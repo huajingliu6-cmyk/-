@@ -51,3 +51,7 @@ next-env.d.ts
 # local workflow data (dev-only JSON store)
 /data/workflows/*.json
 !/data/workflows/.gitkeep
+
+# local uploaded assets (dev-only file store; not for Vercel production)
+/data/assets/**
+!/data/assets/.gitkeep

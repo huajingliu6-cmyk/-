@@ -20,6 +20,7 @@ type WorkflowStore = {
   document: WorkflowDocument;
   saveStatus: SaveStatus;
   saveError: string | null;
+  loadError: string | null;
   selectedNodeId: string | null;
   connectionError: string | null;
   setProjectId: (id: string) => void;
@@ -29,8 +30,10 @@ type WorkflowStore = {
   setViewport: (viewport: WorkflowViewport) => void;
   updateNodeData: (nodeId: string, data: Partial<WorkflowNode["data"]>) => void;
   addNode: (node: WorkflowNode) => void;
+  addNodesAndEdges: (nodes: WorkflowNode[], edges: WorkflowEdge[]) => void;
   setSelectedNodeId: (id: string | null) => void;
   setSaveStatus: (status: SaveStatus, error?: string | null) => void;
+  setLoadError: (message: string | null) => void;
   setConnectionError: (message: string | null) => void;
   markDirty: () => void;
 };
@@ -40,6 +43,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   document: createDefaultWorkflow(DEMO_PROJECT_ID),
   saveStatus: "loading",
   saveError: null,
+  loadError: null,
   selectedNodeId: null,
   connectionError: null,
 
@@ -51,6 +55,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       projectId: doc.projectId,
       saveStatus: status,
       saveError: null,
+      loadError: null,
     }),
 
   setNodes: (nodes) => {
@@ -106,10 +111,26 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     });
   },
 
+  addNodesAndEdges: (nodes, edges) => {
+    const { document } = get();
+    set({
+      document: {
+        ...document,
+        nodes: [...document.nodes, ...nodes],
+        edges: [...document.edges, ...edges],
+      },
+      saveStatus: "dirty",
+      saveError: null,
+      selectedNodeId: nodes[0]?.id ?? get().selectedNodeId,
+    });
+  },
+
   setSelectedNodeId: (id) => set({ selectedNodeId: id }),
 
   setSaveStatus: (status, error = null) =>
     set({ saveStatus: status, saveError: error }),
+
+  setLoadError: (message) => set({ loadError: message }),
 
   setConnectionError: (message) => set({ connectionError: message }),
 

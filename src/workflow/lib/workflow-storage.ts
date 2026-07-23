@@ -1,8 +1,9 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { createDefaultWorkflow, DEMO_PROJECT_ID } from "../default-workflow";
-import { workflowDocumentSchema } from "../schema";
+import { migrateWorkflowDocument, WorkflowMigrationError } from "../migrate";
 import { validateAllEdges } from "../connection-rules";
+import { sanitizeWorkflowForPersist } from "./sanitize-workflow";
 import type { WorkflowDocument } from "../types";
 
 const DATA_DIR = path.join(process.cwd(), "data", "workflows");
@@ -35,15 +36,21 @@ export async function loadWorkflow(
 
   try {
     const raw = await fs.readFile(filePath, "utf-8");
-    const parsed = workflowDocumentSchema.parse(JSON.parse(raw));
+    const parsed = migrateWorkflowDocument(JSON.parse(raw));
     const edgesOk = validateAllEdges(parsed.nodes, parsed.edges);
     if (!edgesOk.ok) {
-      // 损坏/非法连接时回退默认工作流，避免页面崩溃
-      console.warn("Workflow file has illegal edges, using default:", edgesOk.message);
-      return createDefaultWorkflow(id);
+      console.warn(
+        "Workflow file has illegal edges after migration:",
+        edgesOk.message,
+      );
+      // 保留节点数据：仅清空非法边，避免整份工作流被丢弃
+      return { ...parsed, edges: [] };
     }
     return parsed;
-  } catch {
+  } catch (error) {
+    if (error instanceof WorkflowMigrationError) {
+      throw error;
+    }
     return createDefaultWorkflow(id);
   }
 }
@@ -53,7 +60,8 @@ export async function saveWorkflow(
 ): Promise<WorkflowDocument> {
   await ensureDir();
 
-  const parsed = workflowDocumentSchema.parse(document);
+  const sanitized = sanitizeWorkflowForPersist(document);
+  const parsed = migrateWorkflowDocument(sanitized);
   const edgesOk = validateAllEdges(parsed.nodes, parsed.edges);
   if (!edgesOk.ok) {
     throw new Error(edgesOk.message);
@@ -68,7 +76,6 @@ export async function saveWorkflow(
   const { filePath, tempPath } = getPaths(next.projectId);
   const payload = JSON.stringify(next, null, 2);
 
-  // 安全写入：先写临时文件再 rename，避免写到一半损坏
   await fs.writeFile(tempPath, payload, "utf-8");
   await fs.rename(tempPath, filePath);
 

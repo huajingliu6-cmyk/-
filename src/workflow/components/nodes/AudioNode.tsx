@@ -4,20 +4,13 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { HANDLES } from "@/workflow/connection-rules";
 import { AssetUploadControls } from "@/workflow/components/AssetUploadControls";
 import { useWorkflowStore } from "@/workflow/store";
-import type { ImageReferenceNodeData } from "@/workflow/types";
+import type { AudioReferenceNodeData } from "@/workflow/types";
 
-const REF_LABEL: Record<ImageReferenceNodeData["referenceType"], string> = {
-  startFrame: "首帧",
-  endFrame: "尾帧",
-  style: "风格",
-  composition: "构图",
-};
-
-export function ImageNodeView({ id, selected }: NodeProps) {
+export function AudioNodeView({ id, selected }: NodeProps) {
   const nodeData = useWorkflowStore(
     (s) =>
       s.document.nodes.find((n) => n.id === id)?.data as
-        | ImageReferenceNodeData
+        | AudioReferenceNodeData
         | undefined,
   );
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
@@ -28,35 +21,37 @@ export function ImageNodeView({ id, selected }: NodeProps) {
     <div
       className={`w-64 rounded-xl border bg-zinc-900/95 p-3 shadow-lg ${
         selected
-          ? "border-violet-400 ring-1 ring-violet-400/30"
+          ? "border-amber-400 ring-1 ring-amber-400/30"
           : "border-zinc-700"
       }`}
     >
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wide text-violet-300">
-          图片
-        </span>
-        <span className="text-[10px] text-zinc-500">
-          {REF_LABEL[nodeData.referenceType]}
+        <span className="text-xs font-semibold uppercase tracking-wide text-amber-300">
+          音频
         </span>
       </div>
       <div className="mb-2 truncate text-sm text-zinc-100">
-        {nodeData.title || "图片参考"}
+        {nodeData.title || "音频参考"}
       </div>
       <AssetUploadControls
-        kind="image"
-        accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+        kind="audio"
+        accept="audio/mpeg,audio/wav,audio/mp4,audio/x-m4a,audio/m4a,.mp3,.wav,.m4a"
         assetUrl={nodeData.assetUrl}
         fileName={nodeData.fileName}
         uploadStatus={nodeData.uploadStatus}
         errorMessage={nodeData.errorMessage}
-        onChange={(patch) => updateNodeData(id, patch)}
+        onChange={(patch) =>
+          updateNodeData(id, {
+            ...patch,
+            duration: patch.duration ?? nodeData.duration,
+          })
+        }
       />
       <Handle
         type="source"
         position={Position.Right}
-        id={HANDLES.imageOutput}
-        className="!h-3 !w-3 !border-2 !border-zinc-900 !bg-violet-400"
+        id={HANDLES.audioOutput}
+        className="!h-3 !w-3 !border-2 !border-zinc-900 !bg-amber-400"
       />
     </div>
   );

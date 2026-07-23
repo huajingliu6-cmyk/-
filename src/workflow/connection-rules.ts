@@ -7,10 +7,18 @@ import type {
 
 /** Handle ID 约定 */
 export const HANDLES = {
-  promptOutput: "prompt-output",
+  characterOutput: "character-output",
+  sceneOutput: "scene-output",
+  directorOutput: "director-output",
   imageOutput: "image-output",
-  promptInput: "prompt-input",
+  textOutput: "text-output",
+  audioOutput: "audio-output",
+  characterInput: "character-input",
+  sceneInput: "scene-input",
+  directorInput: "director-input",
   imageInput: "image-input",
+  textInput: "text-input",
+  audioInput: "audio-input",
   videoOutput: "video-output",
   videoInput: "video-input",
 } as const;
@@ -24,10 +32,22 @@ type AllowedRule = {
 
 const ALLOWED_CONNECTIONS: AllowedRule[] = [
   {
-    sourceType: "prompt",
+    sourceType: "character",
     targetType: "videoGenerator",
-    sourceHandle: HANDLES.promptOutput,
-    targetHandle: HANDLES.promptInput,
+    sourceHandle: HANDLES.characterOutput,
+    targetHandle: HANDLES.characterInput,
+  },
+  {
+    sourceType: "scene",
+    targetType: "videoGenerator",
+    sourceHandle: HANDLES.sceneOutput,
+    targetHandle: HANDLES.sceneInput,
+  },
+  {
+    sourceType: "director",
+    targetType: "videoGenerator",
+    sourceHandle: HANDLES.directorOutput,
+    targetHandle: HANDLES.directorInput,
   },
   {
     sourceType: "image",
@@ -36,11 +56,32 @@ const ALLOWED_CONNECTIONS: AllowedRule[] = [
     targetHandle: HANDLES.imageInput,
   },
   {
+    sourceType: "text",
+    targetType: "videoGenerator",
+    sourceHandle: HANDLES.textOutput,
+    targetHandle: HANDLES.textInput,
+  },
+  {
+    sourceType: "audio",
+    targetType: "videoGenerator",
+    sourceHandle: HANDLES.audioOutput,
+    targetHandle: HANDLES.audioInput,
+  },
+  {
     sourceType: "videoGenerator",
     targetType: "videoOutput",
     sourceHandle: HANDLES.videoOutput,
     targetHandle: HANDLES.videoInput,
   },
+];
+
+const REFERENCE_TYPES: WorkflowNodeType[] = [
+  "character",
+  "scene",
+  "director",
+  "image",
+  "text",
+  "audio",
 ];
 
 export type ConnectionValidationResult =
@@ -82,6 +123,26 @@ export function validateConnection(
     return { ok: false, message: "视频结果节点不能作为连接起点" };
   }
 
+  if (
+    sourceType === "videoGenerator" &&
+    REFERENCE_TYPES.includes(targetType)
+  ) {
+    return {
+      ok: false,
+      message: "视频生成节点不能连接到素材节点",
+    };
+  }
+
+  if (
+    REFERENCE_TYPES.includes(sourceType) &&
+    REFERENCE_TYPES.includes(targetType)
+  ) {
+    return {
+      ok: false,
+      message: "参考素材节点之间不能相互连接",
+    };
+  }
+
   const rule = ALLOWED_CONNECTIONS.find(
     (r) =>
       r.sourceType === sourceType &&
@@ -91,24 +152,6 @@ export function validateConnection(
   );
 
   if (!rule) {
-    if (sourceType === "prompt" && targetType === "videoOutput") {
-      return {
-        ok: false,
-        message: "提示词节点不能直接连接到视频结果节点",
-      };
-    }
-    if (sourceType === "image" && targetType === "videoOutput") {
-      return {
-        ok: false,
-        message: "图片节点不能直接连接到视频结果节点",
-      };
-    }
-    if (sourceType === "videoGenerator" && targetType === "prompt") {
-      return {
-        ok: false,
-        message: "视频生成节点不能连接到提示词节点",
-      };
-    }
     return {
       ok: false,
       message: `不允许的连接：${sourceType} → ${targetType}`,
@@ -127,7 +170,6 @@ export function validateConnection(
     return { ok: false, message: "已存在完全相同的连接，请勿重复连接" };
   }
 
-  // 简单环检测：若 target 能走到 source，则形成环
   if (wouldCreateCycle(sourceNodeId, targetNodeId, existingEdges)) {
     return { ok: false, message: "不允许形成无意义的循环连接" };
   }
@@ -212,7 +254,6 @@ function wouldCreateCycle(
     adjacency.set(edge.source, list);
   }
 
-  // 拟议边 source → target：从 target 出发能否回到 source
   const stack = [targetId];
   const visited = new Set<string>();
 

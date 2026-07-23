@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import type { WorkflowDocument } from "../types";
-import { workflowDocumentSchema } from "../schema";
+import { migrateWorkflowDocument } from "../migrate";
+import { sanitizeWorkflowForPersist } from "../lib/sanitize-workflow";
 import { useWorkflowStore } from "../store";
 
 const AUTOSAVE_MS = 900;
@@ -16,7 +17,7 @@ export function writeLocalBackup(doc: WorkflowDocument) {
   try {
     localStorage.setItem(backupKey(doc.projectId), JSON.stringify(doc));
   } catch {
-    // quota / private mode：忽略，不影响主流程
+    // quota / private mode：忽略
   }
 }
 
@@ -26,9 +27,8 @@ export function readLocalBackup(
   try {
     const raw = localStorage.getItem(backupKey(projectId));
     if (!raw) return null;
-    return workflowDocumentSchema.parse(JSON.parse(raw));
+    return migrateWorkflowDocument(JSON.parse(raw));
   } catch {
-    // 损坏备份不能导致页面崩溃
     return null;
   }
 }
@@ -38,6 +38,7 @@ export function useWorkflowAutosave(projectId: string) {
   const saveStatus = useWorkflowStore((s) => s.saveStatus);
   const setDocument = useWorkflowStore((s) => s.setDocument);
   const setSaveStatus = useWorkflowStore((s) => s.setSaveStatus);
+  const setLoadError = useWorkflowStore((s) => s.setLoadError);
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestIdRef = useRef(0);
@@ -47,7 +48,8 @@ export function useWorkflowAutosave(projectId: string) {
     async (doc: WorkflowDocument) => {
       const requestId = ++requestIdRef.current;
       setSaveStatus("saving");
-      writeLocalBackup(doc);
+      const sanitized = sanitizeWorkflowForPersist(doc);
+      writeLocalBackup(sanitized);
 
       try {
         const res = await fetch(
@@ -55,7 +57,7 @@ export function useWorkflowAutosave(projectId: string) {
           {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(doc),
+            body: JSON.stringify(sanitized),
           },
         );
 
@@ -66,7 +68,7 @@ export function useWorkflowAutosave(projectId: string) {
           throw new Error(payload.error ?? "保存失败");
         }
 
-        const saved = workflowDocumentSchema.parse(payload);
+        const saved = migrateWorkflowDocument(payload);
         setDocument(saved, "saved");
         writeLocalBackup(saved);
       } catch (error) {
@@ -87,11 +89,11 @@ export function useWorkflowAutosave(projectId: string) {
     void persist(useWorkflowStore.getState().document);
   }, [persist]);
 
-  // 初次加载
   useEffect(() => {
     let cancelled = false;
     loadedRef.current = false;
     setSaveStatus("loading");
+    setLoadError(null);
 
     void (async () => {
       try {
@@ -105,7 +107,7 @@ export function useWorkflowAutosave(projectId: string) {
           throw new Error(payload.error ?? "加载失败");
         }
 
-        const doc = workflowDocumentSchema.parse(payload);
+        const doc = migrateWorkflowDocument(payload);
         setDocument(doc, "loaded");
         writeLocalBackup(doc);
         loadedRef.current = true;
@@ -123,6 +125,7 @@ export function useWorkflowAutosave(projectId: string) {
         }
         const message =
           error instanceof Error ? error.message : "加载工作流失败";
+        setLoadError(message);
         setSaveStatus("error", message);
       }
     })();
@@ -130,9 +133,8 @@ export function useWorkflowAutosave(projectId: string) {
     return () => {
       cancelled = true;
     };
-  }, [projectId, setDocument, setSaveStatus]);
+  }, [projectId, setDocument, setSaveStatus, setLoadError]);
 
-  // dirty 防抖自动保存
   useEffect(() => {
     if (!loadedRef.current) return;
     if (saveStatus !== "dirty") return;
@@ -147,7 +149,6 @@ export function useWorkflowAutosave(projectId: string) {
     };
   }, [document, saveStatus, persist]);
 
-  // Ctrl/Cmd + S
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const isSave =

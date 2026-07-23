@@ -4,20 +4,13 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { HANDLES } from "@/workflow/connection-rules";
 import { AssetUploadControls } from "@/workflow/components/AssetUploadControls";
 import { useWorkflowStore } from "@/workflow/store";
-import type { ImageReferenceNodeData } from "@/workflow/types";
+import type { SceneReferenceNodeData } from "@/workflow/types";
 
-const REF_LABEL: Record<ImageReferenceNodeData["referenceType"], string> = {
-  startFrame: "首帧",
-  endFrame: "尾帧",
-  style: "风格",
-  composition: "构图",
-};
-
-export function ImageNodeView({ id, selected }: NodeProps) {
+export function SceneNodeView({ id, selected }: NodeProps) {
   const nodeData = useWorkflowStore(
     (s) =>
       s.document.nodes.find((n) => n.id === id)?.data as
-        | ImageReferenceNodeData
+        | SceneReferenceNodeData
         | undefined,
   );
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
@@ -28,20 +21,18 @@ export function ImageNodeView({ id, selected }: NodeProps) {
     <div
       className={`w-64 rounded-xl border bg-zinc-900/95 p-3 shadow-lg ${
         selected
-          ? "border-violet-400 ring-1 ring-violet-400/30"
-          : "border-zinc-700"
+          ? "border-teal-400 ring-1 ring-teal-400/30"
+          : "border-teal-900/60"
       }`}
     >
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wide text-violet-300">
-          图片
+        <span className="text-xs font-semibold uppercase tracking-wide text-teal-300">
+          场景
         </span>
-        <span className="text-[10px] text-zinc-500">
-          {REF_LABEL[nodeData.referenceType]}
-        </span>
+        <span className="text-[10px] text-zinc-500">环境参考</span>
       </div>
       <div className="mb-2 truncate text-sm text-zinc-100">
-        {nodeData.title || "图片参考"}
+        {nodeData.sceneName || nodeData.title || "未命名场景"}
       </div>
       <AssetUploadControls
         kind="image"
@@ -55,8 +46,8 @@ export function ImageNodeView({ id, selected }: NodeProps) {
       <Handle
         type="source"
         position={Position.Right}
-        id={HANDLES.imageOutput}
-        className="!h-3 !w-3 !border-2 !border-zinc-900 !bg-violet-400"
+        id={HANDLES.sceneOutput}
+        className="!h-3 !w-3 !border-2 !border-zinc-900 !bg-teal-400"
       />
     </div>
   );

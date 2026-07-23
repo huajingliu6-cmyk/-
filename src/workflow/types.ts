@@ -7,35 +7,98 @@ export type JobStatus =
   | "failed"
   | "cancelled";
 
-export type UploadStatus = "empty" | "preview" | "ready" | "error";
+export type UploadStatus = "empty" | "uploading" | "ready" | "error";
 
 export type WorkflowNodeType =
-  | "prompt"
-  | "image"
+  | "character"
+  | "scene"
+  | "director"
   | "videoGenerator"
+  | "image"
+  | "text"
+  | "audio"
   | "videoOutput";
 
-export type PromptNodeData = {
-  title: string;
-  prompt: string;
-  negativePrompt: string;
-  /** 演示内容标记 */
-  isDemo?: boolean;
-};
+export type ImageReferenceType =
+  | "startFrame"
+  | "endFrame"
+  | "style"
+  | "composition";
 
-export type ImageNodeData = {
+export type TextType =
+  | "script"
+  | "dialogue"
+  | "narration"
+  | "subtitle"
+  | "instruction";
+
+export type ShotSize =
+  | "extremeWide"
+  | "wide"
+  | "medium"
+  | "closeUp"
+  | "extremeCloseUp";
+
+export type CameraAngle =
+  | "eyeLevel"
+  | "lowAngle"
+  | "highAngle"
+  | "topDown"
+  | "dutchAngle";
+
+export type CameraMovement =
+  | "static"
+  | "pan"
+  | "tilt"
+  | "dollyIn"
+  | "dollyOut"
+  | "tracking"
+  | "orbit"
+  | "handheld";
+
+export type LensType = "wide" | "standard" | "telephoto";
+
+export type MovementSpeed = "slow" | "medium" | "fast";
+
+export type CharacterReferenceNodeData = {
   title: string;
-  /** 图片 URL 或本地临时预览（blob:）；不存 base64 */
+  characterName: string;
+  description: string;
+  assetId: string;
   assetUrl: string;
   fileName: string;
+  mimeType: string;
+  sizeBytes: number;
   uploadStatus: UploadStatus;
-  /** 临时预览在刷新后会失效时的提示 */
-  ephemeralHint?: string;
-  isDemo?: boolean;
+  errorMessage: string;
+};
+
+export type SceneReferenceNodeData = {
+  title: string;
+  sceneName: string;
+  description: string;
+  assetId: string;
+  assetUrl: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  uploadStatus: UploadStatus;
+  errorMessage: string;
+};
+
+export type DirectorNodeData = {
+  title: string;
+  shotSize: ShotSize;
+  cameraAngle: CameraAngle;
+  cameraMovement: CameraMovement;
+  lens: LensType;
+  movementSpeed: MovementSpeed;
+  description: string;
 };
 
 export type VideoGeneratorNodeData = {
   title: string;
+  generationInstruction: string;
   provider: string;
   model: string;
   aspectRatio: string;
@@ -44,7 +107,38 @@ export type VideoGeneratorNodeData = {
   status: JobStatus;
   progress: number;
   errorMessage: string;
-  isDemo?: boolean;
+};
+
+export type ImageReferenceNodeData = {
+  title: string;
+  referenceType: ImageReferenceType;
+  assetId: string;
+  assetUrl: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  uploadStatus: UploadStatus;
+  errorMessage: string;
+};
+
+export type TextNodeData = {
+  title: string;
+  content: string;
+  textType: TextType;
+  /** 从旧 PromptNode.negativePrompt 迁移保留 */
+  legacyNegativePrompt?: string;
+};
+
+export type AudioReferenceNodeData = {
+  title: string;
+  assetId: string;
+  assetUrl: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  duration: number;
+  uploadStatus: UploadStatus;
+  errorMessage: string;
 };
 
 export type VideoOutputNodeData = {
@@ -53,13 +147,16 @@ export type VideoOutputNodeData = {
   posterUrl: string;
   status: JobStatus;
   errorMessage: string;
-  isDemo?: boolean;
 };
 
 export type WorkflowNodeDataByType = {
-  prompt: PromptNodeData;
-  image: ImageNodeData;
+  character: CharacterReferenceNodeData;
+  scene: SceneReferenceNodeData;
+  director: DirectorNodeData;
   videoGenerator: VideoGeneratorNodeData;
+  image: ImageReferenceNodeData;
+  text: TextNodeData;
+  audio: AudioReferenceNodeData;
   videoOutput: VideoOutputNodeData;
 };
 
@@ -70,15 +167,23 @@ export type WorkflowNodeBase<T extends WorkflowNodeType = WorkflowNodeType> = {
   data: WorkflowNodeDataByType[T];
 };
 
-export type PromptNode = WorkflowNodeBase<"prompt">;
-export type ImageNode = WorkflowNodeBase<"image">;
+export type CharacterReferenceNode = WorkflowNodeBase<"character">;
+export type SceneReferenceNode = WorkflowNodeBase<"scene">;
+export type DirectorNode = WorkflowNodeBase<"director">;
 export type VideoGeneratorNode = WorkflowNodeBase<"videoGenerator">;
+export type ImageReferenceNode = WorkflowNodeBase<"image">;
+export type TextNode = WorkflowNodeBase<"text">;
+export type AudioReferenceNode = WorkflowNodeBase<"audio">;
 export type VideoOutputNode = WorkflowNodeBase<"videoOutput">;
 
 export type WorkflowNode =
-  | PromptNode
-  | ImageNode
+  | CharacterReferenceNode
+  | SceneReferenceNode
+  | DirectorNode
   | VideoGeneratorNode
+  | ImageReferenceNode
+  | TextNode
+  | AudioReferenceNode
   | VideoOutputNode;
 
 export type WorkflowEdge = {
@@ -96,7 +201,7 @@ export type WorkflowViewport = {
 };
 
 export type WorkflowDocument = {
-  version: 1;
+  version: 2;
   projectId: string;
   revision: number;
   nodes: WorkflowNode[];
@@ -113,3 +218,59 @@ export type ConnectionAttempt = {
   sourceType: WorkflowNodeType;
   targetType: WorkflowNodeType;
 };
+
+export type VideoGenerationInput = {
+  videoNodeId: string;
+  generationInstruction: string;
+  characters: Array<{
+    nodeId: string;
+    characterName: string;
+    assetId: string;
+    assetUrl: string;
+  }>;
+  scenes: Array<{
+    nodeId: string;
+    sceneName: string;
+    assetId: string;
+    assetUrl: string;
+  }>;
+  images: Array<{
+    nodeId: string;
+    referenceType: ImageReferenceType;
+    assetId: string;
+    assetUrl: string;
+  }>;
+  texts: Array<{
+    nodeId: string;
+    textType: TextType;
+    content: string;
+    legacyNegativePrompt?: string;
+  }>;
+  audios: Array<{
+    nodeId: string;
+    assetId: string;
+    assetUrl: string;
+    fileName: string;
+  }>;
+  director: {
+    nodeId: string;
+    shotSize: ShotSize;
+    cameraAngle: CameraAngle;
+    cameraMovement: CameraMovement;
+    lens: LensType;
+    movementSpeed: MovementSpeed;
+    description: string;
+  } | null;
+  summary: {
+    characterCount: number;
+    sceneCount: number;
+    imageCount: number;
+    textCount: number;
+    audioCount: number;
+    hasDirector: boolean;
+  };
+};
+
+export type VideoGenerationInputResult =
+  | { ok: true; input: VideoGenerationInput }
+  | { ok: false; errors: string[] };
