@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "无限画布",
-  description: "Next.js + tldraw 无限画布",
+  title: "AI 视频工作流",
+  description: "基于 Next.js + React Flow 的 AI 视频工作流编辑器",
 };
 
 export default function RootLayout({

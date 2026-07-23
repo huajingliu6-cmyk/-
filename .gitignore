@@ -42,3 +42,12 @@ next-env.d.ts
 
 # local canvas data (keep folder, ignore saved JSON)
 /data/canvases/*.json
+
+# legacy tldraw snapshots (keep until owner confirms deletion)
+/data/canvases-legacy/*.json
+!/data/canvases-legacy/LEGACY.md
+!/data/canvases-legacy/.gitkeep
+
+# local workflow data (dev-only JSON store)
+/data/workflows/*.json
+!/data/workflows/.gitkeep

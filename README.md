@@ -1,27 +1,28 @@
-# 无限画布
+# AI 视频工作流编辑器
 
-Next.js 16 + React 19 + Tailwind CSS 4 + tldraw ^5.2.5
+基于 **Next.js + React Flow（@xyflow/react）** 的节点工作流编辑器。
 
-## 安装与启动
+> 本地 `data/workflows/*.json` 仅用于开发阶段，不是生产数据库方案。
 
-在项目目录 `infinite-canvas` 中打开终端，执行：
+## 启动
 
 ```bash
-# 1. 安装依赖
 npm install
-
-# 若 tldraw 下载很慢，可用国内镜像：
-# npm install --registry=https://registry.npmmirror.com
-
-# 2. 启动开发服务器
 npm run dev
 ```
 
-然后浏览器打开：http://localhost:3000
+打开 http://localhost:3000
 
-## 功能说明
+## 技术栈
 
-- 满屏无限画布（缩放 / 平移 / 画图形）
-- 停止操作 1 秒后自动保存到 `data/canvases/default.json`
-- 顶部状态条显示「正在保存...」或「已保存」
-- 刷新页面后从后端恢复画布
+| 层级 | 技术 |
+|------|------|
+| 前端 | Next.js App Router + Tailwind CSS + @xyflow/react |
+| 状态 | zustand |
+| 校验 | zod |
+| 后端 | Next.js API Routes `/api/workflow` |
+| 存储 | 本地 JSON（开发用） |
+
+## 旧 tldraw 数据
+
+已停用并标记为 legacy，见 `data/canvases-legacy/`。未经确认不要删除。
