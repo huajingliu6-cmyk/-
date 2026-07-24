@@ -37,6 +37,10 @@ import {
 import { getDurationCompatibilityWarning } from "@/video-generation/validate-settings";
 import { selectWanGenerationMode } from "@/video-generation/select-wan-mode";
 import { buildVideoGenerationInput } from "@/workflow/lib/build-video-generation-input";
+import {
+  buildGenerationParameterComparisonView,
+  formatParameterComparisonHistoryLabel,
+} from "@/video-generation/parameter-comparison-view";
 
 type PublicConfig = {
   providerId: VideoProviderId;
@@ -51,9 +55,15 @@ type PublicConfig = {
 type Props = {
   nodeId: string;
   onOpenVideoResult?: (generation: GenerationRecord | null) => void;
+  /** 轮询得到的 GenerationRecord 快照，供节点摘要展示（不发起额外请求） */
+  onGenerationSnapshot?: (generation: GenerationRecord | null) => void;
 };
 
-export function VideoPromptPanel({ nodeId, onOpenVideoResult }: Props) {
+export function VideoPromptPanel({
+  nodeId,
+  onOpenVideoResult,
+  onGenerationSnapshot,
+}: Props) {
   const projectId = useWorkflowStore((s) => s.projectId);
   const node = useWorkflowStore((s) =>
     s.document.nodes.find((n) => n.id === nodeId),
@@ -168,6 +178,7 @@ export function VideoPromptPanel({ nodeId, onOpenVideoResult }: Props) {
         if (!payload.generation) return;
         const g = payload.generation;
         setGeneration(g);
+        onGenerationSnapshot?.(g);
 
         const current = useWorkflowStore.getState().document.nodes.find(
           (n) => n.id === nodeId,
@@ -236,7 +247,21 @@ export function VideoPromptPanel({ nodeId, onOpenVideoResult }: Props) {
     void tick();
     pollRef.current = setInterval(() => void tick(), 3_500);
     return stop;
-  }, [data?.activeGenerationId, nodeId, updateNodeData, commitNodeAssets]);
+  }, [data?.activeGenerationId, nodeId, updateNodeData, commitNodeAssets, onGenerationSnapshot]);
+
+  const comparisonLabelByAssetId = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (generation?.resultAsset?.id) {
+      const view = buildGenerationParameterComparisonView(generation);
+      map[generation.resultAsset.id] =
+        formatParameterComparisonHistoryLabel(view);
+    } else if (generation?.localVideoAssetId) {
+      const view = buildGenerationParameterComparisonView(generation);
+      map[generation.localVideoAssetId] =
+        formatParameterComparisonHistoryLabel(view);
+    }
+    return map;
+  }, [generation]);
 
   if (!data) return null;
 
@@ -584,6 +609,7 @@ export function VideoPromptPanel({ nodeId, onOpenVideoResult }: Props) {
         historyIds={data.generationHistoryIds ?? []}
         activeAssetId={data.resultAssetId}
         onSelect={onSelectHistory}
+        comparisonLabelByAssetId={comparisonLabelByAssetId}
       />
 
       {notice && (

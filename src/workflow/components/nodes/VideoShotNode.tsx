@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { type NodeProps } from "@xyflow/react";
 import {
   Clapperboard,
@@ -23,6 +23,10 @@ import { useWorkflowStore } from "@/workflow/store";
 import type { VideoShotNodeData } from "@/workflow/types";
 import type { GenerationRecord } from "@/video-generation/types";
 import { classifyGenerationResult } from "@/video-generation/classify-generation-result";
+import {
+  buildGenerationParameterComparisonView,
+  formatParameterComparisonNodeSummary,
+} from "@/video-generation/parameter-comparison-view";
 import { DEMO_PROJECT_ID } from "@/workflow/default-workflow";
 
 export function VideoShotNodeView({ id, selected }: NodeProps) {
@@ -41,6 +45,8 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
   const [resultOpen, setResultOpen] = useState(false);
   const [drawerGeneration, setDrawerGeneration] =
     useState<GenerationRecord | null>(null);
+  const [summaryGeneration, setSummaryGeneration] =
+    useState<GenerationRecord | null>(null);
 
   if (selected !== prevSelected) {
     setPrevSelected(selected);
@@ -56,6 +62,34 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
   const attachedIds = (nodeData?.attachedAssetIds ?? []).slice(0, 4);
   const attachedAssets = useAssetsByIds(attachedIds);
   const libraryAssets = useLibraryImageAssets(selected && libraryOpen);
+
+  const parameterSummary = useMemo(() => {
+    const record = summaryGeneration ?? drawerGeneration;
+    if (!record) {
+      if (resultAsset && Boolean(resultAsset.metadata?.mock)) {
+        return "Mock 流程验证";
+      }
+      return null;
+    }
+    if (
+      nodeData?.activeGenerationId &&
+      record.id !== nodeData.activeGenerationId &&
+      record.localVideoAssetId !== resultAsset?.id &&
+      record.resultAsset?.id !== resultAsset?.id
+    ) {
+      if (resultAsset && Boolean(resultAsset.metadata?.mock)) {
+        return "Mock 流程验证";
+      }
+      return null;
+    }
+    const view = buildGenerationParameterComparisonView(record);
+    return formatParameterComparisonNodeSummary(view);
+  }, [
+    summaryGeneration,
+    drawerGeneration,
+    resultAsset,
+    nodeData?.activeGenerationId,
+  ]);
 
   if (!nodeData) return null;
 
@@ -359,6 +393,17 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
           </div>
         )}
 
+        {parameterSummary && (
+          <button
+            type="button"
+            className="nodrag nopan mt-1 w-full truncate rounded-lg px-1 py-0.5 text-left text-[10px] text-zinc-600 hover:bg-white/50 hover:text-zinc-800"
+            title={parameterSummary}
+            onClick={() => void openResultDrawer(summaryGeneration ?? drawerGeneration)}
+          >
+            {parameterSummary}
+          </button>
+        )}
+
         <input
           ref={uploadRef}
           type="file"
@@ -379,6 +424,9 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
           nodeId={id}
           onOpenVideoResult={(generation) => {
             void openResultDrawer(generation);
+          }}
+          onGenerationSnapshot={(generation) => {
+            setSummaryGeneration(generation);
           }}
         />
       </div>

@@ -9,7 +9,7 @@
 - **项目目标**：资产驱动的 AI 视频创作工作台。用户在无限画布上编排角色、场景、参考素材与视频镜头，经确认后提交异步视频生成，并将结果登记为本地 `generatedVideo` 资产。
 - **技术栈**：Next.js 16、React 19、React Flow（`@xyflow/react`）、Zustand、Zod、Vitest、Tailwind CSS 4。
 - **当前分支**：`feat/react-flow-migration`
-- **当前稳定提交**：以本文件「当前验证结果」中记录的阶段 3A 提交为准（提交后请把 hash 写回此处）。
+- **当前稳定提交**：阶段 3B 提交后以 `git log -1` 为准（本文件随 3B 提交更新）。上一基线：`e37228b`（阶段 3A）。
 - **页面入口**：
   - `/` — 入口
   - `/login` — 登录
@@ -69,6 +69,16 @@ npm run dev
   - 浏览器 `loadedmetadata` 读取宽高时长，并 `PATCH .../metadata` 写回 `actual*` + `metadataSource`
   - 转存完整性：HTTP 状态、Content-Type、Content-Length、临时/最终文件大小、SHA-256；截断 → `resultTransferFailed`
   - 人工浏览器播放验收已通过（合法 Mock MP4、可播、可下载、Mock 标记、无真实阿里云调用）
+- **阶段 3B 已完成**（人工浏览器验收已通过）：
+  - `buildGenerationParameterComparisonView` 统一派生 requested / provider / actual 对照（**派生结果，不持久化**）
+  - 数据来源隔离：
+    - requested ← `requestedResolution` / `requestedAspectRatio` / `requestedDurationSeconds`
+    - provider ← `providerResolution` / `providerAspectRatio` / `providerDurationSeconds`
+    - actual ← `actualWidth`×`actualHeight`（比例经 `classifyVideoAspectRatio`）与 `actualDurationSeconds`
+  - `ParameterComparisonPanel` 嵌入 `VideoResultDrawer`；`VideoShotNode` / 历史仅紧凑摘要
+  - Mock 的 `overallStatus` **始终**为 `mockOnly`，不能验证真实模型能力
+  - `metadataSource=browser`：**浏览器读取，非服务端可信验证**
+  - 时长容差：`DURATION_COMPARISON_TOLERANCE_SECONDS = 0.35`（`compare-params.ts`）
 - `generatedVideo` 类型的 `AssetRecord`
 - GenerationRecord 上的 requested / provider / actual 字段与 `compare-params`
 - 自动化测试：见 `src/video-generation/__tests__/`（数量以本文件「当前验证结果」为准）
@@ -105,12 +115,15 @@ npm run dev
 6. **`transferRemoteVideoToLocal`**：下载 / 复制 → 完整性校验 → 登记 `generatedVideo` 资产。
 7. **结果 UI**：`VideoShotNode` 封面预览 + 播放按钮 → `VideoResultDrawer` / `VideoResultPlayer`（原生 `controls`）；`generatedVideo` **不再**交给 `AssetThumb` / `ImageLightbox`。
 8. **Metadata**：浏览器 `loadedmetadata` → 可选 `PATCH /api/generations/[id]/metadata`（仅 `actualWidth` / `actualHeight` / `actualDurationSeconds` / `metadataSource` / `updatedAt`）；失败不影响播放。
+9. **参数对照**：客户端用 `buildGenerationParameterComparisonView(record)` 派生三列对照；不写回 GenerationRecord。
 
 相关源码锚点：
 
 - Mock 源校验：`src/video-generation/validate-mock-video-source.ts`
 - 播放 / Range：`src/video-generation/serve-generated-video.ts`、`src/app/api/assets/[assetId]/route.ts`
 - 播放器：`src/workflow/components/VideoResultPlayer.tsx`、`VideoResultDrawer.tsx`
+- 参数对照：`src/video-generation/parameter-comparison-view.ts`、`ParameterComparisonPanel.tsx`
+- 对照说明：`docs/generation-parameter-comparison.md`
 - 配置说明：`docs/mock-video-setup.md`
 - 旧同步接口 `POST /api/generate/video-shot` **已停用并抛错**，不得再走演示 PNG 冒充视频。
 
@@ -132,35 +145,27 @@ npm run dev
 
 # 当前验证结果
 
-阶段 3A 最终安全验收（提交前本地跑通；提交后请把 commit hash 同步到「项目概况」）：
+阶段 3B 最终安全验收（提交前本地跑通；人工浏览器验收已通过）：
 
 | 命令 | 结果 |
 |------|------|
 | `npm run lint` | 通过（退出码 0） |
 | `npx eslint . --max-warnings=0` | 通过（退出码 0；error 0 / warning 0） |
 | `npm run typecheck` | 通过（退出码 0） |
-| `npm test` | 通过；**54** 项 |
+| `npm test` | 通过；**86** 项 |
 | `npm run build` | 通过（退出码 0） |
 
-安全配置：默认 mock、默认禁止付费；验收未进行真实付费生成、未 push。
+安全配置：默认 `VIDEO_PROVIDER=mock`、`ALLOW_PAID_GENERATION=false`；未进行真实付费生成、未 push。
 
-人工验收（用户确认）：
-
-- 已使用合法 `data/mock/mock-video.mp4` 创建全新 Mock 任务并成功生成
-- 浏览器可播放；可读取时长与实际宽高；metadata PATCH 已执行
-- 视频内容接口正常；下载 MP4 可被本机播放器打开
-- 页面明确标记 Mock 演示；无阿里云真实接口 / 付费请求
-- 不再生成 98 B 伪 MP4
+人工验收（用户确认）：ParameterComparisonPanel 三列无串值；Mock 限制提示正确；actual 来自 metadata；节点摘要紧凑；历史不自动加载多视频；Drawer 关闭停止播放；无阿里云/付费请求。
 
 ---
 
 # 当前已知状态
 
-- **阶段 3A 已完成并提交**（本文件随提交更新）。
-- Mock 播放依赖本地合法 MP4；文件不进 Git。
-- `actualWidth` / `actualHeight` / `actualDurationSeconds` 经浏览器写回（`metadataSource: "browser"`）；不上报失败不影响播放。
-- 相同 fingerprint 不重复上报；资产不匹配的迟到请求不能覆盖新视频。
-- `compare-params` 已存在；完整三组参数对照 UI 为下一阶段。
+- **阶段 3A 已完成**（`e37228b`）。
+- **阶段 3B 已完成**：对照 view 为派生结果，不落盘；Mock `overallStatus=mockOnly`；时长容差 0.35s。
+- `metadataSource=browser` 不是服务端可信校验。
 - `selectedReferenceAssetIds` 超过 5 个参考素材时的手动勾选 UI 尚未实现。
 
 ---
@@ -169,23 +174,21 @@ npm run dev
 
 按建议顺序：
 
-1. requested / provider / actual 参数对照展示（阶段 3B 建议方向）
-2. 超过 5 个参考素材时的手动选择（并与校验/resolver 对齐）
-3. 真实万相最低成本人工付费测试（可选；禁止 Agent 自动执行）
+1. 参考素材上限与手动选择面板（超过 5 个时）
+2. 真实万相最低成本人工付费测试（可选；禁止 Agent 自动执行）
 
 ---
 
 # 下一阶段
 
-**名称：** requested / provider / actual 参数对照展示
+**名称：** 参考素材上限与手动选择面板
 
 **预计涉及（只描述，本交接不实现）：**
 
-- 在结果 Drawer / 镜头面板清晰展示三组参数，禁止用 requested 冒充 actual
-- 复用并完善 `compare-params` 与 GenerationRecord 字段
-- 必要时补充单元测试与文案
+- 与 `selectedReferenceAssetIds`、校验与 resolver 对齐的勾选 UI
+- 不超过能力表 `maxReferenceMedia` 限制
 
-约束延续：默认 mock、禁止自动付费、不 push、不 eslint-disable、不用 `any` / `@ts-ignore`、不开发阶段内未授权的真实 Provider 调用。
+约束延续：默认 mock、禁止自动付费、不 push、不 eslint-disable、不用 `any` / `@ts-ignore`。
 
 ---
 
@@ -206,6 +209,7 @@ npm run dev
 
 - `README.md` — 启动与工作台结构
 - `docs/mock-video-setup.md` — 本地 Mock MP4 配置与验收要点（仅开发环境）
+- `docs/generation-parameter-comparison.md` — requested/provider/actual 对照规则
 - `docs/video-provider-aliyun-wan27.md` — 万相 2.7 Provider 配置与人工付费步骤
 - `.env.example` — 环境变量模板（无密钥）
 - `AGENTS.md` / `CLAUDE.md` — Next.js 版本注意

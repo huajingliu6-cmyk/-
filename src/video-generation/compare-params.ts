@@ -1,7 +1,7 @@
 import { resolveOutputDimensions } from "./dimensions";
+import { classifyVideoAspectRatio } from "./normalize-browser-metadata";
 import type {
   GenerationRecord,
-  VideoAspectRatio,
   VideoResolution,
 } from "./types";
 import { isVideoAspectRatio, isVideoResolution } from "./dimensions";
@@ -11,34 +11,29 @@ export type GenerationComparisonIssue = {
   message: string;
 };
 
-const DURATION_TOLERANCE_SECONDS = 0.35;
+/**
+ * 时长比较容差（秒）。
+ * 用于容纳编码与容器时长的小数偏差（例如请求 5 秒、实际 5.02 秒仍视为一致）；
+ * 明显偏差（如 5.8 秒）不得判为编码误差。
+ */
+export const DURATION_COMPARISON_TOLERANCE_SECONDS = 0.35;
 
-function almostEqual(a: number, b: number, tol: number): boolean {
+/** @deprecated 使用 DURATION_COMPARISON_TOLERANCE_SECONDS */
+export const GENERATION_DURATION_TOLERANCE_SECONDS =
+  DURATION_COMPARISON_TOLERANCE_SECONDS;
+
+export function almostEqualDuration(
+  a: number,
+  b: number,
+  tol: number = DURATION_COMPARISON_TOLERANCE_SECONDS,
+): boolean {
   return Math.abs(a - b) <= tol;
 }
 
-function ratioFromWH(width: number, height: number): string {
-  const r = width / height;
-  const candidates: Array<{ label: VideoAspectRatio; value: number }> = [
-    { label: "16:9", value: 16 / 9 },
-    { label: "9:16", value: 9 / 16 },
-    { label: "1:1", value: 1 },
-    { label: "4:3", value: 4 / 3 },
-    { label: "3:4", value: 3 / 4 },
-  ];
-  let best = candidates[0]!;
-  let bestDiff = Math.abs(r - best.value);
-  for (const c of candidates) {
-    const d = Math.abs(r - c.value);
-    if (d < bestDiff) {
-      best = c;
-      bestDiff = d;
-    }
-  }
-  return best.label;
-}
-
-function mapProviderSr(sr: string | null): VideoResolution | null {
+/** 将 Provider 侧分辨率字符串规范为 VideoResolution。 */
+export function mapProviderResolution(
+  sr: string | null | undefined,
+): VideoResolution | null {
   if (!sr) return null;
   if (sr === "720" || sr === "720P") return "720P";
   if (sr === "1080" || sr === "1080P") return "1080P";
@@ -46,16 +41,17 @@ function mapProviderSr(sr: string | null): VideoResolution | null {
   return null;
 }
 
+/**
+ * 服务端/API 用的差异列表（派生自同一套字段隔离规则）。
+ * 不修改 record；不把 requested 填入 provider/actual。
+ */
 export function compareRequestedAndActualGeneration(
   record: GenerationRecord,
 ): GenerationComparisonIssue[] {
   const issues: GenerationComparisonIssue[] = [];
 
-  const providerRes = mapProviderSr(record.providerResolution);
-  if (
-    providerRes &&
-    providerRes !== record.requestedResolution
-  ) {
+  const providerRes = mapProviderResolution(record.providerResolution);
+  if (providerRes && providerRes !== record.requestedResolution) {
     issues.push({
       code: "RESOLUTION_MISMATCH",
       message: `请求 ${record.requestedResolution}，Provider 返回 ${providerRes}`,
@@ -83,10 +79,12 @@ export function compareRequestedAndActualGeneration(
     });
   }
 
-  if (
+  // 首帧：请求比例为空时不做 requested↔actual 比例/目标宽高硬比较
+  if (record.requestedAspectRatio == null) {
+    // no FILE_RATIO / FILE_DIMENSION from requested ratio
+  } else if (
     record.actualWidth &&
     record.actualHeight &&
-    record.requestedAspectRatio &&
     isVideoAspectRatio(record.requestedAspectRatio)
   ) {
     const expected = resolveOutputDimensions(
@@ -97,7 +95,10 @@ export function compareRequestedAndActualGeneration(
       record.actualWidth !== expected.width ||
       record.actualHeight !== expected.height
     ) {
-      const actualRatio = ratioFromWH(record.actualWidth, record.actualHeight);
+      const actualRatio = classifyVideoAspectRatio(
+        record.actualWidth,
+        record.actualHeight,
+      );
       if (actualRatio !== record.requestedAspectRatio) {
         issues.push({
           code: "FILE_RATIO_MISMATCH",
@@ -114,19 +115,16 @@ export function compareRequestedAndActualGeneration(
 
   if (
     record.actualDurationSeconds !== null &&
-    !almostEqual(
+    !almostEqualDuration(
       record.actualDurationSeconds,
       record.requestedDurationSeconds,
-      DURATION_TOLERANCE_SECONDS,
     )
   ) {
     issues.push({
       code: "FILE_DURATION_MISMATCH",
-      message: `请求 ${record.requestedDurationSeconds} 秒，实际文件为 ${record.actualDurationSeconds.toFixed(2)} 秒`,
+      message: `请求 ${record.requestedDurationSeconds} 秒，实际文件为 ${record.actualDurationSeconds.toFixed(3)} 秒`,
     });
   }
 
   return issues;
 }
-
-export const GENERATION_DURATION_TOLERANCE_SECONDS = DURATION_TOLERANCE_SECONDS;

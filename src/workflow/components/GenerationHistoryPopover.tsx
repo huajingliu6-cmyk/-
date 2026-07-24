@@ -15,6 +15,8 @@ type Props = {
   disabled?: boolean;
   title?: string;
   emptyHint?: string;
+  /** 来自统一 comparison view 的历史摘要；缺省则按 Mock/数据不足降级 */
+  comparisonLabelByAssetId?: Record<string, string>;
 };
 
 function isVideoAsset(asset: AssetRecord): boolean {
@@ -61,6 +63,7 @@ export function GenerationHistoryPopover({
   activeAssetId = "",
   onSelect,
   emptyHint = "暂无历史生成。生成成功后会出现在这里。",
+  comparisonLabelByAssetId,
 }: Omit<Props, "onToggle" | "disabled" | "title">) {
   const assets = useAssetsByIds(historyIds);
 
@@ -90,11 +93,19 @@ export function GenerationHistoryPopover({
           {items.map(({ id, asset }) => {
             const active = id === activeAssetId;
             const isMock = Boolean(asset.metadata?.mock);
+            const video = isVideoAsset(asset);
+            const comparisonLabel =
+              comparisonLabelByAssetId?.[id] ??
+              (video ? (isMock ? "Mock" : "数据不足") : null);
             return (
               <button
                 key={id}
                 type="button"
-                title={asset.name}
+                title={
+                  comparisonLabel
+                    ? `${asset.name} · ${comparisonLabel}`
+                    : asset.name
+                }
                 className={`nodrag nopan relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border transition ${
                   active
                     ? "border-emerald-400/90 ring-2 ring-emerald-300/70"
@@ -106,11 +117,11 @@ export function GenerationHistoryPopover({
                   <span className="flex h-full w-full items-center justify-center bg-zinc-100 text-[10px] font-medium text-zinc-600">
                     音频
                   </span>
-                ) : isVideoAsset(asset) ? (
+                ) : video ? (
                   <span className="flex h-full w-full flex-col items-center justify-center gap-0.5 bg-zinc-900 text-white">
                     <Film className="h-4 w-4 opacity-90" />
-                    <span className="text-[8px] leading-none opacity-90">
-                      {formatDurationHint(asset)}
+                    <span className="max-w-[3.25rem] truncate px-0.5 text-[7px] leading-none opacity-95">
+                      {comparisonLabel ?? formatDurationHint(asset)}
                     </span>
                     {isMock ? (
                       <span className="absolute left-0.5 top-0.5 rounded bg-amber-400 px-0.5 text-[7px] font-semibold text-zinc-900">

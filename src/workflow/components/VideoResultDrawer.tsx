@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Download, X } from "lucide-react";
 import type { AssetRecord } from "@/workflow/types";
@@ -9,8 +9,9 @@ import {
   classifyGenerationResult,
   formatVideoFileSize,
 } from "@/video-generation/classify-generation-result";
-import { classifyVideoAspectRatio } from "@/video-generation/normalize-browser-metadata";
+import { buildGenerationParameterComparisonView } from "@/video-generation/parameter-comparison-view";
 import { buildGeneratedVideoContentUrl } from "@/workflow/lib/generated-video-url";
+import { ParameterComparisonPanel } from "@/workflow/components/ParameterComparisonPanel";
 import { VideoResultPlayer } from "@/workflow/components/VideoResultPlayer";
 
 type Props = {
@@ -44,21 +45,17 @@ function VideoResultDrawerBody({
   const classified = classifyGenerationResult({ generation, asset });
   const videoAsset = classified.videoAsset;
 
-  const actualWidth =
-    browserMeta?.actualWidth ?? generation?.actualWidth ?? null;
-  const actualHeight =
-    browserMeta?.actualHeight ?? generation?.actualHeight ?? null;
-  const actualDuration =
-    browserMeta?.actualDurationSeconds ??
-    generation?.actualDurationSeconds ??
-    null;
-  const aspectLabel =
-    browserMeta?.aspectRatioLabel ??
-    (actualWidth && actualHeight
-      ? classifyVideoAspectRatio(actualWidth, actualHeight)
-      : null);
+  const comparisonView = useMemo(() => {
+    if (!generation) return null;
+    return buildGenerationParameterComparisonView(generation, {
+      actualWidth: browserMeta?.actualWidth ?? generation.actualWidth,
+      actualHeight: browserMeta?.actualHeight ?? generation.actualHeight,
+      actualDurationSeconds:
+        browserMeta?.actualDurationSeconds ?? generation.actualDurationSeconds,
+      metadataSource: browserMeta ? "browser" : generation.metadataSource,
+    });
+  }, [generation, browserMeta]);
 
-  // 始终带上 projectId，避免仅依赖 generation.resultAsset 时播放失败
   const videoUrl =
     videoAsset && classified.canPlay
       ? buildGeneratedVideoContentUrl({
@@ -140,7 +137,7 @@ function VideoResultDrawerBody({
         ) : null}
 
         {classified.isMock && classified.canPlay && (
-          <div className="text-[11px] text-amber-800">
+          <div className="text-[11px] text-amber-900">
             Mock 演示视频，不是真实 AI 生成结果
           </div>
         )}
@@ -171,24 +168,9 @@ function VideoResultDrawerBody({
               videoAsset ? formatVideoFileSize(videoAsset.sizeBytes) : "—"
             }
           />
-          <Row
-            label="实际宽高"
-            value={
-              actualWidth && actualHeight
-                ? `${actualWidth}×${actualHeight}`
-                : "尚未读取"
-            }
-          />
-          <Row
-            label="实际时长"
-            value={
-              actualDuration != null
-                ? `${actualDuration.toFixed(3)} 秒`
-                : "尚未读取"
-            }
-          />
-          <Row label="实际比例" value={aspectLabel ?? "尚未读取"} />
         </dl>
+
+        {comparisonView && <ParameterComparisonPanel view={comparisonView} />}
       </div>
 
       <div className="flex items-center justify-end gap-2 border-t border-zinc-100 px-4 py-3">
