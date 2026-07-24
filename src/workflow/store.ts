@@ -70,6 +70,12 @@ type WorkflowStore = {
     videoShotNodeId: string,
     assetIds: string[],
   ) => void;
+  /** 一次写入 mode + IDs（同一 contentEpoch，便于作为单一逻辑变更） */
+  setReferenceMediaSelection: (
+    videoShotNodeId: string,
+    mode: "auto" | "manual",
+    assetIds: string[],
+  ) => void;
   /** 一次写入素材 + 节点补丁，避免生成/上传时双波重渲染闪烁 */
   commitNodeAssets: (
     nodeId: string,
@@ -304,6 +310,20 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       ordered.push(id);
     }
     get().updateNodeData(videoShotNodeId, {
+      selectedReferenceAssetIds: ordered,
+    });
+  },
+
+  setReferenceMediaSelection: (videoShotNodeId, mode, assetIds) => {
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+    for (const id of assetIds) {
+      if (typeof id !== "string" || !id || seen.has(id)) continue;
+      seen.add(id);
+      ordered.push(id);
+    }
+    get().updateNodeData(videoShotNodeId, {
+      referenceSelectionMode: mode === "manual" ? "manual" : "auto",
       selectedReferenceAssetIds: ordered,
     });
   },

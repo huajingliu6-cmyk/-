@@ -18,8 +18,10 @@ import {
 import { PromptReferenceChips } from "@/workflow/components/PromptReferenceChips";
 import { MentionTextarea } from "@/workflow/components/MentionTextarea";
 import { GenerationConfirmationDrawer } from "@/workflow/components/GenerationConfirmationDrawer";
+import { ReferenceMediaSelectionDrawer } from "@/workflow/components/ReferenceMediaSelectionDrawer";
 import { useDebouncedCommit } from "@/workflow/hooks/useDebouncedCommit";
 import { prependGenerationHistory } from "@/workflow/lib/generation-history";
+import { prepareReferenceMediaSelectionBundle } from "@/workflow/lib/prepare-reference-media-selection";
 import { useWorkflowStore } from "@/workflow/store";
 import type { VideoShotNodeData } from "@/workflow/types";
 import type {
@@ -57,12 +59,15 @@ type Props = {
   onOpenVideoResult?: (generation: GenerationRecord | null) => void;
   /** 轮询得到的 GenerationRecord 快照，供节点摘要展示（不发起额外请求） */
   onGenerationSnapshot?: (generation: GenerationRecord | null) => void;
+  /** 紧凑参考素材摘要（供节点卡片展示，不发网络） */
+  onReferenceSummary?: (label: string) => void;
 };
 
 export function VideoPromptPanel({
   nodeId,
   onOpenVideoResult,
   onGenerationSnapshot,
+  onReferenceSummary,
 }: Props) {
   const projectId = useWorkflowStore((s) => s.projectId);
   const node = useWorkflowStore((s) =>
@@ -71,18 +76,26 @@ export function VideoPromptPanel({
   /** 分字段订阅，避免视口平移导致面板重渲 */
   const edges = useWorkflowStore((s) => s.document.edges);
   const assets = useWorkflowStore((s) => s.document.assets);
+  const nodes = useWorkflowStore((s) => s.document.nodes);
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const commitNodeAssets = useWorkflowStore((s) => s.commitNodeAssets);
   const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [selectionOpen, setSelectionOpen] = useState(false);
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [capabilities, setCapabilities] = useState<ProviderCapabilities | null>(
     null,
   );
   const [generation, setGeneration] = useState<GenerationRecord | null>(null);
+  const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId);
+  const manageRefBtn = useRef<HTMLButtonElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 节点切换时关闭选择面板，避免草稿落到其他节点
+  if (selectionOpen && selectedNodeId !== nodeId) {
+    setSelectionOpen(false);
+  }
 
   const data =
     node?.type === "videoShot" ? (node.data as VideoShotNodeData) : null;
@@ -122,29 +135,66 @@ export function VideoPromptPanel({
     updateNodeData(nodeId, { provider: config.providerId });
   }, [config, data?.provider, nodeId, updateNodeData]);
 
+  const selectionCap = useMemo(() => {
+    if (!capabilities) return null;
+    return (
+      capabilities.models.find((m) => m.mode === "referenceToVideo") ??
+      capabilities.models[0] ??
+      null
+    );
+  }, [capabilities]);
+
+  const selectionBundle = useMemo(() => {
+    if (!data) return null;
+    const base = useWorkflowStore.getState().document;
+    return prepareReferenceMediaSelectionBundle({
+      document: { ...base, edges, assets, nodes },
+      videoShotNodeId: nodeId,
+      capability: selectionCap
+        ? {
+            maxReferenceMedia: selectionCap.maxReferenceMedia,
+            maxFirstFrames: selectionCap.maxFirstFrames,
+            supportsReferenceImages: selectionCap.supportsReferenceImages,
+            supportsReferenceVideos: selectionCap.supportsReferenceVideos,
+            supportsFirstFrame: selectionCap.supportsFirstFrame,
+          }
+        : null,
+      mode:
+        data.referenceSelectionMode === "manual" ? "manual" : "auto",
+      selectedReferenceAssetIds: data.selectedReferenceAssetIds ?? [],
+    });
+  }, [data, nodeId, edges, assets, nodes, selectionCap]);
+
+  const selectionView = selectionBundle?.view ?? null;
+
+  useEffect(() => {
+    onReferenceSummary?.(selectionView?.nodeSummaryLabel ?? "");
+  }, [selectionView?.nodeSummaryLabel, onReferenceSummary]);
+
+  const workflowDocument = useMemo(() => {
+    const base = useWorkflowStore.getState().document;
+    return { ...base, edges, assets, nodes };
+  }, [edges, assets, nodes]);
+
   const builtPreview = useMemo(() => {
     if (!data) return null;
     const base = useWorkflowStore.getState().document;
-    const cap =
-      capabilities?.models.find((m) => m.mode === "referenceToVideo") ??
-      capabilities?.models[0] ??
-      null;
     return buildVideoGenerationInput(
-      { ...base, edges, assets },
+      { ...base, edges, assets, nodes },
       nodeId,
       {
-        capability: cap
+        capability: selectionCap
           ? {
-              maxReferenceMedia: cap.maxReferenceMedia,
-              maxFirstFrames: cap.maxFirstFrames,
-              supportsReferenceImages: cap.supportsReferenceImages,
-              supportsReferenceVideos: cap.supportsReferenceVideos,
-              supportsFirstFrame: cap.supportsFirstFrame,
+              maxReferenceMedia: selectionCap.maxReferenceMedia,
+              maxFirstFrames: selectionCap.maxFirstFrames,
+              supportsReferenceImages: selectionCap.supportsReferenceImages,
+              supportsReferenceVideos: selectionCap.supportsReferenceVideos,
+              supportsFirstFrame: selectionCap.supportsFirstFrame,
             }
           : undefined,
       },
     );
-  }, [data, nodeId, edges, assets, capabilities]);
+  }, [data, nodeId, edges, assets, nodes, selectionCap]);
 
   const mode = useMemo(() => {
     if (!builtPreview || !builtPreview.ok) return "textToVideo" as const;
@@ -300,23 +350,16 @@ export function VideoPromptPanel({
       : 15,
   );
 
-  const mediaLimit = capability?.maxReferenceMedia;
-  const capabilityReady = Boolean(capability);
-  const mediaCount =
-    builtPreview?.candidates.filter((c) => c.eligible).length ??
-    (builtPreview?.ok
-      ? builtPreview.input.orderedReferenceMedia.length
-      : 0);
+  const mediaLimit = selectionView?.limit ?? capability?.maxReferenceMedia ?? null;
+  const capabilityReady = Boolean(capability) && Boolean(selectionView?.capabilityLoaded);
+  const mediaCount = selectionView?.eligibleCount ?? 0;
   const requiresManualSelection = Boolean(
-    builtPreview &&
-      (!builtPreview.ok
-        ? builtPreview.requiresManualSelection
-        : false),
+    selectionView?.requiresManualSelection,
   );
   const canOpenConfirm =
-    capabilityReady &&
-    !requiresManualSelection &&
-    !(builtPreview && !builtPreview.ok);
+    Boolean(selectionView?.canGenerate) &&
+    Boolean(builtPreview?.ok) &&
+    capabilityReady;
 
   const onOptimizePrompt = () => {
     const base = flush().trim();
@@ -481,6 +524,20 @@ export function VideoPromptPanel({
       className={`nodrag nopan nowheel w-[min(520px,92vw)] ${glass.panel}`}
       onMouseDown={(e) => e.stopPropagation()}
     >
+      <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-500">
+        <span className="rounded-md bg-zinc-100 px-1.5 py-0.5">
+          {selectionView?.nodeSummaryLabel ?? "参考素材"}
+        </span>
+        <button
+          ref={manageRefBtn}
+          type="button"
+          className="rounded-md border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 hover:bg-zinc-50"
+          onClick={() => setSelectionOpen(true)}
+        >
+          管理参考素材
+        </button>
+      </div>
+
       <div className="mb-2 flex flex-wrap gap-1.5 text-[10px] text-zinc-500">
         <span className="rounded-md bg-zinc-100 px-1.5 py-0.5">
           Provider：{config?.providerId ?? data.provider}
@@ -503,6 +560,11 @@ export function VideoPromptPanel({
         {requiresManualSelection ? (
           <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
             需手动选择参考素材
+          </span>
+        ) : null}
+        {selectionView?.hasInvalidSelection ? (
+          <span className="rounded-md bg-rose-100 px-1.5 py-0.5 text-rose-800">
+            选择存在失效项
           </span>
         ) : null}
         {generation && (
@@ -659,9 +721,14 @@ export function VideoPromptPanel({
 
       {hasFirstFrame && (
         <div className="mt-1.5 text-[10px] text-amber-700">
-          已连接首帧，视频比例将根据首帧图片自动确定
+          已连接首帧，视频比例将根据首帧图片自动确定；首帧不占普通参考素材名额
         </div>
       )}
+      {selectionView && selectionView.blockingErrors.length > 0 ? (
+        <div className="mt-1.5 text-[10px] text-rose-600">
+          {selectionView.blockingErrors[0]}
+        </div>
+      ) : null}
       {durationWarning && (
         <div className="mt-1.5 text-[10px] text-rose-600">
           {durationWarning}
@@ -704,8 +771,27 @@ export function VideoPromptPanel({
         aspectRatio={hasFirstFrame ? null : aspectRatio}
         durationSeconds={data.duration}
         built={builtPreview}
+        selectionView={selectionView}
+        onManageReferences={() => {
+          setConfirmOpen(false);
+          setSelectionOpen(true);
+        }}
         onConfirmMock={() => void onConfirmGenerate(false)}
         onConfirmPaid={() => void onConfirmGenerate(true)}
+      />
+
+      <ReferenceMediaSelectionDrawer
+        open={selectionOpen}
+        videoShotNodeId={nodeId}
+        document={workflowDocument}
+        capability={selectionCap}
+        providerId={config?.providerId ?? data.provider}
+        onClose={() => setSelectionOpen(false)}
+        onRequestFocusReturn={() => manageRefBtn.current?.focus()}
+        onJumpToNode={(id) => {
+          useWorkflowStore.getState().setSelectedNodeId(id);
+          setSelectionOpen(false);
+        }}
       />
     </div>
   );

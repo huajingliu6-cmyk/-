@@ -2,7 +2,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { createDefaultWorkflow, DEMO_PROJECT_ID } from "../default-workflow";
 import { migrateWorkflowDocument, WorkflowMigrationError } from "../migrate";
-import { validateAllEdges } from "../connection-rules";
+import { validateAllEdges, dedupeWorkflowEdges } from "../connection-rules";
 import { sanitizeWorkflowForPersist } from "./sanitize-workflow";
 import type { WorkflowDocument } from "../types";
 
@@ -55,7 +55,8 @@ export async function loadWorkflow(
     }
 
     const parsed = migrateWorkflowDocument(json);
-    const edgesOk = validateAllEdges(parsed.nodes, parsed.edges);
+    const edges = dedupeWorkflowEdges(parsed.edges);
+    const edgesOk = validateAllEdges(parsed.nodes, edges);
     if (!edgesOk.ok) {
       console.warn(
         "Workflow file has illegal edges after migration:",
@@ -64,17 +65,19 @@ export async function loadWorkflow(
       return { ...parsed, edges: [] };
     }
 
+    const normalized = { ...parsed, edges };
+
     // 若从旧版本迁移而来，写回最新文件（备份已保留）
     if (version < 4) {
       const tempPath = path.join(
         DATA_DIR,
         `${id}.${process.pid}.${Date.now()}.tmp`,
       );
-      await fs.writeFile(tempPath, JSON.stringify(parsed, null, 2), "utf-8");
+      await fs.writeFile(tempPath, JSON.stringify(normalized, null, 2), "utf-8");
       await fs.rename(tempPath, filePath);
     }
 
-    return parsed;
+    return normalized;
   } catch (error) {
     if (error instanceof WorkflowMigrationError) {
       throw error;
@@ -90,14 +93,16 @@ export async function saveWorkflow(
 
   const sanitized = sanitizeWorkflowForPersist(document);
   const parsed = migrateWorkflowDocument(sanitized);
-  const edgesOk = validateAllEdges(parsed.nodes, parsed.edges);
+  const edges = dedupeWorkflowEdges(parsed.edges);
+  const withEdges = { ...parsed, edges };
+  const edgesOk = validateAllEdges(withEdges.nodes, withEdges.edges);
   if (!edgesOk.ok) {
     throw new Error(edgesOk.message);
   }
 
   const next: WorkflowDocument = {
-    ...parsed,
-    revision: parsed.revision + 1,
+    ...withEdges,
+    revision: withEdges.revision + 1,
     updatedAt: new Date().toISOString(),
   };
 

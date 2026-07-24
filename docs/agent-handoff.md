@@ -9,7 +9,7 @@
 - **项目目标**：资产驱动的 AI 视频创作工作台。用户在无限画布上编排角色、场景、参考素材与视频镜头，经确认后提交异步视频生成，并将结果登记为本地 `generatedVideo` 资产。
 - **技术栈**：Next.js 16、React 19、React Flow（`@xyflow/react`）、Zustand、Zod、Vitest、Tailwind CSS 4。
 - **当前分支**：`feat/react-flow-migration`
-- **当前稳定基线**：以 `git log -1` 为准。阶段 3C-A 完成前基线为 `d95353a`（阶段 3B）。
+- **当前稳定基线**：以 `git log -1` 为准。阶段 3C-B 提交前基线为 `e2e6abc`（阶段 3C-A）。
 - **页面入口**：
   - `/` — 入口
   - `/login` — 登录
@@ -73,10 +73,17 @@ npm run dev
   - 超限不静默截断；服务端按最新工作流重收集候选并校验
   - 首帧不占普通参考上限
   - `orderedReferenceMedia` 驱动 Provider payload 与 Prompt 编号
-  - Store：`setReferenceSelectionMode` / `setSelectedReferenceAssetIds`（供 3C-B）
+  - Store：`setReferenceSelectionMode` / `setSelectedReferenceAssetIds` / `setReferenceMediaSelection`
+- **阶段 3C-B 已完成**（选择面板与确认集成；浏览器人工验收已通过）：
+  - `ReferenceMediaSelectionDrawer`（草稿保存/取消、分组浏览、上移下移、首帧独立区）
+  - 入口：`VideoShotNode` 摘要、`VideoPromptPanel`、「生成确认」未完成时跳转
+  - `buildReferenceMediaSelectionView` / draft helpers / `prepareReferenceMediaSelectionBundle`（复用 3C-A，无第二套算法）
+  - capability 缺失禁止保存与生成；UI 不写死上限、无 fallback 5
+  - `setReferenceMediaSelection` 原子写入 mode+IDs；**全局 Undo/Redo 尚未实现**（工具栏占位）
+  - 顺带加固连接规则：多参考边合法；禁止镜头→素材反向连；空句柄去重（避免误报「非法连接」）
 - `generatedVideo` 类型的 `AssetRecord`
 - GenerationRecord 上的 requested / provider / actual 字段与 `compare-params`
-- 自动化测试：见 `src/video-generation/__tests__/`（数量以本文件「当前验证结果」为准）
+- 自动化测试：见 `src/video-generation/__tests__/` 与 `src/workflow/__tests__/`（数量以本文件「当前验证结果」为准）
 
 ---
 
@@ -146,17 +153,19 @@ load WorkflowDocument
 
 # 当前验证结果
 
-阶段 3C-A 本地验收（以最终报告中的命令结果为准）：
+阶段 3C-B 最终验收（以提交前命令结果为准）：
 
 | 命令 | 预期 |
 |------|------|
 | `npm run lint` | 退出码 0 |
 | `npx eslint . --max-warnings=0` | 退出码 0 |
 | `npm run typecheck` | 退出码 0 |
-| `npm test` | 退出码 0；**110** 项（原 86 + 参考素材选择相关） |
+| `npm test` | 退出码 0；**124** 项（含 3C-B UI/view/draft 与连接规则测试） |
 | `npm run build` | 退出码 0 |
 
 安全配置：默认 `VIDEO_PROVIDER=mock`、`ALLOW_PAID_GENERATION=false`；未进行真实付费生成、未 push。
+
+浏览器人工验收：auto/manual、草稿取消/保存、顺序、失效项、首帧、确认抽屉、Mock 生成与 Provider 顺序一致；无真实阿里云/付费请求。
 
 ---
 
@@ -164,20 +173,15 @@ load WorkflowDocument
 
 按建议顺序：
 
-1. **阶段 3C-B**：`ReferenceMediaSelectionDrawer` 与确认界面勾选 UI
-2. 真实万相最低成本人工付费测试（可选；禁止 Agent 自动执行）
+1. Mock 完整端到端验收与真实 Provider 启用前安全审计
+2. 全局编辑器 Undo/Redo（独立阶段；**不是** 3C-B 范围）
+3. 真实万相最低成本人工付费测试（可选；禁止 Agent 自动执行）
 
 ---
 
 # 下一阶段
 
-**名称：** 阶段 3C-B — ReferenceMediaSelectionDrawer 与确认界面
-
-**预计涉及（只描述，本交接不实现）：**
-
-- 勾选 UI 与 `setReferenceSelectionMode` / `setSelectedReferenceAssetIds` 对齐
-- 超过 `maxReferenceMedia` 时强制手动选择
-- 确认抽屉展示候选 / 已选 / 不可选项
+**名称：** Mock 完整端到端验收与真实 Provider 启用前安全审计
 
 约束延续：默认 mock、禁止自动付费、不 push、不 eslint-disable、不用 `any` / `@ts-ignore`。
 
@@ -194,6 +198,7 @@ load WorkflowDocument
 - 万相远程结果 URL 可能有时效（约 24 小时）；成功后应尽快转存。
 - 参考视频在真实 Provider 下通常需要可公网访问的 HTTPS URL；纯 localhost 资产可能被拦截。
 - 当前权限校验仅为项目/节点/边/资产一致性，**不是**生产级多用户隔离。
+- **全局 Undo/Redo 尚未实现**：选择保存仅为原子 Store action；工具栏 Undo/Redo 仍为占位，后续需独立编辑器阶段完成。
 
 ---
 
@@ -202,11 +207,11 @@ load WorkflowDocument
 - `README.md` — 启动与工作台结构
 - `docs/mock-video-setup.md` — 本地 Mock MP4 配置
 - `docs/generation-parameter-comparison.md` — requested/provider/actual 对照
-- `docs/reference-media-selection.md` — 参考素材选择（3C-A）
+- `docs/reference-media-selection.md` — 参考素材选择（3C-A/B）
 - `docs/video-provider-aliyun-wan27.md` — 万相 2.7 Provider
 - `.env.example` — 环境变量模板（无密钥）
 - `AGENTS.md` / `CLAUDE.md` — Next.js 版本注意
 
 ---
 
-*文档对应阶段 3C-A 完成态。若后续功能提交改变行为，请同步更新本文件。*
+*文档对应阶段 3C-B 完成态。若后续功能提交改变行为，请同步更新本文件。*

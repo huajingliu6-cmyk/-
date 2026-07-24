@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { X } from "lucide-react";
 import type { BuildVideoGenerationInputResult } from "@/workflow/lib/build-video-generation-input";
+import type { ReferenceMediaSelectionView } from "@/workflow/lib/reference-media-selection-view";
 import type {
   ModelCapability,
   VideoAspectRatio,
@@ -30,6 +31,8 @@ type Props = {
   aspectRatio: VideoAspectRatio | null;
   durationSeconds: number;
   built: BuildVideoGenerationInputResult | null;
+  selectionView: ReferenceMediaSelectionView | null;
+  onManageReferences: () => void;
   onConfirmMock: () => void;
   onConfirmPaid: () => void;
 };
@@ -44,6 +47,8 @@ export function GenerationConfirmationDrawer({
   aspectRatio,
   durationSeconds,
   built,
+  selectionView,
+  onManageReferences,
   onConfirmMock,
   onConfirmPaid,
 }: Props) {
@@ -55,17 +60,14 @@ export function GenerationConfirmationDrawer({
   const keysReady = Boolean(config?.hasApiKey && config?.hasWorkspaceId);
   const canPaid = !isMock && paidEnabled && keysReady;
 
-  const refs =
-    built && built.ok
-      ? {
-          characters: built.input.characterReferences,
-          scenes: built.input.sceneReferences,
-          images: built.input.imageReferences,
-          videos: built.input.referenceVideos,
-          firstFrame: built.input.firstFrame,
-          unsupported: built.unsupportedAudioLabels,
-        }
-      : null;
+  const selectionBlocking = Boolean(
+    !selectionView?.capabilityLoaded ||
+      !selectionView.canGenerate ||
+      (built && !built.ok),
+  );
+
+  const ordered =
+    built && built.ok ? built.input.orderedReferenceMedia : [];
 
   return (
     <div
@@ -80,7 +82,7 @@ export function GenerationConfirmationDrawer({
           <div>
             <div className="text-sm font-semibold text-zinc-900">生成确认</div>
             <div className="mt-0.5 text-[11px] text-zinc-500">
-              请核对 Provider、参数与素材后再提交
+              请核对 Provider、参数与最终发送素材后再提交
             </div>
           </div>
           <button
@@ -109,45 +111,82 @@ export function GenerationConfirmationDrawer({
             }
           />
           <Row label="时长" value={`${durationSeconds} 秒`} />
+          <Row
+            label="参考上限"
+            value={
+              selectionView?.limit != null
+                ? String(selectionView.limit)
+                : "模型能力尚未加载"
+            }
+          />
 
-          {refs && (
-            <>
-              <Section title="角色参考图片">
-                {refs.characters.length === 0
-                  ? "无"
-                  : refs.characters.map((r) => r.label).join("、")}
-              </Section>
-              <Section title="场景参考图片">
-                {refs.scenes.length === 0
-                  ? "无"
-                  : refs.scenes.map((r) => r.label).join("、")}
-              </Section>
-              <Section title="普通参考图片">
-                {refs.images.length === 0
-                  ? "无"
-                  : refs.images.map((r) => r.label).join("、")}
-              </Section>
-              <Section title="参考视频">
-                {refs.videos.length === 0
-                  ? "无"
-                  : refs.videos.map((r) => r.label).join("、")}
-              </Section>
-              <Section title="首帧">
-                {refs.firstFrame ? refs.firstFrame.label : "无"}
-              </Section>
-              <Section title="不受当前模型支持的音频">
-                {refs.unsupported.length === 0
-                  ? "无"
-                  : refs.unsupported.join("；")}
-              </Section>
-            </>
-          )}
+          <Section title="最终发送顺序">
+            {ordered.length === 0 ? (
+              "无普通参考素材"
+            ) : (
+              <ol className="list-decimal space-y-0.5 pl-4">
+                {ordered.map((r, i) => (
+                  <li key={`${r.assetId}-${i}`}>
+                    {r.label}（{r.kind}）
+                  </li>
+                ))}
+              </ol>
+            )}
+          </Section>
 
-          {built && !built.ok && (
+          <Section title="首帧">
+            {selectionView?.firstFrame
+              ? `${selectionView.firstFrame.label} · ${selectionView.firstFrame.sourceNodeTitle}`
+              : built?.ok && built.input.firstFrame
+                ? built.input.firstFrame.label
+                : "无"}
+          </Section>
+
+          {selectionView && selectionView.excluded.length > 0 ? (
+            <Section title="未发送 / 排除">
+              <ul className="space-y-0.5">
+                {selectionView.excluded.map((ex) => (
+                  <li key={ex.candidate.assetId}>
+                    {ex.candidate.label}：{ex.reason}
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          ) : null}
+
+          {built && built.ok && built.unsupportedAudioLabels.length > 0 ? (
+            <Section title="不受当前模型支持的音频">
+              {built.unsupportedAudioLabels.join("；")}
+            </Section>
+          ) : null}
+
+          {selectionView && !selectionView.capabilityLoaded ? (
+            <div className="rounded-lg bg-amber-50 px-2 py-1.5 text-amber-900">
+              模型能力尚未加载，暂时无法确认参考素材上限。
+            </div>
+          ) : null}
+
+          {selectionView && selectionView.blockingErrors.length > 0 ? (
+            <div className="rounded-lg bg-rose-50 px-2 py-1.5 text-rose-700">
+              {selectionView.blockingErrors.join("；")}
+            </div>
+          ) : null}
+
+          {built && !built.ok ? (
             <div className="rounded-lg bg-rose-50 px-2 py-1.5 text-rose-700">
               {built.errors.join("；")}
             </div>
-          )}
+          ) : null}
+
+          {selectionBlocking ? (
+            <button
+              type="button"
+              className="w-full rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-left text-[11px] text-amber-900"
+              onClick={onManageReferences}
+            >
+              选择未完成：打开「管理参考素材」
+            </button>
+          ) : null}
 
           <div className="rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
             {isMock
@@ -169,9 +208,9 @@ export function GenerationConfirmationDrawer({
           {isMock ? (
             <button
               type="button"
-              className="rounded-lg bg-zinc-900 px-3 py-1.5 text-[12px] text-white"
+              className="rounded-lg bg-zinc-900 px-3 py-1.5 text-[12px] text-white disabled:cursor-not-allowed disabled:bg-zinc-300"
               onClick={onConfirmMock}
-              disabled={Boolean(built && !built.ok)}
+              disabled={selectionBlocking}
             >
               运行 Mock
             </button>
@@ -179,7 +218,7 @@ export function GenerationConfirmationDrawer({
             <button
               type="button"
               className="rounded-lg bg-rose-600 px-3 py-1.5 text-[12px] text-white disabled:cursor-not-allowed disabled:bg-zinc-300"
-              disabled={!canPaid || Boolean(built && !built.ok)}
+              disabled={!canPaid || selectionBlocking}
               title={
                 !paidEnabled
                   ? "ALLOW_PAID_GENERATION 未启用"

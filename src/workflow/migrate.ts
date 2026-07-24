@@ -1,4 +1,4 @@
-import { HANDLES } from "./connection-rules";
+import { dedupeWorkflowEdges, normalizeConnectionHandles } from "./connection-rules";
 import { seedGenerationHistory } from "./lib/generation-history";
 import { workflowDocumentSchema } from "./schema";
 import type {
@@ -862,37 +862,17 @@ function migrateEdge(raw: unknown): WorkflowEdge {
     throw new WorkflowMigrationError("连接数据格式无效");
   }
 
-  let sourceHandle = asString(edge.sourceHandle);
-  let targetHandle = asString(edge.targetHandle);
-
-  // 统一为左右单端口 in/out
-  if (
-    !sourceHandle ||
-    sourceHandle.endsWith("-output") ||
-    sourceHandle === "out" ||
-    sourceHandle === "prompt-output"
-  ) {
-    sourceHandle = HANDLES.out;
-  }
-  if (
-    !targetHandle ||
-    targetHandle.endsWith("-input") ||
-    targetHandle === "in" ||
-    targetHandle === "prompt-input"
-  ) {
-    targetHandle = HANDLES.in;
-  }
-
-  // 无法识别的旧句柄也强制归一，避免校验失败
-  if (sourceHandle !== HANDLES.out) sourceHandle = HANDLES.out;
-  if (targetHandle !== HANDLES.in) targetHandle = HANDLES.in;
+  const handles = normalizeConnectionHandles({
+    sourceHandle: asString(edge.sourceHandle),
+    targetHandle: asString(edge.targetHandle),
+  });
 
   return {
     id: asString(edge.id),
     source: asString(edge.source),
     target: asString(edge.target),
-    sourceHandle,
-    targetHandle,
+    sourceHandle: handles.sourceHandle,
+    targetHandle: handles.targetHandle,
   };
 }
 
@@ -947,9 +927,11 @@ export function migrateWorkflowDocument(raw: unknown): WorkflowDocument {
     .map((node) => migrateNode(node, ctx, shotCounter))
     .filter((node): node is WorkflowNode => node !== null);
   const nodeIds = new Set(nodes.map((n) => n.id));
-  const edges = edgesRaw
-    .map(migrateEdge)
-    .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
+  const edges = dedupeWorkflowEdges(
+    edgesRaw
+      .map(migrateEdge)
+      .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)),
+  );
   const shotOrder =
     (version === 3 || version === 4) &&
     Array.isArray(doc.shotOrder) &&

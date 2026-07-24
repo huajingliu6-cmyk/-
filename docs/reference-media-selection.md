@@ -1,6 +1,6 @@
-# 参考素材选择（阶段 3C-A）
+# 参考素材选择
 
-本文说明视频生成前参考素材的候选收集、自动/手动选择、发送顺序与服务端校验。不含密钥、用户素材或本机绝对路径。
+本文说明视频生成前参考素材的候选收集、自动/手动选择、发送顺序、选择面板与服务端校验。不含密钥、用户素材或本机绝对路径。
 
 ## 数据模型
 
@@ -9,97 +9,95 @@
 | 字段 | 含义 |
 |------|------|
 | `referenceSelectionMode` | `"auto"` \| `"manual"` |
-| `selectedReferenceAssetIds` | 手动模式下的选择与发送顺序 |
+| `selectedReferenceAssetIds` | 手动模式下的选择与发送顺序（Provider / Prompt 图N·视频N 的唯一顺序来源） |
 
 WorkflowDocument **version = 4**。
 
-## 候选素材来源
+## 阶段 3C-B（已完成）
 
-纯函数 `collectReferenceMediaCandidates` 只读取：
+浏览器人工验收已通过。UI 复用 3C-A 领域函数，不另造候选收集或选择算法。
 
-1. 通过边连接到当前 VideoShot **输入端口（in）** 的节点
-2. 镜头自身的 `sourceVideoAssetId`（参考视频）
+### Drawer 入口
 
-不进入普通候选池：
+1. `VideoShotNode` — 紧凑摘要（由选中后的 `VideoPromptPanel` 回写）
+2. `VideoPromptPanel` — 「管理参考素材」
+3. `GenerationConfirmationDrawer` — 选择未完成时跳转管理
 
-- 未连接节点
-- `ImageNode.referenceType === "startFrame"`（首帧独立处理）
+组件：`ReferenceMediaSelectionDrawer`
 
-进入候选：
+组装：`prepareReferenceMediaSelectionBundle` → `collectReferenceMediaCandidates` / `resolveFirstFrame` / `resolveReferenceMediaSelection` / `buildReferenceMediaSelectionView`
 
-- 角色当前形象：主图 + `references` / `referenceAssetIds`（去重保序）
-- 场景：主图 + 视角 + `referenceAssetIds`
-- 普通 ImageNode / PropNode
-- 参考视频（模型支持时 eligible；不支持则保留来源但不可选）
+### 草稿语义
 
-相同 `assetId` 只占一个名额；去重保留第一次出现。
+- 打开时只初始化一次：`draftMode` + `draftSelectedIds`（`key` 会话挂载，非 effect 持续复制 props）
+- 勾选 / 上移下移只改草稿
+- **取消**：不修改 WorkflowDocument / Store
+- **保存**：调用 `setReferenceMediaSelection`（mode + IDs 一次写入）
+- 不在每次勾选时写 WorkflowDocument
+- 节点切换时关闭 Drawer，旧草稿不写入其他节点
+- 后台自动保存响应不覆盖正在编辑的草稿（草稿为组件本地状态）
 
-## 自动模式（auto）
+### 自动模式 UI
 
-- **不以** `selectedReferenceAssetIds` 为权威
-- eligible 数量 ≤ `capability.maxReferenceMedia`：全选，顺序=候选稳定顺序
-- eligible 数量 > 上限：**不**截取前 N 项；`requiresManualSelection=true`；错误码 `REFERENCE_SELECTION_REQUIRED`
+- `eligibleCount <= limit`：显示「已自动选择全部 N 项」；**不**把自动结果写入 `selectedReferenceAssetIds`
+- `eligibleCount > limit`：**不**显示已选前 M 项；`canGenerate=false`；要求切换 manual
+- 从超限 auto 切 manual：**不**擅自勾选前 limit 项（草稿可为空）
+- 无 `slice(0, limit)` 或等价静默截断
 
-## 手动模式（manual）
+### 手动模式 UI
 
-- `selectedReferenceAssetIds` 是选择与发送顺序的**唯一**来源
-- **空数组**表示明确选择零项，**不得**解释为 auto
-- 非法：重复 ID、池外 ID、不可用候选、超过上限、与首帧 ID 冲突
-- 任一非法时不静默删除后继续，返回结构化错误
+- `draftSelectedIds` 顺序 = 发送顺序；空数组保持为空，**不**回退 auto
+- 新候选不会自动加入已有 manual 选择
+- 达上限后未选项禁用，已选项可取消；不可用不可勾选
+- 池外 / 断开 ID 在「失效选择」区显示，阻止保存/生成；「移除失效项」为明确用户操作
 
-## 空手动选择语义
+### 发送顺序
 
-- 文生视频合法时：可不发送参考素材
-- 参考生视频且规则要求至少一张图/视频时：由后续 `validateGenerationSettings` 拒绝
+- 上移 / 下移只改草稿（无拖拽库）；首项不可上移、末项不可下移
+- 分组列表仅浏览；「发送顺序」区为最终顺序来源
+- UI **不**按角色/场景/图片重排最终发送列表
+- 保存后 `selectedReferenceAssetIds` 顺序即 Provider 顺序；刷新后恢复
 
-## 发送顺序
+### 首帧
 
-1. 首帧（若有）单独置于 media 列表前端，不参与「图 N」编号
-2. 普通参考：手动=选择数组顺序；自动=候选稳定顺序
-3. Provider payload **不再**按角色/场景/图片重分组打乱顺序
-4. Prompt 中「图 N / 视频 N」按媒体类型各自递增，且与 payload 中对应项一致
+- 独立区域；不进普通 checkbox；不进 `selectedReferenceAssetIds`；不计入普通 selectedCount
+- 受 `maxFirstFrames`；多首帧阻止生成
+- 显示「首帧不占普通参考素材名额」「画面比例将由首帧决定」
+- 不改变阶段 3B `requestedAspectRatio=null`（有首帧时）语义
 
-## 首帧规则
+### capability 缺失
 
-- 优先 `startFrameAssetId`，否则连接的 startFrame ImageNode
-- 不占用 `maxReferenceMedia`
-- 单独受 `maxFirstFrames` 约束
-- 多个首帧来源：结构化错误，不静默取第一个
-- 首帧存在时 `requestedAspectRatio = null`（阶段 3B 对照语义不变）
+- 文案：「模型能力尚未加载，暂时无法确认参考素材上限。」
+- 禁止保存选择与生成
+- UI **不**写死模型上限；**不**用 fallback `5` 作权威上限
 
-## 服务端验证
+### 生成确认抽屉
 
-权威来源：最新 WorkflowDocument 中 VideoShot 节点的 mode + selected IDs。
+- 只展示最终 resolved selected 与发送顺序、excluded 及原因、首帧独立区
+- 选择未完成时确认禁用，并提供管理入口
+- 确认时不改 selected IDs、不静默 slice；改选择后重开显示最新结果
 
-- API 可选附带客户端快照；必须与节点保存值顺序一致，否则 `STALE_REFERENCE_SELECTION`
-- 池外 / 不可用 ID：`INVALID_REFERENCE_SELECTION` / `REFERENCE_MEDIA_NOT_AVAILABLE`
-- 模型上限只来自 `ModelCapability.maxReferenceMedia` / `maxFirstFrames`
-- Zod 仅做结构校验；HTTP Payload 安全上限为独立常量 `MAX_REFERENCE_SELECTION_IDS_IN_REQUEST`（≠ 模型上限）
-- 禁止 `slice(0, limit)` 静默截断
-- **禁止**用硬编码 fallback `5` 作为业务上限：未加载 `ModelCapability` 时返回 `MODEL_CAPABILITY_NOT_LOADED`，客户端禁用生成
+### Store / Undo
 
-## 结构化错误码
+- `setReferenceMediaSelection(nodeId, mode, ids)`：原子一次 `updateNodeData` → 一次 `contentEpoch`
+- **不**直接 mutate `node.data`；Store **不**写死模型上限
+- **全局 Undo/Redo 尚未实现**（工具栏按钮仍为占位）；本阶段**不**提供仅素材选择用的伪 Undo/Redo，也**不**宣称已支持 Undo/Redo
 
-| code | 含义 |
-|------|------|
-| `REFERENCE_SELECTION_REQUIRED` | 自动模式超限，需手动选择 |
-| `INVALID_REFERENCE_SELECTION` | 选择失效（池外/重复/首帧冲突等） |
-| `REFERENCE_MEDIA_LIMIT_EXCEEDED` | 手动选择超过模型上限 |
-| `REFERENCE_MEDIA_NOT_AVAILABLE` | 已选素材不可用 |
-| `STALE_REFERENCE_SELECTION` | 客户端快照与工作流不一致 |
-| `MODEL_CAPABILITY_NOT_LOADED` | 未提供 ModelCapability，禁止用硬编码上限继续 |
-| `TOO_MANY_FIRST_FRAMES` | 首帧超过 `maxFirstFrames` |
+## 候选与领域语义（3C-A）
 
-## 当前权限限制（非生产级多用户隔离）
+纯函数：`collectReferenceMediaCandidates` / `resolveReferenceMediaSelection` / `resolveFirstFrame`。
+auto 不以 selected 为权威；manual 空数组≠auto；超限不静默截断。服务端权威仍是最新 WorkflowDocument。
 
-当前可验证：
+## 展示用截断说明
 
-- 素材是否属于当前 `WorkflowDocument.projectId`
-- 候选是否来自连接到当前镜头的节点
-- AssetRecord / MIME / 临时 URL
+节点卡片上 `attachedAssetIds.slice(0, 4)` 等 **仅用于缩略图展示**，不是生成选择截断。
 
-**尚未**实现：完整 userId RLS、跨用户对象所有权、生产对象存储 ACL。本地 `data/` 仅适合开发。
+## 测试
+
+- `src/workflow/__tests__/reference-media-selection-ui.test.ts`（view / draft / store）
+- `src/workflow/__tests__/connection-rules.test.ts`（多参考边合法、反向连接禁止等）
+- 全量自动化测试当前 **124** 项；浏览器交互以人工验收为准
 
 ## 下一阶段
 
-阶段 **3C-B**：`ReferenceMediaSelectionDrawer` 与确认界面勾选 UI（本阶段仅预留 Store action：`setReferenceSelectionMode` / `setSelectedReferenceAssetIds`）。
+Mock 完整端到端验收与真实 Provider 启用前安全审计。

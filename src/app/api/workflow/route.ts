@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { migrateWorkflowDocument, WorkflowMigrationError } from "@/workflow/migrate";
-import { validateAllEdges } from "@/workflow/connection-rules";
+import { dedupeWorkflowEdges, validateAllEdges } from "@/workflow/connection-rules";
 import { DEMO_PROJECT_ID } from "@/workflow/default-workflow";
 import { loadWorkflow, saveWorkflow } from "@/workflow/lib/workflow-storage";
 import { sanitizeWorkflowForPersist } from "@/workflow/lib/sanitize-workflow";
@@ -42,12 +42,16 @@ export async function PUT(request: NextRequest) {
     }
 
     const sanitized = sanitizeWorkflowForPersist(parsed);
-    const edgesOk = validateAllEdges(sanitized.nodes, sanitized.edges);
+    const withEdges = {
+      ...sanitized,
+      edges: dedupeWorkflowEdges(sanitized.edges),
+    };
+    const edgesOk = validateAllEdges(withEdges.nodes, withEdges.edges);
     if (!edgesOk.ok) {
       return NextResponse.json({ error: edgesOk.message }, { status: 400 });
     }
 
-    const saved = await saveWorkflow(sanitized);
+    const saved = await saveWorkflow(withEdges);
     return NextResponse.json(saved);
   } catch (error) {
     console.error("PUT /api/workflow failed:", error);

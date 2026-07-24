@@ -240,7 +240,7 @@ export function WorkflowToolbar({
       </div>
 
       {saveError && (
-        <div className="pointer-events-none absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-lg border border-rose-500/40 bg-rose-950/90 px-3 py-1.5 text-xs text-rose-200">
+        <div className="pointer-events-none absolute left-1/2 top-16 z-20 max-w-[min(92vw,36rem)] -translate-x-1/2 rounded-lg border border-rose-500/40 bg-rose-950/90 px-3 py-1.5 text-xs leading-snug text-rose-200 shadow">
           {saveError}
         </div>
       )}

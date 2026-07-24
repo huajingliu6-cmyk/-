@@ -66,7 +66,7 @@ import {
   createNodeFromAsset,
   findReactFlowNodeIdFromTarget,
 } from "@/workflow/lib/drop-asset";
-import { HANDLES, validateConnectionFromGraph } from "@/workflow/connection-rules";
+import { HANDLES, normalizeConnectionHandles, validateConnectionFromGraph } from "@/workflow/connection-rules";
 import { createNodeByType, createNodeId } from "@/workflow/create-node";
 import { DEMO_PROJECT_ID } from "@/workflow/default-workflow";
 import { useWorkflowAutosave } from "@/workflow/hooks/useWorkflowAutosave";
@@ -122,13 +122,19 @@ function fromFlowNodes(
 }
 
 function fromFlowEdges(edges: Edge[]): WorkflowEdge[] {
-  return edges.map((edge) => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    sourceHandle: edge.sourceHandle ?? "",
-    targetHandle: edge.targetHandle ?? "",
-  }));
+  return edges.map((edge) => {
+    const handles = normalizeConnectionHandles({
+      sourceHandle: edge.sourceHandle,
+      targetHandle: edge.targetHandle,
+    });
+    return {
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      sourceHandle: handles.sourceHandle,
+      targetHandle: handles.targetHandle,
+    };
+  });
 }
 
 function nextShotNumber(nodes: WorkflowNode[]): number {
@@ -513,14 +519,18 @@ function WorkflowCanvas({
 
   const isValidConnection = useCallback(
     (connection: Connection | Edge) => {
+      const handles = normalizeConnectionHandles({
+        sourceHandle: connection.sourceHandle,
+        targetHandle: connection.targetHandle,
+      });
       const result = validateConnectionFromGraph(
         resolveWorkflowNodes(),
         fromFlowEdges(edgesRef.current),
         {
           source: connection.source ?? "",
           target: connection.target ?? "",
-          sourceHandle: connection.sourceHandle ?? null,
-          targetHandle: connection.targetHandle ?? null,
+          sourceHandle: handles.sourceHandle,
+          targetHandle: handles.targetHandle,
         },
       );
       return result.ok;
@@ -530,14 +540,18 @@ function WorkflowCanvas({
 
   const onConnect = useCallback(
     (connection: Connection) => {
+      const handles = normalizeConnectionHandles({
+        sourceHandle: connection.sourceHandle,
+        targetHandle: connection.targetHandle,
+      });
       const result = validateConnectionFromGraph(
         resolveWorkflowNodes(),
         fromFlowEdges(edgesRef.current),
         {
           source: connection.source ?? "",
           target: connection.target ?? "",
-          sourceHandle: connection.sourceHandle ?? null,
-          targetHandle: connection.targetHandle ?? null,
+          sourceHandle: handles.sourceHandle,
+          targetHandle: handles.targetHandle,
         },
       );
 
@@ -552,7 +566,9 @@ function WorkflowCanvas({
       const next = addEdge(
         {
           ...connection,
-          id: `e-${connection.source}-${connection.sourceHandle}-${connection.target}-${connection.targetHandle}-${Date.now()}`,
+          sourceHandle: handles.sourceHandle,
+          targetHandle: handles.targetHandle,
+          id: `e-${connection.source}-${handles.sourceHandle}-${connection.target}-${handles.targetHandle}-${Date.now()}`,
         },
         edgesRef.current,
       );

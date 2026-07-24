@@ -47,6 +47,7 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
     useState<GenerationRecord | null>(null);
   const [summaryGeneration, setSummaryGeneration] =
     useState<GenerationRecord | null>(null);
+  const [referenceSummary, setReferenceSummary] = useState("");
 
   if (selected !== prevSelected) {
     setPrevSelected(selected);
@@ -404,6 +405,23 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
           </button>
         )}
 
+        <div
+          className="nodrag nopan mt-1 truncate text-[10px] text-zinc-500"
+          title={
+            referenceSummary ||
+            (nodeData.referenceSelectionMode === "manual"
+              ? `手动选择 ${nodeData.selectedReferenceAssetIds.length} 项`
+              : "参考素材：自动")
+          }
+        >
+          {referenceSummary ||
+            `${nodeData.startFrameAssetId ? "首帧已连接 · " : ""}${
+              nodeData.referenceSelectionMode === "manual"
+                ? `手动选择 ${nodeData.selectedReferenceAssetIds.length} 项`
+                : "参考素材：自动"
+            }`}
+        </div>
+
         <input
           ref={uploadRef}
           type="file"
@@ -428,6 +446,7 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
           onGenerationSnapshot={(generation) => {
             setSummaryGeneration(generation);
           }}
+          onReferenceSummary={setReferenceSummary}
         />
       </div>
 
