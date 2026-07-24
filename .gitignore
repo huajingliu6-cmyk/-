@@ -32,6 +32,15 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# local generated videos (dev transfer from provider temp URLs)
+/data/generated-videos/**
+!/data/generated-videos/.gitkeep
+
+# local generation task records
+/data/generations/**
+!/data/generations/.gitkeep
 
 # vercel
 .vercel

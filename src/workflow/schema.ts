@@ -71,6 +71,7 @@ const characterVariantSchema = z.object({
   referenceAssetIds: z.array(z.string()),
   primaryAssetId: z.string(),
   references: z.array(characterReferenceItemSchema),
+  referenceVoiceAssetId: z.string().default(""),
 });
 
 export const characterNodeDataSchema = z.object({
@@ -170,6 +171,7 @@ export const videoShotNodeDataSchema = z.object({
   referenceMode: z.string().default("full"),
   creditEstimate: z.number().finite().nonnegative().default(10),
   attachedAssetIds: z.array(z.string()).default([]),
+  selectedReferenceAssetIds: z.array(z.string()).default([]),
   continuityMode: z.enum([
     "standalone",
     "continueClip",
@@ -183,6 +185,7 @@ export const videoShotNodeDataSchema = z.object({
   progress: z.number().finite().min(0).max(100),
   errorMessage: z.string(),
   resultAssetId: z.string(),
+  activeGenerationId: z.string().default(""),
   generationHistoryIds: z.array(z.string()).default([]),
 });
 
@@ -199,6 +202,7 @@ export const imageNodeDataSchema = z.object({
   ]),
   assetIds: z.array(z.string()),
   primaryAssetId: z.string(),
+  selectedAssetIds: z.array(z.string()).default([]),
   description: z.string(),
   uploadStatus: uploadStatusSchema,
   errorMessage: z.string(),

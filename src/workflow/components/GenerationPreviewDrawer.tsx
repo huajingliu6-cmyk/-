@@ -1,12 +1,12 @@
 "use client";
 
 import { X } from "lucide-react";
-import type { VideoGenerationInputResult } from "@/workflow/types";
+import type { BuildVideoGenerationInputResult } from "@/workflow/lib/build-video-generation-input";
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  result: VideoGenerationInputResult | null;
+  result: BuildVideoGenerationInputResult | null;
 };
 
 export function GenerationPreviewDrawer({ open, onClose, result }: Props) {
@@ -28,7 +28,7 @@ export function GenerationPreviewDrawer({ open, onClose, result }: Props) {
               生成输入检查
             </div>
             <div className="mt-0.5 text-xs text-amber-300">
-              当前尚未连接真实 AI 视频服务，本页面只用于检查生成请求。
+              正式提交请使用节点上的生成确认抽屉；本面板仅用于调试输入。
             </div>
           </div>
           <button
@@ -62,7 +62,14 @@ export function GenerationPreviewDrawer({ open, onClose, result }: Props) {
 
           {result && result.ok && (
             <pre className="whitespace-pre-wrap break-all rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-[11px] leading-relaxed text-zinc-300">
-              {JSON.stringify(result.input, null, 2)}
+              {JSON.stringify(
+                {
+                  ...result.input,
+                  unsupportedAudioLabels: result.unsupportedAudioLabels,
+                },
+                null,
+                2,
+              )}
             </pre>
           )}
         </div>

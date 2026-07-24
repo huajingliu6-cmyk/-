@@ -134,6 +134,8 @@ export type CharacterVariant = {
   referenceAssetIds: string[];
   primaryAssetId: string;
   references: CharacterReferenceItem[];
+  /** 可选：绑定到该形象的音色素材（仅 voice） */
+  referenceVoiceAssetId: string;
 };
 
 export type SceneViewpoint = {
@@ -215,6 +217,8 @@ export type VideoShotNodeData = {
   creditEstimate: number;
   /** 直接挂在视频节点上的素材（上传 / 资产库） */
   attachedAssetIds: string[];
+  /** 超过 5 个参考时用户勾选的素材顺序 */
+  selectedReferenceAssetIds: string[];
   continuityMode: ContinuityMode;
   sourceVideoAssetId: string;
   startFrameAssetId: string;
@@ -223,6 +227,8 @@ export type VideoShotNodeData = {
   progress: number;
   errorMessage: string;
   resultAssetId: string;
+  /** 当前异步生成任务 */
+  activeGenerationId: string;
   /** 视频 AI 生成历史（新→旧） */
   generationHistoryIds: string[];
 };
@@ -232,6 +238,8 @@ export type ImageNodeData = {
   referenceType: ImageReferenceType;
   assetIds: string[];
   primaryAssetId: string;
+  /** 用户明确勾选用于生成的素材 */
+  selectedAssetIds: string[];
   description: string;
   uploadStatus: UploadStatus;
   errorMessage: string;

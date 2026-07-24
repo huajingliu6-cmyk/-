@@ -4,21 +4,24 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { glass } from "@/workflow/components/glass-ui";
 
-export const VIDEO_DURATION_MIN = 1;
+export const VIDEO_DURATION_MIN = 2;
 export const VIDEO_DURATION_MAX = 15;
 
-export function clampVideoDuration(value: number): number {
-  if (!Number.isFinite(value)) return 5;
-  return Math.min(
-    VIDEO_DURATION_MAX,
-    Math.max(VIDEO_DURATION_MIN, Math.round(value)),
-  );
+export function clampVideoDuration(
+  value: number,
+  min: number = VIDEO_DURATION_MIN,
+  max: number = VIDEO_DURATION_MAX,
+): number {
+  if (!Number.isFinite(value)) return Math.min(max, Math.max(min, 5));
+  return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 type Props = {
   value: number;
   disabled?: boolean;
   onChange: (duration: number) => void;
+  min?: number;
+  max?: number;
   /** glass：节点浮层；dark：属性面板 */
   variant?: "glass" | "dark";
 };
@@ -28,17 +31,19 @@ export function DurationCombobox({
   value,
   disabled = false,
   onChange,
+  min = VIDEO_DURATION_MIN,
+  max = VIDEO_DURATION_MAX,
   variant = "glass",
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
-  const duration = clampVideoDuration(value);
+  const duration = clampVideoDuration(value, min, max);
   const [text, setText] = useState(String(duration));
 
   useEffect(() => {
-    setText(String(clampVideoDuration(value)));
-  }, [value]);
+    setText(String(clampVideoDuration(value, min, max)));
+  }, [value, min, max]);
 
   useEffect(() => {
     if (!open) return;
@@ -68,9 +73,9 @@ export function DurationCombobox({
   }, [open]);
 
   const apply = (nextRaw: number) => {
-    const next = clampVideoDuration(nextRaw);
+    const next = clampVideoDuration(nextRaw, min, max);
     setText(String(next));
-    if (next !== clampVideoDuration(value)) {
+    if (next !== clampVideoDuration(value, min, max)) {
       onChange(next);
     }
   };
@@ -125,8 +130,8 @@ export function DurationCombobox({
 
           <input
             type="range"
-            min={VIDEO_DURATION_MIN}
-            max={VIDEO_DURATION_MAX}
+            min={min}
+            max={max}
             step={1}
             value={duration}
             className={`nodrag nopan mb-3 h-1.5 w-full cursor-pointer ${
@@ -139,8 +144,8 @@ export function DurationCombobox({
             <input
               ref={inputRef}
               type="number"
-              min={VIDEO_DURATION_MIN}
-              max={VIDEO_DURATION_MAX}
+              min={min}
+              max={max}
               step={1}
               value={text}
               className={`nodrag nopan h-9 w-full rounded-xl border px-2.5 text-[13px] tabular-nums outline-none ${
@@ -171,7 +176,7 @@ export function DurationCombobox({
               isDark ? "text-zinc-500" : "text-zinc-400"
             }`}
           >
-            可拖动或输入 {VIDEO_DURATION_MIN}–{VIDEO_DURATION_MAX}
+            可拖动或输入 {min}–{max}
           </div>
         </div>
       )}

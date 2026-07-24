@@ -1,4 +1,15 @@
 import { HANDLES } from "../connection-rules";
+import {
+  isVideoAspectRatio,
+  isVideoResolution,
+} from "@/video-generation/dimensions";
+import type {
+  DirectorSettings,
+  GenerationAssetReference,
+  VideoAspectRatio,
+  VideoGenerationInput,
+  VideoResolution,
+} from "@/video-generation/types";
 import type {
   AssetRecord,
   AudioNode,
@@ -7,12 +18,18 @@ import type {
   PropNode,
   SceneNode,
   TextNode,
-  VideoGenerationInput,
-  VideoGenerationInputResult,
   VideoShotNode,
   WorkflowDocument,
   WorkflowNode,
 } from "../types";
+
+export type BuildVideoGenerationInputResult =
+  | {
+      ok: true;
+      input: VideoGenerationInput;
+      unsupportedAudioLabels: string[];
+    }
+  | { ok: false; errors: string[] };
 
 function incomingSources(
   document: WorkflowDocument,
@@ -35,30 +52,39 @@ function assetById(
   return assets.find((asset) => asset.id === assetId);
 }
 
-function assetUrl(assets: AssetRecord[], assetId: string): string {
-  return assetById(assets, assetId)?.url ?? "";
-}
-
 function resolveCharacterVariant(node: CharacterNode) {
-  const selected =
+  return (
     node.data.variants.find(
       (variant) => variant.id === node.data.selectedVariantId,
     ) ??
     node.data.variants.find(
       (variant) => variant.id === node.data.primaryVariantId,
     ) ??
-    node.data.variants[0];
+    node.data.variants[0] ??
+    null
+  );
+}
 
-  return selected ?? null;
+function normalizeResolution(raw: string): VideoResolution {
+  if (isVideoResolution(raw)) return raw;
+  if (raw.includes("1080")) return "1080P";
+  return "720P";
+}
+
+function normalizeAspect(raw: string): VideoAspectRatio {
+  if (isVideoAspectRatio(raw)) return raw;
+  return "9:16";
 }
 
 /**
  * 纯函数：汇总连接到指定 VideoShotNode 的全部输入。
+ * Mock 与真实 Provider 的共同输入来源。
  */
 export function buildVideoGenerationInput(
   document: WorkflowDocument,
   videoShotNodeId: string,
-): VideoGenerationInputResult {
+  options?: { selectedReferenceAssetIds?: string[] },
+): BuildVideoGenerationInputResult {
   const videoNode = document.nodes.find(
     (n): n is VideoShotNode =>
       n.id === videoShotNodeId && n.type === "videoShot",
@@ -70,193 +96,244 @@ export function buildVideoGenerationInput(
 
   const { assets } = document;
   const incoming = incomingSources(document, videoShotNodeId);
-
-  const characters = incoming
-    .filter((n): n is CharacterNode => n.type === "character")
-    .map((n) => {
-      const variant = resolveCharacterVariant(n);
-      const referenceAssetIds = variant
-        ? [
-            ...new Set([
-              ...variant.referenceAssetIds,
-              ...(variant.primaryAssetId ? [variant.primaryAssetId] : []),
-              ...variant.references.map((ref) => ref.assetId),
-            ]),
-          ].filter(Boolean)
-        : [];
-
-      return {
-        nodeId: n.id,
-        characterName: n.data.characterName,
-        variantName: variant?.name ?? "",
-        referenceAssetIds,
-        referenceUrls: referenceAssetIds.map((id) => assetUrl(assets, id)),
-      };
-    });
-
-  const scenes = incoming
-    .filter((n): n is SceneNode => n.type === "scene")
-    .map((n) => {
-      const viewpointAssetIds = n.data.viewpoints
-        .map((viewpoint) => viewpoint.assetId)
-        .filter(Boolean);
-      const primaryAssetId =
-        n.data.primaryAssetId || n.data.referenceAssetIds[0] || "";
-
-      return {
-        nodeId: n.id,
-        sceneName: n.data.sceneName,
-        primaryAssetId,
-        primaryUrl: assetUrl(assets, primaryAssetId),
-        viewpointAssetIds,
-        viewpointUrls: viewpointAssetIds.map((id) => assetUrl(assets, id)),
-      };
-    });
-
-  const referenceImages = [
-    ...incoming
-      .filter((n): n is ImageNode => n.type === "image")
-      .map((n) => {
-        const assetIds = [
-          ...new Set([
-            ...n.data.assetIds,
-            ...(n.data.primaryAssetId ? [n.data.primaryAssetId] : []),
-          ]),
-        ].filter(Boolean);
-
-        return {
-          nodeId: n.id,
-          referenceType: n.data.referenceType,
-          assetIds,
-          urls: assetIds.map((id) => assetUrl(assets, id)),
-        };
-      }),
-    ...incoming
-      .filter((n): n is PropNode => n.type === "prop")
-      .map((n) => {
-        const assetIds = [
-          ...new Set([
-            ...n.data.assetIds,
-            ...(n.data.primaryAssetId ? [n.data.primaryAssetId] : []),
-          ]),
-        ].filter(Boolean);
-
-        return {
-          nodeId: n.id,
-          referenceType: "prop" as const,
-          assetIds,
-          urls: assetIds.map((id) => assetUrl(assets, id)),
-        };
-      }),
-  ];
-
-  const texts = incoming
-    .filter((n): n is TextNode => n.type === "text")
-    .map((n) => ({
-      nodeId: n.id,
-      textType: n.data.textType,
-      content: n.data.content,
-      legacyNegativePrompt: n.data.legacyNegativePrompt,
-    }));
-
-  const audios = incoming
-    .filter((n): n is AudioNode => n.type === "audio")
-    .map((n) => ({
-      nodeId: n.id,
-      audioType: n.data.audioType,
-      assetId: n.data.assetId,
-      url: assetUrl(assets, n.data.assetId),
-    }));
-
   const errors: string[] = [];
+  const unsupportedAudioLabels: string[] = [];
 
-  for (const character of characters) {
-    if (character.referenceAssetIds.length === 0) {
+  const characterReferences: GenerationAssetReference[] = [];
+  for (const n of incoming.filter(
+    (node): node is CharacterNode => node.type === "character",
+  )) {
+    const variant = resolveCharacterVariant(n);
+    const primaryId = variant?.primaryAssetId || "";
+    const asset = assetById(assets, primaryId);
+    if (!primaryId || !asset) {
       errors.push(
-        `角色「${character.characterName || character.nodeId}」尚未配置参考图`,
+        `角色「${n.data.characterName || n.id}」尚未配置主参考图`,
       );
       continue;
     }
-    for (let i = 0; i < character.referenceAssetIds.length; i += 1) {
-      if (!character.referenceUrls[i]) {
-        errors.push(
-          `角色「${character.characterName || character.nodeId}」的参考图素材缺失`,
-        );
-        break;
-      }
-    }
-  }
-
-  for (const scene of scenes) {
-    if (!scene.primaryAssetId || !scene.primaryUrl) {
-      errors.push(`场景「${scene.sceneName || scene.nodeId}」尚未上传主参考图`);
-    }
-    for (let i = 0; i < scene.viewpointAssetIds.length; i += 1) {
-      if (!scene.viewpointUrls[i]) {
-        errors.push(
-          `场景「${scene.sceneName || scene.nodeId}」的视角参考图素材缺失`,
-        );
-        break;
-      }
-    }
-  }
-
-  for (const image of referenceImages) {
-    if (image.assetIds.length === 0) {
-      errors.push(`图片参考节点 ${image.nodeId} 尚未上传图片`);
+    if (asset.url.startsWith("blob:")) {
+      errors.push(
+        `角色「${n.data.characterName || n.id}」素材为临时地址，无法用于生成`,
+      );
       continue;
     }
-    if (image.urls.some((url) => !url)) {
-      errors.push(`图片参考节点 ${image.nodeId} 的部分素材缺失`);
+    const voiceId =
+      variant && "referenceVoiceAssetId" in variant
+        ? String(
+            (variant as { referenceVoiceAssetId?: string })
+              .referenceVoiceAssetId ?? "",
+          )
+        : n.data.voiceAssetId || "";
+    characterReferences.push({
+      assetId: asset.id,
+      kind: "character",
+      label: n.data.characterName || variant?.name || "角色",
+      mimeType: asset.mimeType,
+      sourceUrl: asset.url,
+      referenceVoiceAssetId: voiceId || undefined,
+    });
+  }
+
+  const sceneReferences: GenerationAssetReference[] = [];
+  for (const n of incoming.filter(
+    (node): node is SceneNode => node.type === "scene",
+  )) {
+    const primaryId =
+      n.data.primaryAssetId || n.data.referenceAssetIds[0] || "";
+    const asset = assetById(assets, primaryId);
+    if (!primaryId || !asset) {
+      errors.push(`场景「${n.data.sceneName || n.id}」尚未上传主参考图`);
+      continue;
+    }
+    if (asset.url.startsWith("blob:")) {
+      errors.push(`场景「${n.data.sceneName || n.id}」素材为临时地址`);
+      continue;
+    }
+    sceneReferences.push({
+      assetId: asset.id,
+      kind: "scene",
+      label: n.data.sceneName || "场景",
+      mimeType: asset.mimeType,
+      sourceUrl: asset.url,
+    });
+  }
+
+  const imageReferences: GenerationAssetReference[] = [];
+  for (const n of incoming.filter(
+    (node): node is ImageNode => node.type === "image",
+  )) {
+    const selectedIds =
+      (n.data as { selectedAssetIds?: string[] }).selectedAssetIds?.length
+        ? (n.data as { selectedAssetIds: string[] }).selectedAssetIds
+        : [
+            ...new Set([
+              ...(n.data.primaryAssetId ? [n.data.primaryAssetId] : []),
+              ...n.data.assetIds,
+            ]),
+          ].filter(Boolean);
+
+    if (n.data.referenceType === "startFrame") {
+      // handled as first frame below
+      const id = selectedIds[0] || "";
+      const asset = assetById(assets, id);
+      if (asset && !asset.url.startsWith("blob:")) {
+        // collect later into firstFrame — keep one
+        imageReferences.push({
+          assetId: asset.id,
+          kind: "first_frame",
+          label: n.data.title || "首帧",
+          mimeType: asset.mimeType,
+          sourceUrl: asset.url,
+        });
+      } else {
+        errors.push(`图片节点 ${n.id} 的首帧素材缺失或不可用`);
+      }
+      continue;
+    }
+
+    for (const id of selectedIds) {
+      const asset = assetById(assets, id);
+      if (!asset) {
+        errors.push(`图片参考节点 ${n.id} 的素材缺失`);
+        continue;
+      }
+      if (asset.url.startsWith("blob:")) {
+        errors.push(`图片参考节点 ${n.id} 含临时地址，无法用于生成`);
+        continue;
+      }
+      imageReferences.push({
+        assetId: asset.id,
+        kind: "image",
+        label: n.data.title || "参考图",
+        mimeType: asset.mimeType,
+        sourceUrl: asset.url,
+      });
     }
   }
 
-  for (const audio of audios) {
-    if (!audio.assetId || !audio.url) {
-      errors.push(`音频节点 ${audio.nodeId} 尚未上传文件`);
+  for (const n of incoming.filter(
+    (node): node is PropNode => node.type === "prop",
+  )) {
+    const ids = [
+      ...new Set([
+        ...(n.data.primaryAssetId ? [n.data.primaryAssetId] : []),
+        ...n.data.assetIds,
+      ]),
+    ].filter(Boolean);
+    for (const id of ids) {
+      const asset = assetById(assets, id);
+      if (!asset || asset.url.startsWith("blob:")) {
+        errors.push(`道具节点 ${n.id} 的素材缺失或不可用`);
+        continue;
+      }
+      imageReferences.push({
+        assetId: asset.id,
+        kind: "image",
+        label: n.data.propName || "道具",
+        mimeType: asset.mimeType,
+        sourceUrl: asset.url,
+      });
     }
   }
+
+  const referenceVideos: GenerationAssetReference[] = [];
+  // 视频参考：挂在 videoShot 的 sourceVideoAssetId，或 continuity
+  if (videoNode.data.sourceVideoAssetId) {
+    const asset = assetById(assets, videoNode.data.sourceVideoAssetId);
+    if (asset) {
+      referenceVideos.push({
+        assetId: asset.id,
+        kind: "reference_video",
+        label: asset.name || "参考视频",
+        mimeType: asset.mimeType,
+        sourceUrl: asset.url,
+      });
+    }
+  }
+
+  let firstFrame: GenerationAssetReference | undefined;
+  if (videoNode.data.startFrameAssetId) {
+    const asset = assetById(assets, videoNode.data.startFrameAssetId);
+    if (asset && !asset.url.startsWith("blob:")) {
+      firstFrame = {
+        assetId: asset.id,
+        kind: "first_frame",
+        label: "首帧",
+        mimeType: asset.mimeType,
+        sourceUrl: asset.url,
+      };
+    }
+  }
+  const fromImageNode = imageReferences.find((r) => r.kind === "first_frame");
+  if (!firstFrame && fromImageNode) {
+    firstFrame = fromImageNode;
+  }
+  const plainImages = imageReferences.filter((r) => r.kind !== "first_frame");
+
+  for (const n of incoming.filter(
+    (node): node is AudioNode => node.type === "audio",
+  )) {
+    if (n.data.audioType === "voice") {
+      // 仅当明确绑到角色时才作为 reference_voice；否则标记不支持发送为 BGM
+      unsupportedAudioLabels.push(
+        `${n.data.title || "音频"}（voice，未绑定角色则不作为 reference_voice）`,
+      );
+    } else {
+      unsupportedAudioLabels.push(
+        `${n.data.title || n.data.audioType}（当前模型不支持作为参考音色）`,
+      );
+    }
+  }
+
+  const textInputs = incoming
+    .filter((node): node is TextNode => node.type === "text")
+    .map((n) => n.data.content.trim())
+    .filter(Boolean);
 
   const instruction = videoNode.data.generationInstruction.trim();
-  const hasAnyInput =
-    characters.length +
-      scenes.length +
-      referenceImages.length +
-      texts.length +
-      audios.length >
-    0;
-
-  if (!instruction && !hasAnyInput) {
-    errors.push("请填写生成描述，或至少连接一个参考素材/文本输入");
+  if (!instruction && textInputs.length === 0) {
+    errors.push("请填写生成描述，或连接文本节点");
   }
+
+  const hasFirstFrame = Boolean(firstFrame);
+  const resolution = normalizeResolution(videoNode.data.resolution);
+  const aspectRatio = hasFirstFrame
+    ? null
+    : normalizeAspect(videoNode.data.aspectRatio);
+
+  const directorSettings: DirectorSettings = {
+    shotSize: videoNode.data.shotSize,
+    cameraAngle: videoNode.data.cameraAngle,
+    cameraMovement: videoNode.data.cameraMovement,
+    colorTone: videoNode.data.colorTone,
+    focalLength: videoNode.data.focalLength,
+    actionDescription: videoNode.data.actionDescription,
+    stylePreset: videoNode.data.stylePreset,
+  };
 
   const input: VideoGenerationInput = {
     shotId: videoNode.id,
-    instruction,
-    characters,
-    scenes,
-    referenceImages,
-    texts,
-    audios,
-    duration: videoNode.data.duration,
-    aspectRatio: videoNode.data.aspectRatio,
-    resolution: videoNode.data.resolution,
-    continuity: videoNode.data.continuityMode,
-    model: videoNode.data.model,
-    startFrameAssetId: videoNode.data.startFrameAssetId,
-    endFrameAssetId: videoNode.data.endFrameAssetId,
-    summary: {
-      characterCount: characters.length,
-      sceneCount: scenes.length,
-      imageCount: referenceImages.length,
-      textCount: texts.length,
-      audioCount: audios.length,
-    },
+    projectId: document.projectId,
+    prompt: instruction || textInputs.join("\n"),
+    resolution,
+    aspectRatio,
+    durationSeconds: videoNode.data.duration,
+    watermark: false,
+    promptExtend: true,
+    characterReferences,
+    sceneReferences,
+    imageReferences: plainImages,
+    referenceVideos,
+    firstFrame,
+    directorSettings,
+    textInputs,
+    selectedReferenceAssetIds: options?.selectedReferenceAssetIds,
   };
 
   if (errors.length > 0) {
     return { ok: false, errors };
   }
 
-  return { ok: true, input };
+  return { ok: true, input, unsupportedAudioLabels };
 }

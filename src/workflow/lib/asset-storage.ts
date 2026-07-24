@@ -31,6 +31,8 @@ const EXT_BY_MIME: Record<string, string> = {
   "audio/x-m4a": ".m4a",
   "audio/m4a": ".m4a",
   "audio/aac": ".aac",
+  "video/mp4": ".mp4",
+  "video/quicktime": ".mov",
 };
 
 const ALLOWED_EXT = new Set([
@@ -42,6 +44,8 @@ const ALLOWED_EXT = new Set([
   ".wav",
   ".m4a",
   ".aac",
+  ".mp4",
+  ".mov",
 ]);
 
 export type StoredAssetMeta = {
@@ -50,7 +54,7 @@ export type StoredAssetMeta = {
   fileName: string;
   mimeType: string;
   sizeBytes: number;
-  kind: "image" | "audio";
+  kind: "image" | "audio" | "video";
 };
 
 export async function ensureAssetsDir() {
@@ -96,7 +100,7 @@ export async function saveAssetFile(params: {
   buffer: Buffer;
   mimeType: string;
   fileName: string;
-  kind: "image" | "audio";
+  kind: "image" | "audio" | "video";
   ext: string;
 }): Promise<StoredAssetMeta> {
   await ensureAssetsDir();

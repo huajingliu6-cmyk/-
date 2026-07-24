@@ -117,6 +117,7 @@ function defaultVideoShotData(
     referenceMode: patch.referenceMode ?? "omni",
     creditEstimate: patch.creditEstimate ?? 50,
     attachedAssetIds: patch.attachedAssetIds ?? [],
+    selectedReferenceAssetIds: patch.selectedReferenceAssetIds ?? [],
     continuityMode: patch.continuityMode ?? "standalone",
     sourceVideoAssetId: patch.sourceVideoAssetId ?? "",
     startFrameAssetId: patch.startFrameAssetId ?? "",
@@ -125,6 +126,7 @@ function defaultVideoShotData(
     progress: patch.progress ?? 0,
     errorMessage: patch.errorMessage ?? "",
     resultAssetId: patch.resultAssetId ?? "",
+    activeGenerationId: patch.activeGenerationId ?? "",
     generationHistoryIds: patch.generationHistoryIds ?? [],
   };
 }

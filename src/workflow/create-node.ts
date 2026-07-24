@@ -20,6 +20,7 @@ function createDefaultCharacterVariant(): CharacterVariant {
     referenceAssetIds: [],
     primaryAssetId: "",
     references: [],
+    referenceVoiceAssetId: "",
   };
 }
 
@@ -104,12 +105,13 @@ export function createNodeByType(
           focalLength: "50mm",
           aspectRatio: "9:16",
           resolution: "720P",
-          provider: "demo-provider",
-          model: "demo-video",
+          provider: "mock",
+          model: "mock-wan27-t2v",
           stylePreset: "",
           referenceMode: "omni",
           creditEstimate: 50,
           attachedAssetIds: [],
+          selectedReferenceAssetIds: [],
           continuityMode: "standalone",
           sourceVideoAssetId: "",
           startFrameAssetId: "",
@@ -118,6 +120,7 @@ export function createNodeByType(
           progress: 0,
           errorMessage: "",
           resultAssetId: "",
+          activeGenerationId: "",
           generationHistoryIds: [],
         },
       };
@@ -131,6 +134,7 @@ export function createNodeByType(
           referenceType: "general",
           assetIds: [],
           primaryAssetId: "",
+          selectedAssetIds: [],
           description: "",
           uploadStatus: "empty",
           errorMessage: "",

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowUp, Maximize2, Wand2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUp, Wand2 } from "lucide-react";
 import {
   GlassIconButton,
   GlassSendButton,
@@ -17,63 +17,42 @@ import {
 } from "@/workflow/components/GenerationHistoryPopover";
 import { PromptReferenceChips } from "@/workflow/components/PromptReferenceChips";
 import { MentionTextarea } from "@/workflow/components/MentionTextarea";
+import { GenerationConfirmationDrawer } from "@/workflow/components/GenerationConfirmationDrawer";
 import { useDebouncedCommit } from "@/workflow/hooks/useDebouncedCommit";
 import { prependGenerationHistory } from "@/workflow/lib/generation-history";
-import { requestVideoShotGeneration } from "@/workflow/lib/request-video-shot-generation";
 import { useWorkflowStore } from "@/workflow/store";
 import type { VideoShotNodeData } from "@/workflow/types";
+import type {
+  GenerationRecord,
+  ModelCapability,
+  ProviderCapabilities,
+  VideoAspectRatio,
+  VideoProviderId,
+  VideoResolution,
+} from "@/video-generation/types";
+import {
+  isVideoAspectRatio,
+  isVideoResolution,
+} from "@/video-generation/dimensions";
+import { getDurationCompatibilityWarning } from "@/video-generation/validate-settings";
+import { selectWanGenerationMode } from "@/video-generation/select-wan-mode";
+import { buildVideoGenerationInput } from "@/workflow/lib/build-video-generation-input";
 
-const ASPECT_OPTIONS = [
-  { value: "9:16", label: "9:16（竖屏）" },
-  { value: "16:9", label: "16:9（横屏）" },
-];
-
-const RESOLUTION_OPTIONS = [
-  { value: "480P", label: "480P" },
-  { value: "720P", label: "720P" },
-  { value: "1080P", label: "1080P" },
-  { value: "2K", label: "2K" },
-  { value: "4K", label: "4K" },
-];
-
-const REFERENCE_OPTIONS = [
-  { value: "startEndFrame", label: "首尾帧" },
-  { value: "omni", label: "全能参考" },
-  { value: "video", label: "视频参考" },
-];
-
-type Props = {
-  nodeId: string;
+type PublicConfig = {
+  providerId: VideoProviderId;
+  allowPaidGeneration: boolean;
+  hasApiKey: boolean;
+  hasWorkspaceId: boolean;
+  region: string;
+  t2vModelId: string;
+  r2vModelId: string;
 };
 
-function normalizeAspect(value: string): string {
-  return value === "16:9" ? "16:9" : "9:16";
-}
-
-function normalizeResolution(value: string): string {
-  const hit = RESOLUTION_OPTIONS.find((opt) => opt.value === value);
-  if (hit) return hit.value;
-  if (value.includes("480")) return "480P";
-  if (value.includes("1080") || value.includes("1920")) return "1080P";
-  if (value.includes("2K") || value.includes("2560") || value.includes("1440"))
-    return "2K";
-  if (value.includes("4K") || value.includes("3840") || value.includes("2160"))
-    return "4K";
-  return "720P";
-}
-
-function normalizeReferenceMode(value: string): string {
-  if (value === "startEndFrame" || value === "omni" || value === "video") {
-    return value;
-  }
-  if (value === "full" || value === "style" || value === "composition") {
-    return "omni";
-  }
-  return "omni";
-}
+type Props = { nodeId: string };
 
 export function VideoPromptPanel({ nodeId }: Props) {
   const projectId = useWorkflowStore((s) => s.projectId);
+  const document = useWorkflowStore((s) => s.document);
   const node = useWorkflowStore((s) =>
     s.document.nodes.find((n) => n.id === nodeId),
   );
@@ -82,6 +61,14 @@ export function VideoPromptPanel({ nodeId }: Props) {
   const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [config, setConfig] = useState<PublicConfig | null>(null);
+  const [capabilities, setCapabilities] = useState<ProviderCapabilities | null>(
+    null,
+  );
+  const [generation, setGeneration] = useState<GenerationRecord | null>(null);
+  const [durationWarning, setDurationWarning] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const data =
     node?.type === "videoShot" ? (node.data as VideoShotNodeData) : null;
@@ -91,15 +78,173 @@ export function VideoPromptPanel({ nodeId }: Props) {
     updateNodeData(nodeId, { generationInstruction: value });
   });
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/generations");
+        if (!res.ok) return;
+        const payload = (await res.json()) as {
+          config: PublicConfig;
+          capabilities: ProviderCapabilities;
+        };
+        if (!cancelled) {
+          setConfig(payload.config);
+          setCapabilities(payload.capabilities);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!config) return;
+    updateNodeData(nodeId, { provider: config.providerId });
+  }, [config, nodeId, updateNodeData]);
+
+  const builtPreview = useMemo(() => {
+    if (!data) return null;
+    return buildVideoGenerationInput(document, nodeId, {
+      selectedReferenceAssetIds: data.selectedReferenceAssetIds,
+    });
+  }, [data, document, nodeId]);
+
+  const mode = useMemo(() => {
+    if (!builtPreview || !builtPreview.ok) return "textToVideo" as const;
+    return selectWanGenerationMode(builtPreview.input);
+  }, [builtPreview]);
+
+  const capability: ModelCapability | null = useMemo(() => {
+    if (!capabilities) return null;
+    return capabilities.models.find((m) => m.mode === mode) ?? null;
+  }, [capabilities, mode]);
+
+  useEffect(() => {
+    if (!data || !capability) return;
+    const hasRefVideo =
+      Boolean(data.sourceVideoAssetId) ||
+      (builtPreview?.ok &&
+        builtPreview.input.referenceVideos.length > 0);
+    const warn = getDurationCompatibilityWarning(
+      data.duration,
+      Boolean(hasRefVideo),
+      capability.maxDurationWithReferenceVideoSeconds,
+    );
+    setDurationWarning(warn);
+  }, [data, capability, builtPreview]);
+
+  useEffect(() => {
+    const activeId = data?.activeGenerationId;
+    if (!activeId) return;
+
+    const stop = () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/generations/${activeId}`);
+        const payload = (await res.json()) as {
+          generation?: GenerationRecord;
+          asset?: { id: string } | null;
+          comparison?: Array<{ message: string }>;
+        };
+        if (!payload.generation) return;
+        setGeneration(payload.generation);
+        const g = payload.generation;
+        updateNodeData(nodeId, {
+          status:
+            g.status === "completed"
+              ? "completed"
+              : g.status === "failed" || g.status === "resultTransferFailed"
+                ? "failed"
+                : g.status === "cancelled"
+                  ? "cancelled"
+                  : "processing",
+          progress: 0,
+          errorMessage: g.errorMessage ?? "",
+        });
+        if (g.resultAsset && g.status === "completed") {
+          commitNodeAssets(nodeId, [g.resultAsset], {
+            status: "completed",
+            progress: 100,
+            resultAssetId: g.resultAsset.id,
+            generationHistoryIds: prependGenerationHistory(
+              data.generationHistoryIds,
+              g.resultAsset.id,
+            ),
+            activeGenerationId: g.id,
+          });
+          if (payload.comparison && payload.comparison.length > 0) {
+            setNotice(payload.comparison.map((c) => c.message).join("；"));
+          } else {
+            setNotice(g.progressLabel);
+          }
+          stop();
+        }
+        if (
+          g.status === "failed" ||
+          g.status === "cancelled" ||
+          g.status === "resultTransferFailed"
+        ) {
+          setNotice(g.errorMessage || g.progressLabel);
+          stop();
+        }
+      } catch {
+        // ignore transient
+      }
+    };
+
+    void tick();
+    pollRef.current = setInterval(() => void tick(), 15_000);
+    return stop;
+  }, [
+    data?.activeGenerationId,
+    data?.generationHistoryIds,
+    nodeId,
+    updateNodeData,
+    commitNodeAssets,
+  ]);
+
   if (!data) return null;
 
-  const busy = submitting || data.status === "processing";
-  const duration = clampVideoDuration(data.duration);
-  const aspectRatio = normalizeAspect(data.aspectRatio);
-  const resolution = normalizeResolution(data.resolution);
-  const referenceMode = normalizeReferenceMode(data.referenceMode);
-  const credit = Math.max(1, Math.round(duration * 10));
-  const historyIds = data.generationHistoryIds ?? [];
+  const busy =
+    submitting ||
+    data.status === "processing" ||
+    data.status === "queued" ||
+    Boolean(data.activeGenerationId && generation && !["completed", "failed", "cancelled", "resultTransferFailed"].includes(generation.status));
+
+  const hasFirstFrame = Boolean(data.startFrameAssetId);
+  const resolution: VideoResolution = isVideoResolution(data.resolution)
+    ? data.resolution
+    : "720P";
+  const aspectRatio: VideoAspectRatio = isVideoAspectRatio(data.aspectRatio)
+    ? data.aspectRatio
+    : "9:16";
+  const duration = clampVideoDuration(
+    data.duration,
+    capability?.minDurationSeconds ?? 2,
+    capability
+      ? builtPreview?.ok && builtPreview.input.referenceVideos.length > 0
+        ? capability.maxDurationWithReferenceVideoSeconds
+        : capability.maxDurationSeconds
+      : 15,
+  );
+
+  const mediaCount =
+    builtPreview?.ok
+      ? builtPreview.input.characterReferences.length +
+        builtPreview.input.sceneReferences.length +
+        builtPreview.input.imageReferences.length +
+        builtPreview.input.referenceVideos.length
+      : 0;
 
   const onOptimizePrompt = () => {
     const base = flush().trim();
@@ -123,53 +268,62 @@ export function VideoPromptPanel({ nodeId }: Props) {
     setNotice("已切换到历史视频生成");
   };
 
-  const onGenerate = async () => {
+  const onConfirmGenerate = async (confirmPaid: boolean) => {
     const trimmed = flush().trim();
     if (!trimmed) {
       setNotice("请先描述要生成的短片内容");
       return;
     }
+    if (durationWarning) {
+      setNotice(durationWarning);
+      return;
+    }
+    if (mediaCount > 5) {
+      setNotice("参考素材最多可以选择 5 个，请在确认面板勾选后再生成");
+      return;
+    }
 
     setSubmitting(true);
     setNotice("");
+    setConfirmOpen(false);
     updateNodeData(nodeId, {
       status: "processing",
-      progress: 10,
+      progress: 0,
       errorMessage: "",
       duration,
-      aspectRatio,
+      aspectRatio: hasFirstFrame ? data.aspectRatio : aspectRatio,
       resolution,
-      referenceMode,
-      creditEstimate: credit,
     });
 
     try {
-      const result = await requestVideoShotGeneration({
-        projectId,
-        videoShotNodeId: nodeId,
-        title: data.title,
-        prompt: trimmed,
-        model: data.model,
-        aspectRatio,
-        duration,
-        resolution,
-        stylePreset: data.stylePreset,
-        referenceMode,
-        cameraMovement: data.cameraMovement,
+      const res = await fetch("/api/generations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          videoShotNodeId: nodeId,
+          confirmPaidGeneration: confirmPaid,
+          idempotencyKey: `${nodeId}-${Date.now()}`,
+          selectedReferenceAssetIds: data.selectedReferenceAssetIds,
+          title: data.title,
+        }),
       });
-      commitNodeAssets(nodeId, [result.asset], {
-        status: "completed",
-        progress: 100,
-        resultAssetId: result.asset.id,
-        creditEstimate: result.creditEstimate,
-        errorMessage: "",
-        generationHistoryIds: prependGenerationHistory(
-          data.generationHistoryIds,
-          result.asset.id,
-        ),
+      const payload = (await res.json()) as {
+        generation?: GenerationRecord;
+        message?: string;
+        code?: string;
+      };
+      if (!res.ok || !payload.generation) {
+        throw new Error(payload.message ?? "提交失败");
+      }
+      setGeneration(payload.generation);
+      updateNodeData(nodeId, {
+        activeGenerationId: payload.generation.id,
+        model: payload.generation.providerModelId,
+        provider: payload.generation.providerId,
+        status: "processing",
       });
-      setNotice(result.notice);
-      setHistoryOpen(true);
+      setNotice(payload.generation.progressLabel);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "生成失败，请重试";
@@ -177,6 +331,7 @@ export function VideoPromptPanel({ nodeId }: Props) {
         status: "failed",
         progress: 0,
         errorMessage: message,
+        activeGenerationId: "",
       });
       setNotice(message);
     } finally {
@@ -184,11 +339,76 @@ export function VideoPromptPanel({ nodeId }: Props) {
     }
   };
 
+  const onCancel = async () => {
+    if (!data.activeGenerationId) return;
+    const res = await fetch(
+      `/api/generations/${data.activeGenerationId}/cancel`,
+      { method: "POST" },
+    );
+    const payload = (await res.json()) as {
+      generation?: GenerationRecord;
+      message?: string;
+    };
+    if (!res.ok) {
+      setNotice(payload.message ?? "取消失败");
+      return;
+    }
+    setGeneration(payload.generation ?? null);
+    updateNodeData(nodeId, {
+      status: "cancelled",
+      activeGenerationId: "",
+    });
+    setNotice("已取消");
+  };
+
+  const onRetry = async () => {
+    if (!data.activeGenerationId) {
+      setConfirmOpen(true);
+      return;
+    }
+    setConfirmOpen(true);
+  };
+
+  const resolutionOptions = capability?.supportedResolutions ?? ["720P", "1080P"];
+  const aspectOptions = capability?.supportedAspectRatios ?? [
+    "16:9",
+    "9:16",
+    "1:1",
+    "4:3",
+    "3:4",
+  ];
+  const minDur = capability?.minDurationSeconds ?? 2;
+  const maxDur = capability
+    ? builtPreview?.ok && builtPreview.input.referenceVideos.length > 0
+      ? capability.maxDurationWithReferenceVideoSeconds
+      : capability.maxDurationSeconds
+    : 15;
+
   return (
     <div
       className={`nodrag nopan nowheel w-[min(520px,92vw)] ${glass.panel}`}
       onMouseDown={(e) => e.stopPropagation()}
     >
+      <div className="mb-2 flex flex-wrap gap-1.5 text-[10px] text-zinc-500">
+        <span className="rounded-md bg-zinc-100 px-1.5 py-0.5">
+          Provider：{config?.providerId ?? data.provider}
+        </span>
+        <span className="rounded-md bg-zinc-100 px-1.5 py-0.5">
+          模型：{capability?.modelId ?? data.model}
+        </span>
+        <span className="rounded-md bg-zinc-100 px-1.5 py-0.5">
+          模式：{mode === "textToVideo" ? "文生视频" : "参考生视频"}
+        </span>
+        <span className="rounded-md bg-zinc-100 px-1.5 py-0.5">
+          素材：{mediaCount}
+        </span>
+        {generation && (
+          <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-amber-800">
+            {generation.progressLabel}
+          </span>
+        )}
+      </div>
+
       <PromptReferenceChips nodeId={nodeId} />
       <div className="relative mb-2.5">
         <MentionTextarea
@@ -198,37 +418,41 @@ export function VideoPromptPanel({ nodeId }: Props) {
           disabled={busy}
           onChange={setValue}
           onBlur={() => flush()}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              void onGenerate();
-            }
-          }}
         />
-        <Maximize2 className="pointer-events-none absolute right-3 top-3 h-3.5 w-3.5 text-zinc-400" />
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
         <select
           className={glass.select}
-          value={aspectRatio}
-          disabled={busy}
-          title="比例"
-          onChange={(e) =>
-            updateNodeData(nodeId, {
-              aspectRatio: normalizeAspect(e.target.value),
-            })
+          value={hasFirstFrame ? "" : aspectRatio}
+          disabled={busy || hasFirstFrame}
+          title={
+            hasFirstFrame
+              ? "已连接首帧，视频比例将根据首帧图片自动确定"
+              : "比例"
           }
+          onChange={(e) => {
+            const v = e.target.value;
+            if (isVideoAspectRatio(v)) {
+              updateNodeData(nodeId, { aspectRatio: v });
+            }
+          }}
         >
-          {ASPECT_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
+          {hasFirstFrame ? (
+            <option value="">由首帧决定</option>
+          ) : (
+            aspectOptions.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))
+          )}
         </select>
 
         <DurationCombobox
-          value={duration}
+          value={data.duration}
+          min={minDur}
+          max={maxDur}
           disabled={busy}
           onChange={(next) =>
             updateNodeData(nodeId, {
@@ -242,34 +466,17 @@ export function VideoPromptPanel({ nodeId }: Props) {
           className={glass.select}
           value={resolution}
           disabled={busy}
-          onChange={(e) =>
-            updateNodeData(nodeId, {
-              resolution: normalizeResolution(e.target.value),
-            })
-          }
+          onChange={(e) => {
+            const v = e.target.value;
+            if (isVideoResolution(v)) {
+              updateNodeData(nodeId, { resolution: v });
+            }
+          }}
           title="画质"
         >
-          {RESOLUTION_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-
-        <select
-          className={glass.select}
-          value={referenceMode}
-          disabled={busy}
-          onChange={(e) =>
-            updateNodeData(nodeId, {
-              referenceMode: normalizeReferenceMode(e.target.value),
-            })
-          }
-          title="参考"
-        >
-          {REFERENCE_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
+          {resolutionOptions.map((opt) => (
+            <option key={opt} value={opt}>
+              {opt}
             </option>
           ))}
         </select>
@@ -277,7 +484,7 @@ export function VideoPromptPanel({ nodeId }: Props) {
         <div className="ml-auto flex items-center gap-1.5">
           <GenerationHistoryButton
             open={historyOpen}
-            historyIds={historyIds}
+            historyIds={data.generationHistoryIds ?? []}
             disabled={busy}
             onToggle={() => setHistoryOpen((v) => !v)}
           />
@@ -288,20 +495,60 @@ export function VideoPromptPanel({ nodeId }: Props) {
           >
             <Wand2 className="h-3.5 w-3.5" />
           </GlassIconButton>
-          <span className={glass.credit}>{credit}</span>
+          {busy && data.activeGenerationId ? (
+            <button
+              type="button"
+              className="rounded-lg border border-zinc-300 px-2 py-1 text-[11px] text-zinc-600"
+              onClick={() => void onCancel()}
+            >
+              取消
+            </button>
+          ) : null}
+          {!busy && data.status === "failed" ? (
+            <button
+              type="button"
+              className="rounded-lg border border-zinc-300 px-2 py-1 text-[11px] text-zinc-600"
+              onClick={() => void onRetry()}
+            >
+              重试
+            </button>
+          ) : null}
           <GlassSendButton
             busy={busy}
-            title={busy ? "生成中…" : "生成"}
-            onClick={() => void onGenerate()}
+            title={busy ? "生成中…" : "打开生成确认"}
+            onClick={() => setConfirmOpen(true)}
           >
             <ArrowUp className="h-4 w-4" strokeWidth={2.25} />
           </GlassSendButton>
         </div>
       </div>
 
+      {hasFirstFrame && (
+        <div className="mt-1.5 text-[10px] text-amber-700">
+          已连接首帧，视频比例将根据首帧图片自动确定
+        </div>
+      )}
+      {durationWarning && (
+        <div className="mt-1.5 text-[10px] text-rose-600">
+          {durationWarning}
+          <button
+            type="button"
+            className="ml-2 underline"
+            onClick={() =>
+              updateNodeData(nodeId, {
+                duration:
+                  capability?.maxDurationWithReferenceVideoSeconds ?? 10,
+              })
+            }
+          >
+            确认改为最大允许时长
+          </button>
+        </div>
+      )}
+
       <GenerationHistoryPopover
         open={historyOpen}
-        historyIds={historyIds}
+        historyIds={data.generationHistoryIds ?? []}
         activeAssetId={data.resultAssetId}
         onSelect={onSelectHistory}
       />
@@ -311,6 +558,20 @@ export function VideoPromptPanel({ nodeId }: Props) {
           {notice}
         </div>
       )}
+
+      <GenerationConfirmationDrawer
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        config={config}
+        capability={capability}
+        mode={mode}
+        resolution={resolution}
+        aspectRatio={hasFirstFrame ? null : aspectRatio}
+        durationSeconds={data.duration}
+        built={builtPreview}
+        onConfirmMock={() => void onConfirmGenerate(false)}
+        onConfirmPaid={() => void onConfirmGenerate(true)}
+      />
     </div>
   );
 }
