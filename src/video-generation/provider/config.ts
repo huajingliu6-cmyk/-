@@ -1,4 +1,10 @@
 import type { VideoProviderId } from "../types";
+import {
+  WAN27_DEFAULT_R2V_MODEL_ID,
+  WAN27_DEFAULT_T2V_MODEL_ID,
+  WAN27_RECOMMENDED_POLL_INTERVAL_MS,
+  MOCK_POLL_INTERVAL_MS,
+} from "./wan27-constants";
 
 export type DashScopeRegion = "cn-beijing" | "ap-southeast-1";
 
@@ -40,11 +46,11 @@ export function getVideoProviderRuntimeConfig(
       env.DASHSCOPE_REGION ?? "cn-beijing",
     ),
     t2vModelId:
-      (env.WAN_T2V_MODEL_ID ?? "wan2.7-t2v-2026-06-12").trim() ||
-      "wan2.7-t2v-2026-06-12",
+      (env.WAN_T2V_MODEL_ID ?? WAN27_DEFAULT_T2V_MODEL_ID).trim() ||
+      WAN27_DEFAULT_T2V_MODEL_ID,
     r2vModelId:
-      (env.WAN_R2V_MODEL_ID ?? "wan2.7-r2v-2026-06-12").trim() ||
-      "wan2.7-r2v-2026-06-12",
+      (env.WAN_R2V_MODEL_ID ?? WAN27_DEFAULT_R2V_MODEL_ID).trim() ||
+      WAN27_DEFAULT_R2V_MODEL_ID,
   };
 }
 
@@ -116,6 +122,9 @@ export function getPublicVideoConfig(
   region: DashScopeRegion;
   t2vModelId: string;
   r2vModelId: string;
+  /** 客户端轮询间隔：真实 Provider 对齐官方约 15s；Mock 可更快 */
+  recommendedPollIntervalMs: number;
+  costNotice: string;
 } {
   const config = getVideoProviderRuntimeConfig(env);
   return {
@@ -126,6 +135,12 @@ export function getPublicVideoConfig(
     region: config.dashscopeRegion,
     t2vModelId: config.t2vModelId,
     r2vModelId: config.r2vModelId,
+    recommendedPollIntervalMs:
+      config.providerId === "aliyun-wan27"
+        ? WAN27_RECOMMENDED_POLL_INTERVAL_MS
+        : MOCK_POLL_INTERVAL_MS,
+    costNotice:
+      "预计费用请以阿里云百炼当前价格和控制台实际结算为准。",
   };
 }
 

@@ -52,6 +52,8 @@ type PublicConfig = {
   region: string;
   t2vModelId: string;
   r2vModelId: string;
+  recommendedPollIntervalMs?: number;
+  costNotice?: string;
 };
 
 type Props = {
@@ -319,9 +321,17 @@ export function VideoPromptPanel({
     };
 
     void tick();
-    pollRef.current = setInterval(() => void tick(), 3_500);
+    const pollMs = config?.recommendedPollIntervalMs ?? 3_500;
+    pollRef.current = setInterval(() => void tick(), pollMs);
     return stop;
-  }, [data?.activeGenerationId, nodeId, updateNodeData, commitNodeAssets, onGenerationSnapshot]);
+  }, [
+    data?.activeGenerationId,
+    nodeId,
+    updateNodeData,
+    commitNodeAssets,
+    onGenerationSnapshot,
+    config?.recommendedPollIntervalMs,
+  ]);
 
   const comparisonLabelByAssetId = useMemo(() => {
     const map: Record<string, string> = {};

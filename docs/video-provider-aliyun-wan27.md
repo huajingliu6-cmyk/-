@@ -1,6 +1,8 @@
 # 阿里云百炼 · 万相 2.7 视频 Provider
 
-本项目阶段 1 接入说明。默认使用 Mock，**不会自动发起付费请求**。
+本项目接入说明。默认使用 Mock，**不会自动发起付费请求**。
+
+官方契约核对日期：**2026-07-25**。详见 `docs/wan27-contract-checklist.md`。
 
 ## 支持的模式
 
@@ -10,6 +12,7 @@
 | 参考生视频 (R2V) | `WAN_R2V_MODEL_ID` | 存在任一参考图、参考视频或首帧 |
 
 模式由服务端 `selectWanGenerationMode` 判定，客户端不能绕过。
+默认模型 ID：`wan2.7-t2v-2026-06-12` / `wan2.7-r2v-2026-06-12`。
 
 ## 环境变量
 
@@ -21,7 +24,7 @@
 - `DASHSCOPE_WORKSPACE_ID`（仅服务端）
 - `DASHSCOPE_REGION=cn-beijing` 或 `ap-southeast-1`
 - `WAN_T2V_MODEL_ID` / `WAN_R2V_MODEL_ID`
-- `WAN_RESULT_ALLOWED_HOSTS`（仅服务端；默认空。真实结果下载域名白名单，见 `docs/secure-provider-result-transfer.md`）
+- `WAN_RESULT_ALLOWED_HOSTS`（仅服务端；默认空）
 
 **禁止**使用 `NEXT_PUBLIC_` 暴露 API Key。浏览器不得传入 Endpoint。
 
@@ -32,55 +35,57 @@
 - 北京：`https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com`
 - 新加坡：`https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com`
 
-Workspace ID 可在阿里云百炼控制台「业务空间」详情页查看。
+## 请求契约要点
 
-## 如何配置 API Key（仅服务端）
+- Header：`Authorization: Bearer …`、`Content-Type: application/json`、创建时 `X-DashScope-Async: enable`
+- 使用 `resolution` + `ratio`，**不使用**旧版 `size`
+- 有首帧时不发送 `ratio`
+- 响应经 Zod Schema 校验；缺 `task_id` / 非 JSON → 安全失败
+- 错误经 `mapWan27ProviderError` 转为中文；不回传完整 Provider 响应或密钥
 
-1. 在百炼控制台创建 API Key（与目标地域一致）。
-2. 写入本机 `.env.local`（已被 gitignore），**不要提交**。
-3. 重启 `npm run dev`。
-4. 确认页面「生成确认」抽屉显示密钥已配置（不展示明文）。
-
-## 分辨率 / 比例 / 时长（官方文档基线）
+## 分辨率 / 比例 / 时长
 
 - 分辨率：`720P`、`1080P`
 - 比例：`16:9`、`9:16`、`1:1`、`4:3`、`3:4`
-- 时长：
-  - 文生视频：2–15 秒整数
-  - 参考生视频（无参考视频）：2–15 秒
-  - 参考生视频（含参考视频）：2–10 秒
+- 时长：T2V 2–15；R2V 无参考视频 2–15；含参考视频 2–10
 
-像素映射见 `src/video-generation/dimensions.ts`（与官方表格一致）。
+像素映射见 `src/video-generation/dimensions.ts`。
 
-## 首帧与比例
+## 状态与轮询
 
-存在 `first_frame` 时：
+| 官方 | 应用 |
+|---|---|
+| PENDING | queued |
+| RUNNING | processing |
+| SUCCEEDED | downloading → 转存 → completed |
+| FAILED | failed |
+| CANCELED | cancelled |
+| UNKNOWN | failed（不自动新建任务） |
 
-- 请求 **不发送** `ratio`
-- UI 禁用比例选择
-- 提示：「已连接首帧，视频比例将根据首帧图片自动确定」
+- 真实 Provider 客户端轮询约 **15 秒**（官方建议）
+- Mock 约 3.5 秒
+- 页面离开停止轮询；恢复后继续查同一任务
+- 取消仅 PENDING；查询接口官方默认 RPS 20
 
-## 参考素材限制
+## Readiness 与 Dry Run
 
-- `reference_image` + `reference_video` ≤ 5
-- `first_frame` ≤ 1
-- 参考生视频至少需要 1 个 reference_image 或 reference_video
-- **不得静默截断**；超过限制时禁止提交并在确认面板列出素材
+- `buildWan27ProviderReadinessReport()`：不联网；检查 mock/付费门闩/密钥布尔/地域/模型/allowlist/幂等/SSRF 等。
+  **本阶段 `readyForPaidSubmission` 恒为 `false`**
+- `buildWan27DryRunPreview()`：脱敏请求摘要；不创建任务、不产生费用
+- `GET /api/generations` 返回 `readiness`（打开页面不创建任务）
 
-## 费用与输出 URL
+## 费用
 
-- 真实调用按秒计费，请在百炼控制台查看[模型价格](https://help.aliyun.com/zh/model-studio/models)。
-- 成功返回的 `video_url` **约 24 小时有效**，服务端会立即转存。
-- 官方文档示例主机类似 `dashscope-result-*.oss-*.aliyuncs.com`，但文档明确：**不提供固定 OSS 域名白名单**（底层存储可能变更）。
-- 本仓库用 `WAN_RESULT_ALLOWED_HOSTS` 由管理员显式配置；**默认空则真实转存被阻止**。
+- **不要**把单价硬编码进业务代码
+- UI：`预计费用请以阿里云百炼当前价格和控制台实际结算为准。`
+- 价格页名称：模型价格（大模型服务平台百炼）
+- 2026-07-25 摘录（可能变化）：北京 T2V 720P **0.6 元/秒**，1080P **1 元/秒**；免费额度说明见官方页（北京曾列 50 秒）
 
-## 开发环境转存
+## 结果 URL 与 allowlist
 
-- Mock：本地 `file://` 中间文件（目录受限）→ `generatedVideo`。
-- 真实 Provider：仅 HTTPS + allowlist + 私网拦截 + 手动重定向 + 流式下载（见 `docs/secure-provider-result-transfer.md`）。
-- 成功后登记到 `data/generated-videos/` / `data/assets/`（已 gitignore）。
-
-**仅适合本地开发。** 生产环境必须改为 OSS / 对象存储。
+- `video_url` 约 24 小时有效；成功后立即转存
+- 官方不保证固定 OSS 域名 → `WAN_RESULT_ALLOWED_HOSTS` 默认空
+- 首次域名审批与 `retryTransfer`：见 `docs/wan27-first-paid-test.md`、`docs/secure-provider-result-transfer.md`
 
 ## 切回 Mock
 
@@ -89,34 +94,24 @@ VIDEO_PROVIDER=mock
 ALLOW_PAID_GENERATION=false
 ```
 
-## 首次付费测试（必须人工执行）
+## 首次付费测试
 
-本仓库的自动测试与 Cursor 代理 **禁止** 将 `ALLOW_PAID_GENERATION` 设为 true，也禁止联网生成。
+见 `docs/wan27-first-paid-test.md`。**3D-B6-A 只准备文档，不执行付费。**
 
-在开启付费前，还须：
+## 异步接口（百炼）与本应用封装
 
-1. 完成安全审计中仍适用的约束（幂等、所有权等）。
-2. 配置 `WAN_RESULT_ALLOWED_HOSTS`（首次人工确认结果域名后填写；勿凭记忆硬编码进仓库默认值）。
+百炼：
 
-人工步骤：
+- 创建：`POST …/video-synthesis`
+- 查询：`GET …/tasks/{task_id}`
+- 取消：`POST …/tasks/{task_id}/cancel`
 
-1. 配置同一地域的 Key / Workspace / Region。
-2. 配置结果域名白名单。
-3. 手动将 `.env.local` 中 `VIDEO_PROVIDER=aliyun-wan27` 与 `ALLOW_PAID_GENERATION=true`。
-4. 重启服务。
-5. 在生成确认抽屉点击「确认付费生成」。
-6. 测完后立刻改回 `ALLOW_PAID_GENERATION=false` 与 `VIDEO_PROVIDER=mock`。
-
-## 异步接口
-
-- 创建：`POST /api/v1/services/aigc/video-generation/video-synthesis`（`X-DashScope-Async: enable`）
-- 查询：`GET /api/v1/tasks/{task_id}`
-- 取消：`POST /api/v1/tasks/{task_id}/cancel`（仅 PENDING）
-
-本应用封装为：
+本应用：
 
 - `POST /api/generations`
+- `GET /api/generations`（config + capabilities + readiness）
 - `GET /api/generations/[id]`
 - `POST /api/generations/[id]/cancel`
-- `POST /api/generations/[id]/retry`
-- `POST /api/generations/[id]/transfer`
+- `POST /api/generations/[id]/retry`（新任务，可能重新计费）
+- `POST /api/generations/[id]/transfer`（仅转存，不调 Provider）
+- `POST /api/generations/[id]/reconcile`（仅对账）

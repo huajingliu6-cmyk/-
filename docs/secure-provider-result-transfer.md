@@ -90,8 +90,10 @@ hostname 本身为 IP 时同样检查。任一私网地址 → 拒绝整个下�
 
 ## 付费开关
 
-当前 **仍不允许** `ALLOW_PAID_GENERATION=true`。SSRF 转存加固是启用真实 Provider 的必要前提之一，但持久幂等、用户所有权、限流预算等尚未完成。
+当前 **仍不允许** `ALLOW_PAID_GENERATION=true` 作为日常默认。SSRF 转存加固与持久幂等是启用真实 Provider 的必要前提；阶段 3D-B6-A 另增加 Readiness / Dry Run，且 **`readyForPaidSubmission` 硬性为 false**。
+
+首次真实成功后若 allowlist 为空：Provider 可能已成功，本地转存被阻止 → 管理员确认脱敏 hostname → 本机写入 exact host → 重启 → `retryTransfer`（不新建付费任务）。详见 `docs/wan27-first-paid-test.md`。
 
 ## 下一阶段
 
-持久幂等与 Provider 任务原子性（3D-B1）。本阶段不开启 `ALLOW_PAID_GENERATION`。
+按 `docs/wan27-first-paid-test.md` 在解除阶段付费门闩后做本机一次最低成本人工试跑。本阶段不开启自动付费，不调用阿里云。

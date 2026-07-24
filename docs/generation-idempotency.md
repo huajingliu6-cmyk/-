@@ -150,16 +150,17 @@ active：`validating` / `submitting` / `queued` / `processing` / `downloading` /
 - 本地文件锁 ≠ 数据库唯一约束
 - 完整用户所有权 / IDOR 防护未完成
 - 服务端限流与预算未完成
-- 真实 Provider 契约与付费 e2e 未做
+- 真实 Provider 付费 e2e 尚未执行（3D-B6-A 仅完成契约复核与试跑准备）
 - DNS rebinding 等转存残余风险见 `docs/secure-provider-result-transfer.md`
 
-**仍不允许** `ALLOW_PAID_GENERATION=true`。默认 `VIDEO_PROVIDER=mock`。
+**仍不允许**日常将 `ALLOW_PAID_GENERATION=true`。默认 `VIDEO_PROVIDER=mock`。
+阶段 3D-B6-A：`readyForPaidSubmission` 恒为 false。
 
 ## 测试
 
-以 `npm test`（Vitest）为准；阶段 3D-B1-A：**207** 项（0 failed / 0 skipped / 0 todo）。
+以 `npm test`（Vitest）为准；阶段 3D-B6-A 起不少于 **207** 项（含契约 / Readiness / Dry Run 增量）。
 
 ## 下一阶段
 
-**Provider 官方契约复核与最低成本试跑准备。**
-本阶段不开启真实付费，不调用阿里云。
+**本机一次最低成本人工试跑**（见 `docs/wan27-first-paid-test.md`），须先明确解除付费硬门闩。
+不要自动付费，不调用阿里云（除非人工执行清单）。

@@ -6,7 +6,7 @@ import type {
 } from "./types";
 
 const WAN_PRICING =
-  "真实调用按秒计费，请在阿里云百炼控制台查看万相 2.7 当前价格。输出 URL 有效期约 24 小时。";
+  "预计费用请以阿里云百炼当前价格和控制台实际结算为准。输出 URL 有效期约 24 小时。";
 
 function wanBase(): Omit<
   ModelCapability,
@@ -106,3 +106,8 @@ export function listCapabilitiesForProvider(
     r2vModelId: modelIds?.r2vModelId ?? "wan2.7-r2v-2026-06-12",
   });
 }
+
+export {
+  WAN27_DEFAULT_T2V_MODEL_ID,
+  WAN27_DEFAULT_R2V_MODEL_ID,
+} from "./provider/wan27-constants";

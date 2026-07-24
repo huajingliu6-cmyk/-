@@ -13,6 +13,7 @@ import {
   pickCapability,
 } from "@/video-generation/model-capabilities";
 import { getVideoProviderRuntimeConfig } from "@/video-generation/provider/config";
+import { buildWan27ProviderReadinessReport } from "@/video-generation/provider/wan27-readiness";
 import { selectWanGenerationMode } from "@/video-generation/select-wan-mode";
 import { MAX_REFERENCE_SELECTION_IDS_IN_REQUEST } from "@/video-generation/reference-media";
 import { IdempotencyError } from "@/video-generation/idempotency";
@@ -41,9 +42,11 @@ export async function GET() {
     t2vModelId: runtime.t2vModelId,
     r2vModelId: runtime.r2vModelId,
   });
+  const readiness = buildWan27ProviderReadinessReport();
   return NextResponse.json({
     config: publicConfig,
     capabilities,
+    readiness,
   });
 }
 

@@ -18,10 +18,24 @@ import {
   type VideoProviderRuntimeConfig,
 } from "./config";
 import type { FetchLike, VideoProvider } from "./types";
+import {
+  WAN27_CREATE_PATH,
+  WAN27_REQUEST_TIMEOUT_MS,
+  WAN27_TASK_PATH_PREFIX,
+} from "./wan27-constants";
+import { mapWan27ProviderError } from "./wan27-error-map";
+import {
+  parseCancelResponse,
+  parseCreateTaskResponse,
+  parseJsonResponseSafe,
+  parseTaskStatusResponse,
+  Wan27ResponseParseError,
+} from "./wan27-response-schema";
 
 function mapTaskStatus(raw: string): {
   status: GenerationJobStatus;
   progressLabel: string;
+  errorCode?: string;
 } {
   switch (raw) {
     case "PENDING":
@@ -38,25 +52,29 @@ function mapTaskStatus(raw: string): {
     case "UNKNOWN":
       return {
         status: "failed",
-        progressLabel: "任务状态未知或已过期",
+        progressLabel: "任务状态未知或已过期，请勿自动创建新任务",
+        errorCode: "PROVIDER_TASK_UNKNOWN",
       };
     default:
       return {
         status: "failed",
-        progressLabel: `未知状态：${raw}`,
+        progressLabel: "收到无法识别的任务状态，已安全失败",
+        errorCode: "PROVIDER_TASK_STATUS_UNRECOGNIZED",
       };
   }
 }
 
-function translateProviderError(code?: string, message?: string): string {
-  if (code === "InvalidApiKey") return "百炼 API Key 无效或未提供";
-  if (code === "UnsupportedOperation") {
-    return "当前任务状态不允许此操作（例如仅 PENDING 可取消）";
-  }
-  if (message?.includes("PENDING")) {
-    return "仅排队中的任务可以取消";
-  }
-  return message?.slice(0, 200) || code || "百炼接口返回错误";
+function toUserError(
+  options: Parameters<typeof mapWan27ProviderError>[0],
+): Error & { code?: string; requestId?: string } {
+  const mapped = mapWan27ProviderError(options);
+  const err = new Error(mapped.userMessage) as Error & {
+    code?: string;
+    requestId?: string;
+  };
+  err.code = mapped.code;
+  err.requestId = mapped.requestId;
+  return err;
 }
 
 export class AliyunWan27VideoProvider implements VideoProvider {
@@ -72,7 +90,7 @@ export class AliyunWan27VideoProvider implements VideoProvider {
   }) {
     this.config = options.config;
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.timeoutMs = options.timeoutMs ?? 60_000;
+    this.timeoutMs = options.timeoutMs ?? WAN27_REQUEST_TIMEOUT_MS;
   }
 
   getCapabilities() {
@@ -83,6 +101,19 @@ export class AliyunWan27VideoProvider implements VideoProvider {
   }
 
   private baseUrl(): string {
+    if (!this.config.dashscopeApiKey) {
+      throw toUserError({
+        code: "MISSING_DASHSCOPE_API_KEY",
+        context: "config",
+      });
+    }
+    if (!this.config.t2vModelId.trim() || !this.config.r2vModelId.trim()) {
+      throw toUserError({
+        code: "PROVIDER_MODEL_NOT_FOUND",
+        message: "model id missing",
+        context: "config",
+      });
+    }
     return buildDashScopeBaseUrl({
       workspaceId: this.config.dashscopeWorkspaceId,
       region: this.config.dashscopeRegion,
@@ -108,6 +139,15 @@ export class AliyunWan27VideoProvider implements VideoProvider {
         ...init,
         signal: controller.signal,
       });
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        throw toUserError({
+          code: "RequestTimeOut",
+          message: "timeout",
+          context: "submit",
+        });
+      }
+      throw err;
     } finally {
       clearTimeout(timer);
     }
@@ -120,25 +160,36 @@ export class AliyunWan27VideoProvider implements VideoProvider {
     const summary = summarizeWan27Request(body);
     console.info("[aliyun-wan27] submit", JSON.stringify(summary));
 
-    const url = `${this.baseUrl()}/api/v1/services/aigc/video-generation/video-synthesis`;
+    const url = `${this.baseUrl()}${WAN27_CREATE_PATH}`;
     const res = await this.fetchWithTimeout(url, {
       method: "POST",
       headers: this.authHeaders({ "X-DashScope-Async": "enable" }),
       body: JSON.stringify(body),
     });
 
-    const json = (await res.json()) as {
-      output?: { task_id?: string; task_status?: string };
-      code?: string;
-      message?: string;
-      request_id?: string;
-    };
+    let json: ReturnType<typeof parseCreateTaskResponse>;
+    try {
+      const raw = await parseJsonResponseSafe(res);
+      json = parseCreateTaskResponse(raw);
+    } catch (err) {
+      if (err instanceof Wan27ResponseParseError) {
+        throw toUserError({
+          code: err.code,
+          message: err.message,
+          httpStatus: res.status,
+        });
+      }
+      throw err;
+    }
 
     if (!res.ok || json.code || !json.output?.task_id) {
-      throw new Error(
-        translateProviderError(json.code, json.message) ||
-          `创建任务失败（HTTP ${res.status}）`,
-      );
+      throw toUserError({
+        httpStatus: res.status,
+        code: json.code ?? (!json.output?.task_id ? "MISSING_TASK_ID" : undefined),
+        message: json.message ?? (json.output?.task_id ? undefined : "missing task_id"),
+        requestId: json.request_id,
+        context: "submit",
+      });
     }
 
     const mapped = mapTaskStatus(json.output.task_status ?? "PENDING");
@@ -152,43 +203,84 @@ export class AliyunWan27VideoProvider implements VideoProvider {
   async getGenerationStatus(
     providerTaskId: string,
   ): Promise<ProviderStatusResult> {
-    const url = `${this.baseUrl()}/api/v1/tasks/${encodeURIComponent(providerTaskId)}`;
+    const url = `${this.baseUrl()}${WAN27_TASK_PATH_PREFIX}${encodeURIComponent(providerTaskId)}`;
     const res = await this.fetchWithTimeout(url, {
       method: "GET",
       headers: this.authHeaders(),
     });
 
-    const json = (await res.json()) as {
-      output?: {
-        task_id?: string;
-        task_status?: string;
-        video_url?: string;
-        code?: string;
-        message?: string;
+    let json: ReturnType<typeof parseTaskStatusResponse>;
+    try {
+      const raw = await parseJsonResponseSafe(res);
+      json = parseTaskStatusResponse(raw);
+    } catch (err) {
+      if (err instanceof Wan27ResponseParseError) {
+        return {
+          providerTaskId,
+          status: "failed",
+          progressLabel: "任务状态响应无效",
+          errorCode: err.code,
+          errorMessage: mapWan27ProviderError({
+            code: err.code,
+            message: err.message,
+          }).userMessage,
+          rawTaskStatus: "UNKNOWN",
+        };
+      }
+      throw err;
+    }
+
+    if (!res.ok && json.code) {
+      const mappedErr = mapWan27ProviderError({
+        httpStatus: res.status,
+        code: json.code,
+        message: json.message,
+        requestId: json.request_id,
+        context: "status",
+      });
+      return {
+        providerTaskId,
+        status: "failed",
+        progressLabel: mappedErr.userMessage,
+        errorCode: mappedErr.code,
+        errorMessage: mappedErr.userMessage,
+        rawTaskStatus: "UNKNOWN",
       };
-      usage?: {
-        SR?: number | string;
-        ratio?: string;
-        output_video_duration?: number;
-        duration?: number;
-      };
-      code?: string;
-      message?: string;
-    };
+    }
 
     const raw = json.output?.task_status ?? "UNKNOWN";
     const mapped = mapTaskStatus(raw);
 
-    if (mapped.status === "failed") {
+    if (raw === "UNKNOWN") {
+      const mappedErr = mapWan27ProviderError({
+        code: "UNKNOWN",
+        message: "task unknown or expired",
+        requestId: json.request_id,
+      });
       return {
         providerTaskId,
         status: "failed",
         progressLabel: mapped.progressLabel,
-        errorCode: json.output?.code ?? json.code ?? "PROVIDER_FAILED",
-        errorMessage: translateProviderError(
-          json.output?.code ?? json.code,
-          json.output?.message ?? json.message,
-        ),
+        errorCode: mappedErr.code,
+        errorMessage: mappedErr.userMessage,
+        rawTaskStatus: raw,
+      };
+    }
+
+    if (mapped.status === "failed") {
+      const providerCode = json.output?.code ?? json.code;
+      const mappedErr = mapWan27ProviderError({
+        code: providerCode,
+        message: json.output?.message ?? json.message,
+        requestId: json.request_id,
+        context: "status",
+      });
+      return {
+        providerTaskId,
+        status: "failed",
+        progressLabel: mapped.progressLabel,
+        errorCode: mappedErr.code,
+        errorMessage: mappedErr.userMessage,
         rawTaskStatus: raw,
       };
     }
@@ -211,21 +303,39 @@ export class AliyunWan27VideoProvider implements VideoProvider {
   async cancelGeneration(
     providerTaskId: string,
   ): Promise<ProviderCancelResult> {
-    const url = `${this.baseUrl()}/api/v1/tasks/${encodeURIComponent(providerTaskId)}/cancel`;
+    const url = `${this.baseUrl()}${WAN27_TASK_PATH_PREFIX}${encodeURIComponent(providerTaskId)}/cancel`;
     const res = await this.fetchWithTimeout(url, {
       method: "POST",
       headers: this.authHeaders(),
     });
-    const json = (await res.json()) as {
-      code?: string;
-      message?: string;
-      output?: { task_status?: string };
-    };
+
+    let json: ReturnType<typeof parseCancelResponse>;
+    try {
+      const raw = await parseJsonResponseSafe(res);
+      json = parseCancelResponse(raw);
+    } catch (err) {
+      if (err instanceof Wan27ResponseParseError) {
+        return {
+          cancelled: false,
+          message: mapWan27ProviderError({
+            code: err.code,
+            message: err.message,
+          }).userMessage,
+        };
+      }
+      throw err;
+    }
 
     if (!res.ok || json.code) {
       return {
         cancelled: false,
-        message: translateProviderError(json.code, json.message),
+        message: mapWan27ProviderError({
+          httpStatus: res.status,
+          code: json.code,
+          message: json.message,
+          requestId: json.request_id,
+          context: "cancel",
+        }).userMessage,
       };
     }
 
