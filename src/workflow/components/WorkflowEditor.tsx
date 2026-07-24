@@ -261,12 +261,17 @@ function WorkflowCanvas() {
   ]);
 
   const commitGraph = useCallback(
-    (nextNodes: Node[], nextEdges: Edge[]) => {
+    (
+      nextNodes: Node[],
+      nextEdges: Edge[],
+      options?: { immediate?: boolean },
+    ) => {
       try {
         const storeNodes = useWorkflowStore.getState().document.nodes;
         replaceGraphInStore(
           fromFlowNodes(nextNodes, storeNodes),
           fromFlowEdges(nextEdges),
+          options,
         );
       } catch (error) {
         console.error(error);
@@ -579,13 +584,25 @@ function WorkflowCanvas() {
   const onNodeDrag: OnNodeDrag = useCallback(
     (_event, draggedNode) => {
       if (layoutPrefs.nodeDensity !== "fixed") {
-        setHelperLines({ horizontal: null, vertical: null });
+        setHelperLines((prev) =>
+          prev.horizontal == null && prev.vertical == null
+            ? prev
+            : { horizontal: null, vertical: null },
+        );
         return;
       }
       const result = getHelperLines(draggedNode, nodesRef.current);
-      setHelperLines({
-        horizontal: result.horizontal,
-        vertical: result.vertical,
+      setHelperLines((prev) => {
+        if (
+          prev.horizontal === result.horizontal &&
+          prev.vertical === result.vertical
+        ) {
+          return prev;
+        }
+        return {
+          horizontal: result.horizontal,
+          vertical: result.vertical,
+        };
       });
       if (
         result.snapPosition.x === draggedNode.position.x &&
@@ -607,14 +624,16 @@ function WorkflowCanvas() {
   );
 
   /**
-   * 根因修复：xyflow 的 onNodeDragStop 第三个参数只包含「正在拖动的节点」，
-   * 不是全部 nodes。若 setNodes(currentNodes) 会把其他节点整表覆盖掉。
-   * 位置变更已由 onNodesChange 写入本地 state；结束时合并被拖节点坐标后提交完整列表。
+   * 拖动结束：合并坐标后写入 store；immediate:false 走防抖保存，避免松手瞬间闪烁。
    */
   const onNodeDragStop: OnNodeDrag = useCallback(
     (_event, draggedNode) => {
       draggingRef.current = false;
-      setHelperLines({ horizontal: null, vertical: null });
+      setHelperLines((prev) =>
+        prev.horizontal == null && prev.vertical == null
+          ? prev
+          : { horizontal: null, vertical: null },
+      );
       touchLastEditedNode(draggedNode.id);
       setNodes((current) => {
         const local = current.find((n) => n.id === draggedNode.id);
@@ -623,8 +642,7 @@ function WorkflowCanvas() {
           n.id === draggedNode.id ? { ...n, position: { ...position } } : n,
         );
         nodesRef.current = next;
-        // 写入 store 后由 saveEpoch 触发立即保存
-        commitGraph(next, edgesRef.current);
+        commitGraph(next, edgesRef.current, { immediate: false });
         return next;
       });
     },
@@ -1037,6 +1055,8 @@ function WorkflowCanvas() {
           )}
 
           <div className="relative min-h-0 min-w-0 flex-1">
+            {/* 明确宽高，避免 React Flow 父级短暂 0×0 */}
+            <div className="absolute inset-0">
             {showStoryboard ? (
               <div className="flex h-full items-center justify-center bg-[#0b0f14] p-6 text-center text-sm text-zinc-400">
                 分镜视图尚未开放。请切换回「画布」模式继续编排节点与连接。
@@ -1115,6 +1135,7 @@ function WorkflowCanvas() {
                 />
               </ReactFlow>
             )}
+            </div>
 
             {!showStoryboard && (
               <QuickCreateDock

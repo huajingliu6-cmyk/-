@@ -121,7 +121,6 @@ export function PropNodeView({ id, selected }: NodeProps) {
                   src={primaryAsset.url}
                   alt={primaryAsset.name}
                   fit="contain"
-                  sizes="220px"
                 />
                 <span className="pointer-events-none absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/70 bg-white/85 text-zinc-600 opacity-80">
                   <ZoomIn className="h-3.5 w-3.5" />
@@ -160,7 +159,7 @@ export function PropNodeView({ id, selected }: NodeProps) {
                     setPreview({ src: asset.url, alt: asset.name })
                   }
                 >
-                  <AssetThumb src={asset.url} alt={asset.name} sizes="56px" />
+                  <AssetThumb src={asset.url} alt={asset.name} />
                 </button>
               );
             })}

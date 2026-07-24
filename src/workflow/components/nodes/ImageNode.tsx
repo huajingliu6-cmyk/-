@@ -137,7 +137,7 @@ export function ImageNodeView({ id, selected }: NodeProps) {
               title="双击放大预览"
               onDoubleClick={() => setPreview({ src: asset.url, alt: asset.name })}
             >
-              <AssetThumb src={asset.url} alt={asset.name} sizes="80px" />
+              <AssetThumb src={asset.url} alt={asset.name} />
             </button>
           );
         })}

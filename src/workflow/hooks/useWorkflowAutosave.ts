@@ -6,26 +6,22 @@ import { migrateWorkflowDocument } from "../migrate";
 import { sanitizeWorkflowForPersist } from "../lib/sanitize-workflow";
 import { useWorkflowStore } from "../store";
 
-/** 文字编辑等常规 dirty：停顿后保存 */
 const AUTOSAVE_MS = 400;
-
 const BACKUP_PREFIX = "workflow-backup:";
 
 function backupKey(projectId: string) {
   return `${BACKUP_PREFIX}${projectId}`;
 }
 
-export function writeLocalBackup(doc: WorkflowDocument) {
+function writeLocalBackup(doc: WorkflowDocument) {
   try {
     localStorage.setItem(backupKey(doc.projectId), JSON.stringify(doc));
   } catch {
-    // quota / private mode：忽略
+    // ignore quota / private mode
   }
 }
 
-export function readLocalBackup(
-  projectId: string,
-): WorkflowDocument | null {
+function readLocalBackup(projectId: string): WorkflowDocument | null {
   try {
     const raw = localStorage.getItem(backupKey(projectId));
     if (!raw) return null;
@@ -36,9 +32,9 @@ export function readLocalBackup(
 }
 
 export function useWorkflowAutosave(projectId: string) {
-  const document = useWorkflowStore((s) => s.document);
   const saveStatus = useWorkflowStore((s) => s.saveStatus);
   const saveEpoch = useWorkflowStore((s) => s.saveEpoch);
+  const contentEpoch = useWorkflowStore((s) => s.contentEpoch);
   const setDocument = useWorkflowStore((s) => s.setDocument);
   const acknowledgeSave = useWorkflowStore((s) => s.acknowledgeSave);
   const setSaveStatus = useWorkflowStore((s) => s.setSaveStatus);
@@ -48,13 +44,10 @@ export function useWorkflowAutosave(projectId: string) {
   const requestIdRef = useRef(0);
   const loadedRef = useRef(false);
   const lastHandledEpochRef = useRef(0);
-  /** 发起保存时的 revision，用于避免用旧响应覆盖更新中的文档 */
-  const savingRevisionRef = useRef<number | null>(null);
 
   const persist = useCallback(
     async (doc: WorkflowDocument) => {
       const requestId = ++requestIdRef.current;
-      savingRevisionRef.current = doc.revision;
       setSaveStatus("saving");
       const sanitized = sanitizeWorkflowForPersist(doc);
       writeLocalBackup(sanitized);
@@ -77,7 +70,6 @@ export function useWorkflowAutosave(projectId: string) {
         }
 
         const saved = migrateWorkflowDocument(payload);
-        // 不整表 setDocument，避免上传后画布闪烁
         acknowledgeSave(saved.revision, saved.updatedAt);
         writeLocalBackup({
           ...useWorkflowStore.getState().document,
@@ -89,8 +81,6 @@ export function useWorkflowAutosave(projectId: string) {
         const message =
           error instanceof Error ? error.message : "保存失败，请稍后重试";
         setSaveStatus("error", message);
-      } finally {
-        savingRevisionRef.current = null;
       }
     },
     [projectId, acknowledgeSave, setSaveStatus],
@@ -152,7 +142,7 @@ export function useWorkflowAutosave(projectId: string) {
     };
   }, [projectId, setDocument, setSaveStatus, setLoadError]);
 
-  /** 文字编辑等：dirty 后短暂停顿再保存 */
+  // contentEpoch：内容变更防抖保存；视口平移不递增
   useEffect(() => {
     if (!loadedRef.current) return;
     if (saveStatus !== "dirty") return;
@@ -165,15 +155,14 @@ export function useWorkflowAutosave(projectId: string) {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [document, saveStatus, persist]);
+  }, [contentEpoch, saveStatus, persist]);
 
-  /** 生成完成 / 上传素材 / 移动节点等：立即保存 */
+  // saveEpoch：结构性操作立即保存
   useEffect(() => {
     if (!loadedRef.current) return;
     if (saveEpoch === 0) return;
     if (saveEpoch === lastHandledEpochRef.current) return;
     lastHandledEpochRef.current = saveEpoch;
-    // 微任务：确保同一 tick 内的 store 更新已合并后再读取 document
     queueMicrotask(() => {
       saveNow();
     });

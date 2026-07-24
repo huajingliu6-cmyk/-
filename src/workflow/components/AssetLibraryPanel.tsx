@@ -398,7 +398,6 @@ export function AssetLibraryPanel({ collapsed, onToggle, projectId }: Props) {
                     <AssetThumb
                       src={thumbSrc}
                       alt={asset.name}
-                      sizes="48px"
                     />
                   )}
                 </button>

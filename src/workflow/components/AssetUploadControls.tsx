@@ -144,7 +144,6 @@ export function AssetUploadControls({
           <AssetThumb
             src={previewSrc}
             alt={fileName || "预览"}
-            sizes="240px"
           />
           {busy || uploadStatus === "uploading" ? (
             <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/45">

@@ -75,7 +75,7 @@ export function PromptReferenceChips({ nodeId }: Props) {
         >
           {ref.thumbUrl ? (
             <div className="relative h-full w-full">
-              <AssetThumb src={ref.thumbUrl} alt={ref.label} sizes="44px" />
+              <AssetThumb src={ref.thumbUrl} alt={ref.label} />
             </div>
           ) : (
             <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 bg-zinc-100 text-zinc-500">

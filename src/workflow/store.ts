@@ -53,8 +53,12 @@ type WorkflowStore = {
   acknowledgeSave: (revision: number, updatedAt: string) => void;
   setNodes: (nodes: WorkflowNode[]) => void;
   setEdges: (edges: WorkflowEdge[]) => void;
-  /** 一次写入节点+边（拖动结束等），只触发一次立即保存 */
-  replaceGraph: (nodes: WorkflowNode[], edges: WorkflowEdge[]) => void;
+  /** 写入节点+边；immediate 默认 true，仅改坐标时传 false 走防抖保存 */
+  replaceGraph: (
+    nodes: WorkflowNode[],
+    edges: WorkflowEdge[],
+    options?: { immediate?: boolean },
+  ) => void;
   removeEdge: (edgeId: string) => void;
   setViewport: (viewport: WorkflowViewport) => void;
   updateNodeData: (nodeId: string, data: Partial<WorkflowNode["data"]>) => void;
@@ -84,6 +88,10 @@ type WorkflowStore = {
   requestImmediateSave: () => void;
   /** 递增则触发立即保存；0 表示尚未请求过 */
   saveEpoch: number;
+  /**
+   * 内容变更时钟：标 dirty 时递增；视口平移不递增，避免画布无意义重渲。
+   */
+  contentEpoch: number;
 };
 
 export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
@@ -96,6 +104,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   lastEditedNodeId: null,
   connectionError: null,
   saveEpoch: 0,
+  contentEpoch: 0,
 
   setProjectId: (id) => set({ projectId: id }),
 
@@ -126,7 +135,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   setNodes: (nodes) => {
-    const { document, saveEpoch } = get();
+    const { document, saveEpoch, contentEpoch } = get();
     set({
       document: {
         ...document,
@@ -136,36 +145,71 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       saveStatus: "dirty",
       saveError: null,
       saveEpoch: saveEpoch + 1,
+      contentEpoch: contentEpoch + 1,
     });
   },
 
   setEdges: (edges) => {
-    const { document, saveEpoch } = get();
+    const { document, saveEpoch, contentEpoch } = get();
     set({
       document: { ...document, edges },
       saveStatus: "dirty",
       saveError: null,
       saveEpoch: saveEpoch + 1,
+      contentEpoch: contentEpoch + 1,
     });
   },
 
-  replaceGraph: (nodes, edges) => {
-    const { document, saveEpoch } = get();
+  replaceGraph: (nodes, edges, options) => {
+    const { document, saveEpoch, contentEpoch } = get();
+    const immediate = options?.immediate !== false;
+    const prevById = new Map(document.nodes.map((n) => [n.id, n]));
+    // 保留未改动节点引用，减少重渲
+    const nextNodes = nodes.map((node) => {
+      const prev = prevById.get(node.id);
+      if (!prev) return node;
+      if (
+        prev.position.x === node.position.x &&
+        prev.position.y === node.position.y &&
+        prev.data === node.data &&
+        prev.type === node.type
+      ) {
+        return prev;
+      }
+      if (prev.data === node.data && prev.type === node.type) {
+        return { ...prev, position: node.position };
+      }
+      return node;
+    });
+    const edgesUnchanged =
+      edges.length === document.edges.length &&
+      edges.every((edge, i) => {
+        const prev = document.edges[i];
+        return (
+          prev &&
+          prev.id === edge.id &&
+          prev.source === edge.source &&
+          prev.target === edge.target &&
+          prev.sourceHandle === edge.sourceHandle &&
+          prev.targetHandle === edge.targetHandle
+        );
+      });
     set({
       document: {
         ...document,
-        nodes,
-        edges,
-        shotOrder: pruneShotOrder(document.shotOrder, nodes),
+        nodes: nextNodes,
+        edges: edgesUnchanged ? document.edges : edges,
+        shotOrder: pruneShotOrder(document.shotOrder, nextNodes),
       },
       saveStatus: "dirty",
       saveError: null,
-      saveEpoch: saveEpoch + 1,
+      contentEpoch: contentEpoch + 1,
+      ...(immediate ? { saveEpoch: saveEpoch + 1 } : {}),
     });
   },
 
   removeEdge: (edgeId) => {
-    const { document, saveEpoch } = get();
+    const { document, saveEpoch, contentEpoch } = get();
     if (!document.edges.some((e) => e.id === edgeId)) return;
     set({
       document: {
@@ -175,20 +219,28 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       saveStatus: "dirty",
       saveError: null,
       saveEpoch: saveEpoch + 1,
+      contentEpoch: contentEpoch + 1,
     });
   },
 
   setViewport: (viewport) => {
     const { document } = get();
+    const current = document.viewport;
+    if (
+      current.x === viewport.x &&
+      current.y === viewport.y &&
+      current.zoom === viewport.zoom
+    ) {
+      return;
+    }
+    // 仅更新视口：不 dirty、不递增 contentEpoch
     set({
       document: { ...document, viewport },
-      saveStatus: "dirty",
-      saveError: null,
     });
   },
 
   updateNodeData: (nodeId, data) => {
-    const { document } = get();
+    const { document, contentEpoch } = get();
     const nodes = document.nodes.map((node) => {
       if (node.id !== nodeId) return node;
       return {
@@ -201,11 +253,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       saveStatus: "dirty",
       saveError: null,
       lastEditedNodeId: nodeId,
+      contentEpoch: contentEpoch + 1,
     });
   },
 
   commitNodeAssets: (nodeId, assets, data) => {
-    const { document } = get();
+    const { document, contentEpoch } = get();
     const map = new Map(document.assets.map((asset) => [asset.id, asset]));
     for (const asset of assets) {
       map.set(asset.id, asset);
@@ -227,11 +280,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       saveError: null,
       lastEditedNodeId: nodeId,
       saveEpoch: get().saveEpoch + 1,
+      contentEpoch: contentEpoch + 1,
     });
   },
 
   addNode: (node) => {
-    const { document, saveEpoch } = get();
+    const { document, saveEpoch, contentEpoch } = get();
     const shotOrder =
       node.type === "videoShot"
         ? appendVideoShotsToOrder(document.shotOrder, [node])
@@ -247,11 +301,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       selectedNodeId: node.id,
       lastEditedNodeId: node.id,
       saveEpoch: saveEpoch + 1,
+      contentEpoch: contentEpoch + 1,
     });
   },
 
   addNodesAndEdges: (nodes, edges) => {
-    const { document, saveEpoch } = get();
+    const { document, saveEpoch, contentEpoch } = get();
     const focusId = nodes[0]?.id ?? get().selectedNodeId;
     set({
       document: {
@@ -265,11 +320,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       selectedNodeId: focusId,
       lastEditedNodeId: nodes[0]?.id ?? get().lastEditedNodeId,
       saveEpoch: saveEpoch + 1,
+      contentEpoch: contentEpoch + 1,
     });
   },
 
   addAsset: (asset) => {
-    const { document, saveEpoch } = get();
+    const { document, saveEpoch, contentEpoch } = get();
     const exists = document.assets.some((a) => a.id === asset.id);
     set({
       document: {
@@ -281,12 +337,13 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       saveStatus: "dirty",
       saveError: null,
       saveEpoch: saveEpoch + 1,
+      contentEpoch: contentEpoch + 1,
     });
   },
 
   addAssets: (assets) => {
     if (assets.length === 0) return;
-    const { document, saveEpoch } = get();
+    const { document, saveEpoch, contentEpoch } = get();
     const map = new Map(document.assets.map((a) => [a.id, a]));
     for (const asset of assets) {
       map.set(asset.id, asset);
@@ -299,11 +356,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       saveStatus: "dirty",
       saveError: null,
       saveEpoch: saveEpoch + 1,
+      contentEpoch: contentEpoch + 1,
     });
   },
 
   updateAsset: (assetId, patch) => {
-    const { document } = get();
+    const { document, contentEpoch } = get();
     set({
       document: {
         ...document,
@@ -315,11 +373,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       },
       saveStatus: "dirty",
       saveError: null,
+      contentEpoch: contentEpoch + 1,
     });
   },
 
   removeAsset: (assetId) => {
-    const { document, saveEpoch } = get();
+    const { document, saveEpoch, contentEpoch } = get();
     set({
       document: {
         ...document,
@@ -328,16 +387,18 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       saveStatus: "dirty",
       saveError: null,
       saveEpoch: saveEpoch + 1,
+      contentEpoch: contentEpoch + 1,
     });
   },
 
   setShotOrder: (shotOrder) => {
-    const { document, saveEpoch } = get();
+    const { document, saveEpoch, contentEpoch } = get();
     set({
       document: { ...document, shotOrder },
       saveStatus: "dirty",
       saveError: null,
       saveEpoch: saveEpoch + 1,
+      contentEpoch: contentEpoch + 1,
     });
   },
 
@@ -352,12 +413,21 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
   setConnectionError: (message) => set({ connectionError: message }),
 
-  markDirty: () => set({ saveStatus: "dirty", saveError: null }),
+  markDirty: () =>
+    set((state) => ({
+      saveStatus: "dirty",
+      saveError: null,
+      contentEpoch: state.contentEpoch + 1,
+    })),
 
   requestImmediateSave: () =>
     set((state) => ({
       saveStatus: state.saveStatus === "loading" ? state.saveStatus : "dirty",
       saveError: null,
       saveEpoch: state.saveEpoch + 1,
+      contentEpoch:
+        state.saveStatus === "loading"
+          ? state.contentEpoch
+          : state.contentEpoch + 1,
     })),
 }));

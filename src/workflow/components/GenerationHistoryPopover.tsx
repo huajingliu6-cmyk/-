@@ -102,14 +102,13 @@ export function GenerationHistoryPopover({
                     <AssetThumb
                       src={asset.thumbnailUrl || asset.url}
                       alt={asset.name}
-                      sizes="56px"
                     />
                     <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-black/45 py-0.5 text-center text-[9px] text-white">
                       视频
                     </span>
                   </>
                 ) : (
-                  <AssetThumb src={asset.url} alt={asset.name} sizes="56px" />
+                  <AssetThumb src={asset.url} alt={asset.name} />
                 )}
               </button>
             );

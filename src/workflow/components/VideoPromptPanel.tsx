@@ -52,10 +52,12 @@ type Props = { nodeId: string };
 
 export function VideoPromptPanel({ nodeId }: Props) {
   const projectId = useWorkflowStore((s) => s.projectId);
-  const document = useWorkflowStore((s) => s.document);
   const node = useWorkflowStore((s) =>
     s.document.nodes.find((n) => n.id === nodeId),
   );
+  /** 分字段订阅，避免视口平移导致面板重渲 */
+  const edges = useWorkflowStore((s) => s.document.edges);
+  const assets = useWorkflowStore((s) => s.document.assets);
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const commitNodeAssets = useWorkflowStore((s) => s.commitNodeAssets);
   const [notice, setNotice] = useState("");
@@ -107,10 +109,15 @@ export function VideoPromptPanel({ nodeId }: Props) {
 
   const builtPreview = useMemo(() => {
     if (!data) return null;
-    return buildVideoGenerationInput(document, nodeId, {
-      selectedReferenceAssetIds: data.selectedReferenceAssetIds,
-    });
-  }, [data, document, nodeId]);
+    const base = useWorkflowStore.getState().document;
+    return buildVideoGenerationInput(
+      { ...base, edges, assets },
+      nodeId,
+      {
+        selectedReferenceAssetIds: data.selectedReferenceAssetIds,
+      },
+    );
+  }, [data, nodeId, edges, assets]);
 
   const mode = useMemo(() => {
     if (!builtPreview || !builtPreview.ok) return "textToVideo" as const;

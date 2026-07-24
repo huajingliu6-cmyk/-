@@ -7,3 +7,10 @@ body {
   padding: 0;
   overflow: hidden;
 }
+
+/* 画布节点内媒体：禁止按原始像素短暂撑开（选中/平移重绘闪一下） */
+.react-flow__node img,
+.react-flow__node video {
+  max-width: 100%;
+  max-height: 100%;
+}

@@ -250,7 +250,6 @@ export function MentionTextarea({
                         <AssetThumb
                           src={asset.thumbnailUrl || asset.url}
                           alt={asset.name}
-                          sizes="32px"
                         />
                       )}
                     </div>
