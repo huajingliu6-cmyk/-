@@ -3,6 +3,7 @@
 import { type NodeProps } from "@xyflow/react";
 import { MentionTextarea } from "@/workflow/components/MentionTextarea";
 import { NodePorts } from "@/workflow/components/nodes/NodePorts";
+import { useWorkflowNodeData } from "@/workflow/hooks/useWorkflowNodeData";
 import { useWorkflowStore } from "@/workflow/store";
 import type { TextNodeData } from "@/workflow/types";
 
@@ -15,12 +16,7 @@ const TEXT_LABEL: Record<TextNodeData["textType"], string> = {
 };
 
 export function TextNodeView({ id, selected }: NodeProps) {
-  const nodeData = useWorkflowStore(
-    (s) =>
-      s.document.nodes.find((n) => n.id === id)?.data as
-        | TextNodeData
-        | undefined,
-  );
+  const nodeData = useWorkflowNodeData<TextNodeData>(id);
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
 
   if (!nodeData) return null;

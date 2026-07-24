@@ -1,4 +1,7 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { promises as fs } from "fs";
+import os from "os";
+import path from "path";
 import { resolveOutputDimensions } from "@/video-generation/dimensions";
 import { validateGenerationSettings } from "@/video-generation/validate-settings";
 import { getWan27R2VCapability, getWan27T2VCapability } from "@/video-generation/model-capabilities";
@@ -11,6 +14,17 @@ import { paidGenerationAllowed, getVideoProviderRuntimeConfig } from "@/video-ge
 import { AliyunWan27VideoProvider } from "@/video-generation/provider/aliyun-wan27-provider";
 import { MockVideoProvider, resetMockVideoProviderTasks } from "@/video-generation/provider/mock-provider";
 import type { VideoGenerationInput } from "@/video-generation/types";
+
+function structuralMockMp4(): Buffer {
+  return Buffer.concat([
+    Buffer.from([
+      0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d,
+      0x00, 0x00, 0x02, 0x00, 0x69, 0x73, 0x6f, 0x6d, 0x69, 0x73, 0x6f, 0x32,
+    ]),
+    Buffer.from("moovtrakmdat", "ascii"),
+    Buffer.alloc(1024, 0x41),
+  ]);
+}
 
 function baseInput(
   patch: Partial<VideoGenerationInput> = {},
@@ -319,8 +333,23 @@ describe("paid generation guard", () => {
   });
 });
 describe("providers", () => {
-  beforeEach(() => {
+  const tmpDirs: string[] = [];
+
+  beforeEach(async () => {
     resetMockVideoProviderTasks();
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "wan-mock-"));
+    tmpDirs.push(dir);
+    const file = path.join(dir, "mock-video.mp4");
+    await fs.writeFile(file, structuralMockMp4());
+    process.env.MOCK_VIDEO_FILE = file;
+  });
+
+  afterEach(async () => {
+    delete process.env.MOCK_VIDEO_FILE;
+    resetMockVideoProviderTasks();
+    for (const dir of tmpDirs.splice(0)) {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("Mock provider does not call real HTTP", async () => {

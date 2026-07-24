@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
+  Film,
   Mic2,
   Mountain,
   Package,
@@ -356,7 +357,6 @@ export function AssetLibraryPanel({ collapsed, onToggle, projectId }: Props) {
             documentSnapshot,
             asset.id,
           );
-          const thumbSrc = asset.thumbnailUrl || asset.url;
 
           return (
             <div
@@ -383,10 +383,23 @@ export function AssetLibraryPanel({ collapsed, onToggle, projectId }: Props) {
                 <button
                   type="button"
                   className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md border border-zinc-700 bg-zinc-950"
-                  title={asset.assetType === "audio" ? undefined : "双击放大预览"}
-                  disabled={asset.assetType === "audio"}
+                  title={
+                    asset.assetType === "audio" ||
+                    asset.assetType === "generatedVideo"
+                      ? undefined
+                      : "双击放大预览"
+                  }
+                  disabled={
+                    asset.assetType === "audio" ||
+                    asset.assetType === "generatedVideo"
+                  }
                   onDoubleClick={() => {
-                    if (asset.assetType === "audio") return;
+                    if (
+                      asset.assetType === "audio" ||
+                      asset.assetType === "generatedVideo"
+                    ) {
+                      return;
+                    }
                     setPreview({ src: asset.url, alt: asset.name });
                   }}
                 >
@@ -394,9 +407,13 @@ export function AssetLibraryPanel({ collapsed, onToggle, projectId }: Props) {
                     <div className="flex h-full w-full items-center justify-center text-zinc-500">
                       <Mic2 className="h-4 w-4" />
                     </div>
+                  ) : asset.assetType === "generatedVideo" ? (
+                    <div className="flex h-full w-full items-center justify-center bg-zinc-900 text-zinc-300">
+                      <Film className="h-4 w-4" />
+                    </div>
                   ) : (
                     <AssetThumb
-                      src={thumbSrc}
+                      src={asset.thumbnailUrl || asset.url}
                       alt={asset.name}
                     />
                   )}

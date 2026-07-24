@@ -2,43 +2,52 @@
 
 import { useRef, useState } from "react";
 import { type NodeProps } from "@xyflow/react";
-import { Clapperboard, FolderOpen, Upload, ZoomIn } from "lucide-react";
-import { AssetThumb } from "@/workflow/components/AssetThumb";
+import {
+  Clapperboard,
+  FolderOpen,
+  Play,
+  Upload,
+} from "lucide-react";
 import { BrandMark } from "@/workflow/components/BrandMark";
+import { AssetThumb } from "@/workflow/components/AssetThumb";
 import { ImageLightbox } from "@/workflow/components/ImageLightbox";
 import { VideoPromptPanel } from "@/workflow/components/VideoPromptPanel";
+import { VideoResultDrawer } from "@/workflow/components/VideoResultDrawer";
 import { GlassChip, glass } from "@/workflow/components/glass-ui";
 import { NodePorts } from "@/workflow/components/nodes/NodePorts";
-import {
-  useAssetById,
-  useAssetsByIds,
-  useLibraryImageAssets,
-} from "@/workflow/hooks/useAssetById";
+import { useAssetById, useAssetsByIds, useLibraryImageAssets } from "@/workflow/hooks/useAssetById";
+import { useWorkflowNodeData } from "@/workflow/hooks/useWorkflowNodeData";
 import { uploadAssetFile } from "@/workflow/lib/upload-asset";
+import { buildGeneratedVideoContentUrl } from "@/workflow/lib/generated-video-url";
 import { useWorkflowStore } from "@/workflow/store";
 import type { VideoShotNodeData } from "@/workflow/types";
+import type { GenerationRecord } from "@/video-generation/types";
+import { classifyGenerationResult } from "@/video-generation/classify-generation-result";
+import { DEMO_PROJECT_ID } from "@/workflow/default-workflow";
 
 export function VideoShotNodeView({ id, selected }: NodeProps) {
-  const projectId = useWorkflowStore((s) => s.projectId);
-  const nodeData = useWorkflowStore(
-    (s) =>
-      s.document.nodes.find((n) => n.id === id)?.data as
-        | VideoShotNodeData
-        | undefined,
-  );
+  const projectId = useWorkflowStore((s) => s.projectId) || DEMO_PROJECT_ID;
+  const nodeData = useWorkflowNodeData<VideoShotNodeData>(id);
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const commitNodeAssets = useWorkflowStore((s) => s.commitNodeAssets);
   const uploadRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [libraryOpenIntent, setLibraryOpenIntent] = useState(false);
   const [prevSelected, setPrevSelected] = useState(selected);
-  const [preview, setPreview] = useState<{ src: string; alt: string } | null>(
-    null,
-  );
+  const [imagePreview, setImagePreview] = useState<{
+    src: string;
+    alt: string;
+  } | null>(null);
+  const [resultOpen, setResultOpen] = useState(false);
+  const [drawerGeneration, setDrawerGeneration] =
+    useState<GenerationRecord | null>(null);
 
   if (selected !== prevSelected) {
     setPrevSelected(selected);
-    if (!selected) setLibraryOpenIntent(false);
+    if (!selected) {
+      setLibraryOpenIntent(false);
+      setResultOpen(false);
+    }
   }
 
   const libraryOpen = selected && libraryOpenIntent;
@@ -51,6 +60,20 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
   if (!nodeData) return null;
 
   const isPortrait = nodeData.aspectRatio === "9:16";
+  const classified = classifyGenerationResult({
+    generation: drawerGeneration,
+    asset: resultAsset,
+  });
+
+  const transferFailed =
+    drawerGeneration?.status === "resultTransferFailed" ||
+    (nodeData.status === "failed" &&
+      Boolean(nodeData.activeGenerationId) &&
+      /转存/.test(nodeData.errorMessage || ""));
+
+  const isVideoAsset =
+    resultAsset?.assetType === "generatedVideo" ||
+    Boolean(resultAsset?.mimeType.startsWith("video/"));
 
   const onUpload = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -93,13 +116,90 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
     setLibraryOpenIntent(false);
   };
 
+  const openResultDrawer = async (generation?: GenerationRecord | null) => {
+    setResultOpen(true);
+    if (generation) {
+      setDrawerGeneration(generation);
+      return;
+    }
+    const generationId = nodeData.activeGenerationId;
+    if (!generationId) {
+      setDrawerGeneration(null);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/generations/${generationId}`);
+      const payload = (await res.json()) as {
+        generation?: GenerationRecord;
+      };
+      setDrawerGeneration(payload.generation ?? null);
+    } catch {
+      setDrawerGeneration(null);
+    }
+  };
+
+  const onRetryTransfer = async () => {
+    const generationId = nodeData.activeGenerationId;
+    if (!generationId) return;
+    try {
+      const res = await fetch(`/api/generations/${generationId}/transfer`, {
+        method: "POST",
+      });
+      const payload = (await res.json()) as {
+        generation?: GenerationRecord;
+        message?: string;
+      };
+      if (!res.ok || !payload.generation) {
+        updateNodeData(id, {
+          errorMessage: payload.message ?? "转存失败",
+          status: "failed",
+        });
+        setDrawerGeneration(payload.generation ?? null);
+        return;
+      }
+      setDrawerGeneration(payload.generation);
+      if (payload.generation.resultAsset) {
+        commitNodeAssets(id, [payload.generation.resultAsset], {
+          status: "completed",
+          progress: 100,
+          resultAssetId: payload.generation.resultAsset.id,
+          errorMessage: "",
+        });
+      }
+    } catch (error) {
+      updateNodeData(id, {
+        errorMessage:
+          error instanceof Error ? error.message : "转存失败，请重试",
+      });
+    }
+  };
+
+  const canPlay =
+    classified.canPlay ||
+    (isVideoAsset &&
+      resultAsset?.assetType === "generatedVideo" &&
+      resultAsset.mimeType === "video/mp4");
+
+  const invalidVideo =
+    resultAsset &&
+    !isVideoAsset &&
+    nodeData.status === "completed";
+
+  const previewUrl =
+    canPlay && resultAsset
+      ? buildGeneratedVideoContentUrl({
+          assetId: resultAsset.id,
+          generationId: nodeData.activeGenerationId || null,
+          projectId,
+          shotNumber: nodeData.shotNumber,
+        })
+      : null;
+
   return (
-    <div className="relative">
+    <div className="group/node relative">
       <div
-        className={`pointer-events-none absolute bottom-full left-1/2 z-20 mb-3 flex -translate-x-1/2 flex-col items-center gap-2 ${
-          selected ? "" : "invisible"
-        }`}
-        aria-hidden={!selected}
+        className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-3 flex -translate-x-1/2 flex-col items-center gap-2 opacity-0 transition-opacity duration-150 group-hover/node:pointer-events-auto group-hover/node:opacity-100"
+        aria-hidden
       >
         <div className={`pointer-events-auto ${glass.floatBar}`}>
           <GlassChip
@@ -140,10 +240,7 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
                     onClick={() => attachFromLibrary(asset.id)}
                   >
                     <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded-lg border border-white/50 bg-white/40">
-                      <AssetThumb
-                        src={asset.url}
-                        alt={asset.name}
-                      />
+                      <AssetThumb src={asset.url} alt={asset.name} />
                     </div>
                     <span className="truncate text-[11px] text-zinc-700">
                       {asset.name}
@@ -156,7 +253,6 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
         )}
       </div>
 
-      {/* 外框宽度固定，避免切换画幅时触发 React Flow 尺寸回写闪烁 */}
       <div
         className={`relative w-[224px] p-2 ${
           selected ? glass.cardSelected : glass.card
@@ -178,24 +274,48 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
             isPortrait ? "aspect-[9/16] w-[156px]" : "aspect-video w-full"
           }`}
         >
-          {resultAsset ? (
-            <button
-              type="button"
-              className="nodrag nopan absolute inset-0"
-              title="双击放大预览"
-              onDoubleClick={() =>
-                setPreview({ src: resultAsset.url, alt: resultAsset.name })
-              }
-            >
-              <AssetThumb
-                src={resultAsset.url}
-                alt={resultAsset.name}
-                fit="contain"
-              />
-              <span className="pointer-events-none absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/70 bg-white/85 text-zinc-600 opacity-80">
-                <ZoomIn className="h-3.5 w-3.5" />
+          {invalidVideo ? (
+            <div className="absolute inset-0 flex items-center justify-center bg-zinc-900/90 px-2 text-center">
+              <span className="text-[10px] leading-snug text-rose-300">
+                结果不是有效的生成视频资产
               </span>
-            </button>
+            </div>
+          ) : transferFailed ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-900/90 px-2 text-center">
+              <span className="text-[10px] text-amber-200">
+                视频已生成，但本地转存失败
+              </span>
+              <button
+                type="button"
+                className="nodrag nopan rounded-lg bg-amber-400 px-2 py-1 text-[10px] font-medium text-zinc-900"
+                onClick={() => void onRetryTransfer()}
+              >
+                重试转存
+              </button>
+            </div>
+          ) : canPlay && previewUrl ? (
+            <>
+              {/* 封面：静音首帧预览，无控件、无文案 */}
+              <video
+                className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+                src={`${previewUrl}#t=0.1`}
+                muted
+                playsInline
+                preload="metadata"
+                aria-hidden
+              />
+              <button
+                type="button"
+                className="nodrag nopan absolute inset-0 flex items-center justify-center bg-black/25 transition hover:bg-black/35"
+                title="播放"
+                aria-label="播放"
+                onClick={() => void openResultDrawer()}
+              >
+                <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-black/55 text-white shadow-lg ring-1 ring-white/30">
+                  <Play className="h-5 w-5 fill-current" strokeWidth={0} />
+                </span>
+              </button>
+            </>
           ) : (
             <div className="absolute inset-0 flex items-center justify-center bg-[#e8eaee]/55">
               <BrandMark
@@ -204,7 +324,7 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
               />
             </div>
           )}
-          {nodeData.status === "processing" && resultAsset && (
+          {nodeData.status === "processing" && canPlay && (
             <div className="absolute inset-0 flex items-center justify-center bg-zinc-900/30">
               <BrandMark size={32} spin />
             </div>
@@ -223,7 +343,7 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
                   className="relative h-8 w-8 shrink-0 overflow-hidden rounded-lg border border-white/70 bg-white/90"
                   title="双击放大预览"
                   onDoubleClick={() =>
-                    setPreview({ src: asset.url, alt: asset.name })
+                    setImagePreview({ src: asset.url, alt: asset.name })
                   }
                 >
                   <AssetThumb src={asset.url} alt={asset.name} />
@@ -255,13 +375,28 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
         }`}
         aria-hidden={!selected}
       >
-        <VideoPromptPanel nodeId={id} />
+        <VideoPromptPanel
+          nodeId={id}
+          onOpenVideoResult={(generation) => {
+            void openResultDrawer(generation);
+          }}
+        />
       </div>
 
       <ImageLightbox
-        src={preview?.src ?? null}
-        alt={preview?.alt}
-        onClose={() => setPreview(null)}
+        src={imagePreview?.src ?? null}
+        alt={imagePreview?.alt}
+        onClose={() => setImagePreview(null)}
+      />
+
+      <VideoResultDrawer
+        open={resultOpen}
+        onClose={() => setResultOpen(false)}
+        generation={drawerGeneration}
+        asset={resultAsset ?? null}
+        projectId={projectId}
+        shotNumber={nodeData.shotNumber}
+        onRetryTransfer={() => void onRetryTransfer()}
       />
     </div>
   );

@@ -5,6 +5,10 @@ import {
   getMockCapabilities,
   pickCapability,
 } from "../model-capabilities";
+import {
+  hashFileSha256,
+  validateMockVideoSource,
+} from "../validate-mock-video-source";
 import type {
   ProviderCancelResult,
   ProviderGenerationInput,
@@ -21,31 +25,104 @@ type MockTask = {
   resolution: string;
   aspectRatio: string | null;
   durationSeconds: number;
+  errorCode?: string;
+  errorMessage?: string;
 };
 
-const tasks = new Map<string, MockTask>();
+type MockTasksGlobal = typeof globalThis & {
+  __infiniteCanvasMockTasks?: Map<string, MockTask>;
+};
 
 /**
- * 极小合法 MP4（ftyp+mdat），仅用于 Mock，明确标记非真实 AI 视频。
+ * 必须挂在 globalThis：Next webpack 开发态会对路由分别打包/HMR，
+ * 模块级 Map 会在 POST 提交与 GET 轮询之间变成两份。
  */
-const MINIMAL_MP4 = Buffer.from(
-  "AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAt1tb292AAAAbG12aGQAAAAA1tQtodbdLaEAAAW+AAAD6F9waWEAAAAgbWRhdAAAAAAAAm1kYXQ=",
-  "base64",
-);
+function getTasks(): Map<string, MockTask> {
+  const g = globalThis as MockTasksGlobal;
+  if (!g.__infiniteCanvasMockTasks) {
+    g.__infiniteCanvasMockTasks = new Map();
+  }
+  return g.__infiniteCanvasMockTasks;
+}
 
-async function writeMockMp4(): Promise<{ absolutePath: string; url: string }> {
+/**
+ * 从已验证的本地 Mock 源复制出独立任务文件（不共享可被覆盖的同一路径）。
+ * 不再手写 98 B 伪 MP4。
+ */
+async function materializeMockVideoCopy(): Promise<{
+  absolutePath: string;
+  url: string;
+  sizeBytes: number;
+  sha256: string;
+}> {
+  const validated = await validateMockVideoSource();
+  if (!validated.ok) {
+    throw Object.assign(new Error(validated.message), {
+      code: validated.code,
+    });
+  }
+
   const dir = path.join(process.cwd(), "data", "generated-videos");
   await fs.mkdir(dir, { recursive: true });
   const id = randomUUID();
   const fileName = `${id}-mock.mp4`;
   const absolutePath = path.join(dir, fileName);
   const tmp = `${absolutePath}.tmp`;
-  await fs.writeFile(tmp, MINIMAL_MP4);
+
+  await fs.copyFile(validated.absolutePath, tmp);
+  const statTmp = await fs.stat(tmp);
+  if (statTmp.size !== validated.sizeBytes) {
+    await fs.unlink(tmp).catch(() => undefined);
+    throw Object.assign(new Error("复制 Mock 视频后大小不一致"), {
+      code: "MOCK_VIDEO_INVALID",
+    });
+  }
+  const shaTmp = await hashFileSha256(tmp);
+  if (shaTmp !== validated.sha256) {
+    await fs.unlink(tmp).catch(() => undefined);
+    throw Object.assign(new Error("复制 Mock 视频后哈希不一致"), {
+      code: "MOCK_VIDEO_INVALID",
+    });
+  }
   await fs.rename(tmp, absolutePath);
+  const statFinal = await fs.stat(absolutePath);
+  const shaFinal = await hashFileSha256(absolutePath);
+  if (
+    statFinal.size !== validated.sizeBytes ||
+    shaFinal !== validated.sha256
+  ) {
+    await fs.unlink(absolutePath).catch(() => undefined);
+    throw Object.assign(new Error("Mock 视频落盘完整性校验失败"), {
+      code: "MOCK_VIDEO_INVALID",
+    });
+  }
+
   return {
     absolutePath,
     url: `/api/generated-videos/${fileName}`,
+    sizeBytes: statFinal.size,
+    sha256: shaFinal,
   };
+}
+
+function ensureTask(
+  providerTaskId: string,
+  seed?: Partial<MockTask>,
+): MockTask {
+  const tasks = getTasks();
+  const existing = tasks.get(providerTaskId);
+  if (existing) return existing;
+  const created: MockTask = {
+    status: "queued",
+    tick: 0,
+    videoPath: null,
+    remoteUrl: null,
+    resolution: seed?.resolution ?? "720P",
+    aspectRatio: seed?.aspectRatio ?? "9:16",
+    durationSeconds: seed?.durationSeconds ?? 5,
+  };
+  tasks.set(providerTaskId, created);
+  return created;
 }
 
 export class MockVideoProvider implements VideoProvider {
@@ -58,12 +135,16 @@ export class MockVideoProvider implements VideoProvider {
   async submitGeneration(
     input: ProviderGenerationInput,
   ): Promise<ProviderSubmitResult> {
+    // 提交前即校验：缺失/无效时不排队伪装成功
+    const validated = await validateMockVideoSource();
+    if (!validated.ok) {
+      throw Object.assign(new Error(validated.message), {
+        code: validated.code,
+      });
+    }
+
     const taskId = `mock-${randomUUID()}`;
-    tasks.set(taskId, {
-      status: "queued",
-      tick: 0,
-      videoPath: null,
-      remoteUrl: null,
+    ensureTask(taskId, {
       resolution: input.input.resolution,
       aspectRatio: input.input.aspectRatio,
       durationSeconds: input.input.durationSeconds,
@@ -78,17 +159,7 @@ export class MockVideoProvider implements VideoProvider {
   async getGenerationStatus(
     providerTaskId: string,
   ): Promise<ProviderStatusResult> {
-    const task = tasks.get(providerTaskId);
-    if (!task) {
-      return {
-        providerTaskId,
-        status: "failed",
-        progressLabel: "Mock · 任务不存在",
-        errorCode: "MOCK_TASK_NOT_FOUND",
-        errorMessage: "Mock 任务不存在或已过期",
-        rawTaskStatus: "UNKNOWN",
-      };
-    }
+    const task = ensureTask(providerTaskId);
 
     if (task.status === "cancelled") {
       return {
@@ -104,8 +175,8 @@ export class MockVideoProvider implements VideoProvider {
         providerTaskId,
         status: "failed",
         progressLabel: "Mock · 失败",
-        errorCode: "MOCK_FAILED",
-        errorMessage: "Mock 任务失败",
+        errorCode: task.errorCode ?? "MOCK_FAILED",
+        errorMessage: task.errorMessage ?? "Mock 任务失败",
         rawTaskStatus: "FAILED",
       };
     }
@@ -134,27 +205,52 @@ export class MockVideoProvider implements VideoProvider {
       };
     }
 
-    const written = await writeMockMp4();
-    task.status = "completed";
-    task.videoPath = written.absolutePath;
-    // 使用本地可下载路径模拟「临时 URL」；服务端转存会再拷贝一次
-    task.remoteUrl = `file://${written.absolutePath.replace(/\\/g, "/")}`;
+    try {
+      const written = await materializeMockVideoCopy();
+      task.status = "completed";
+      task.videoPath = written.absolutePath;
+      // 仅服务端转存使用 file://；不把本机绝对路径发给浏览器
+      task.remoteUrl = `file://${written.absolutePath.replace(/\\/g, "/")}`;
 
-    return {
-      providerTaskId,
-      status: "downloading",
-      progressLabel: "Mock · 准备转存",
-      remoteVideoUrl: task.remoteUrl,
-      providerResolution: task.resolution === "1080P" ? "1080" : "720",
-      providerAspectRatio: task.aspectRatio ?? undefined,
-      providerDurationSeconds: task.durationSeconds,
-      rawTaskStatus: "SUCCEEDED",
-    };
+      return {
+        providerTaskId,
+        status: "downloading",
+        progressLabel: "Mock · 准备转存",
+        remoteVideoUrl: task.remoteUrl,
+        providerResolution: task.resolution === "1080P" ? "1080" : "720",
+        providerAspectRatio: task.aspectRatio ?? undefined,
+        providerDurationSeconds: task.durationSeconds,
+        rawTaskStatus: "SUCCEEDED",
+      };
+    } catch (error) {
+      const code =
+        error instanceof Error &&
+        "code" in error &&
+        typeof (error as { code?: unknown }).code === "string"
+          ? (error as { code: string }).code
+          : "MOCK_VIDEO_INVALID";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Mock 视频源无效";
+      task.status = "failed";
+      task.errorCode = code;
+      task.errorMessage = message;
+      return {
+        providerTaskId,
+        status: "failed",
+        progressLabel: "Mock · 失败",
+        errorCode: code,
+        errorMessage: message,
+        rawTaskStatus: "FAILED",
+      };
+    }
   }
 
   async cancelGeneration(
     providerTaskId: string,
   ): Promise<ProviderCancelResult> {
+    const tasks = getTasks();
     const task = tasks.get(providerTaskId);
     if (!task) {
       return { cancelled: false, message: "Mock 任务不存在" };
@@ -172,7 +268,7 @@ export class MockVideoProvider implements VideoProvider {
 
 /** 测试辅助：清空内存任务 */
 export function resetMockVideoProviderTasks(): void {
-  tasks.clear();
+  getTasks().clear();
 }
 
 export function getMockCapabilityForMode(

@@ -7,17 +7,13 @@ import { BrandMark } from "@/workflow/components/BrandMark";
 import { StableAudioPlayer } from "@/workflow/components/StableAudioPlayer";
 import { useAssetById } from "@/workflow/hooks/useAssetById";
 import { uploadAssetFile } from "@/workflow/lib/upload-asset";
+import { useWorkflowNodeData } from "@/workflow/hooks/useWorkflowNodeData";
 import { useWorkflowStore } from "@/workflow/store";
 import type { AudioNodeData } from "@/workflow/types";
 
 export function AudioNodeView({ id, selected }: NodeProps) {
   const projectId = useWorkflowStore((s) => s.projectId);
-  const nodeData = useWorkflowStore(
-    (s) =>
-      s.document.nodes.find((n) => n.id === id)?.data as
-        | AudioNodeData
-        | undefined,
-  );
+  const nodeData = useWorkflowNodeData<AudioNodeData>(id);
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const commitNodeAssets = useWorkflowStore((s) => s.commitNodeAssets);
   const inputRef = useRef<HTMLInputElement>(null);

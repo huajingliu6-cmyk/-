@@ -52,7 +52,7 @@ export function useWorkflowAutosave(projectId: string) {
       const sanitized = sanitizeWorkflowForPersist(doc);
       writeLocalBackup(sanitized);
 
-      try {
+      const putOnce = async () => {
         const res = await fetch(
           `/api/workflow?projectId=${encodeURIComponent(projectId)}`,
           {
@@ -61,13 +61,27 @@ export function useWorkflowAutosave(projectId: string) {
             body: JSON.stringify(sanitized),
           },
         );
-
-        const payload = await res.json();
-        if (requestId !== requestIdRef.current) return;
-
+        const payload = (await res.json()) as WorkflowDocument & {
+          error?: string;
+        };
         if (!res.ok) {
           throw new Error(payload.error ?? "保存失败");
         }
+        return payload;
+      };
+
+      try {
+        let payload: WorkflowDocument;
+        try {
+          payload = await putOnce();
+        } catch {
+          // 页面刚从后台恢复时，开发服/瞬时网络常失败一次；静默重试避免红字闪一下
+          await new Promise((r) => window.setTimeout(r, 450));
+          if (requestId !== requestIdRef.current) return;
+          payload = await putOnce();
+        }
+
+        if (requestId !== requestIdRef.current) return;
 
         const saved = migrateWorkflowDocument(payload);
         acknowledgeSave(saved.revision, saved.updatedAt);
@@ -95,6 +109,22 @@ export function useWorkflowAutosave(projectId: string) {
   }, [persist]);
 
   useEffect(() => {
+    // 同项目 store 已有数据时跳过：StrictMode/桥接重挂载不得再 set loading 闪屏
+    const snap = useWorkflowStore.getState();
+    if (
+      snap.projectId === projectId &&
+      snap.saveStatus !== "loading" &&
+      (snap.saveStatus === "loaded" ||
+        snap.saveStatus === "saved" ||
+        snap.saveStatus === "dirty" ||
+        snap.saveStatus === "error") &&
+      !snap.loadError
+    ) {
+      loadedRef.current = true;
+      lastHandledEpochRef.current = snap.saveEpoch;
+      return;
+    }
+
     let cancelled = false;
     loadedRef.current = false;
     setSaveStatus("loading");

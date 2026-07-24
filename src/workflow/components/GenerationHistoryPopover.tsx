@@ -1,6 +1,6 @@
 "use client";
 
-import { History } from "lucide-react";
+import { Film, History } from "lucide-react";
 import { AssetThumb } from "@/workflow/components/AssetThumb";
 import { GlassIconButton, glass } from "@/workflow/components/glass-ui";
 import { useAssetsByIds } from "@/workflow/hooks/useAssetById";
@@ -25,6 +25,14 @@ function isVideoAsset(asset: AssetRecord): boolean {
 
 function isAudioAsset(asset: AssetRecord): boolean {
   return asset.assetType === "audio" || asset.mimeType.startsWith("audio/");
+}
+
+function formatDurationHint(asset: AssetRecord): string {
+  const raw = asset.metadata?.durationSeconds ?? asset.metadata?.duration;
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+    return `${raw.toFixed(1)}s`;
+  }
+  return "视频";
 }
 
 export function GenerationHistoryButton({
@@ -81,6 +89,7 @@ export function GenerationHistoryPopover({
         <div className="flex max-w-full gap-1.5 overflow-x-auto pb-0.5">
           {items.map(({ id, asset }) => {
             const active = id === activeAssetId;
+            const isMock = Boolean(asset.metadata?.mock);
             return (
               <button
                 key={id}
@@ -98,15 +107,21 @@ export function GenerationHistoryPopover({
                     音频
                   </span>
                 ) : isVideoAsset(asset) ? (
-                  <>
-                    <AssetThumb
-                      src={asset.thumbnailUrl || asset.url}
-                      alt={asset.name}
-                    />
-                    <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-black/45 py-0.5 text-center text-[9px] text-white">
-                      视频
+                  <span className="flex h-full w-full flex-col items-center justify-center gap-0.5 bg-zinc-900 text-white">
+                    <Film className="h-4 w-4 opacity-90" />
+                    <span className="text-[8px] leading-none opacity-90">
+                      {formatDurationHint(asset)}
                     </span>
-                  </>
+                    {isMock ? (
+                      <span className="absolute left-0.5 top-0.5 rounded bg-amber-400 px-0.5 text-[7px] font-semibold text-zinc-900">
+                        Mock
+                      </span>
+                    ) : (
+                      <span className="absolute left-0.5 top-0.5 rounded bg-emerald-500/90 px-0.5 text-[7px] text-white">
+                        AI
+                      </span>
+                    )}
+                  </span>
                 ) : (
                   <AssetThumb src={asset.url} alt={asset.name} />
                 )}

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Mic2, Mountain, Package, UserRound } from "lucide-react";
+import { Clapperboard, Mic2, Mountain, Package, UserRound } from "lucide-react";
 import type { QuickCreateDockPosition, WorkflowNodeType } from "@/workflow/types";
 
 export type QuickCreateItem = {
@@ -12,6 +12,11 @@ export type QuickCreateItem = {
 };
 
 export const QUICK_CREATE_ITEMS: QuickCreateItem[] = [
+  {
+    type: "videoShot",
+    label: "视频",
+    icon: <Clapperboard className="h-4 w-4" />,
+  },
   {
     type: "character",
     label: "角色",
@@ -96,7 +101,7 @@ export function QuickCreateDock({
             isTop ? "" : "max-w-[7rem] text-center leading-snug"
           }`}
         >
-          点击上方按钮开始搭建镜头
+          点击上方按钮开始搭建，可先添加「视频」镜头
         </div>
       )}
     </div>

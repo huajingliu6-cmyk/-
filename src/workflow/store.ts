@@ -53,11 +53,11 @@ type WorkflowStore = {
   acknowledgeSave: (revision: number, updatedAt: string) => void;
   setNodes: (nodes: WorkflowNode[]) => void;
   setEdges: (edges: WorkflowEdge[]) => void;
-  /** 写入节点+边；immediate 默认 true，仅改坐标时传 false 走防抖保存 */
+  /** 写入节点+边；immediate 默认 true；persist:false 仅同步布局到内存，不触发自动保存 */
   replaceGraph: (
     nodes: WorkflowNode[],
     edges: WorkflowEdge[],
-    options?: { immediate?: boolean },
+    options?: { immediate?: boolean; persist?: boolean },
   ) => void;
   removeEdge: (edgeId: string) => void;
   setViewport: (viewport: WorkflowViewport) => void;
@@ -162,6 +162,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
   replaceGraph: (nodes, edges, options) => {
     const { document, saveEpoch, contentEpoch } = get();
+    const persist = options?.persist !== false;
     const immediate = options?.immediate !== false;
     const prevById = new Map(document.nodes.map((n) => [n.id, n]));
     // 保留未改动节点引用，减少重渲
@@ -194,13 +195,21 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           prev.targetHandle === edge.targetHandle
         );
       });
+    const nextDocument = {
+      ...document,
+      nodes: nextNodes,
+      edges: edgesUnchanged ? document.edges : edges,
+      shotOrder: pruneShotOrder(document.shotOrder, nextNodes),
+    };
+
+    // 仅布局（拖动节点）：写入内存，不 dirty、不自动保存
+    if (!persist) {
+      set({ document: nextDocument });
+      return;
+    }
+
     set({
-      document: {
-        ...document,
-        nodes: nextNodes,
-        edges: edgesUnchanged ? document.edges : edges,
-        shotOrder: pruneShotOrder(document.shotOrder, nextNodes),
-      },
+      document: nextDocument,
       saveStatus: "dirty",
       saveError: null,
       contentEpoch: contentEpoch + 1,
@@ -241,6 +250,20 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
   updateNodeData: (nodeId, data) => {
     const { document, contentEpoch } = get();
+    const target = document.nodes.find((node) => node.id === nodeId);
+    if (!target) return;
+
+    const prevData = target.data as Record<string, unknown>;
+    const patch = data as Record<string, unknown>;
+    let changed = false;
+    for (const key of Object.keys(patch)) {
+      if (!Object.is(prevData[key], patch[key])) {
+        changed = true;
+        break;
+      }
+    }
+    if (!changed) return;
+
     const nodes = document.nodes.map((node) => {
       if (node.id !== nodeId) return node;
       return {
@@ -285,7 +308,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   addNode: (node) => {
-    const { document, saveEpoch, contentEpoch } = get();
+    const { document, contentEpoch } = get();
     const shotOrder =
       node.type === "videoShot"
         ? appendVideoShotsToOrder(document.shotOrder, [node])
@@ -300,13 +323,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       saveError: null,
       selectedNodeId: node.id,
       lastEditedNodeId: node.id,
-      saveEpoch: saveEpoch + 1,
       contentEpoch: contentEpoch + 1,
     });
   },
 
   addNodesAndEdges: (nodes, edges) => {
-    const { document, saveEpoch, contentEpoch } = get();
+    const { document, contentEpoch } = get();
     const focusId = nodes[0]?.id ?? get().selectedNodeId;
     set({
       document: {
@@ -319,7 +341,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       saveError: null,
       selectedNodeId: focusId,
       lastEditedNodeId: nodes[0]?.id ?? get().lastEditedNodeId,
-      saveEpoch: saveEpoch + 1,
+      // 走防抖保存，避免连点新建时每次都立刻 PUT 造成闪烁
       contentEpoch: contentEpoch + 1,
     });
   },

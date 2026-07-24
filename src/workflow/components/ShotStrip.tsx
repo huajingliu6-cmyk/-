@@ -5,6 +5,7 @@ import {
   ChevronUp,
   Copy,
   PanelBottom,
+  Plus,
   Trash2,
 } from "lucide-react";
 import { useWorkflowStore } from "@/workflow/store";
@@ -26,6 +27,7 @@ type Props = {
   onDuplicateShot: (shotId: string) => void;
   onDeleteShot: (shotId: string) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
+  onAddShot: () => void;
 };
 
 export function ShotStrip({
@@ -35,13 +37,18 @@ export function ShotStrip({
   onDuplicateShot,
   onDeleteShot,
   onReorder,
+  onAddShot,
 }: Props) {
   const shotOrder = useWorkflowStore((s) => s.document.shotOrder);
   const nodes = useWorkflowStore((s) => s.document.nodes);
   const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId);
 
   const shots = shotOrder
-    .map((id) => nodes.find((n): n is VideoShotNode => n.id === id && n.type === "videoShot"))
+    .map((id) =>
+      nodes.find(
+        (n): n is VideoShotNode => n.id === id && n.type === "videoShot",
+      ),
+    )
     .filter((n): n is VideoShotNode => Boolean(n));
 
   if (collapsed) {
@@ -55,6 +62,15 @@ export function ShotStrip({
           <PanelBottom className="h-3.5 w-3.5" />
           镜头条 ({shots.length})
         </button>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
+          onClick={onAddShot}
+          title="新建视频镜头"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          视频
+        </button>
       </div>
     );
   }
@@ -64,23 +80,41 @@ export function ShotStrip({
       <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-1.5">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-zinc-300">镜头条</span>
-          <span className="text-[11px] text-zinc-500">{shots.length} 个镜头</span>
+          <span className="text-[11px] text-zinc-500">
+            {shots.length} 个镜头
+          </span>
         </div>
-        <button
-          type="button"
-          className="rounded p-1 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
-          onClick={onToggle}
-          title="收起镜头条"
-        >
-          <ChevronDown className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
+            onClick={onAddShot}
+            title="新建视频镜头"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            新建视频
+          </button>
+          <button
+            type="button"
+            className="rounded p-1 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
+            onClick={onToggle}
+            title="收起镜头条"
+          >
+            <ChevronDown className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-1 gap-2 overflow-x-auto p-2">
         {shots.length === 0 && (
-          <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-zinc-800 text-[11px] text-zinc-500">
-            暂无镜头，可从快速创建栏新建视频节点
-          </div>
+          <button
+            type="button"
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-dashed border-zinc-700 text-[11px] text-zinc-400 transition hover:border-emerald-500/50 hover:bg-emerald-950/20 hover:text-emerald-200"
+            onClick={onAddShot}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            点击新建视频镜头
+          </button>
         )}
 
         {shots.map((shot, index) => {

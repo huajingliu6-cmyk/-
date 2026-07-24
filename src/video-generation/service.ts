@@ -156,13 +156,19 @@ export async function submitVideoGeneration(params: {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "提交失败";
+    const code =
+      err instanceof Error &&
+      "code" in err &&
+      typeof (err as { code?: unknown }).code === "string"
+        ? (err as { code: string }).code
+        : "SUBMIT_FAILED";
     record = await updateGenerationRecord(id, {
       status: "failed",
-      errorCode: "SUBMIT_FAILED",
+      errorCode: code,
       errorMessage: message,
       progressLabel: "提交失败",
     });
-    throw Object.assign(new Error(message), { generation: record });
+    throw Object.assign(new Error(message), { generation: record, code });
   }
 
   if (params.idempotencyKey) {
@@ -185,6 +191,22 @@ export async function refreshGenerationStatus(
     current.status === "cancelled" ||
     current.status === "resultTransferFailed"
   ) {
+    return current;
+  }
+
+  // 已有本地结果则直接收口为完成，避免 Mock 内存任务丢失后把成功态刷成失败
+  if (current.localVideoAssetId || current.resultAsset) {
+    if (current.status === "downloading") {
+      return updateGenerationRecord(generationId, {
+        status: "completed",
+        progressLabel: current.isMock
+          ? "Mock 演示结果，不是真实 AI 视频"
+          : "已完成",
+        completedAt: current.completedAt ?? new Date().toISOString(),
+        errorCode: null,
+        errorMessage: null,
+      });
+    }
     return current;
   }
 
@@ -215,8 +237,9 @@ export async function refreshGenerationStatus(
     errorMessage: status.errorMessage ?? current.errorMessage,
   });
 
+  const remoteUrl = status.remoteVideoUrl ?? next.remoteVideoUrl;
   if (
-    status.remoteVideoUrl &&
+    remoteUrl &&
     (status.status === "downloading" || status.rawTaskStatus === "SUCCEEDED") &&
     !next.localVideoAssetId
   ) {
@@ -226,11 +249,11 @@ export async function refreshGenerationStatus(
         progressLabel: next.isMock
           ? "Mock · 正在转存"
           : "正在转存结果视频",
-        remoteVideoUrl: status.remoteVideoUrl,
+        remoteVideoUrl: remoteUrl,
       });
       const transferred = await transferRemoteVideoToLocal({
         projectId: next.projectId,
-        remoteVideoUrl: status.remoteVideoUrl,
+        remoteVideoUrl: remoteUrl,
         title: options?.title ?? "镜头",
         generationId,
         isMock: next.isMock,
@@ -243,6 +266,8 @@ export async function refreshGenerationStatus(
         localVideoAssetId: transferred.asset.id,
         resultAsset: transferred.asset,
         completedAt: new Date().toISOString(),
+        errorCode: null,
+        errorMessage: null,
       });
     } catch (err) {
       next = await updateGenerationRecord(generationId, {
@@ -251,7 +276,7 @@ export async function refreshGenerationStatus(
         errorMessage:
           err instanceof Error ? err.message : "结果视频转存失败",
         progressLabel: "结果转存失败",
-        remoteVideoUrl: status.remoteVideoUrl,
+        remoteVideoUrl: remoteUrl,
       });
     }
   }

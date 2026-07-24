@@ -9,6 +9,7 @@ import { ImageLightbox } from "@/workflow/components/ImageLightbox";
 import { NodePorts } from "@/workflow/components/nodes/NodePorts";
 import { useAssetsByIds } from "@/workflow/hooks/useAssetById";
 import { uploadAssetFile } from "@/workflow/lib/upload-asset";
+import { useWorkflowNodeData } from "@/workflow/hooks/useWorkflowNodeData";
 import { useWorkflowStore } from "@/workflow/store";
 import type { ImageNodeData, ImageReferenceType } from "@/workflow/types";
 
@@ -24,12 +25,7 @@ const REF_LABEL: Record<ImageReferenceType, string> = {
 
 export function ImageNodeView({ id, selected }: NodeProps) {
   const projectId = useWorkflowStore((s) => s.projectId);
-  const nodeData = useWorkflowStore(
-    (s) =>
-      s.document.nodes.find((n) => n.id === id)?.data as
-        | ImageNodeData
-        | undefined,
-  );
+  const nodeData = useWorkflowNodeData<ImageNodeData>(id);
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const commitNodeAssets = useWorkflowStore((s) => s.commitNodeAssets);
   const inputRef = useRef<HTMLInputElement>(null);

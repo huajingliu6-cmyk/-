@@ -14,7 +14,6 @@ import {
   Save,
   Undo2,
 } from "lucide-react";
-import type { SaveStatus } from "@/workflow/store";
 import type {
   NodeDensity,
   QuickCreateDockPosition,
@@ -22,6 +21,7 @@ import type {
 } from "@/workflow/types";
 import { BrandMark } from "@/workflow/components/BrandMark";
 import { AuthUserMenu } from "@/auth/AuthUserMenu";
+import { useWorkflowStore, type SaveStatus } from "@/workflow/store";
 
 const STATUS_LABEL: Record<SaveStatus, string> = {
   loading: "正在加载",
@@ -34,8 +34,6 @@ const STATUS_LABEL: Record<SaveStatus, string> = {
 
 type Props = {
   projectName: string;
-  saveStatus: SaveStatus;
-  saveError: string | null;
   layoutMode: WorkbenchLayoutMode;
   dockPosition: QuickCreateDockPosition;
   nodeDensity: NodeDensity;
@@ -49,8 +47,6 @@ type Props = {
 
 export function WorkflowToolbar({
   projectName,
-  saveStatus,
-  saveError,
   layoutMode,
   dockPosition,
   nodeDensity,
@@ -61,6 +57,9 @@ export function WorkflowToolbar({
   onDockPositionChange,
   onNodeDensityChange,
 }: Props) {
+  // 工具栏自己订阅保存状态，避免每次 dirty/saving/saved 拖着整张画布重渲
+  const saveStatus = useWorkflowStore((s) => s.saveStatus);
+  const saveError = useWorkflowStore((s) => s.saveError);
   return (
     <header className="relative flex h-14 shrink-0 items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-950/95 px-3 text-zinc-100">
       <div className="flex min-w-0 items-center gap-2">
@@ -155,12 +154,14 @@ export function WorkflowToolbar({
           ))}
         </div>
 
-        <div className="flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1 text-xs">
-          {(saveStatus === "loading" || saveStatus === "saving") && (
-            <BrandMark size={14} spin />
-          )}
+        <div className="flex w-[9.5rem] shrink-0 items-center gap-2 rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1 text-xs">
+          <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+            {(saveStatus === "loading" || saveStatus === "saving") && (
+              <BrandMark size={14} spin />
+            )}
+          </span>
           <span
-            className={
+            className={`min-w-0 flex-1 truncate ${
               saveStatus === "error"
                 ? "text-rose-300"
                 : saveStatus === "saved"
@@ -168,7 +169,7 @@ export function WorkflowToolbar({
                   : saveStatus === "dirty" || saveStatus === "saving"
                     ? "text-amber-300"
                     : "text-zinc-300"
-            }
+            }`}
           >
             {STATUS_LABEL[saveStatus]}
           </span>

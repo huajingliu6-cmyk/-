@@ -10,17 +10,13 @@ import { GlassIconButton, glass } from "@/workflow/components/glass-ui";
 import { NodePorts } from "@/workflow/components/nodes/NodePorts";
 import { useAssetById, useAssetsByIds } from "@/workflow/hooks/useAssetById";
 import { uploadAssetFile } from "@/workflow/lib/upload-asset";
+import { useWorkflowNodeData } from "@/workflow/hooks/useWorkflowNodeData";
 import { useWorkflowStore } from "@/workflow/store";
 import type { PropNodeData } from "@/workflow/types";
 
 export function PropNodeView({ id, selected }: NodeProps) {
   const projectId = useWorkflowStore((s) => s.projectId);
-  const nodeData = useWorkflowStore(
-    (s) =>
-      s.document.nodes.find((n) => n.id === id)?.data as
-        | PropNodeData
-        | undefined,
-  );
+  const nodeData = useWorkflowNodeData<PropNodeData>(id);
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const commitNodeAssets = useWorkflowStore((s) => s.commitNodeAssets);
   const inputRef = useRef<HTMLInputElement>(null);

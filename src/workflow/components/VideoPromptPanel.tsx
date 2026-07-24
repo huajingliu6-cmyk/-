@@ -48,9 +48,12 @@ type PublicConfig = {
   r2vModelId: string;
 };
 
-type Props = { nodeId: string };
+type Props = {
+  nodeId: string;
+  onOpenVideoResult?: (generation: GenerationRecord | null) => void;
+};
 
-export function VideoPromptPanel({ nodeId }: Props) {
+export function VideoPromptPanel({ nodeId, onOpenVideoResult }: Props) {
   const projectId = useWorkflowStore((s) => s.projectId);
   const node = useWorkflowStore((s) =>
     s.document.nodes.find((n) => n.id === nodeId),
@@ -104,8 +107,10 @@ export function VideoPromptPanel({ nodeId }: Props) {
 
   useEffect(() => {
     if (!config) return;
+    // 仅在 provider 真正变化时写入，避免选中镜头就 dirty→保存→HMR 死循环
+    if (data?.provider === config.providerId) return;
     updateNodeData(nodeId, { provider: config.providerId });
-  }, [config, nodeId, updateNodeData]);
+  }, [config, data?.provider, nodeId, updateNodeData]);
 
   const builtPreview = useMemo(() => {
     if (!data) return null;
@@ -161,30 +166,30 @@ export function VideoPromptPanel({ nodeId }: Props) {
           comparison?: Array<{ message: string }>;
         };
         if (!payload.generation) return;
-        setGeneration(payload.generation);
         const g = payload.generation;
-        updateNodeData(nodeId, {
-          status:
-            g.status === "completed"
-              ? "completed"
-              : g.status === "failed" || g.status === "resultTransferFailed"
-                ? "failed"
-                : g.status === "cancelled"
-                  ? "cancelled"
-                  : "processing",
-          progress: 0,
-          errorMessage: g.errorMessage ?? "",
-        });
+        setGeneration(g);
+
+        const current = useWorkflowStore.getState().document.nodes.find(
+          (n) => n.id === nodeId,
+        )?.data as VideoShotNodeData | undefined;
+
+        // 已有成片时忽略后续失败/重复轮询，避免把成功刷成「任务不存在」
+        if (current?.resultAssetId && current.status === "completed") {
+          stop();
+          return;
+        }
+
         if (g.resultAsset && g.status === "completed") {
           commitNodeAssets(nodeId, [g.resultAsset], {
             status: "completed",
             progress: 100,
             resultAssetId: g.resultAsset.id,
             generationHistoryIds: prependGenerationHistory(
-              data.generationHistoryIds,
+              current?.generationHistoryIds ?? [],
               g.resultAsset.id,
             ),
             activeGenerationId: g.id,
+            errorMessage: "",
           });
           if (payload.comparison && payload.comparison.length > 0) {
             setNotice(payload.comparison.map((c) => c.message).join("；"));
@@ -192,7 +197,29 @@ export function VideoPromptPanel({ nodeId }: Props) {
             setNotice(g.progressLabel);
           }
           stop();
+          return;
         }
+
+        const nextStatus =
+          g.status === "failed" || g.status === "resultTransferFailed"
+            ? "failed"
+            : g.status === "cancelled"
+              ? "cancelled"
+              : "processing";
+        const nextError = g.errorMessage ?? "";
+
+        if (
+          !current ||
+          current.status !== nextStatus ||
+          current.errorMessage !== nextError
+        ) {
+          updateNodeData(nodeId, {
+            status: nextStatus,
+            progress: 0,
+            errorMessage: nextError,
+          });
+        }
+
         if (
           g.status === "failed" ||
           g.status === "cancelled" ||
@@ -207,15 +234,9 @@ export function VideoPromptPanel({ nodeId }: Props) {
     };
 
     void tick();
-    pollRef.current = setInterval(() => void tick(), 15_000);
+    pollRef.current = setInterval(() => void tick(), 3_500);
     return stop;
-  }, [
-    data?.activeGenerationId,
-    data?.generationHistoryIds,
-    nodeId,
-    updateNodeData,
-    commitNodeAssets,
-  ]);
+  }, [data?.activeGenerationId, nodeId, updateNodeData, commitNodeAssets]);
 
   if (!data) return null;
 
@@ -270,6 +291,14 @@ export function VideoPromptPanel({ nodeId }: Props) {
       errorMessage: "",
     });
     setNotice("已切换到历史视频生成");
+    if (
+      generation?.resultAsset?.id === assetId ||
+      generation?.localVideoAssetId === assetId
+    ) {
+      onOpenVideoResult?.(generation);
+    } else {
+      onOpenVideoResult?.(null);
+    }
   };
 
   const onConfirmGenerate = async (confirmPaid: boolean) => {

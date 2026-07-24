@@ -11,17 +11,13 @@ import { GlassIconButton, glass } from "@/workflow/components/glass-ui";
 import { NodePorts } from "@/workflow/components/nodes/NodePorts";
 import { useAssetById, useAssetsByIds } from "@/workflow/hooks/useAssetById";
 import { uploadAssetFile } from "@/workflow/lib/upload-asset";
+import { useWorkflowNodeData } from "@/workflow/hooks/useWorkflowNodeData";
 import { useWorkflowStore } from "@/workflow/store";
 import type { SceneNodeData, SceneViewpoint } from "@/workflow/types";
 
 export function SceneNodeView({ id, selected }: NodeProps) {
   const projectId = useWorkflowStore((s) => s.projectId);
-  const nodeData = useWorkflowStore(
-    (s) =>
-      s.document.nodes.find((n) => n.id === id)?.data as
-        | SceneNodeData
-        | undefined,
-  );
+  const nodeData = useWorkflowNodeData<SceneNodeData>(id);
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const commitNodeAssets = useWorkflowStore((s) => s.commitNodeAssets);
   const inputRef = useRef<HTMLInputElement>(null);

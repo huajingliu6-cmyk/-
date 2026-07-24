@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   Background,
   BackgroundVariant,
@@ -18,7 +18,12 @@ import {
   type FinalConnectionState,
   type Node,
   type NodeChange,
+  type OnConnect,
+  type OnConnectEnd,
+  type OnEdgesChange,
+  type OnMove,
   type OnNodeDrag,
+  type OnNodesChange,
   type OnSelectionChangeParams,
   type Viewport,
 } from "@xyflow/react";
@@ -66,8 +71,9 @@ import { createNodeByType, createNodeId } from "@/workflow/create-node";
 import { DEMO_PROJECT_ID } from "@/workflow/default-workflow";
 import { useWorkflowAutosave } from "@/workflow/hooks/useWorkflowAutosave";
 import {
-  DEFAULT_LAYOUT_PREFS,
-  readLayoutPrefs,
+  getLayoutPrefsSnapshot,
+  getServerLayoutPrefsSnapshot,
+  subscribeLayoutPrefs,
   writeLayoutPrefs,
 } from "@/workflow/lib/layout-prefs";
 import { useWorkflowStore } from "@/workflow/store";
@@ -131,32 +137,173 @@ function nextShotNumber(nodes: WorkflowNode[]): number {
   return Math.max(...shots.map((s) => s.data.shotNumber)) + 1;
 }
 
-function WorkflowCanvas() {
+/** 自动保存桥：订阅 save 状态但不挂在画布树上，避免每次 dirty/saving 重渲 React Flow */
+function WorkflowAutosaveBridge({
+  projectId,
+  saveNowRef,
+}: {
+  projectId: string;
+  saveNowRef: React.MutableRefObject<() => void>;
+}) {
+  const { saveNow } = useWorkflowAutosave(projectId);
+  useEffect(() => {
+    saveNowRef.current = saveNow;
+  }, [saveNow, saveNowRef]);
+  return null;
+}
+
+const StableReactFlow = memo(function StableReactFlow({
+  nodes,
+  edges,
+  onNodesChange,
+  onEdgesChange,
+  onConnect,
+  onConnectEnd,
+  isValidConnection,
+  onSelectionChange,
+  onNodeDragStart,
+  onNodeDrag,
+  onNodeDragStop,
+  onNodeContextMenu,
+  onEdgeContextMenu,
+  onPaneContextMenu,
+  onPaneClick,
+  onMoveEnd,
+  onDragOver,
+  onDropAsset,
+  fixedAlign,
+  helperLines,
+  defaultEdgeOptions,
+  onMiniMapClick,
+  onMiniMapNodeClick,
+}: {
+  nodes: Node[];
+  edges: Edge[];
+  onNodesChange: OnNodesChange;
+  onEdgesChange: OnEdgesChange;
+  onConnect: OnConnect;
+  onConnectEnd: OnConnectEnd;
+  isValidConnection: (connection: Connection | Edge) => boolean;
+  onSelectionChange: (params: OnSelectionChangeParams) => void;
+  onNodeDragStart: OnNodeDrag;
+  onNodeDrag: OnNodeDrag;
+  onNodeDragStop: OnNodeDrag;
+  onNodeContextMenu: (event: React.MouseEvent, node: Node) => void;
+  onEdgeContextMenu: (event: React.MouseEvent, edge: Edge) => void;
+  onPaneContextMenu: (event: React.MouseEvent | MouseEvent) => void;
+  onPaneClick: () => void;
+  onMoveEnd: OnMove;
+  onDragOver: (event: React.DragEvent) => void;
+  onDropAsset: (event: React.DragEvent) => void;
+  fixedAlign: boolean;
+  helperLines: HelperLinesState;
+  defaultEdgeOptions: { style: { stroke: string; strokeWidth: number }; interactionWidth: number };
+  onMiniMapClick: (event: React.MouseEvent, position: { x: number; y: number }) => void;
+  onMiniMapNodeClick: (event: React.MouseEvent, node: Node) => void;
+}) {
+  return (
+    <ReactFlow
+      nodes={nodes}
+      edges={edges}
+      nodeTypes={workflowNodeTypes}
+      onNodesChange={onNodesChange}
+      onEdgesChange={onEdgesChange}
+      onConnect={onConnect}
+      onConnectEnd={onConnectEnd}
+      isValidConnection={isValidConnection}
+      onSelectionChange={onSelectionChange}
+      onNodeDragStart={onNodeDragStart}
+      onNodeDrag={onNodeDrag}
+      onNodeDragStop={onNodeDragStop}
+      onNodeContextMenu={onNodeContextMenu}
+      onEdgeContextMenu={onEdgeContextMenu}
+      onPaneContextMenu={onPaneContextMenu}
+      onPaneClick={onPaneClick}
+      onMoveEnd={onMoveEnd}
+      onDragOver={onDragOver}
+      onDrop={onDropAsset}
+      edgesFocusable
+      elementsSelectable
+      selectNodesOnDrag={false}
+      elevateNodesOnSelect={false}
+      deleteKeyCode={["Backspace", "Delete"]}
+      multiSelectionKeyCode={["Meta", "Control"]}
+      selectionOnDrag={false}
+      panOnDrag
+      panActivationKeyCode={null}
+      zoomOnScroll
+      minZoom={0.2}
+      maxZoom={2}
+      snapToGrid={fixedAlign}
+      snapGrid={[CANVAS_GRID_SIZE, CANVAS_GRID_SIZE]}
+      defaultEdgeOptions={defaultEdgeOptions}
+      className="h-full w-full bg-[#0b0f14]"
+      proOptions={{ hideAttribution: true }}
+    >
+      <Background
+        variant={
+          fixedAlign ? BackgroundVariant.Lines : BackgroundVariant.Dots
+        }
+        gap={fixedAlign ? CANVAS_GRID_SIZE : 18}
+        size={1}
+        color={fixedAlign ? "#1e293b" : "#2a3340"}
+        lineWidth={fixedAlign ? 0.6 : undefined}
+      />
+      {fixedAlign && (
+        <HelperLinesOverlay
+          horizontal={helperLines.horizontal}
+          vertical={helperLines.vertical}
+        />
+      )}
+      <Controls className="!border-zinc-700 !bg-zinc-900 !shadow-lg" />
+      <MiniMap
+        className="!cursor-pointer !border !border-zinc-700 !bg-zinc-900"
+        maskColor="rgba(0,0,0,0.55)"
+        nodeColor="#334155"
+        pannable
+        zoomable
+        onClick={onMiniMapClick}
+        onNodeClick={onMiniMapNodeClick}
+      />
+    </ReactFlow>
+  );
+});
+
+function WorkflowCanvas({
+  saveNowRef,
+}: {
+  saveNowRef: React.MutableRefObject<() => void>;
+}) {
   const projectId = useWorkflowStore((s) => s.projectId) || DEMO_PROJECT_ID;
-  const nodeCount = useWorkflowStore((s) => s.document.nodes.length);
-  const documentRevision = useWorkflowStore((s) => s.document.revision);
-  const saveStatus = useWorkflowStore((s) => s.saveStatus);
-  const saveError = useWorkflowStore((s) => s.saveError);
-  const connectionError = useWorkflowStore((s) => s.connectionError);
+  // 只关心是否仍在首屏加载，避免 dirty/saving/saved 触发整画布重渲
+  const stillLoading = useWorkflowStore((s) => s.saveStatus === "loading");
   const loadError = useWorkflowStore((s) => s.loadError);
+  const [connectionError, setLocalConnectionError] = useState<string | null>(
+    null,
+  );
   const replaceGraphInStore = useWorkflowStore((s) => s.replaceGraph);
   const setViewportInStore = useWorkflowStore((s) => s.setViewport);
   const addNodesAndEdges = useWorkflowStore((s) => s.addNodesAndEdges);
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const setSelectedNodeId = useWorkflowStore((s) => s.setSelectedNodeId);
   const touchLastEditedNode = useWorkflowStore((s) => s.touchLastEditedNode);
-  const setConnectionError = useWorkflowStore((s) => s.setConnectionError);
+  const setStoreConnectionError = useWorkflowStore((s) => s.setConnectionError);
   const addAsset = useWorkflowStore((s) => s.addAsset);
   const setShotOrder = useWorkflowStore((s) => s.setShotOrder);
 
-  const { saveNow } = useWorkflowAutosave(projectId);
+  const setConnectionError = useCallback((message: string | null) => {
+    setStoreConnectionError(message);
+    setLocalConnectionError(message);
+  }, [setStoreConnectionError]);
+
   const { fitView, screenToFlowPosition, setViewport, getNode, setCenter, getZoom } =
     useReactFlow();
 
-  const [layoutPrefs, setLayoutPrefs] = useState<WorkbenchLayoutPrefs>(() => {
-    if (typeof window === "undefined") return DEFAULT_LAYOUT_PREFS;
-    return readLayoutPrefs();
-  });
+  const layoutPrefs = useSyncExternalStore(
+    subscribeLayoutPrefs,
+    getLayoutPrefsSnapshot,
+    getServerLayoutPrefsSnapshot,
+  );
   const [nodes, setNodes] = useState<Node[]>(() =>
     toFlowNodes(useWorkflowStore.getState().document.nodes),
   );
@@ -164,8 +311,24 @@ function WorkflowCanvas() {
     toFlowEdges(useWorkflowStore.getState().document.edges),
   );
   const [hydratedRevision, setHydratedRevision] = useState<number | null>(
-    null,
+    () => {
+      // 热更新 / 组件重挂载时 store 仍在，直接视为已灌入，避免先闪加载屏再整页重绘
+      const snap = useWorkflowStore.getState();
+      if (snap.saveStatus === "loading") return null;
+      if (
+        snap.saveStatus === "loaded" ||
+        snap.saveStatus === "saved" ||
+        snap.saveStatus === "dirty" ||
+        snap.saveStatus === "error"
+      ) {
+        return snap.document.revision;
+      }
+      return null;
+    },
   );
+  const canvasReady = hydratedRevision !== null;
+  const [resumeMask, setResumeMask] = useState(false);
+  const hiddenAtRef = useRef<number | null>(null);
   const [contextMenu, setContextMenu] = useState<NodeContextMenuState | null>(
     null,
   );
@@ -185,42 +348,39 @@ function WorkflowCanvas() {
   });
   const fixedAlign = layoutPrefs.nodeDensity === "fixed";
 
-  const persistLayoutPrefs = useCallback((patch: Partial<WorkbenchLayoutPrefs>) => {
-    setLayoutPrefs((current) => {
-      const next = { ...current, ...patch };
-      writeLayoutPrefs(next);
-      return next;
-    });
-  }, []);
+  const persistLayoutPrefs = useCallback(
+    (patch: Partial<WorkbenchLayoutPrefs>) => {
+      writeLayoutPrefs({ ...getLayoutPrefsSnapshot(), ...patch });
+    },
+    [],
+  );
 
   useEffect(() => {
     nodesRef.current = nodes;
     edgesRef.current = edges;
   }, [nodes, edges]);
 
-  /** 属性面板 / 提示栏解除参考时，store 边变化需同步到 React Flow 本地边 */
-  const storeEdgeSignature = useWorkflowStore((s) =>
-    s.document.edges.map((e) => e.id).join("|"),
-  );
+  /** store 边变化（属性面板断开等）同步到本地，不通过 selector 订阅以免拖着画布重渲 */
   useEffect(() => {
-    if (draggingRef.current) return;
-    const storeEdges = toFlowEdges(
-      useWorkflowStore.getState().document.edges,
-    );
-    const localIds = edgesRef.current.map((e) => e.id).join("|");
-    const storeIds = storeEdges.map((e) => e.id).join("|");
-    if (localIds === storeIds) return;
-    setEdges(storeEdges);
-    edgesRef.current = storeEdges;
-  }, [storeEdgeSignature]);
+    return useWorkflowStore.subscribe((state, prev) => {
+      if (state.document.edges === prev.document.edges) return;
+      if (draggingRef.current) return;
+      const storeEdges = toFlowEdges(state.document.edges);
+      const localIds = edgesRef.current.map((e) => e.id).join("|");
+      const storeIds = storeEdges.map((e) => e.id).join("|");
+      if (localIds === storeIds) return;
+      setEdges(storeEdges);
+      edgesRef.current = storeEdges;
+    });
+  }, []);
 
   useEffect(() => {
-    // 仅在首次 loaded 时灌入画布；不要依赖 document.nodes 以免上传/保存时反复触发
-    if (saveStatus !== "loaded") return;
-    if (hydratedRevision === documentRevision) return;
+    // 仅首次从服务器加载完成后灌入一次；之后保存涨 revision 不得整表 setNodes
+    if (canvasReady) return;
+    if (stillLoading) return;
 
     let cancelled = false;
-    const revision = documentRevision;
+    const revision = useWorkflowStore.getState().document.revision;
     const snapshot = useWorkflowStore.getState().document;
     const nextNodes = toFlowNodes(snapshot.nodes);
     const nextEdges = toFlowEdges(snapshot.edges);
@@ -231,7 +391,6 @@ function WorkflowCanvas() {
       syncingViewportRef.current = true;
       setNodes(nextNodes);
       setEdges(nextEdges);
-      // 首屏用瞬时贴合，避免 220ms 动画造成整画布闪动
       if (
         Number.isFinite(nextViewport.x) &&
         Number.isFinite(nextViewport.y) &&
@@ -252,19 +411,31 @@ function WorkflowCanvas() {
     return () => {
       cancelled = true;
     };
-  }, [
-    saveStatus,
-    documentRevision,
-    hydratedRevision,
-    fitView,
-    setViewport,
-  ]);
+  }, [stillLoading, canvasReady, fitView, setViewport]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        hiddenAtRef.current = Date.now();
+        return;
+      }
+      const hiddenAt = hiddenAtRef.current;
+      hiddenAtRef.current = null;
+      if (hiddenAt == null) return;
+      // 后台超过 45s 再回来：短遮罩盖住 HMR/重绘闪一下
+      if (Date.now() - hiddenAt < 45_000) return;
+      setResumeMask(true);
+      window.setTimeout(() => setResumeMask(false), 320);
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
 
   const commitGraph = useCallback(
     (
       nextNodes: Node[],
       nextEdges: Edge[],
-      options?: { immediate?: boolean },
+      options?: { immediate?: boolean; persist?: boolean },
     ) => {
       try {
         const storeNodes = useWorkflowStore.getState().document.nodes;
@@ -285,16 +456,9 @@ function WorkflowCanvas() {
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      // 忽略无意义的 dimensions / 未变化的 select，避免整表节点引用抖动闪烁
+      // 忽略测量回写：新节点 mount 后 dimensions 会触发整表 setNodes，是连点闪烁主因之一
       const meaningful = changes.filter((change) => {
-        if (change.type === "dimensions") {
-          const current = nodesRef.current.find((n) => n.id === change.id);
-          if (!current || !change.dimensions) return true;
-          return (
-            current.width !== change.dimensions.width ||
-            current.height !== change.dimensions.height
-          );
-        }
+        if (change.type === "dimensions") return false;
         if (change.type === "select") {
           const current = nodesRef.current.find((n) => n.id === change.id);
           if (!current) return true;
@@ -304,37 +468,36 @@ function WorkflowCanvas() {
       });
       if (meaningful.length === 0) return;
 
-      setNodes((current) => {
-        const next = applyNodeChanges(meaningful, current);
-        nodesRef.current = next;
-        const removed = meaningful.some((c) => c.type === "remove");
-        if (removed) {
-          const removedIds = new Set(
-            meaningful.filter((c) => c.type === "remove").map((c) => c.id),
-          );
-          const nextEdges = edgesRef.current.filter(
-            (e) => !removedIds.has(e.source) && !removedIds.has(e.target),
-          );
-          setEdges(nextEdges);
-          edgesRef.current = nextEdges;
-          commitGraph(next, nextEdges);
-        }
-        return next;
-      });
+      const next = applyNodeChanges(meaningful, nodesRef.current);
+      nodesRef.current = next;
+      const removed = meaningful.some((c) => c.type === "remove");
+      if (removed) {
+        const removedIds = new Set(
+          meaningful.filter((c) => c.type === "remove").map((c) => c.id),
+        );
+        const nextEdges = edgesRef.current.filter(
+          (e) => !removedIds.has(e.source) && !removedIds.has(e.target),
+        );
+        edgesRef.current = nextEdges;
+        setNodes(next);
+        setEdges(nextEdges);
+        commitGraph(next, nextEdges, { immediate: false });
+        return;
+      }
+      setNodes(next);
     },
     [commitGraph],
   );
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
-      setEdges((current) => {
-        const next = applyEdgeChanges(changes, current);
-        const removed = changes.some((c) => c.type === "remove");
-        if (removed) {
-          commitGraph(nodesRef.current, next);
-        }
-        return next;
-      });
+      const next = applyEdgeChanges(changes, edgesRef.current);
+      edgesRef.current = next;
+      const removed = changes.some((c) => c.type === "remove");
+      setEdges(next);
+      if (removed) {
+        commitGraph(nodesRef.current, next, { immediate: false });
+      }
     },
     [commitGraph],
   );
@@ -386,17 +549,16 @@ function WorkflowCanvas() {
 
       setConnectionError(null);
       setConnectDropMenu(null);
-      setEdges((eds) => {
-        const next = addEdge(
-          {
-            ...connection,
-            id: `e-${connection.source}-${connection.sourceHandle}-${connection.target}-${connection.targetHandle}-${Date.now()}`,
-          },
-          eds,
-        );
-        commitGraph(nodesRef.current, next);
-        return next;
-      });
+      const next = addEdge(
+        {
+          ...connection,
+          id: `e-${connection.source}-${connection.sourceHandle}-${connection.target}-${connection.targetHandle}-${Date.now()}`,
+        },
+        edgesRef.current,
+      );
+      edgesRef.current = next;
+      setEdges(next);
+      commitGraph(nodesRef.current, next);
     },
     [commitGraph, setConnectionError, resolveWorkflowNodes],
   );
@@ -477,21 +639,22 @@ function WorkflowCanvas() {
       }
 
       addNodesAndEdges([created], [edge]);
-      setNodes((nds) => [...nds, ...toFlowNodes([created])]);
-      setEdges((eds) => {
-        const next = [
-          ...eds,
-          {
-            id: edge.id,
-            source: edge.source,
-            target: edge.target,
-            sourceHandle: edge.sourceHandle,
-            targetHandle: edge.targetHandle,
-          },
-        ];
-        edgesRef.current = next;
-        return next;
-      });
+      const flowNode = toFlowNodes([created])[0]!;
+      const nextNodes = [...nodesRef.current, flowNode];
+      const nextEdges: Edge[] = [
+        ...edgesRef.current,
+        {
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          sourceHandle: edge.sourceHandle,
+          targetHandle: edge.targetHandle,
+        },
+      ];
+      nodesRef.current = nextNodes;
+      edgesRef.current = nextEdges;
+      setNodes(nextNodes);
+      setEdges(nextEdges);
       setSelectedNodeId(created.id);
       setConnectDropMenu(null);
     },
@@ -556,7 +719,9 @@ function WorkflowCanvas() {
         nextShotNumber(storeDoc.nodes),
       );
       addNodesAndEdges([created], []);
-      setNodes((nds) => [...nds, ...toFlowNodes([created])]);
+      const nextNodes = [...nodesRef.current, ...toFlowNodes([created])];
+      nodesRef.current = nextNodes;
+      setNodes(nextNodes);
       setSelectedNodeId(created.id);
       setConnectionError(null);
     },
@@ -624,7 +789,8 @@ function WorkflowCanvas() {
   );
 
   /**
-   * 拖动结束：合并坐标后写入 store；immediate:false 走防抖保存，避免松手瞬间闪烁。
+   * 拖动结束：只把坐标同步进内存，不触发自动保存。
+   * 下次编辑文字 / 生成内容保存时会带上最新位置。
    */
   const onNodeDragStop: OnNodeDrag = useCallback(
     (_event, draggedNode) => {
@@ -642,7 +808,7 @@ function WorkflowCanvas() {
           n.id === draggedNode.id ? { ...n, position: { ...position } } : n,
         );
         nodesRef.current = next;
-        commitGraph(next, edgesRef.current, { immediate: false });
+        commitGraph(next, edgesRef.current, { persist: false });
         return next;
       });
     },
@@ -650,20 +816,26 @@ function WorkflowCanvas() {
   );
 
   const focusNodeById = useCallback(
-    (nodeId: string) => {
+    (nodeId: string, options?: { fit?: boolean }) => {
       const node =
         getNode(nodeId) ?? nodesRef.current.find((n) => n.id === nodeId);
       if (!node) return false;
       setSelectedNodeId(nodeId);
       setNodes((current) => {
-        const next = current.map((n) => ({
-          ...n,
-          selected: n.id === nodeId,
-        }));
+        let changed = false;
+        const next = current.map((n) => {
+          const selected = n.id === nodeId;
+          if (Boolean(n.selected) === selected) return n;
+          changed = true;
+          return { ...n, selected };
+        });
+        if (!changed) return current;
         nodesRef.current = next;
         return next;
       });
-      fitView({ nodes: [node], padding: 0.72, duration: 0 });
+      if (options?.fit !== false) {
+        fitView({ nodes: [node], padding: 0.72, duration: 0 });
+      }
       return true;
     },
     [getNode, setSelectedNodeId, fitView],
@@ -704,16 +876,15 @@ function WorkflowCanvas() {
 
   const deleteNodeById = useCallback(
     (nodeId: string) => {
-      setNodes((current) => {
-        const next = current.filter((n) => n.id !== nodeId);
-        const nextEdges = edgesRef.current.filter(
-          (e) => e.source !== nodeId && e.target !== nodeId,
-        );
-        setEdges(nextEdges);
-        edgesRef.current = nextEdges;
-        commitGraph(next, nextEdges);
-        return next;
-      });
+      const next = nodesRef.current.filter((n) => n.id !== nodeId);
+      const nextEdges = edgesRef.current.filter(
+        (e) => e.source !== nodeId && e.target !== nodeId,
+      );
+      nodesRef.current = next;
+      edgesRef.current = nextEdges;
+      setNodes(next);
+      setEdges(nextEdges);
+      commitGraph(next, nextEdges, { immediate: false });
       const state = useWorkflowStore.getState();
       if (state.selectedNodeId === nodeId) {
         setSelectedNodeId(null);
@@ -727,12 +898,10 @@ function WorkflowCanvas() {
 
   const deleteEdgeById = useCallback(
     (edgeId: string) => {
-      setEdges((current) => {
-        const next = current.filter((e) => e.id !== edgeId);
-        edgesRef.current = next;
-        commitGraph(nodesRef.current, next);
-        return next;
-      });
+      const next = edgesRef.current.filter((e) => e.id !== edgeId);
+      edgesRef.current = next;
+      setEdges(next);
+      commitGraph(nodesRef.current, next, { immediate: false });
     },
     [commitGraph],
   );
@@ -836,12 +1005,28 @@ function WorkflowCanvas() {
         createNodeByType(type, position, shotNumber),
       ];
       const createdEdges: WorkflowEdge[] = [];
+      const createdId = createdNodes[0]!.id;
+      const flowNodes = toFlowNodes(createdNodes);
 
+      // store 先于 RF：首帧节点组件即可读到 data，避免 null 空闪
       addNodesAndEdges(createdNodes, createdEdges);
-      setNodes((nds) => [...nds, ...toFlowNodes(createdNodes)]);
-      setSelectedNodeId(createdNodes[0].id);
+      setSelectedNodeId(createdId);
+      touchLastEditedNode(createdId);
+      setNodes((nds) => {
+        const next = [
+          ...nds.map((n) => (n.selected ? { ...n, selected: false } : n)),
+          ...flowNodes.map((n) => ({ ...n, selected: true })),
+        ];
+        nodesRef.current = next;
+        return next;
+      });
     },
-    [screenToFlowPosition, addNodesAndEdges, setSelectedNodeId],
+    [
+      screenToFlowPosition,
+      addNodesAndEdges,
+      setSelectedNodeId,
+      touchLastEditedNode,
+    ],
   );
 
   const onPaneUpload = useCallback(
@@ -929,7 +1114,9 @@ function WorkflowCanvas() {
       };
 
       addNodesAndEdges([duplicate], []);
-      setNodes((nds) => [...nds, ...toFlowNodes([duplicate])]);
+      const nextNodes = [...nodesRef.current, ...toFlowNodes([duplicate])];
+      nodesRef.current = nextNodes;
+      setNodes(nextNodes);
       setSelectedNodeId(duplicate.id);
     },
     [addNodesAndEdges, setSelectedNodeId],
@@ -966,7 +1153,9 @@ function WorkflowCanvas() {
       } as WorkflowNode;
 
       addNodesAndEdges([duplicate], []);
-      setNodes((nds) => [...nds, ...toFlowNodes([duplicate])]);
+      const nextNodes = [...nodesRef.current, ...toFlowNodes([duplicate])];
+      nodesRef.current = nextNodes;
+      setNodes(nextNodes);
       setSelectedNodeId(duplicate.id);
     },
     [onDuplicateShot, addNodesAndEdges, setSelectedNodeId],
@@ -1002,7 +1191,7 @@ function WorkflowCanvas() {
     layoutPrefs.layoutMode === "assets" || layoutPrefs.layoutMode === "canvas";
   const showStoryboard = layoutPrefs.layoutMode === "storyboard";
 
-  if (loadError && saveStatus === "error" && hydratedRevision === null) {
+  if (loadError && !stillLoading && hydratedRevision === null) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-zinc-950 px-6 text-center text-sm text-rose-300">
         <div>
@@ -1017,8 +1206,6 @@ function WorkflowCanvas() {
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-zinc-950 text-zinc-100">
       <WorkflowToolbar
         projectName={`项目 ${projectId}`}
-        saveStatus={saveStatus}
-        saveError={saveError}
         layoutMode={layoutPrefs.layoutMode}
         dockPosition={layoutPrefs.dockPosition}
         nodeDensity={layoutPrefs.nodeDensity}
@@ -1029,8 +1216,8 @@ function WorkflowCanvas() {
             syncingViewportRef.current = false;
           }, 300);
         }}
-        onSaveNow={saveNow}
-        onRetrySave={saveNow}
+        onSaveNow={() => saveNowRef.current()}
+        onRetrySave={() => saveNowRef.current()}
         onLayoutModeChange={(mode) => persistLayoutPrefs({ layoutMode: mode })}
         onDockPositionChange={(dockPosition) =>
           persistLayoutPrefs({ dockPosition })
@@ -1057,6 +1244,12 @@ function WorkflowCanvas() {
           <div className="relative min-h-0 min-w-0 flex-1">
             {/* 明确宽高，避免 React Flow 父级短暂 0×0 */}
             <div className="absolute inset-0">
+            {resumeMask && (
+              <div
+                className="pointer-events-none absolute inset-0 z-[60] bg-[#0b0f14]/75 transition-opacity duration-300"
+                aria-hidden
+              />
+            )}
             {showStoryboard ? (
               <div className="flex h-full items-center justify-center bg-[#0b0f14] p-6 text-center text-sm text-zinc-400">
                 分镜视图尚未开放。请切换回「画布」模式继续编排节点与连接。
@@ -1070,10 +1263,9 @@ function WorkflowCanvas() {
                 <BrandMark size={48} spin />
               </div>
             ) : (
-              <ReactFlow
+              <StableReactFlow
                 nodes={nodes}
                 edges={edges}
-                nodeTypes={workflowNodeTypes}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
@@ -1089,51 +1281,13 @@ function WorkflowCanvas() {
                 onPaneClick={onPaneClick}
                 onMoveEnd={onMoveEnd}
                 onDragOver={onDragOver}
-                onDrop={onDropAsset}
-                edgesFocusable
-                elementsSelectable
-                deleteKeyCode={["Backspace", "Delete"]}
-                multiSelectionKeyCode={["Meta", "Control"]}
-                selectionOnDrag={false}
-                panOnDrag
-                panActivationKeyCode={null}
-                zoomOnScroll
-                minZoom={0.2}
-                maxZoom={2}
-                snapToGrid={fixedAlign}
-                snapGrid={[CANVAS_GRID_SIZE, CANVAS_GRID_SIZE]}
+                onDropAsset={onDropAsset}
+                fixedAlign={fixedAlign}
+                helperLines={helperLines}
                 defaultEdgeOptions={defaultEdgeOptions}
-                className="h-full w-full bg-[#0b0f14]"
-                proOptions={{ hideAttribution: true }}
-              >
-                <Background
-                  variant={
-                    fixedAlign
-                      ? BackgroundVariant.Lines
-                      : BackgroundVariant.Dots
-                  }
-                  gap={fixedAlign ? CANVAS_GRID_SIZE : 18}
-                  size={fixedAlign ? 1 : 1}
-                  color={fixedAlign ? "#1e293b" : "#2a3340"}
-                  lineWidth={fixedAlign ? 0.6 : undefined}
-                />
-                {fixedAlign && (
-                  <HelperLinesOverlay
-                    horizontal={helperLines.horizontal}
-                    vertical={helperLines.vertical}
-                  />
-                )}
-                <Controls className="!border-zinc-700 !bg-zinc-900 !shadow-lg" />
-                <MiniMap
-                  className="!cursor-pointer !border !border-zinc-700 !bg-zinc-900"
-                  maskColor="rgba(0,0,0,0.55)"
-                  nodeColor="#334155"
-                  pannable
-                  zoomable
-                  onClick={onMiniMapClick}
-                  onNodeClick={onMiniMapNodeClick}
-                />
-              </ReactFlow>
+                onMiniMapClick={onMiniMapClick}
+                onMiniMapNodeClick={onMiniMapNodeClick}
+              />
             )}
             </div>
 
@@ -1141,7 +1295,7 @@ function WorkflowCanvas() {
               <QuickCreateDock
                 position={layoutPrefs.dockPosition}
                 onCreate={placeQuickCreate}
-                showEmptyHint={nodeCount === 0}
+                showEmptyHint={nodes.length === 0}
               />
             )}
 
@@ -1197,6 +1351,7 @@ function WorkflowCanvas() {
           onDuplicateShot={onDuplicateShot}
           onDeleteShot={onDeleteShot}
           onReorder={onReorder}
+          onAddShot={() => placeQuickCreate("videoShot")}
         />
       </div>
     </div>
@@ -1204,9 +1359,13 @@ function WorkflowCanvas() {
 }
 
 export function WorkflowEditor() {
+  const projectId = useWorkflowStore((s) => s.projectId) || DEMO_PROJECT_ID;
+  const saveNowRef = useRef<() => void>(() => {});
+
   return (
     <ReactFlowProvider>
-      <WorkflowCanvas />
+      <WorkflowAutosaveBridge projectId={projectId} saveNowRef={saveNowRef} />
+      <WorkflowCanvas saveNowRef={saveNowRef} />
     </ReactFlowProvider>
   );
 }

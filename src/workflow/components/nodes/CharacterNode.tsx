@@ -10,6 +10,7 @@ import { GlassIconButton, glass } from "@/workflow/components/glass-ui";
 import { ImageLightbox } from "@/workflow/components/ImageLightbox";
 import { NodePorts } from "@/workflow/components/nodes/NodePorts";
 import { useAssetById } from "@/workflow/hooks/useAssetById";
+import { useWorkflowNodeData } from "@/workflow/hooks/useWorkflowNodeData";
 import { uploadAssetFile } from "@/workflow/lib/upload-asset";
 import { useWorkflowStore } from "@/workflow/store";
 import type { CharacterNodeData, CharacterVariant } from "@/workflow/types";
@@ -40,12 +41,7 @@ function statusLabel(data: CharacterNodeData, hasImage: boolean): {
 
 export function CharacterNodeView({ id, selected }: NodeProps) {
   const projectId = useWorkflowStore((s) => s.projectId);
-  const nodeData = useWorkflowStore(
-    (s) =>
-      s.document.nodes.find((n) => n.id === id)?.data as
-        | CharacterNodeData
-        | undefined,
-  );
+  const nodeData = useWorkflowNodeData<CharacterNodeData>(id);
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const commitNodeAssets = useWorkflowStore((s) => s.commitNodeAssets);
   const imageInputRef = useRef<HTMLInputElement>(null);

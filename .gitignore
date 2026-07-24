@@ -34,9 +34,10 @@ yarn-error.log*
 .env*
 !.env.example
 
-# local generated videos (dev transfer from provider temp URLs)
-/data/generated-videos/**
-!/data/generated-videos/.gitkeep
+# local mock playable MP4 (dev only; never commit real videos)
+/data/mock/**
+!/data/mock/.gitkeep
+!/data/mock/README.md
 
 # local generation task records
 /data/generations/**
@@ -74,3 +75,7 @@ next-env.d.ts
 # local uploaded assets (dev-only file store; not for Vercel production)
 /data/assets/**
 !/data/assets/.gitkeep
+
+# mock / transfer intermediate videos (dev-only; never commit MP4)
+/data/generated-videos/**
+!/data/generated-videos/.gitkeep
