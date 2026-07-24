@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { assertSafeGenerationId } from "@/video-generation/generation-store";
 import { refreshGenerationStatus } from "@/video-generation/service";
 import { compareRequestedAndActualGeneration } from "@/video-generation/compare-params";
+import { sanitizeGenerationForClient } from "@/video-generation/secure-transfer";
 import type { AssetRecord } from "@/workflow/types";
 
 type RouteContext = { params: Promise<{ generationId: string }> };
@@ -20,7 +21,7 @@ export async function GET(
     )._transferredAsset;
 
     return NextResponse.json({
-      generation: record,
+      generation: sanitizeGenerationForClient(record),
       comparison,
       asset: transferred ?? null,
     });

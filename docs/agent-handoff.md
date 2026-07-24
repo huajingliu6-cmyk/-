@@ -9,7 +9,7 @@
 - **项目目标**：资产驱动的 AI 视频创作工作台。用户在无限画布上编排角色、场景、参考素材与视频镜头，经确认后提交异步视频生成，并将结果登记为本地 `generatedVideo` 资产。
 - **技术栈**：Next.js 16、React 19、React Flow（`@xyflow/react`）、Zustand、Zod、Vitest、Tailwind CSS 4。
 - **当前分支**：`feat/react-flow-migration`
-- **当前稳定基线**：阶段 3C-B 为 `62fe260`；阶段 3D-A 提交后以 `git log -1` 为准。
+- **当前稳定基线**：阶段 3D-A 为 `60e6935`；阶段 3D-B3（SSRF 安全转存）完成后以 `git log -1` 为准。
 - **页面入口**：`/`、`/login`、`/workflow`
 - **本地启动**：
 
@@ -28,7 +28,7 @@ npm run dev
 |------|------|
 | `src/workflow` | React Flow 工作台 UI 与领域 |
 | `src/video-generation` | Provider、生成任务、转存、参数对照、Range、metadata |
-| `src/video-generation/reference-media` | 参考素材候选与 auto/manual 解析 |
+| `src/video-generation/secure-transfer` | 真实结果 SSRF 防护、TransferSource、安全下载、URL 脱敏 |
 | `src/app/api/generations` | 异步生成 HTTP API |
 | `src/app/api/assets` | 本地资产；generatedVideo 支持 Range |
 | `data/workflows` | WorkflowDocument JSON（开发） |
@@ -75,6 +75,28 @@ Mock 只验证流程、播放、转存与参数记录；`overallStatus=mockOnly`
 - Mock / 万相 Provider 抽象；默认 mock；付费双门闩
 - 阶段 3A–3C：可播放 Mock、参数对照、参考素材选择 UI
 - 阶段 3D-A：幂等 / 防连点 / 转存幂等 / completed 收口 / e2e 测试 / 人工验收
+- 阶段 3D-B3：真实结果 SSRF 防护、域名白名单、Mock/Provider 转存隔离、客户端 URL 脱敏
+
+---
+
+# 阶段 3D-B3（已完成）
+
+真实 Provider 结果安全转存与 SSRF 防护 **已完成**。未开启付费，未调用阿里云。
+
+要点：
+
+1. `TransferSource`：`mockFile` vs `providerHttps`，由 GenerationRecord 派生。
+2. `WAN_RESULT_ALLOWED_HOSTS` 默认空 → 真实转存阻止。
+3. HTTPS-only、私网/保留 IP 拦截、手动重定向、custom lookup DNS。
+4. 流式下载、200MB、超时、ftyp、失败清理临时文件。
+5. 客户端 API 不返回完整 `remoteVideoUrl`（`hasRemoteVideo` + 脱敏摘要）。
+6. 详见 `docs/secure-provider-result-transfer.md`。
+
+官方文档不保证固定 OSS 结果域名；白名单须管理员在首次人工确认后配置。
+
+**浏览器 Mock 回归已通过**：生成 / 转存 / 播放 / 下载 / Range / metadata / 参数对照正常；`file://` 分支未被破坏；API 不暴露完整签名 URL；无阿里云与付费请求。
+
+**仍不允许**设置 `ALLOW_PAID_GENERATION=true`（缺持久幂等、完整所有权、限流预算等）。
 
 ---
 
@@ -82,6 +104,7 @@ Mock 只验证流程、播放、转存与参数记录；`overallStatus=mockOnly`
 
 - `VIDEO_PROVIDER` 默认 **`mock`**
 - `ALLOW_PAID_GENERATION` 默认 **`false`**
+- `WAN_RESULT_ALLOWED_HOSTS` 默认空（真实转存禁用直至配置）
 - 密钥仅服务端；禁止 `NEXT_PUBLIC_` 暴露
 - 自动保存、metadata PATCH、页面刷新 **不会**自动提交新 generation
 - `createVideoProvider` 硬分支；Aliyun **失败不回退** Mock
@@ -96,16 +119,16 @@ Mock 只验证流程、播放、转存与参数记录；`overallStatus=mockOnly`
 | `npm run lint` | 0 |
 | `npx eslint . --max-warnings=0` | 0 |
 | `npm run typecheck` | 0 |
-| `npm test` | 0；**138** 项（Vitest 为准；0 failed / 0 skipped / 0 todo） |
+| `npm test` | 0；**186** 项（Vitest 为准；0 failed / 0 skipped / 0 todo） |
 | `npm run build` | 0 |
 
-浏览器人工验收：完整 Mock 流程、防连点、状态流转、播放/下载、Range、metadata、参数对照、刷新恢复、Mock 标记、无阿里云/付费请求 — **已通过**。
+浏览器人工验收（3D-A Mock 全流程 + 3D-B3 Mock 回归）：**已通过**。
 
 ---
 
 # 下一阶段
 
-**真实 Provider 启用前安全审计**
+**持久幂等与 Provider 任务原子性（3D-B1）**
 
 不要自动付费；不要 push；不要 eslint-disable / `any` / `@ts-ignore`。
 
@@ -118,7 +141,9 @@ Mock 只验证流程、播放、转存与参数记录；`overallStatus=mockOnly`
 - 进程内幂等 Map / 转存锁非多实例方案
 - 真实 Provider 尚未付费 e2e
 - 全局 Undo/Redo 未实现
-- 权限非生产级多用户隔离
+- 权限非生产级多用户隔离（缺少完整 userId 所有权时，签名 URL 即使脱敏仍须防 IDOR）
+- 官方不保证固定结果域名；allowlist 为空时真实转存保持禁用
+- custom lookup 降低但未宣称消除全部 DNS rebinding 理论风险
 
 ---
 
@@ -129,8 +154,9 @@ Mock 只验证流程、播放、转存与参数记录；`overallStatus=mockOnly`
 - `docs/generation-parameter-comparison.md`
 - `docs/reference-media-selection.md`
 - `docs/video-provider-aliyun-wan27.md`
+- `docs/secure-provider-result-transfer.md`
 - `.env.example`
 
 ---
 
-*文档对应阶段 3D-A 完成态。*
+*文档对应阶段 3D-B3 完成态。*

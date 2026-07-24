@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { assertSafeGenerationId } from "@/video-generation/generation-store";
 import { updateGenerationBrowserMetadata } from "@/video-generation/update-browser-metadata";
+import { sanitizeGenerationForClient } from "@/video-generation/secure-transfer";
 
 type RouteContext = { params: Promise<{ generationId: string }> };
 
@@ -48,7 +49,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     return NextResponse.json({
-      generation: result.generation,
+      generation: sanitizeGenerationForClient(result.generation),
       idempotent: result.idempotent,
     });
   } catch (error) {

@@ -25,6 +25,7 @@ import {
   selectWanGenerationMode,
 } from "./select-wan-mode";
 import { transferRemoteVideoToLocal } from "./transfer-video";
+import { TransferError } from "./secure-transfer/errors";
 import type {
   GenerationRecord,
   VideoGenerationInput,
@@ -32,6 +33,7 @@ import type {
 import type { AssetRecord } from "@/workflow/types";
 import { validateGenerationSettings } from "./validate-settings";
 import type { FetchLike } from "./provider/types";
+import type { SafeDownloadDeps } from "./secure-transfer/safe-download";
 
 /** 单进程内转存锁：防止轮询与手动 transfer 并发产生双份资产（非多实例方案） */
 const transferInFlight = new Map<
@@ -327,7 +329,7 @@ export async function cancelVideoGeneration(
  */
 export async function retryTransferGeneration(
   generationId: string,
-  options?: { title?: string },
+  options?: { title?: string; downloadDeps?: SafeDownloadDeps },
 ): Promise<{
   generation: GenerationRecord;
   asset: AssetRecord | null;
@@ -368,9 +370,7 @@ export async function retryTransferGeneration(
     }
 
     if (!record.remoteVideoUrl) {
-      throw Object.assign(new Error("没有可转存的远程视频地址"), {
-        code: "NO_REMOTE_URL",
-      });
+      throw new TransferError("NO_REMOTE_URL");
     }
 
     await updateGenerationRecord(generationId, {
@@ -387,14 +387,16 @@ export async function retryTransferGeneration(
         remoteVideoUrl: record.remoteVideoUrl,
         title: options?.title ?? "镜头",
         generationId,
+        providerId: record.providerId,
         isMock: record.isMock,
+        downloadDeps: options?.downloadDeps,
       });
       if (
         transferred.asset.assetType !== "generatedVideo" ||
         !ALLOWED_GENERATED_VIDEO_MIME.has(transferred.asset.mimeType) ||
         transferred.asset.sizeBytes <= 0
       ) {
-        throw new Error("转存结果不是合法 generatedVideo");
+        throw new TransferError("RESULT_VIDEO_STRUCTURE_INVALID");
       }
       const generation = await updateGenerationRecord(generationId, {
         status: "completed",
@@ -413,17 +415,24 @@ export async function retryTransferGeneration(
         idempotent: false,
       };
     } catch (err) {
+      const code =
+        err instanceof TransferError
+          ? err.code
+          : "RESULT_TRANSFER_FAILED";
+      const message =
+        err instanceof TransferError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "结果视频转存失败";
       await updateGenerationRecord(generationId, {
         status: "resultTransferFailed",
-        errorCode: "RESULT_TRANSFER_FAILED",
-        errorMessage: err instanceof Error ? err.message : "结果视频转存失败",
+        errorCode: code,
+        errorMessage: message,
         progressLabel: "结果转存失败",
         remoteVideoUrl: record.remoteVideoUrl,
       });
-      throw Object.assign(
-        new Error(err instanceof Error ? err.message : "转存失败"),
-        { code: "RESULT_TRANSFER_FAILED" },
-      );
+      throw Object.assign(new Error(message), { code });
     }
   })();
 

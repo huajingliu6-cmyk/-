@@ -21,6 +21,7 @@
 - `DASHSCOPE_WORKSPACE_ID`（仅服务端）
 - `DASHSCOPE_REGION=cn-beijing` 或 `ap-southeast-1`
 - `WAN_T2V_MODEL_ID` / `WAN_R2V_MODEL_ID`
+- `WAN_RESULT_ALLOWED_HOSTS`（仅服务端；默认空。真实结果下载域名白名单，见 `docs/secure-provider-result-transfer.md`）
 
 **禁止**使用 `NEXT_PUBLIC_` 暴露 API Key。浏览器不得传入 Endpoint。
 
@@ -70,10 +71,14 @@ Workspace ID 可在阿里云百炼控制台「业务空间」详情页查看。
 
 - 真实调用按秒计费，请在百炼控制台查看[模型价格](https://help.aliyun.com/zh/model-studio/models)。
 - 成功返回的 `video_url` **约 24 小时有效**，服务端会立即转存。
+- 官方文档示例主机类似 `dashscope-result-*.oss-*.aliyuncs.com`，但文档明确：**不提供固定 OSS 域名白名单**（底层存储可能变更）。
+- 本仓库用 `WAN_RESULT_ALLOWED_HOSTS` 由管理员显式配置；**默认空则真实转存被阻止**。
 
 ## 开发环境转存
 
-成功后下载到 `data/generated-videos/`（已 gitignore），并登记 `generatedVideo` 资产。
+- Mock：本地 `file://` 中间文件（目录受限）→ `generatedVideo`。
+- 真实 Provider：仅 HTTPS + allowlist + 私网拦截 + 手动重定向 + 流式下载（见 `docs/secure-provider-result-transfer.md`）。
+- 成功后登记到 `data/generated-videos/` / `data/assets/`（已 gitignore）。
 
 **仅适合本地开发。** 生产环境必须改为 OSS / 对象存储。
 
@@ -88,13 +93,19 @@ ALLOW_PAID_GENERATION=false
 
 本仓库的自动测试与 Cursor 代理 **禁止** 将 `ALLOW_PAID_GENERATION` 设为 true，也禁止联网生成。
 
+在开启付费前，还须：
+
+1. 完成安全审计中仍适用的约束（幂等、所有权等）。
+2. 配置 `WAN_RESULT_ALLOWED_HOSTS`（首次人工确认结果域名后填写；勿凭记忆硬编码进仓库默认值）。
+
 人工步骤：
 
 1. 配置同一地域的 Key / Workspace / Region。
-2. 手动将 `.env.local` 中 `VIDEO_PROVIDER=aliyun-wan27` 与 `ALLOW_PAID_GENERATION=true`。
-3. 重启服务。
-4. 在生成确认抽屉点击「确认付费生成」。
-5. 测完后立刻改回 `ALLOW_PAID_GENERATION=false` 与 `VIDEO_PROVIDER=mock`。
+2. 配置结果域名白名单。
+3. 手动将 `.env.local` 中 `VIDEO_PROVIDER=aliyun-wan27` 与 `ALLOW_PAID_GENERATION=true`。
+4. 重启服务。
+5. 在生成确认抽屉点击「确认付费生成」。
+6. 测完后立刻改回 `ALLOW_PAID_GENERATION=false` 与 `VIDEO_PROVIDER=mock`。
 
 ## 异步接口
 

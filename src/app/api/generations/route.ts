@@ -6,6 +6,8 @@ import {
   getVideoGenerationPublicConfig,
   submitVideoGeneration,
 } from "@/video-generation/service";
+import { sanitizeGenerationForClient } from "@/video-generation/secure-transfer";
+import type { GenerationRecord } from "@/video-generation/types";
 import {
   listCapabilitiesForProvider,
   pickCapability,
@@ -106,12 +108,14 @@ export async function POST(request: NextRequest) {
       title: body.title,
     });
 
-    return NextResponse.json({ generation: record });
+    return NextResponse.json({
+      generation: sanitizeGenerationForClient(record),
+    });
   } catch (error) {
     const err = error as Error & {
       code?: string;
       errors?: unknown;
-      generation?: unknown;
+      generation?: GenerationRecord;
     };
     const code = err.code ?? "SUBMIT_FAILED";
     const status =
@@ -126,7 +130,9 @@ export async function POST(request: NextRequest) {
         code,
         message: err.message || "提交生成失败",
         errors: err.errors,
-        generation: err.generation ?? undefined,
+        generation: err.generation
+          ? sanitizeGenerationForClient(err.generation)
+          : undefined,
       },
       { status },
     );

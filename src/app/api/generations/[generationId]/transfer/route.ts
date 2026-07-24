@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertSafeGenerationId } from "@/video-generation/generation-store";
 import { retryTransferGeneration } from "@/video-generation/service";
+import { sanitizeGenerationForClient } from "@/video-generation/secure-transfer";
 
 type RouteContext = { params: Promise<{ generationId: string }> };
 
@@ -17,7 +18,7 @@ export async function POST(
     });
 
     return NextResponse.json({
-      generation: result.generation,
+      generation: sanitizeGenerationForClient(result.generation),
       asset: result.asset,
       idempotent: result.idempotent,
     });

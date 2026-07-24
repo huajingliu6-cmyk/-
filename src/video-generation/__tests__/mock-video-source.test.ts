@@ -227,6 +227,7 @@ describe("transferRemoteVideoToLocal integrity", () => {
         remoteVideoUrl: `file://${file.replace(/\\/g, "/")}`,
         title: "t",
         generationId: "00000000-0000-4000-8000-000000000099",
+        providerId: "mock",
         isMock: true,
       }),
     ).rejects.toThrow(/98 B|伪 MP4/);
@@ -246,6 +247,7 @@ describe("transferRemoteVideoToLocal integrity", () => {
       remoteVideoUrl: `file://${file.replace(/\\/g, "/")}`,
       title: "镜头",
       generationId: "00000000-0000-4000-8000-000000000098",
+      providerId: "mock",
       isMock: true,
     });
     cleanupAssets.push(result.asset.id);

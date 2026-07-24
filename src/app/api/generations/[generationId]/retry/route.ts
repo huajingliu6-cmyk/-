@@ -13,6 +13,7 @@ import {
 } from "@/video-generation/model-capabilities";
 import { getVideoProviderRuntimeConfig } from "@/video-generation/provider/config";
 import { MAX_REFERENCE_SELECTION_IDS_IN_REQUEST } from "@/video-generation/reference-media";
+import { sanitizeGenerationForClient } from "@/video-generation/secure-transfer";
 
 const bodySchema = z.object({
   confirmPaidGeneration: z.boolean().optional().default(false),
@@ -91,7 +92,7 @@ export async function POST(
     });
 
     return NextResponse.json({
-      generation,
+      generation: sanitizeGenerationForClient(generation),
       previousGenerationId: oldId,
     });
   } catch (error) {
