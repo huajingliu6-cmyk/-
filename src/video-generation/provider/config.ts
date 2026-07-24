@@ -24,7 +24,7 @@ export function parseDashScopeRegion(raw: string): DashScopeRegion {
 }
 
 export function getVideoProviderRuntimeConfig(
-  env: NodeJS.ProcessEnv = process.env,
+  env: Record<string, string | undefined> = process.env,
 ): VideoProviderRuntimeConfig {
   const providerRaw = (env.VIDEO_PROVIDER ?? "mock").trim().toLowerCase();
   const providerId: VideoProviderId =
@@ -107,7 +107,7 @@ export function paidGenerationAllowed(
 
 /** 供 UI 使用的公开配置（不含密钥） */
 export function getPublicVideoConfig(
-  env: NodeJS.ProcessEnv = process.env,
+  env: Record<string, string | undefined> = process.env,
 ): {
   providerId: VideoProviderId;
   allowPaidGeneration: boolean;

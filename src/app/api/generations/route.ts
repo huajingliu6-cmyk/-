@@ -8,7 +8,6 @@ import {
 } from "@/video-generation/service";
 import { listCapabilitiesForProvider } from "@/video-generation/model-capabilities";
 import { getVideoProviderRuntimeConfig } from "@/video-generation/provider/config";
-import { readGenerationRecord } from "@/video-generation/generation-store";
 
 const postSchema = z.object({
   projectId: z.string().min(1),
@@ -96,9 +95,4 @@ export async function POST(request: NextRequest) {
       { status },
     );
   }
-}
-
-/** 便于测试读取 */
-export async function getGenerationForTests(id: string) {
-  return readGenerationRecord(id);
 }

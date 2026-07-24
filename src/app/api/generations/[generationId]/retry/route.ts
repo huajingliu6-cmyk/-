@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { assertSafeGenerationId, readGenerationRecord } from "@/video-generation/generation-store";
-import { loadWorkflowDocument } from "@/workflow/lib/workflow-storage";
+import {
+  assertSafeGenerationId,
+  readGenerationRecord,
+} from "@/video-generation/generation-store";
+import { loadWorkflow } from "@/workflow/lib/workflow-storage";
 import { buildVideoGenerationInput } from "@/workflow/lib/build-video-generation-input";
 import { submitVideoGeneration } from "@/video-generation/service";
 
@@ -37,13 +40,8 @@ export async function POST(
       );
     }
 
-    const document = await loadWorkflowDocument(old.projectId);
-    if (!document) {
-      return NextResponse.json(
-        { code: "PROJECT_NOT_FOUND", message: "项目不存在" },
-        { status: 404 },
-      );
-    }
+    // 始终加载最新 WorkflowDocument；新任务不复用旧 providerTaskId
+    const document = await loadWorkflow(old.projectId);
 
     const built = buildVideoGenerationInput(document, old.shotNodeId, {
       selectedReferenceAssetIds: parsed.data.selectedReferenceAssetIds,
@@ -64,7 +62,6 @@ export async function POST(
       unsupportedAudioLabels: built.unsupportedAudioLabels,
       confirmPaidGeneration: parsed.data.confirmPaidGeneration,
       title: parsed.data.title,
-      // 新任务，不复用旧 providerTaskId / idempotency
     });
 
     return NextResponse.json({

@@ -215,12 +215,20 @@ function migrateCharacterNode(
 ): WorkflowNode {
   if (Array.isArray(data.variants)) {
     const raw = data as CharacterNodeData;
+    const variants = raw.variants.map((variant) => ({
+      ...variant,
+      referenceVoiceAssetId: asString(
+        (variant as { referenceVoiceAssetId?: unknown }).referenceVoiceAssetId,
+        "",
+      ),
+    }));
     return {
       id,
       type: "character",
       position: pos,
       data: {
         ...raw,
+        variants,
         appearancePrompt: asString(
           data.appearancePrompt,
           raw.appearancePrompt ?? "",
@@ -249,7 +257,7 @@ function migrateCharacterNode(
             : "idle",
         generationHistoryIds: seedGenerationHistory(
           data.generationHistoryIds,
-          ...raw.variants.map((v) => v.primaryAssetId),
+          ...variants.map((v) => v.primaryAssetId),
         ),
         voiceHistoryIds: seedGenerationHistory(
           data.voiceHistoryIds,
@@ -285,6 +293,7 @@ function migrateCharacterNode(
     references: effectiveAssetId
       ? [{ assetId: effectiveAssetId, poseTag: "front", label: "正面" }]
       : [],
+    referenceVoiceAssetId: "",
   };
 
   const characterData: CharacterNodeData = {
@@ -421,11 +430,34 @@ function migrateImageNode(
   ctx: MigrationContext,
 ): WorkflowNode {
   if (Array.isArray(data.assetIds)) {
+    const raw = data as ImageNodeData;
+    const assetIds = Array.isArray(data.assetIds)
+      ? data.assetIds.map((x) => asString(x)).filter(Boolean)
+      : [];
+    const primaryAssetId = asString(
+      data.primaryAssetId,
+      raw.primaryAssetId ?? "",
+    );
+    const selectedAssetIds = Array.isArray(data.selectedAssetIds)
+      ? data.selectedAssetIds.map((x) => asString(x)).filter(Boolean)
+      : [];
     return {
       id,
       type: "image",
       position: pos,
-      data: data as ImageNodeData,
+      data: {
+        ...raw,
+        title: asString(data.title, raw.title ?? "图片参考"),
+        assetIds,
+        primaryAssetId,
+        selectedAssetIds,
+        description: asString(data.description, raw.description ?? ""),
+        uploadStatus: mapUploadStatus(
+          data.uploadStatus,
+          Boolean(primaryAssetId || assetIds.length),
+        ),
+        errorMessage: asString(data.errorMessage, raw.errorMessage ?? ""),
+      },
     };
   }
 
@@ -458,6 +490,7 @@ function migrateImageNode(
         : "general",
     assetIds: effectiveAssetId ? [effectiveAssetId] : [],
     primaryAssetId: effectiveAssetId,
+    selectedAssetIds: [],
     description: asString(data.description),
     uploadStatus: isBlob
       ? "empty"

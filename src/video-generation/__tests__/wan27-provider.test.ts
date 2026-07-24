@@ -318,7 +318,6 @@ describe("paid generation guard", () => {
     if (!gate.ok) expect(gate.code).toBe("MISSING_DASHSCOPE_API_KEY");
   });
 });
-
 describe("providers", () => {
   beforeEach(() => {
     resetMockVideoProviderTasks();
