@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { type NodeProps } from "@xyflow/react";
 import { Clapperboard, FolderOpen, Upload, ZoomIn } from "lucide-react";
 import { AssetThumb } from "@/workflow/components/AssetThumb";
@@ -30,19 +30,23 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
   const commitNodeAssets = useWorkflowStore((s) => s.commitNodeAssets);
   const uploadRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
-  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryOpenIntent, setLibraryOpenIntent] = useState(false);
+  const [prevSelected, setPrevSelected] = useState(selected);
   const [preview, setPreview] = useState<{ src: string; alt: string } | null>(
     null,
   );
+
+  if (selected !== prevSelected) {
+    setPrevSelected(selected);
+    if (!selected) setLibraryOpenIntent(false);
+  }
+
+  const libraryOpen = selected && libraryOpenIntent;
 
   const resultAsset = useAssetById(nodeData?.resultAssetId);
   const attachedIds = (nodeData?.attachedAssetIds ?? []).slice(0, 4);
   const attachedAssets = useAssetsByIds(attachedIds);
   const libraryAssets = useLibraryImageAssets(selected && libraryOpen);
-
-  useEffect(() => {
-    if (!selected) setLibraryOpen(false);
-  }, [selected]);
 
   if (!nodeData) return null;
 
@@ -86,7 +90,7 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
     updateNodeData(id, {
       attachedAssetIds: [...new Set([...nodeData.attachedAssetIds, assetId])],
     });
-    setLibraryOpen(false);
+    setLibraryOpenIntent(false);
   };
 
   return (
@@ -108,7 +112,7 @@ export function VideoShotNodeView({ id, selected }: NodeProps) {
           <span className={glass.floatDivider} aria-hidden />
           <GlassChip
             active={libraryOpen}
-            onClick={() => setLibraryOpen((v) => !v)}
+            onClick={() => setLibraryOpenIntent((v) => !v)}
           >
             <FolderOpen className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
             <span>资产库</span>

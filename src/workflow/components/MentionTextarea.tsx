@@ -167,7 +167,7 @@ export function MentionTextarea({
         rows={rows}
         aria-autocomplete="list"
         aria-controls={open ? listId : undefined}
-        aria-expanded={open}
+        aria-haspopup="listbox"
         onChange={(e) => {
           const next = e.target.value;
           onChange(next);

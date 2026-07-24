@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { promises as fs } from "fs";
-import path from "path";
 import { assertSafeGenerationId, readGenerationRecord, updateGenerationRecord } from "@/video-generation/generation-store";
 import { transferRemoteVideoToLocal } from "@/video-generation/transfer-video";
 

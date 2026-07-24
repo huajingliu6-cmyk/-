@@ -1,6 +1,7 @@
 "use client";
 
-import type { ImgHTMLAttributes } from "react";
+import Image from "next/image";
+import type { CSSProperties } from "react";
 
 export const BRAND_MARK_SRC = "/brand/mark.png";
 
@@ -11,10 +12,8 @@ type Props = {
   spin?: boolean;
   className?: string;
   alt?: string;
-} & Omit<
-  ImgHTMLAttributes<HTMLImageElement>,
-  "src" | "alt" | "width" | "height"
->;
+  style?: CSSProperties;
+};
 
 /** 品牌四角标（透明底）：空素材占位 / 加载等待 */
 export function BrandMark({
@@ -22,26 +21,27 @@ export function BrandMark({
   spin = false,
   className = "",
   alt = "",
-  ...rest
+  style,
 }: Props) {
   return (
-    <img
+    <Image
       src={BRAND_MARK_SRC}
       alt={alt}
       width={size}
       height={size}
       draggable={false}
-      decoding="async"
+      unoptimized
       className={[
         "pointer-events-none select-none object-contain opacity-[0.92]",
         "[filter:drop-shadow(0_1px_1px_rgba(120,80,20,0.12))]",
-        spin ? "animate-spin [animation-duration:2.4s] [animation-timing-function:linear]" : "",
+        spin
+          ? "animate-spin [animation-duration:2.4s] [animation-timing-function:linear]"
+          : "",
         className,
       ]
         .filter(Boolean)
         .join(" ")}
-      style={{ width: size, height: size }}
-      {...rest}
+      style={{ width: size, height: size, ...style }}
     />
   );
 }

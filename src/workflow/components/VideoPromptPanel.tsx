@@ -67,7 +67,6 @@ export function VideoPromptPanel({ nodeId }: Props) {
     null,
   );
   const [generation, setGeneration] = useState<GenerationRecord | null>(null);
-  const [durationWarning, setDurationWarning] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const data =
@@ -123,18 +122,16 @@ export function VideoPromptPanel({ nodeId }: Props) {
     return capabilities.models.find((m) => m.mode === mode) ?? null;
   }, [capabilities, mode]);
 
-  useEffect(() => {
-    if (!data || !capability) return;
+  const durationWarning = useMemo(() => {
+    if (!data || !capability) return null;
     const hasRefVideo =
       Boolean(data.sourceVideoAssetId) ||
-      (builtPreview?.ok &&
-        builtPreview.input.referenceVideos.length > 0);
-    const warn = getDurationCompatibilityWarning(
+      (builtPreview?.ok && builtPreview.input.referenceVideos.length > 0);
+    return getDurationCompatibilityWarning(
       data.duration,
       Boolean(hasRefVideo),
       capability.maxDurationWithReferenceVideoSeconds,
     );
-    setDurationWarning(warn);
   }, [data, capability, builtPreview]);
 
   useEffect(() => {

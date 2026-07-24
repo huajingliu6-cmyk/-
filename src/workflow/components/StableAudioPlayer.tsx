@@ -15,12 +15,7 @@ function formatTime(sec: number) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-/**
- * 画布友好的音频播放器：
- * - 使用脱离节点 DOM 的 Audio 实例，避免原生 controls 在 React Flow transform 下整页闪烁
- * - 进度用 DOM 直接更新，播放中不 setState，避免节点反复重渲染/尺寸回写
- */
-export function StableAudioPlayer({ src, className = "" }: Props) {
+function StableAudioPlayerInner({ src, className = "" }: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
@@ -30,7 +25,6 @@ export function StableAudioPlayer({ src, className = "" }: Props) {
     const audio = new Audio(src);
     audio.preload = "metadata";
     audioRef.current = audio;
-    setPlaying(false);
     if (barRef.current) barRef.current.style.width = "0%";
     if (timeRef.current) timeRef.current.textContent = "0:00";
 
@@ -46,24 +40,28 @@ export function StableAudioPlayer({ src, className = "" }: Props) {
       }
     };
 
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
     const onEnded = () => {
       setPlaying(false);
       paint();
     };
 
     audio.addEventListener("loadedmetadata", paint);
+    audio.addEventListener("durationchange", paint);
     audio.addEventListener("timeupdate", paint);
     audio.addEventListener("ended", onEnded);
-    audio.addEventListener("pause", paint);
-    audio.addEventListener("play", paint);
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("pause", onPause);
 
     return () => {
       audio.pause();
       audio.removeEventListener("loadedmetadata", paint);
+      audio.removeEventListener("durationchange", paint);
       audio.removeEventListener("timeupdate", paint);
       audio.removeEventListener("ended", onEnded);
-      audio.removeEventListener("pause", paint);
-      audio.removeEventListener("play", paint);
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("pause", onPause);
       audio.src = "";
       audioRef.current = null;
     };
@@ -137,4 +135,13 @@ export function StableAudioPlayer({ src, className = "" }: Props) {
       </span>
     </div>
   );
+}
+
+/**
+ * 画布友好的音频播放器：
+ * - 使用脱离节点 DOM 的 Audio 实例，避免原生 controls 在 React Flow transform 下整页闪烁
+ * - src 变化时 remount，避免用 effect 同步 playing
+ */
+export function StableAudioPlayer({ src, className = "" }: Props) {
+  return <StableAudioPlayerInner key={src} src={src} className={className} />;
 }

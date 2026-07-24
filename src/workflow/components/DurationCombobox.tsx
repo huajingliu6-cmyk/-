@@ -26,7 +26,7 @@ type Props = {
   variant?: "glass" | "dark";
 };
 
-/** 时长：点击展开滑条 + 下方可输入秒数。 */
+/** 时长：点击展开滑条 + 下方可输入秒数。业务值以 props.value 为准。 */
 export function DurationCombobox({
   value,
   disabled = false,
@@ -38,12 +38,10 @@ export function DurationCombobox({
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
+  /** 仅编辑会话中的草稿；null 表示展示 store 中的值 */
+  const [text, setText] = useState<string | null>(null);
   const duration = clampVideoDuration(value, min, max);
-  const [text, setText] = useState(String(duration));
-
-  useEffect(() => {
-    setText(String(clampVideoDuration(value, min, max)));
-  }, [value, min, max]);
+  const displayText = text ?? String(duration);
 
   useEffect(() => {
     if (!open) return;
@@ -51,9 +49,13 @@ export function DurationCombobox({
       const target = event.target as Node | null;
       if (target && rootRef.current?.contains(target)) return;
       setOpen(false);
+      setText(null);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        setOpen(false);
+        setText(null);
+      }
     };
     window.addEventListener("pointerdown", onPointerDown, true);
     window.addEventListener("keydown", onKeyDown);
@@ -65,11 +67,8 @@ export function DurationCombobox({
 
   useEffect(() => {
     if (!open) return;
-    const timer = window.setTimeout(() => {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    }, 0);
-    return () => window.clearTimeout(timer);
+    inputRef.current?.focus();
+    inputRef.current?.select();
   }, [open]);
 
   const apply = (nextRaw: number) => {
@@ -102,7 +101,12 @@ export function DurationCombobox({
         }
         onClick={() => {
           if (disabled) return;
-          setOpen((v) => !v);
+          setOpen((v) => {
+            const next = !v;
+            if (next) setText(String(duration));
+            else setText(null);
+            return next;
+          });
         }}
       >
         <span className="tabular-nums">{duration}s</span>
@@ -147,19 +151,20 @@ export function DurationCombobox({
               min={min}
               max={max}
               step={1}
-              value={text}
+              value={displayText}
               className={`nodrag nopan h-9 w-full rounded-xl border px-2.5 text-[13px] tabular-nums outline-none ${
                 isDark
                   ? "border-zinc-600 bg-zinc-950 text-zinc-100 focus:border-zinc-400"
                   : "border-zinc-200 bg-zinc-50 text-zinc-800 focus:border-zinc-400 focus:bg-white"
               }`}
               onChange={(e) => setText(e.target.value)}
-              onBlur={() => commitText(text)}
+              onBlur={() => commitText(displayText)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
-                  commitText(text);
+                  commitText(displayText);
                   setOpen(false);
+                  setText(null);
                 }
               }}
             />

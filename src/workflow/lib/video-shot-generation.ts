@@ -1,4 +1,3 @@
-import { saveAssetFile } from "@/workflow/lib/asset-storage";
 import type { AssetRecord } from "@/workflow/types";
 
 /**
@@ -27,19 +26,13 @@ export type VideoShotGenerationResult = {
   creditEstimate: number;
 };
 
-function estimateCredits(duration: number): number {
-  return Math.max(1, Math.round(duration * 10));
-}
-
 /**
  * 旧同步接口：始终拒绝伪装成功。请改用异步 /api/generations。
  */
 export async function generateVideoShot(
   request: VideoShotGenerationRequest,
 ): Promise<VideoShotGenerationResult> {
-  void request;
-  void saveAssetFile;
   throw new Error(
-    "旧版 /api/generate/video-shot 已停用。请通过镜头节点的生成确认提交到 /api/generations（默认 Mock Provider）。",
+    `旧版 /api/generate/video-shot 已停用（节点 ${request.videoShotNodeId}）。请通过镜头节点的生成确认提交到 /api/generations（默认 Mock Provider）。`,
   );
 }

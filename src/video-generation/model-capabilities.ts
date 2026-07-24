@@ -8,10 +8,7 @@ import type {
 const WAN_PRICING =
   "真实调用按秒计费，请在阿里云百炼控制台查看万相 2.7 当前价格。输出 URL 有效期约 24 小时。";
 
-function wanBase(
-  mode: WanGenerationMode,
-  modelId: string,
-): Omit<
+function wanBase(): Omit<
   ModelCapability,
   "mode" | "modelId" | "supportsReferenceImages" | "supportsReferenceVideos" | "supportsFirstFrame" | "supportsReferenceVoice" | "maxDurationWithReferenceVideoSeconds"
 > {
@@ -35,7 +32,7 @@ function wanBase(
 /** 万相 2.7 T2V — 依据官方文生视频文档 */
 export function getWan27T2VCapability(modelId: string): ModelCapability {
   return {
-    ...wanBase("textToVideo", modelId),
+    ...wanBase(),
     modelId,
     mode: "textToVideo",
     maxDurationWithReferenceVideoSeconds: 15,
@@ -49,7 +46,7 @@ export function getWan27T2VCapability(modelId: string): ModelCapability {
 /** 万相 2.7 R2V — 依据官方参考生视频文档 */
 export function getWan27R2VCapability(modelId: string): ModelCapability {
   return {
-    ...wanBase("referenceToVideo", modelId),
+    ...wanBase(),
     modelId,
     mode: "referenceToVideo",
     maxDurationWithReferenceVideoSeconds: 10,

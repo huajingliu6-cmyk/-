@@ -1,12 +1,14 @@
 "use client";
 
+import Image from "next/image";
+
 type Props = {
   src: string;
   alt: string;
   className?: string;
   /** cover：裁切填满；contain：完整可见（角色预览） */
   fit?: "cover" | "contain";
-  /** 保留参数以兼容旧调用，画布缩略图不再依赖 sizes */
+  /** 传给 next/image 的 sizes，帮助布局估算 */
   sizes?: string;
 };
 
@@ -14,32 +16,33 @@ type Props = {
 const decodedSrcCache = new Set<string>();
 
 /**
- * 画布素材缩略图。使用原生 img：
- * - 避免 next/image 在 React Flow 选中/尺寸变化时重挂载闪白
- * - 已加载 URL 再次挂载时立即可见（不透明淡入）
+ * 画布素材缩略图（next/image + unoptimized）：
+ * - 支持 /api/assets、本地静态与动态 URL
+ * - 已加载 URL 再次挂载时使用 priority，减少闪白
  */
 export function AssetThumb({
   src,
   alt,
   className = "",
   fit = "cover",
+  sizes = "160px",
 }: Props) {
   const alreadyDecoded = decodedSrcCache.has(src);
   const fitClass = fit === "contain" ? "object-contain" : "object-cover";
 
   return (
-    <img
+    <Image
       src={src}
       alt={alt}
+      fill
+      unoptimized
+      sizes={sizes}
       draggable={false}
-      decoding={alreadyDecoded ? "sync" : "async"}
-      loading={alreadyDecoded ? "eager" : "lazy"}
-      className={`absolute inset-0 h-full w-full ${fitClass} ${className}`}
+      priority={alreadyDecoded}
+      className={`${fitClass} ${className}`}
       style={alreadyDecoded ? undefined : { contentVisibility: "auto" }}
-      onLoad={(e) => {
+      onLoad={() => {
         decodedSrcCache.add(src);
-        // 确保解码完成后仍保持不透明，避免二次绘制闪白
-        e.currentTarget.style.opacity = "1";
       }}
     />
   );

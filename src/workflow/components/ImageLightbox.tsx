@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
+import Image from "next/image";
 import { X } from "lucide-react";
 
 type Props = {
@@ -35,15 +36,17 @@ export function ImageLightbox({ src, alt = "预览", onClose }: Props) {
       }}
     >
       <div
-        className="relative w-fit max-w-[min(920px,92vw)]"
+        className="relative h-[90vh] w-[min(920px,92vw)]"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src={src}
           alt={alt}
+          fill
+          unoptimized
           draggable={false}
-          className="block max-h-[90vh] max-w-full rounded-xl object-contain shadow-2xl"
+          className="rounded-xl object-contain shadow-2xl"
+          sizes="(max-width: 920px) 92vw, 920px"
         />
         <button
           type="button"

@@ -23,17 +23,30 @@ type Props = {
 export function ApiManagePanel({ open, onClose }: Props) {
   const [configs, setConfigs] = useState<GenerationApiConfigPublic[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
-  const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [prevOpen, setPrevOpen] = useState(open);
+  const [fetchEpoch, setFetchEpoch] = useState(0);
+  const [loadSettled, setLoadSettled] = useState(false);
+
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (open) {
+      setConfigs([]);
+      setDrafts({});
+      setError("");
+      setNotice("");
+      setLoadSettled(false);
+      setFetchEpoch((n) => n + 1);
+    }
+  }
+
+  const loading = open && !loadSettled && !error;
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    setLoading(true);
-    setError("");
-    setNotice("");
     void (async () => {
       try {
         const res = await fetch("/api/admin/api-configs");
@@ -60,13 +73,13 @@ export function ApiManagePanel({ open, onClose }: Props) {
           setError(err instanceof Error ? err.message : "加载失败");
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setLoadSettled(true);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, fetchEpoch]);
 
   if (!open) return null;
 
