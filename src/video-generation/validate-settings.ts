@@ -121,7 +121,7 @@ export function validateGenerationSettings(
       errors.push({
         code: "TOO_MANY_REFERENCE_MEDIA",
         field: "media",
-        message: `参考素材最多可以选择 ${capability.maxReferenceMedia} 个`,
+        message: `当前有 ${mediaCount} 项参考素材，当前模型最多支持 ${capability.maxReferenceMedia} 项。`,
       });
     }
     if (inputSummary.firstFrameCount > capability.maxFirstFrames) {

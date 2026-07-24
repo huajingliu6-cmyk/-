@@ -9,7 +9,7 @@
 - **项目目标**：资产驱动的 AI 视频创作工作台。用户在无限画布上编排角色、场景、参考素材与视频镜头，经确认后提交异步视频生成，并将结果登记为本地 `generatedVideo` 资产。
 - **技术栈**：Next.js 16、React 19、React Flow（`@xyflow/react`）、Zustand、Zod、Vitest、Tailwind CSS 4。
 - **当前分支**：`feat/react-flow-migration`
-- **当前稳定提交**：阶段 3B 提交后以 `git log -1` 为准（本文件随 3B 提交更新）。上一基线：`e37228b`（阶段 3A）。
+- **当前稳定基线**：以 `git log -1` 为准。阶段 3C-A 完成前基线为 `d95353a`（阶段 3B）。
 - **页面入口**：
   - `/` — 入口
   - `/login` — 登录
@@ -33,6 +33,7 @@ npm run dev
 |------|------|
 | `src/workflow` | React Flow 工作台 UI 与领域：节点组件、提示栏、确认抽屉、资产库、WorkflowDocument schema/migrate、store、自动保存、上传与引用解析。 |
 | `src/video-generation` | 视频生成领域层：`VideoProvider` 抽象、Mock / 万相 2.7 Provider、能力表、参数校验、GenerationRecord 存储、转存、requested/provider/actual 对比、Mock 源校验、Range 服务、浏览器 metadata 写回。 |
+| `src/video-generation/reference-media` | 参考素材候选收集、自动/手动选择解析、首帧独立解析（阶段 3C-A）。 |
 | `src/app/api/generations` | 异步生成 HTTP API：创建、查询（含轮询刷新）、取消、重试、转存、浏览器 metadata PATCH；公开配置不含密钥。 |
 | `src/app/api/generated-videos` | 开发态中间 MP4 静态读取（Mock 写出后、转存前的临时文件服务）。 |
 | `src/app/api/assets` | 本地资产上传 / 读取 / 删除；`generatedVideo` 经 assetId + `generationId`/`projectId` 校验后支持 HTTP Range。 |
@@ -50,7 +51,7 @@ npm run dev
 
 - React Flow 工作台（工具栏、资产库、画布、属性面板、分镜栏）
 - 节点类型：角色、场景、图片、文本、音频、道具、视频镜头（VideoShot）等
-- `WorkflowDocument` 持久化、schema 与迁移
+- `WorkflowDocument` 持久化、schema 与迁移（当前 **version = 4**）
 - 自动保存（工作流写回 `data/workflows`；**不会**触发生成）
 - 本地资产上传（禁止把 base64 / `blob:` 写入持久化文档）
 - `VideoProvider` 抽象（`src/video-generation/provider`）
@@ -60,46 +61,48 @@ npm run dev
 - 分辨率 / 画面比例 / 视频时长校验（含参考视频时的时长上限）
 - 异步 generation API（创建、查询、取消、重试、转存）
 - 付费双门闩：`ALLOW_PAID_GENERATION` + 请求体 `confirmPaidGeneration`
-- **阶段 3A 已完成**：
-  - Mock 使用本地合法 MP4（默认 `data/mock/mock-video.mp4`，或 `MOCK_VIDEO_FILE`）
-  - **彻底移除**硬编码 98 B `MINIMAL_MP4` 写入与 `writeMockMp4` 伪视频逻辑
-  - 缺失 / 无效 Mock 源 → 任务 `failed`（`MOCK_VIDEO_NOT_CONFIGURED` / `MOCK_VIDEO_INVALID`），不伪装 `completed`，不回退 PNG
-  - `generatedVideo` 真实 `<video>` 播放（`VideoResultPlayer` / `VideoResultDrawer`）
-  - assetId 内容路由支持 HTTP Range（200 / 206，Buffer 读取，禁止客户端传磁盘路径）
-  - 浏览器 `loadedmetadata` 读取宽高时长，并 `PATCH .../metadata` 写回 `actual*` + `metadataSource`
-  - 转存完整性：HTTP 状态、Content-Type、Content-Length、临时/最终文件大小、SHA-256；截断 → `resultTransferFailed`
-  - 人工浏览器播放验收已通过（合法 Mock MP4、可播、可下载、Mock 标记、无真实阿里云调用）
-- **阶段 3B 已完成**（人工浏览器验收已通过）：
-  - `buildGenerationParameterComparisonView` 统一派生 requested / provider / actual 对照（**派生结果，不持久化**）
-  - 数据来源隔离：
-    - requested ← `requestedResolution` / `requestedAspectRatio` / `requestedDurationSeconds`
-    - provider ← `providerResolution` / `providerAspectRatio` / `providerDurationSeconds`
-    - actual ← `actualWidth`×`actualHeight`（比例经 `classifyVideoAspectRatio`）与 `actualDurationSeconds`
-  - `ParameterComparisonPanel` 嵌入 `VideoResultDrawer`；`VideoShotNode` / 历史仅紧凑摘要
-  - Mock 的 `overallStatus` **始终**为 `mockOnly`，不能验证真实模型能力
-  - `metadataSource=browser`：**浏览器读取，非服务端可信验证**
-  - 时长容差：`DURATION_COMPARISON_TOLERANCE_SECONDS = 0.35`（`compare-params.ts`）
+- **阶段 3A 已完成**：合法 Mock MP4、Range 播放、浏览器 metadata、转存完整性
+- **阶段 3B 已完成**：requested / provider / actual 对照派生视图；Mock `overallStatus=mockOnly`；时长容差 0.35s
+- **阶段 3C-A 已完成**（领域逻辑，无勾选 Drawer UI）：
+  - `referenceSelectionMode`: `"auto"` \| `"manual"`
+  - `selectedReferenceAssetIds`：手动模式的选择与**发送顺序**唯一来源；空数组≠auto
+  - migrate 保留选择；WorkflowDocument v4
+  - `collectReferenceMediaCandidates` / `resolveReferenceMediaSelection` / `resolveFirstFrame`
+  - `maxReferenceMedia` / `maxFirstFrames` 唯一来自 `ModelCapability`（无硬编码 fallback 5 作为业务上限）
+  - 未加载能力时：`MODEL_CAPABILITY_NOT_LOADED`，客户端禁用生成
+  - 超限不静默截断；服务端按最新工作流重收集候选并校验
+  - 首帧不占普通参考上限
+  - `orderedReferenceMedia` 驱动 Provider payload 与 Prompt 编号
+  - Store：`setReferenceSelectionMode` / `setSelectedReferenceAssetIds`（供 3C-B）
 - `generatedVideo` 类型的 `AssetRecord`
 - GenerationRecord 上的 requested / provider / actual 字段与 `compare-params`
 - 自动化测试：见 `src/video-generation/__tests__/`（数量以本文件「当前验证结果」为准）
 
 ---
 
-# 98 B 伪 MP4 根因与修复
+# 参考素材选择语义（3C-A）
 
-**根因（已修复）：**
+详见 `docs/reference-media-selection.md`。
 
-- Mock 曾硬编码约 **98 B** 的 `MINIMAL_MP4`（残缺 `ftyp` / `moov` / `mdat` 字符串）
-- 只有基础 box，**没有可解码视频轨道和媒体帧**
-- 浏览器无法 `loadedmetadata`，界面表现为一直「正在读取视频…」
+| 模式 | 行为 |
+|------|------|
+| auto | 不以 selected 为权威；eligible≤上限则全选；>上限 → `REFERENCE_SELECTION_REQUIRED`，不截前 N |
+| manual | selected 为唯一顺序来源；`[]`=明确选零项 |
 
-**当前行为：**
+生成链路：
 
-- `MockVideoProvider` 读取本地合法 MP4：默认 `data/mock/mock-video.mp4`，可用环境变量 `MOCK_VIDEO_FILE` 覆盖
-- Mock 视频文件 **不进入 Git**（见 `.gitignore` 与 `docs/mock-video-setup.md`）
-- 源缺失 → `MOCK_VIDEO_NOT_CONFIGURED` → `failed`
-- 源无效 → `MOCK_VIDEO_INVALID` → `failed`
-- **不会**再写出 98 B 占位文件，**不会**回退 PNG 伪装 `completed`
+```
+load WorkflowDocument
+→ collectReferenceMediaCandidates
+→ resolveFirstFrame
+→ resolveReferenceMediaSelection
+→ buildVideoGenerationInput（orderedReferenceMedia）
+→ buildInputSummary / validateGenerationSettings（按最终 selected 计数）
+→ resolveProviderAssets
+→ buildWan27Request
+```
+
+权限范围（非生产级多用户隔离）：可校验项目 `projectId`、连接边、AssetRecord/MIME/临时 URL；**无**完整 userId RLS。
 
 ---
 
@@ -108,24 +111,22 @@ npm run dev
 主路径（镜头节点选中后的提示栏）：
 
 1. **`VideoPromptPanel`**：用户填写提示词与参数 → 打开确认抽屉 → 提交。
-2. **`POST /api/generations`**：从工作流构建输入 → `submitVideoGeneration`。
+2. **`POST /api/generations`**：从最新工作流构建输入（选择以节点数据为准）→ `submitVideoGeneration`。
 3. **`VideoProvider`**：默认 `MockVideoProvider`；仅当环境配置为 `aliyun-wan27` 且通过付费门闩时走万相。
 4. **Provider task** → `GenerationRecord.providerTaskId`。
 5. **Polling**：`GET /api/generations/[generationId]` → `refreshGenerationStatus`。
 6. **`transferRemoteVideoToLocal`**：下载 / 复制 → 完整性校验 → 登记 `generatedVideo` 资产。
-7. **结果 UI**：`VideoShotNode` 封面预览 + 播放按钮 → `VideoResultDrawer` / `VideoResultPlayer`（原生 `controls`）；`generatedVideo` **不再**交给 `AssetThumb` / `ImageLightbox`。
-8. **Metadata**：浏览器 `loadedmetadata` → 可选 `PATCH /api/generations/[id]/metadata`（仅 `actualWidth` / `actualHeight` / `actualDurationSeconds` / `metadataSource` / `updatedAt`）；失败不影响播放。
-9. **参数对照**：客户端用 `buildGenerationParameterComparisonView(record)` 派生三列对照；不写回 GenerationRecord。
+7. **结果 UI**：`VideoShotNode` 封面预览 + 播放按钮 → `VideoResultDrawer` / `VideoResultPlayer`。
+8. **Metadata**：浏览器 `loadedmetadata` → 可选 `PATCH .../metadata`。
+9. **参数对照**：`buildGenerationParameterComparisonView(record)` 派生三列对照。
 
 相关源码锚点：
 
-- Mock 源校验：`src/video-generation/validate-mock-video-source.ts`
-- 播放 / Range：`src/video-generation/serve-generated-video.ts`、`src/app/api/assets/[assetId]/route.ts`
-- 播放器：`src/workflow/components/VideoResultPlayer.tsx`、`VideoResultDrawer.tsx`
-- 参数对照：`src/video-generation/parameter-comparison-view.ts`、`ParameterComparisonPanel.tsx`
+- 参考素材选择：`src/video-generation/reference-media/`
+- 参数对照：`src/video-generation/parameter-comparison-view.ts`
 - 对照说明：`docs/generation-parameter-comparison.md`
+- 参考素材说明：`docs/reference-media-selection.md`
 - 配置说明：`docs/mock-video-setup.md`
-- 旧同步接口 `POST /api/generate/video-shot` **已停用并抛错**，不得再走演示 PNG 冒充视频。
 
 ---
 
@@ -145,28 +146,17 @@ npm run dev
 
 # 当前验证结果
 
-阶段 3B 最终安全验收（提交前本地跑通；人工浏览器验收已通过）：
+阶段 3C-A 本地验收（以最终报告中的命令结果为准）：
 
-| 命令 | 结果 |
+| 命令 | 预期 |
 |------|------|
-| `npm run lint` | 通过（退出码 0） |
-| `npx eslint . --max-warnings=0` | 通过（退出码 0；error 0 / warning 0） |
-| `npm run typecheck` | 通过（退出码 0） |
-| `npm test` | 通过；**86** 项 |
-| `npm run build` | 通过（退出码 0） |
+| `npm run lint` | 退出码 0 |
+| `npx eslint . --max-warnings=0` | 退出码 0 |
+| `npm run typecheck` | 退出码 0 |
+| `npm test` | 退出码 0；**110** 项（原 86 + 参考素材选择相关） |
+| `npm run build` | 退出码 0 |
 
 安全配置：默认 `VIDEO_PROVIDER=mock`、`ALLOW_PAID_GENERATION=false`；未进行真实付费生成、未 push。
-
-人工验收（用户确认）：ParameterComparisonPanel 三列无串值；Mock 限制提示正确；actual 来自 metadata；节点摘要紧凑；历史不自动加载多视频；Drawer 关闭停止播放；无阿里云/付费请求。
-
----
-
-# 当前已知状态
-
-- **阶段 3A 已完成**（`e37228b`）。
-- **阶段 3B 已完成**：对照 view 为派生结果，不落盘；Mock `overallStatus=mockOnly`；时长容差 0.35s。
-- `metadataSource=browser` 不是服务端可信校验。
-- `selectedReferenceAssetIds` 超过 5 个参考素材时的手动勾选 UI 尚未实现。
 
 ---
 
@@ -174,19 +164,20 @@ npm run dev
 
 按建议顺序：
 
-1. 参考素材上限与手动选择面板（超过 5 个时）
+1. **阶段 3C-B**：`ReferenceMediaSelectionDrawer` 与确认界面勾选 UI
 2. 真实万相最低成本人工付费测试（可选；禁止 Agent 自动执行）
 
 ---
 
 # 下一阶段
 
-**名称：** 参考素材上限与手动选择面板
+**名称：** 阶段 3C-B — ReferenceMediaSelectionDrawer 与确认界面
 
 **预计涉及（只描述，本交接不实现）：**
 
-- 与 `selectedReferenceAssetIds`、校验与 resolver 对齐的勾选 UI
-- 不超过能力表 `maxReferenceMedia` 限制
+- 勾选 UI 与 `setReferenceSelectionMode` / `setSelectedReferenceAssetIds` 对齐
+- 超过 `maxReferenceMedia` 时强制手动选择
+- 确认抽屉展示候选 / 已选 / 不可选项
 
 约束延续：默认 mock、禁止自动付费、不 push、不 eslint-disable、不用 `any` / `@ts-ignore`。
 
@@ -202,18 +193,20 @@ npm run dev
 - 真实 Provider 尚未进行付费端到端测试。
 - 万相远程结果 URL 可能有时效（约 24 小时）；成功后应尽快转存。
 - 参考视频在真实 Provider 下通常需要可公网访问的 HTTPS URL；纯 localhost 资产可能被拦截。
+- 当前权限校验仅为项目/节点/边/资产一致性，**不是**生产级多用户隔离。
 
 ---
 
 # 相关文档
 
 - `README.md` — 启动与工作台结构
-- `docs/mock-video-setup.md` — 本地 Mock MP4 配置与验收要点（仅开发环境）
-- `docs/generation-parameter-comparison.md` — requested/provider/actual 对照规则
-- `docs/video-provider-aliyun-wan27.md` — 万相 2.7 Provider 配置与人工付费步骤
+- `docs/mock-video-setup.md` — 本地 Mock MP4 配置
+- `docs/generation-parameter-comparison.md` — requested/provider/actual 对照
+- `docs/reference-media-selection.md` — 参考素材选择（3C-A）
+- `docs/video-provider-aliyun-wan27.md` — 万相 2.7 Provider
 - `.env.example` — 环境变量模板（无密钥）
 - `AGENTS.md` / `CLAUDE.md` — Next.js 版本注意
 
 ---
 
-*文档对应阶段 3A 完成态。若后续功能提交改变行为，请同步更新本文件。*
+*文档对应阶段 3C-A 完成态。若后续功能提交改变行为，请同步更新本文件。*

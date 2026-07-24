@@ -62,6 +62,14 @@ type WorkflowStore = {
   removeEdge: (edgeId: string) => void;
   setViewport: (viewport: WorkflowViewport) => void;
   updateNodeData: (nodeId: string, data: Partial<WorkflowNode["data"]>) => void;
+  setReferenceSelectionMode: (
+    videoShotNodeId: string,
+    mode: "auto" | "manual",
+  ) => void;
+  setSelectedReferenceAssetIds: (
+    videoShotNodeId: string,
+    assetIds: string[],
+  ) => void;
   /** 一次写入素材 + 节点补丁，避免生成/上传时双波重渲染闪烁 */
   commitNodeAssets: (
     nodeId: string,
@@ -277,6 +285,26 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       saveError: null,
       lastEditedNodeId: nodeId,
       contentEpoch: contentEpoch + 1,
+    });
+  },
+
+  setReferenceSelectionMode: (videoShotNodeId, mode) => {
+    get().updateNodeData(videoShotNodeId, {
+      referenceSelectionMode: mode,
+    });
+  },
+
+  setSelectedReferenceAssetIds: (videoShotNodeId, assetIds) => {
+    // 保留调用方顺序；不在此校验模型上限；不隐式改 mode
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+    for (const id of assetIds) {
+      if (typeof id !== "string" || !id || seen.has(id)) continue;
+      seen.add(id);
+      ordered.push(id);
+    }
+    get().updateNodeData(videoShotNodeId, {
+      selectedReferenceAssetIds: ordered,
     });
   },
 

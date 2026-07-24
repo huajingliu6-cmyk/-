@@ -111,6 +111,7 @@ export function createNodeByType(
           referenceMode: "omni",
           creditEstimate: 50,
           attachedAssetIds: [],
+          referenceSelectionMode: "auto",
           selectedReferenceAssetIds: [],
           continuityMode: "standalone",
           sourceVideoAssetId: "",
@@ -187,7 +188,7 @@ export function createEmptyDocument(
   projectId: string,
 ): WorkflowDocument {
   return {
-    version: 3,
+    version: 4,
     projectId,
     revision: 0,
     updatedAt: new Date().toISOString(),

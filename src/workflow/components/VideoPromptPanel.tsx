@@ -125,14 +125,26 @@ export function VideoPromptPanel({
   const builtPreview = useMemo(() => {
     if (!data) return null;
     const base = useWorkflowStore.getState().document;
+    const cap =
+      capabilities?.models.find((m) => m.mode === "referenceToVideo") ??
+      capabilities?.models[0] ??
+      null;
     return buildVideoGenerationInput(
       { ...base, edges, assets },
       nodeId,
       {
-        selectedReferenceAssetIds: data.selectedReferenceAssetIds,
+        capability: cap
+          ? {
+              maxReferenceMedia: cap.maxReferenceMedia,
+              maxFirstFrames: cap.maxFirstFrames,
+              supportsReferenceImages: cap.supportsReferenceImages,
+              supportsReferenceVideos: cap.supportsReferenceVideos,
+              supportsFirstFrame: cap.supportsFirstFrame,
+            }
+          : undefined,
       },
     );
-  }, [data, nodeId, edges, assets]);
+  }, [data, nodeId, edges, assets, capabilities]);
 
   const mode = useMemo(() => {
     if (!builtPreview || !builtPreview.ok) return "textToVideo" as const;
@@ -288,13 +300,23 @@ export function VideoPromptPanel({
       : 15,
   );
 
+  const mediaLimit = capability?.maxReferenceMedia;
+  const capabilityReady = Boolean(capability);
   const mediaCount =
-    builtPreview?.ok
-      ? builtPreview.input.characterReferences.length +
-        builtPreview.input.sceneReferences.length +
-        builtPreview.input.imageReferences.length +
-        builtPreview.input.referenceVideos.length
-      : 0;
+    builtPreview?.candidates.filter((c) => c.eligible).length ??
+    (builtPreview?.ok
+      ? builtPreview.input.orderedReferenceMedia.length
+      : 0);
+  const requiresManualSelection = Boolean(
+    builtPreview &&
+      (!builtPreview.ok
+        ? builtPreview.requiresManualSelection
+        : false),
+  );
+  const canOpenConfirm =
+    capabilityReady &&
+    !requiresManualSelection &&
+    !(builtPreview && !builtPreview.ok);
 
   const onOptimizePrompt = () => {
     const base = flush().trim();
@@ -332,12 +354,24 @@ export function VideoPromptPanel({
       setNotice("请先描述要生成的短片内容");
       return;
     }
+    if (!capability) {
+      setNotice("模型能力尚未加载");
+      return;
+    }
     if (durationWarning) {
       setNotice(durationWarning);
       return;
     }
-    if (mediaCount > 5) {
-      setNotice("参考素材最多可以选择 5 个，请在确认面板勾选后再生成");
+    if (requiresManualSelection || (builtPreview && !builtPreview.ok && builtPreview.requiresManualSelection)) {
+      const msg =
+        builtPreview && !builtPreview.ok
+          ? builtPreview.errors[0]
+          : `当前有 ${mediaCount} 项参考素材，当前模型最多支持 ${capability.maxReferenceMedia} 项，请先手动选择要发送的素材。`;
+      setNotice(msg ?? "请先手动选择要发送的参考素材");
+      return;
+    }
+    if (builtPreview && !builtPreview.ok) {
+      setNotice(builtPreview.errors[0] ?? "生成输入无效");
       return;
     }
 
@@ -459,7 +493,18 @@ export function VideoPromptPanel({
         </span>
         <span className="rounded-md bg-zinc-100 px-1.5 py-0.5">
           素材：{mediaCount}
+          {mediaLimit != null ? ` / ${mediaLimit}` : ""}
         </span>
+        {!capabilityReady ? (
+          <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
+            模型能力尚未加载
+          </span>
+        ) : null}
+        {requiresManualSelection ? (
+          <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
+            需手动选择参考素材
+          </span>
+        ) : null}
         {generation && (
           <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-amber-800">
             {generation.progressLabel}
@@ -573,8 +618,39 @@ export function VideoPromptPanel({
           ) : null}
           <GlassSendButton
             busy={busy}
-            title={busy ? "生成中…" : "打开生成确认"}
-            onClick={() => setConfirmOpen(true)}
+            disabled={busy || !canOpenConfirm}
+            title={
+              !capabilityReady
+                ? "模型能力尚未加载"
+                : requiresManualSelection
+                  ? "请先手动选择参考素材"
+                  : busy
+                    ? "生成中…"
+                    : "打开生成确认"
+            }
+            onClick={() => {
+              if (!canOpenConfirm) {
+                if (!capabilityReady) {
+                  setNotice("模型能力尚未加载");
+                  return;
+                }
+                if (requiresManualSelection) {
+                  setNotice(
+                    builtPreview && !builtPreview.ok
+                      ? (builtPreview.errors[0] ??
+                          "请先手动选择要发送的参考素材")
+                      : "请先手动选择要发送的参考素材",
+                  );
+                  return;
+                }
+                if (builtPreview && !builtPreview.ok) {
+                  setNotice(builtPreview.errors[0] ?? "生成输入无效");
+                  return;
+                }
+                return;
+              }
+              setConfirmOpen(true);
+            }}
           >
             <ArrowUp className="h-4 w-4" strokeWidth={2.25} />
           </GlassSendButton>

@@ -171,6 +171,7 @@ export const videoShotNodeDataSchema = z.object({
   referenceMode: z.string().default("full"),
   creditEstimate: z.number().finite().nonnegative().default(10),
   attachedAssetIds: z.array(z.string()).default([]),
+  referenceSelectionMode: z.enum(["auto", "manual"]).default("auto"),
   selectedReferenceAssetIds: z.array(z.string()).default([]),
   continuityMode: z.enum([
     "standalone",
@@ -314,7 +315,7 @@ export const workflowViewportSchema = z.object({
 });
 
 export const workflowDocumentSchema = z.object({
-  version: z.literal(3),
+  version: z.literal(4),
   projectId: z.string().min(1),
   revision: z.number().int().nonnegative(),
   nodes: z.array(workflowNodeSchema),

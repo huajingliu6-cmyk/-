@@ -7,10 +7,23 @@ import {
 import { loadWorkflow } from "@/workflow/lib/workflow-storage";
 import { buildVideoGenerationInput } from "@/workflow/lib/build-video-generation-input";
 import { submitVideoGeneration } from "@/video-generation/service";
+import {
+  listCapabilitiesForProvider,
+  pickCapability,
+} from "@/video-generation/model-capabilities";
+import { getVideoProviderRuntimeConfig } from "@/video-generation/provider/config";
+import { MAX_REFERENCE_SELECTION_IDS_IN_REQUEST } from "@/video-generation/reference-media";
 
 const bodySchema = z.object({
   confirmPaidGeneration: z.boolean().optional().default(false),
-  selectedReferenceAssetIds: z.array(z.string()).max(5).optional(),
+  /**
+   * 可选客户端快照；权威选择来自最新 WorkflowDocument。
+   * 不得用旧任务 requestSnapshot 覆盖。
+   */
+  selectedReferenceAssetIds: z
+    .array(z.string().min(1))
+    .max(MAX_REFERENCE_SELECTION_IDS_IN_REQUEST)
+    .optional(),
   title: z.string().optional(),
 });
 
@@ -40,18 +53,31 @@ export async function POST(
       );
     }
 
-    // 始终加载最新 WorkflowDocument；新任务不复用旧 providerTaskId
+    // 始终加载最新 WorkflowDocument；选择以节点数据为准，不复用旧任务快照
     const document = await loadWorkflow(old.projectId);
+    const runtime = getVideoProviderRuntimeConfig();
+    const capabilities = listCapabilitiesForProvider(runtime.providerId, {
+      t2vModelId: runtime.t2vModelId,
+      r2vModelId: runtime.r2vModelId,
+    });
+    const r2vCapability = pickCapability(capabilities, "referenceToVideo");
 
     const built = buildVideoGenerationInput(document, old.shotNodeId, {
-      selectedReferenceAssetIds: parsed.data.selectedReferenceAssetIds,
+      clientSelectedReferenceAssetIds: parsed.data.selectedReferenceAssetIds,
+      capability: r2vCapability,
     });
     if (!built.ok) {
+      const code =
+        built.structuredErrors[0]?.code ??
+        (built.requiresManualSelection
+          ? "REFERENCE_SELECTION_REQUIRED"
+          : "INPUT_INVALID");
       return NextResponse.json(
         {
-          code: "INPUT_INVALID",
+          code,
           message: built.errors[0] ?? "生成输入无效",
-          errors: built.errors,
+          errors: built.structuredErrors,
+          requiresManualSelection: built.requiresManualSelection,
         },
         { status: 400 },
       );

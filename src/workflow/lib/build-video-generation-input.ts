@@ -3,6 +3,15 @@ import {
   isVideoAspectRatio,
   isVideoResolution,
 } from "@/video-generation/dimensions";
+import {
+  collectReferenceMediaCandidates,
+  resolveFirstFrame,
+  resolveReferenceMediaSelection,
+  type ReferenceMediaCandidate,
+  type ReferenceSelectionMode,
+  type StructuredGenerationError,
+} from "@/video-generation/reference-media";
+import type { ModelCapability } from "@/video-generation/types";
 import type {
   DirectorSettings,
   GenerationAssetReference,
@@ -11,12 +20,7 @@ import type {
   VideoResolution,
 } from "@/video-generation/types";
 import type {
-  AssetRecord,
   AudioNode,
-  CharacterNode,
-  ImageNode,
-  PropNode,
-  SceneNode,
   TextNode,
   VideoShotNode,
   WorkflowDocument,
@@ -28,8 +32,16 @@ export type BuildVideoGenerationInputResult =
       ok: true;
       input: VideoGenerationInput;
       unsupportedAudioLabels: string[];
+      candidates: ReferenceMediaCandidate[];
+      requiresManualSelection: boolean;
     }
-  | { ok: false; errors: string[] };
+  | {
+      ok: false;
+      errors: string[];
+      structuredErrors: StructuredGenerationError[];
+      candidates: ReferenceMediaCandidate[];
+      requiresManualSelection: boolean;
+    };
 
 function incomingSources(
   document: WorkflowDocument,
@@ -44,27 +56,6 @@ function incomingSources(
     .filter((n): n is WorkflowNode => Boolean(n));
 }
 
-function assetById(
-  assets: AssetRecord[],
-  assetId: string,
-): AssetRecord | undefined {
-  if (!assetId) return undefined;
-  return assets.find((asset) => asset.id === assetId);
-}
-
-function resolveCharacterVariant(node: CharacterNode) {
-  return (
-    node.data.variants.find(
-      (variant) => variant.id === node.data.selectedVariantId,
-    ) ??
-    node.data.variants.find(
-      (variant) => variant.id === node.data.primaryVariantId,
-    ) ??
-    node.data.variants[0] ??
-    null
-  );
-}
-
 function normalizeResolution(raw: string): VideoResolution {
   if (isVideoResolution(raw)) return raw;
   if (raw.includes("1080")) return "1080P";
@@ -76,14 +67,62 @@ function normalizeAspect(raw: string): VideoAspectRatio {
   return "9:16";
 }
 
+function candidateToReference(
+  c: ReferenceMediaCandidate,
+): GenerationAssetReference {
+  const kind =
+    c.referenceKind === "character"
+      ? "character"
+      : c.referenceKind === "scene"
+        ? "scene"
+        : c.referenceKind === "referenceVideo"
+          ? "reference_video"
+          : "image";
+  return {
+    assetId: c.assetId,
+    kind,
+    label: c.label,
+    mimeType: c.mimeType,
+    sourceUrl: c.url || "",
+  };
+}
+
+export type BuildVideoGenerationInputOptions = {
+  /**
+   * 客户端可选快照；若提供则必须与节点上保存的数组与顺序完全一致，
+   * 否则返回 STALE_REFERENCE_SELECTION。权威来源始终是 WorkflowDocument。
+   */
+  clientSelectedReferenceAssetIds?: string[];
+  /**
+   * 模型能力（权威）。未提供时不得用硬编码上限冒充业务限制，
+   * 必须返回 MODEL_CAPABILITY_NOT_LOADED。
+   */
+  capability?: Pick<
+    ModelCapability,
+    | "maxReferenceMedia"
+    | "maxFirstFrames"
+    | "supportsReferenceImages"
+    | "supportsReferenceVideos"
+    | "supportsFirstFrame"
+  >;
+};
+
+function arraysEqualOrder(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 /**
- * 纯函数：汇总连接到指定 VideoShotNode 的全部输入。
- * Mock 与真实 Provider 的共同输入来源。
+ * 纯函数：汇总连接到指定 VideoShotNode 的最终生成输入。
+ * 链路：候选收集 → 首帧 → 选择解析 → 有序 input。
  */
 export function buildVideoGenerationInput(
   document: WorkflowDocument,
   videoShotNodeId: string,
-  options?: { selectedReferenceAssetIds?: string[] },
+  options?: BuildVideoGenerationInputOptions,
 ): BuildVideoGenerationInputResult {
   const videoNode = document.nodes.find(
     (n): n is VideoShotNode =>
@@ -91,191 +130,110 @@ export function buildVideoGenerationInput(
   );
 
   if (!videoNode) {
-    return { ok: false, errors: ["未找到镜头节点"] };
+    return {
+      ok: false,
+      errors: ["未找到镜头节点"],
+      structuredErrors: [
+        {
+          code: "SHOT_NOT_FOUND",
+          message: "未找到镜头节点",
+        },
+      ],
+      candidates: [],
+      requiresManualSelection: false,
+    };
   }
 
-  const { assets } = document;
+  if (!options?.capability) {
+    return {
+      ok: false,
+      errors: ["模型能力尚未加载"],
+      structuredErrors: [
+        {
+          code: "MODEL_CAPABILITY_NOT_LOADED",
+          field: "capability",
+          message: "模型能力尚未加载",
+        },
+      ],
+      candidates: [],
+      requiresManualSelection: false,
+    };
+  }
+
+  const capability = options.capability;
+  const selectionMode: ReferenceSelectionMode =
+    videoNode.data.referenceSelectionMode === "manual" ? "manual" : "auto";
+  const nodeSelectedIds = videoNode.data.selectedReferenceAssetIds ?? [];
+
+  if (
+    options?.clientSelectedReferenceAssetIds !== undefined &&
+    !arraysEqualOrder(
+      options.clientSelectedReferenceAssetIds,
+      nodeSelectedIds,
+    )
+  ) {
+    return {
+      ok: false,
+      errors: ["参考素材选择与已保存工作流不一致，请重新打开确认后再提交。"],
+      structuredErrors: [
+        {
+          code: "STALE_REFERENCE_SELECTION",
+          field: "selectedReferenceAssetIds",
+          message:
+            "参考素材选择与已保存工作流不一致，请重新打开确认后再提交。",
+        },
+      ],
+      candidates: [],
+      requiresManualSelection: false,
+    };
+  }
+
+  const candidates = collectReferenceMediaCandidates({
+    document,
+    videoShotNodeId,
+    capability,
+  });
+
+  const firstFrameResult = resolveFirstFrame({
+    document,
+    videoShotNodeId,
+    capability,
+  });
+  if (!firstFrameResult.ok) {
+    return {
+      ok: false,
+      errors: firstFrameResult.errors.map((e) => e.message),
+      structuredErrors: firstFrameResult.errors,
+      candidates,
+      requiresManualSelection: false,
+    };
+  }
+
+  const firstFrameCandidate = firstFrameResult.firstFrame;
+  const selection = resolveReferenceMediaSelection({
+    candidates,
+    selectionMode,
+    selectedReferenceAssetIds: nodeSelectedIds,
+    capability,
+    firstFrameAssetId: firstFrameCandidate?.assetId ?? null,
+  });
+
+  if (selection.requiresManualSelection || selection.validationErrors.length > 0) {
+    return {
+      ok: false,
+      errors: selection.validationErrors.map((e) => e.message),
+      structuredErrors: selection.validationErrors,
+      candidates,
+      requiresManualSelection: selection.requiresManualSelection,
+    };
+  }
+
   const incoming = incomingSources(document, videoShotNodeId);
-  const errors: string[] = [];
   const unsupportedAudioLabels: string[] = [];
-
-  const characterReferences: GenerationAssetReference[] = [];
-  for (const n of incoming.filter(
-    (node): node is CharacterNode => node.type === "character",
-  )) {
-    const variant = resolveCharacterVariant(n);
-    const primaryId = variant?.primaryAssetId || "";
-    const asset = assetById(assets, primaryId);
-    if (!primaryId || !asset) {
-      errors.push(
-        `角色「${n.data.characterName || n.id}」尚未配置主参考图`,
-      );
-      continue;
-    }
-    if (asset.url.startsWith("blob:")) {
-      errors.push(
-        `角色「${n.data.characterName || n.id}」素材为临时地址，无法用于生成`,
-      );
-      continue;
-    }
-    const voiceId =
-      variant && "referenceVoiceAssetId" in variant
-        ? String(
-            (variant as { referenceVoiceAssetId?: string })
-              .referenceVoiceAssetId ?? "",
-          )
-        : n.data.voiceAssetId || "";
-    characterReferences.push({
-      assetId: asset.id,
-      kind: "character",
-      label: n.data.characterName || variant?.name || "角色",
-      mimeType: asset.mimeType,
-      sourceUrl: asset.url,
-      referenceVoiceAssetId: voiceId || undefined,
-    });
-  }
-
-  const sceneReferences: GenerationAssetReference[] = [];
-  for (const n of incoming.filter(
-    (node): node is SceneNode => node.type === "scene",
-  )) {
-    const primaryId =
-      n.data.primaryAssetId || n.data.referenceAssetIds[0] || "";
-    const asset = assetById(assets, primaryId);
-    if (!primaryId || !asset) {
-      errors.push(`场景「${n.data.sceneName || n.id}」尚未上传主参考图`);
-      continue;
-    }
-    if (asset.url.startsWith("blob:")) {
-      errors.push(`场景「${n.data.sceneName || n.id}」素材为临时地址`);
-      continue;
-    }
-    sceneReferences.push({
-      assetId: asset.id,
-      kind: "scene",
-      label: n.data.sceneName || "场景",
-      mimeType: asset.mimeType,
-      sourceUrl: asset.url,
-    });
-  }
-
-  const imageReferences: GenerationAssetReference[] = [];
-  for (const n of incoming.filter(
-    (node): node is ImageNode => node.type === "image",
-  )) {
-    const selectedIds =
-      (n.data as { selectedAssetIds?: string[] }).selectedAssetIds?.length
-        ? (n.data as { selectedAssetIds: string[] }).selectedAssetIds
-        : [
-            ...new Set([
-              ...(n.data.primaryAssetId ? [n.data.primaryAssetId] : []),
-              ...n.data.assetIds,
-            ]),
-          ].filter(Boolean);
-
-    if (n.data.referenceType === "startFrame") {
-      // handled as first frame below
-      const id = selectedIds[0] || "";
-      const asset = assetById(assets, id);
-      if (asset && !asset.url.startsWith("blob:")) {
-        // collect later into firstFrame — keep one
-        imageReferences.push({
-          assetId: asset.id,
-          kind: "first_frame",
-          label: n.data.title || "首帧",
-          mimeType: asset.mimeType,
-          sourceUrl: asset.url,
-        });
-      } else {
-        errors.push(`图片节点 ${n.id} 的首帧素材缺失或不可用`);
-      }
-      continue;
-    }
-
-    for (const id of selectedIds) {
-      const asset = assetById(assets, id);
-      if (!asset) {
-        errors.push(`图片参考节点 ${n.id} 的素材缺失`);
-        continue;
-      }
-      if (asset.url.startsWith("blob:")) {
-        errors.push(`图片参考节点 ${n.id} 含临时地址，无法用于生成`);
-        continue;
-      }
-      imageReferences.push({
-        assetId: asset.id,
-        kind: "image",
-        label: n.data.title || "参考图",
-        mimeType: asset.mimeType,
-        sourceUrl: asset.url,
-      });
-    }
-  }
-
-  for (const n of incoming.filter(
-    (node): node is PropNode => node.type === "prop",
-  )) {
-    const ids = [
-      ...new Set([
-        ...(n.data.primaryAssetId ? [n.data.primaryAssetId] : []),
-        ...n.data.assetIds,
-      ]),
-    ].filter(Boolean);
-    for (const id of ids) {
-      const asset = assetById(assets, id);
-      if (!asset || asset.url.startsWith("blob:")) {
-        errors.push(`道具节点 ${n.id} 的素材缺失或不可用`);
-        continue;
-      }
-      imageReferences.push({
-        assetId: asset.id,
-        kind: "image",
-        label: n.data.propName || "道具",
-        mimeType: asset.mimeType,
-        sourceUrl: asset.url,
-      });
-    }
-  }
-
-  const referenceVideos: GenerationAssetReference[] = [];
-  // 视频参考：挂在 videoShot 的 sourceVideoAssetId，或 continuity
-  if (videoNode.data.sourceVideoAssetId) {
-    const asset = assetById(assets, videoNode.data.sourceVideoAssetId);
-    if (asset) {
-      referenceVideos.push({
-        assetId: asset.id,
-        kind: "reference_video",
-        label: asset.name || "参考视频",
-        mimeType: asset.mimeType,
-        sourceUrl: asset.url,
-      });
-    }
-  }
-
-  let firstFrame: GenerationAssetReference | undefined;
-  if (videoNode.data.startFrameAssetId) {
-    const asset = assetById(assets, videoNode.data.startFrameAssetId);
-    if (asset && !asset.url.startsWith("blob:")) {
-      firstFrame = {
-        assetId: asset.id,
-        kind: "first_frame",
-        label: "首帧",
-        mimeType: asset.mimeType,
-        sourceUrl: asset.url,
-      };
-    }
-  }
-  const fromImageNode = imageReferences.find((r) => r.kind === "first_frame");
-  if (!firstFrame && fromImageNode) {
-    firstFrame = fromImageNode;
-  }
-  const plainImages = imageReferences.filter((r) => r.kind !== "first_frame");
-
   for (const n of incoming.filter(
     (node): node is AudioNode => node.type === "audio",
   )) {
     if (n.data.audioType === "voice") {
-      // 仅当明确绑到角色时才作为 reference_voice；否则标记不支持发送为 BGM
       unsupportedAudioLabels.push(
         `${n.data.title || "音频"}（voice，未绑定角色则不作为 reference_voice）`,
       );
@@ -293,7 +251,44 @@ export function buildVideoGenerationInput(
 
   const instruction = videoNode.data.generationInstruction.trim();
   if (!instruction && textInputs.length === 0) {
-    errors.push("请填写生成描述，或连接文本节点");
+    return {
+      ok: false,
+      errors: ["请填写生成描述，或连接文本节点"],
+      structuredErrors: [
+        {
+          code: "PROMPT_REQUIRED",
+          field: "prompt",
+          message: "请填写生成描述，或连接文本节点",
+        },
+      ],
+      candidates,
+      requiresManualSelection: false,
+    };
+  }
+
+  const orderedReferenceMedia = selection.selected.map(candidateToReference);
+  const characterReferences = orderedReferenceMedia.filter(
+    (r) => r.kind === "character",
+  );
+  const sceneReferences = orderedReferenceMedia.filter(
+    (r) => r.kind === "scene",
+  );
+  const imageReferences = orderedReferenceMedia.filter(
+    (r) => r.kind === "image",
+  );
+  const referenceVideos = orderedReferenceMedia.filter(
+    (r) => r.kind === "reference_video",
+  );
+
+  let firstFrame: GenerationAssetReference | undefined;
+  if (firstFrameCandidate) {
+    firstFrame = {
+      assetId: firstFrameCandidate.assetId,
+      kind: "first_frame",
+      label: firstFrameCandidate.label,
+      mimeType: firstFrameCandidate.mimeType,
+      sourceUrl: firstFrameCandidate.url || "",
+    };
   }
 
   const hasFirstFrame = Boolean(firstFrame);
@@ -323,17 +318,22 @@ export function buildVideoGenerationInput(
     promptExtend: true,
     characterReferences,
     sceneReferences,
-    imageReferences: plainImages,
+    imageReferences,
     referenceVideos,
+    orderedReferenceMedia,
     firstFrame,
     directorSettings,
     textInputs,
-    selectedReferenceAssetIds: options?.selectedReferenceAssetIds,
+    referenceSelectionMode: selectionMode,
+    selectedReferenceAssetIds: selection.selected.map((c) => c.assetId),
+    requiresManualSelection: false,
   };
 
-  if (errors.length > 0) {
-    return { ok: false, errors };
-  }
-
-  return { ok: true, input, unsupportedAudioLabels };
+  return {
+    ok: true,
+    input,
+    unsupportedAudioLabels,
+    candidates,
+    requiresManualSelection: false,
+  };
 }

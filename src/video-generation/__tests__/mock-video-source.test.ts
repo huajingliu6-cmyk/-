@@ -49,7 +49,10 @@ function baseInput(): VideoGenerationInput {
     sceneReferences: [],
     imageReferences: [],
     referenceVideos: [],
+    orderedReferenceMedia: [],
     textInputs: [],
+    referenceSelectionMode: "auto",
+    selectedReferenceAssetIds: [],
   };
 }
 

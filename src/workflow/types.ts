@@ -103,6 +103,9 @@ export type ContinuityMode =
   | "startFrame"
   | "startAndEndFrame";
 
+/** 视频镜头参考素材选择模式 */
+export type ReferenceSelectionMode = "auto" | "manual";
+
 export type CharacterPoseTag =
   | "front"
   | "side"
@@ -217,7 +220,13 @@ export type VideoShotNodeData = {
   creditEstimate: number;
   /** 直接挂在视频节点上的素材（上传 / 资产库） */
   attachedAssetIds: string[];
-  /** 超过 5 个参考时用户勾选的素材顺序 */
+  /**
+   * 参考素材选择模式。
+   * - auto：不把 selectedReferenceAssetIds 当权威；≤上限则全选，>上限则要求手动
+   * - manual：selectedReferenceAssetIds 为唯一选择与发送顺序；空数组=明确选零项
+   */
+  referenceSelectionMode: ReferenceSelectionMode;
+  /** 手动模式下用户勾选的素材顺序（也是 Provider 发送顺序） */
   selectedReferenceAssetIds: string[];
   continuityMode: ContinuityMode;
   sourceVideoAssetId: string;
@@ -320,7 +329,8 @@ export type WorkflowViewport = {
 };
 
 export type WorkflowDocument = {
-  version: 3;
+  /** v4：参考素材选择 mode + 持久化 selectedReferenceAssetIds */
+  version: 4;
   projectId: string;
   revision: number;
   nodes: WorkflowNode[];

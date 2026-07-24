@@ -207,7 +207,7 @@ export function AssetLibraryPanel({ collapsed, onToggle, projectId }: Props) {
 
   const documentSnapshot = useMemo<WorkflowDocument>(
     () => ({
-      version: 3,
+      version: 4,
       projectId,
       revision: 0,
       nodes: documentNodes,

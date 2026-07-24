@@ -42,16 +42,16 @@ function directorPrompt(input: VideoGenerationInput): string {
 }
 
 /**
- * 按稳定顺序构建 media，并生成与「图 N / 视频 N」一致的指代说明。
- * 顺序：first_frame（若有）→ 选定的参考图（角色/场景/普通）→ 参考视频
+ * 保持 resolveProviderAssets 给出的顺序：
+ * first_frame（若有且已在列表前端）之后的普通参考素材不再按 image/video 重分组。
+ * 若 first_frame 不在首位，则提到最前，其余相对顺序不变。
  */
 export function orderResolvedMedia(
   resolved: ResolvedProviderMedia[],
 ): ResolvedProviderMedia[] {
   const first = resolved.filter((m) => m.type === "first_frame");
-  const images = resolved.filter((m) => m.type === "reference_image");
-  const videos = resolved.filter((m) => m.type === "reference_video");
-  return [...first, ...images, ...videos];
+  const rest = resolved.filter((m) => m.type !== "first_frame");
+  return [...first, ...rest];
 }
 
 export function buildPromptWithMediaRefs(

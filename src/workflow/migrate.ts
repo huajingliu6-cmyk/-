@@ -94,6 +94,64 @@ function parseFocalLength(value: unknown): FocalLength {
   return mapLensToFocalLength(value);
 }
 
+function parseSelectedReferenceAssetIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const id = item.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+/**
+ * v3→v4 / 缺字段迁移：
+ * - 无字段 → auto + []
+ * - 非空 selected、无 mode → manual（保留顺序）
+ * - 空 selected、无 mode → auto（无法证明曾是手动空选）
+ */
+function migrateReferenceSelectionFields(
+  data: Record<string, unknown>,
+): Pick<
+  VideoShotNodeData,
+  "referenceSelectionMode" | "selectedReferenceAssetIds"
+> {
+  const hasSelectedField = Object.prototype.hasOwnProperty.call(
+    data,
+    "selectedReferenceAssetIds",
+  );
+  const hasModeField = Object.prototype.hasOwnProperty.call(
+    data,
+    "referenceSelectionMode",
+  );
+  const selectedReferenceAssetIds = parseSelectedReferenceAssetIds(
+    data.selectedReferenceAssetIds,
+  );
+
+  if (hasModeField) {
+    const modeRaw = asString(data.referenceSelectionMode, "auto");
+    const referenceSelectionMode =
+      modeRaw === "manual" ? "manual" : "auto";
+    return { referenceSelectionMode, selectedReferenceAssetIds };
+  }
+
+  if (hasSelectedField && selectedReferenceAssetIds.length > 0) {
+    return {
+      referenceSelectionMode: "manual",
+      selectedReferenceAssetIds,
+    };
+  }
+
+  return {
+    referenceSelectionMode: "auto",
+    selectedReferenceAssetIds: [],
+  };
+}
+
 function defaultVideoShotData(
   shotNumber: number,
   patch: Partial<VideoShotNodeData> = {},
@@ -117,6 +175,7 @@ function defaultVideoShotData(
     referenceMode: patch.referenceMode ?? "omni",
     creditEstimate: patch.creditEstimate ?? 50,
     attachedAssetIds: patch.attachedAssetIds ?? [],
+    referenceSelectionMode: patch.referenceSelectionMode ?? "auto",
     selectedReferenceAssetIds: patch.selectedReferenceAssetIds ?? [],
     continuityMode: patch.continuityMode ?? "standalone",
     sourceVideoAssetId: patch.sourceVideoAssetId ?? "",
@@ -738,6 +797,7 @@ function migrateNode(
       attachedAssetIds: Array.isArray(data.attachedAssetIds)
         ? data.attachedAssetIds.map((id) => asString(id)).filter(Boolean)
         : [],
+      ...migrateReferenceSelectionFields(data),
       status: asJobStatus(data.status),
       progress: asNumber(data.progress),
       errorMessage: asString(data.errorMessage),
@@ -867,7 +927,7 @@ export function migrateWorkflowDocument(raw: unknown): WorkflowDocument {
   }
 
   const version = asNumber(doc.version, 1);
-  if (version !== 1 && version !== 2 && version !== 3) {
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4) {
     throw new WorkflowMigrationError(`不支持的工作流版本：${version}`);
   }
 
@@ -891,14 +951,16 @@ export function migrateWorkflowDocument(raw: unknown): WorkflowDocument {
     .map(migrateEdge)
     .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
   const shotOrder =
-    version === 3 && Array.isArray(doc.shotOrder) && doc.shotOrder.length > 0
+    (version === 3 || version === 4) &&
+    Array.isArray(doc.shotOrder) &&
+    doc.shotOrder.length > 0
       ? doc.shotOrder
           .map((id) => asString(id))
           .filter((id) => Boolean(id) && nodeIds.has(id))
       : buildShotOrder(nodes);
 
   const migrated: WorkflowDocument = {
-    version: 3,
+    version: 4,
     projectId,
     revision: asNumber(doc.revision),
     updatedAt: asString(doc.updatedAt, new Date().toISOString()),

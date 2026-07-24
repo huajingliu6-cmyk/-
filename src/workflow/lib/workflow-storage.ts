@@ -46,7 +46,7 @@ export async function loadWorkflow(
         : 1;
 
     // 迁移前保留旧文件备份，避免破坏历史工作流
-    if (version < 3) {
+    if (version < 4) {
       const backupPath = path.join(
         DATA_DIR,
         `${id}.v${version}.pre-migrate.${Date.now()}.bak.json`,
@@ -64,8 +64,8 @@ export async function loadWorkflow(
       return { ...parsed, edges: [] };
     }
 
-    // 若从旧版本迁移而来，写回 v3 文件（备份已保留）
-    if (version < 3) {
+    // 若从旧版本迁移而来，写回最新文件（备份已保留）
+    if (version < 4) {
       const tempPath = path.join(
         DATA_DIR,
         `${id}.${process.pid}.${Date.now()}.tmp`,

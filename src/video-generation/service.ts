@@ -116,6 +116,7 @@ export async function submitVideoGeneration(params: {
     requestSnapshot: {
       prompt: params.input.prompt,
       settings,
+      /** 真正发送的素材顺序（含首帧在 resolved 中的位置） */
       mediaAssetIds,
       unsupportedAudioLabels: params.unsupportedAudioLabels,
     },

@@ -86,8 +86,16 @@ export type VideoGenerationInput = {
   directorSettings?: DirectorSettings;
   textInputs: string[];
 
-  /** 用户在确认面板中显式选择的参考素材顺序（assetId），用于 ≤5 限制 */
-  selectedReferenceAssetIds?: string[];
+  /**
+   * 最终选定并按发送顺序排列的普通参考素材（不含首帧）。
+   * Provider / Prompt 编号以此为准，不得再按角色/场景分组重排。
+   */
+  orderedReferenceMedia: GenerationAssetReference[];
+
+  referenceSelectionMode: "auto" | "manual";
+  /** 与节点 / 最终选择一致的 assetId 顺序（手动模式权威；自动模式为解析结果） */
+  selectedReferenceAssetIds: string[];
+  requiresManualSelection?: boolean;
 };
 
 export type InputSummary = {
@@ -105,6 +113,9 @@ export type ValidationError = {
   field?: string;
   message: string;
 };
+
+/** 生成链路结构化错误（与 ValidationError 同形） */
+export type StructuredGenerationError = ValidationError;
 
 export type ProviderCapabilities = {
   providerId: VideoProviderId;

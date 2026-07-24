@@ -113,31 +113,22 @@ function toMediaType(
 }
 
 /**
- * 将工作流素材解析为 Provider 可用的 URL（HTTPS 或临时 data URL）。
- * data URL 仅在本次请求内存中，不写入 WorkflowDocument / 数据库 / 日志。
+ * 将最终选定素材解析为 Provider 可用 URL。
+ * 顺序：首帧（若有）→ orderedReferenceMedia（用户/自动稳定顺序，不再按类型重排）。
  */
 export async function resolveProviderAssets(
   input: VideoGenerationInput,
   options?: { forRealProvider: boolean },
 ): Promise<ResolvedProviderMedia[]> {
   const forReal = options?.forRealProvider ?? true;
-  const selected = new Set(input.selectedReferenceAssetIds ?? []);
-
-  const imagePool = [
-    ...input.characterReferences,
-    ...input.sceneReferences,
-    ...input.imageReferences,
-  ];
-
-  const images =
-    selected.size > 0
-      ? imagePool.filter((r) => selected.has(r.assetId))
-      : imagePool;
-
-  const videos =
-    selected.size > 0
-      ? input.referenceVideos.filter((r) => selected.has(r.assetId))
-      : input.referenceVideos;
+  const ordered =
+    input.orderedReferenceMedia ??
+    [
+      ...input.characterReferences,
+      ...input.sceneReferences,
+      ...input.imageReferences,
+      ...input.referenceVideos,
+    ];
 
   const result: ResolvedProviderMedia[] = [];
 
@@ -153,38 +144,25 @@ export async function resolveProviderAssets(
     });
   }
 
-  for (const ref of images) {
+  for (const ref of ordered) {
+    if (ref.kind === "reference_video") {
+      const url = forReal
+        ? await resolvePublicOrBlock(ref, "参考视频")
+        : ref.sourceUrl || `mock://${ref.assetId}`;
+      result.push({
+        type: "reference_video",
+        url,
+        assetId: ref.assetId,
+        label: ref.label,
+      });
+      continue;
+    }
+
     const url = forReal
       ? await resolveImageUrl(ref)
       : ref.sourceUrl || `mock://${ref.assetId}`;
-    let referenceVoiceUrl: string | undefined;
-    if (ref.referenceVoiceAssetId) {
-      // 音色必须是公网 URL；本机音频直接阻止真实生成
-      const voiceRef: GenerationAssetReference = {
-        assetId: ref.referenceVoiceAssetId,
-        kind: "voice",
-        label: "音色",
-        mimeType: "audio/mpeg",
-        sourceUrl: "", // filled below if we find matching audio in document - handled by caller
-      };
-      // Voice URL should be passed via a side map; for now require HTTPS on sourceUrl if provided
-      void voiceRef;
-    }
     result.push({
       type: toMediaType(ref),
-      url,
-      assetId: ref.assetId,
-      label: ref.label,
-      referenceVoiceUrl,
-    });
-  }
-
-  for (const ref of videos) {
-    const url = forReal
-      ? await resolvePublicOrBlock(ref, "参考视频")
-      : ref.sourceUrl || `mock://${ref.assetId}`;
-    result.push({
-      type: "reference_video",
       url,
       assetId: ref.assetId,
       label: ref.label,

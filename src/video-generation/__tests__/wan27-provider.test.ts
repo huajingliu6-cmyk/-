@@ -42,7 +42,10 @@ function baseInput(
     sceneReferences: [],
     imageReferences: [],
     referenceVideos: [],
+    orderedReferenceMedia: [],
     textInputs: [],
+    referenceSelectionMode: "auto",
+    selectedReferenceAssetIds: [],
     ...patch,
   };
 }
@@ -220,6 +223,15 @@ describe("wan mode and request", () => {
     expect(
       selectWanGenerationMode(
         baseInput({
+          orderedReferenceMedia: [
+            {
+              assetId: "a1",
+              kind: "image",
+              label: "图",
+              mimeType: "image/png",
+              sourceUrl: "https://example.com/a.png",
+            },
+          ],
           imageReferences: [
             {
               assetId: "a1",
