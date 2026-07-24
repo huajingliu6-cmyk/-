@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
+    "dev:local-paid-test": "next dev --webpack -H 127.0.0.1",
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",

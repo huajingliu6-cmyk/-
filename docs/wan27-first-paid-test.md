@@ -1,9 +1,11 @@
 # 万相 2.7 首次最低成本人工测试清单
 
-**阶段**：3D-B6-A 仅编写本文档，**不执行**付费测试。
+**阶段**：3D-B6-A 编写本文档；**3D-B6-B** 已实现本机闸门 / Arm / Simulation（零费用浏览器验收已通过）。**仍不执行**真实付费。
 **核对日期参考**：2026-07-25（测试当天必须重新确认价格与模型 ID）。
 
 本清单**只描述人工操作**，不自动执行。完成后立即恢复 mock。
+
+配套闸门实现见 `docs/wan27-local-one-shot-test-gate.md`（默认关闭；真实提交路径尚未接线；确认按钮仍禁用；仅 Arm / Dry Run / Simulation）。
 
 **不允许 Agent 自动执行付费测试。** 不允许把真实密钥、Workspace ID 或 allowlist 写入本文档或仓库。
 
@@ -70,11 +72,11 @@ UI 费用文案固定为：
    - `VIDEO_PROVIDER=aliyun-wan27`
    - `ALLOW_PAID_GENERATION=true`
    - `WAN_RESULT_ALLOWED_HOSTS=` 先留空亦可（见下）
-3. 重启唯一的 `npm run dev`。
-4. 打开 Readiness（`GET /api/generations` 的 `readiness`）：确认 `readyForPaidSubmission` 在代码门闩下仍为 false 时，**本阶段文档要求**：仅在你已理解阶段门闩含义、并在后续阶段解除硬门闩后才可真实提交。
-   > 注意：3D-B6-A 代码中 `readyForPaidSubmission` **恒为 false**。若你要做真实试跑，需在后续阶段明确解除该阶段门闩后再执行；**本阶段禁止执行付费**。
-5. 使用 Dry Run 查看脱敏摘要（文案含「当前不会发送真实请求，也不会产生费用。」）。
-6. （后续阶段）创建唯一一条 T2V 任务 → 等待 SUCCEEDED → 处理 allowlist → `retryTransfer`（不重新计费）。
+3. 重启唯一开发服务器，建议：`npm run dev:local-paid-test`（仅 `127.0.0.1`；禁止隧道 / 局域网共享）。
+4. 打开本机测试卡片：完成当日价格确认、Token、Arm；确认 `readyForPaidSubmission` 在代码门闩下仍为 false。
+   > 注意：3D-B6-B 仍强制 `readyForPaidSubmission=false`，真实提交路径未接线。需后续阶段接线并人工解除门闩后才可真实提交；**当前禁止执行付费**。
+5. 使用 Dry Run / Simulation 做零费用演练（不得当作真实 Provider 成功）。
+6. （后续阶段接线后）创建唯一一条 T2V 任务 → 等待 SUCCEEDED → 处理 allowlist → `retryTransfer`（不重新计费）。
 7. 立刻恢复：
    ```env
    VIDEO_PROVIDER=mock

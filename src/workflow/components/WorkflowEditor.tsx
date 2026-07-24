@@ -54,6 +54,7 @@ import {
 } from "@/workflow/components/QuickCreateDock";
 import { ShotStrip } from "@/workflow/components/ShotStrip";
 import { HelperLinesOverlay } from "@/workflow/components/HelperLinesOverlay";
+import { LocalPaidTestCard } from "@/workflow/components/LocalPaidTestCard";
 import { uploadAssetFile } from "@/workflow/lib/upload-asset";
 import {
   CANVAS_GRID_SIZE,
@@ -1261,6 +1262,10 @@ function WorkflowCanvas({
           persistLayoutPrefs({ nodeDensity })
         }
       />
+
+      <div className="pointer-events-none absolute bottom-4 left-4 z-[70]">
+        <LocalPaidTestCard />
+      </div>
 
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div className="relative flex min-h-0 flex-1">

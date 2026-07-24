@@ -48,6 +48,11 @@ yarn-error.log*
 !/data/idempotency/.gitkeep
 !/data/idempotency/README.md
 
+# 本机一次性付费测试 Guard（运行时 JSON 不进 Git）
+/data/paid-test-guard/**
+!/data/paid-test-guard/.gitkeep
+!/data/paid-test-guard/README.md
+
 # vercel
 .vercel
 

@@ -90,3 +90,4 @@
 - 错误码中文映射扩展
 - 响应 Schema 校验
 - 首次最低成本测试文档：`docs/wan27-first-paid-test.md`
+- （3D-B6-B **已完成**）本机一次性闸门与零费用 Simulation：`docs/wan27-local-one-shot-test-gate.md`（真实提交未接线；确认按钮仍禁用；≥241 tests）
