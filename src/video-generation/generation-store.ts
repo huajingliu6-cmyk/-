@@ -83,6 +83,11 @@ export function rememberIdempotencyKey(key: string, id: string): void {
   recentKeys.set(key, { id, at: Date.now() });
 }
 
+/** 仅测试用：清空短时幂等缓存，避免用例互相污染 */
+export function clearIdempotencyKeysForTests(): void {
+  recentKeys.clear();
+}
+
 /** 服务端轮询节流 */
 const lastPollAt = new Map<string, number>();
 const POLL_MIN_MS = 3_000;

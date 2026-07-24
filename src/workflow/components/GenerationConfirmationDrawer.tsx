@@ -32,6 +32,7 @@ type Props = {
   durationSeconds: number;
   built: BuildVideoGenerationInputResult | null;
   selectionView: ReferenceMediaSelectionView | null;
+  submitting?: boolean;
   onManageReferences: () => void;
   onConfirmMock: () => void;
   onConfirmPaid: () => void;
@@ -48,6 +49,7 @@ export function GenerationConfirmationDrawer({
   durationSeconds,
   built,
   selectionView,
+  submitting = false,
   onManageReferences,
   onConfirmMock,
   onConfirmPaid,
@@ -63,7 +65,8 @@ export function GenerationConfirmationDrawer({
   const selectionBlocking = Boolean(
     !selectionView?.capabilityLoaded ||
       !selectionView.canGenerate ||
-      (built && !built.ok),
+      (built && !built.ok) ||
+      submitting,
   );
 
   const ordered =

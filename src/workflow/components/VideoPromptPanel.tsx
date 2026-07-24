@@ -92,6 +92,10 @@ export function VideoPromptPanel({
   const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId);
   const manageRefBtn = useRef<HTMLButtonElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** 同步防连点：React setState 异步，仅靠 submitting state 挡不住双击 */
+  const submittingRef = useRef(false);
+  /** 同一次确认会话复用；成功后清空，避免 Date.now() 破坏服务端幂等 */
+  const idempotencyKeyRef = useRef<string | null>(null);
   // 节点切换时关闭选择面板，避免草稿落到其他节点
   if (selectionOpen && selectedNodeId !== nodeId) {
     setSelectionOpen(false);
@@ -392,6 +396,7 @@ export function VideoPromptPanel({
   };
 
   const onConfirmGenerate = async (confirmPaid: boolean) => {
+    if (submittingRef.current) return;
     const trimmed = flush().trim();
     if (!trimmed) {
       setNotice("请先描述要生成的短片内容");
@@ -418,9 +423,17 @@ export function VideoPromptPanel({
       return;
     }
 
+    submittingRef.current = true;
     setSubmitting(true);
     setNotice("");
     setConfirmOpen(false);
+    if (!idempotencyKeyRef.current) {
+      idempotencyKeyRef.current =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? `${nodeId}-${crypto.randomUUID()}`
+          : `${nodeId}-${Date.now()}`;
+    }
+    const idempotencyKey = idempotencyKeyRef.current;
     updateNodeData(nodeId, {
       status: "processing",
       progress: 0,
@@ -438,7 +451,7 @@ export function VideoPromptPanel({
           projectId,
           videoShotNodeId: nodeId,
           confirmPaidGeneration: confirmPaid,
-          idempotencyKey: `${nodeId}-${Date.now()}`,
+          idempotencyKey,
           selectedReferenceAssetIds: data.selectedReferenceAssetIds,
           title: data.title,
         }),
@@ -449,8 +462,26 @@ export function VideoPromptPanel({
         code?: string;
       };
       if (!res.ok || !payload.generation) {
+        // 服务端已给出明确业务结果 → 释放键，允许用户重新开确认会话再试
+        if (payload.generation || payload.code) {
+          idempotencyKeyRef.current = null;
+        }
         throw new Error(payload.message ?? "提交失败");
       }
+      if (
+        payload.generation.status === "failed" ||
+        payload.generation.status === "cancelled"
+      ) {
+        // 幂等命中返回终态失败时，不得当作 processing；释放键供明确重试
+        idempotencyKeyRef.current = null;
+        throw new Error(
+          payload.generation.errorMessage ??
+            payload.message ??
+            "提交失败",
+        );
+      }
+      // 成功受理（queued 等）后清空；同会话连点已用同一键命中服务端幂等
+      idempotencyKeyRef.current = null;
       setGeneration(payload.generation);
       updateNodeData(nodeId, {
         activeGenerationId: payload.generation.id,
@@ -469,7 +500,9 @@ export function VideoPromptPanel({
         activeGenerationId: "",
       });
       setNotice(message);
+      // 网络/解析异常且未拿到业务码：保留键，短时内重试可命中幂等
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -497,10 +530,11 @@ export function VideoPromptPanel({
   };
 
   const onRetry = async () => {
-    if (!data.activeGenerationId) {
-      setConfirmOpen(true);
-      return;
-    }
+    // 明确重新生成：新确认会话、新幂等键（不复用旧任务键）
+    idempotencyKeyRef.current =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? `${nodeId}-${crypto.randomUUID()}`
+        : `${nodeId}-${Date.now()}`;
     setConfirmOpen(true);
   };
 
@@ -711,6 +745,12 @@ export function VideoPromptPanel({
                 }
                 return;
               }
+              if (!idempotencyKeyRef.current) {
+                idempotencyKeyRef.current =
+                  typeof crypto !== "undefined" && "randomUUID" in crypto
+                    ? `${nodeId}-${crypto.randomUUID()}`
+                    : `${nodeId}-${Date.now()}`;
+              }
               setConfirmOpen(true);
             }}
           >
@@ -763,7 +803,13 @@ export function VideoPromptPanel({
 
       <GenerationConfirmationDrawer
         open={confirmOpen}
-        onClose={() => setConfirmOpen(false)}
+        onClose={() => {
+          if (!submittingRef.current) {
+            // 未提交关闭：丢弃本会话 key，下次打开重新生成
+            idempotencyKeyRef.current = null;
+          }
+          setConfirmOpen(false);
+        }}
         config={config}
         capability={capability}
         mode={mode}
@@ -772,6 +818,7 @@ export function VideoPromptPanel({
         durationSeconds={data.duration}
         built={builtPreview}
         selectionView={selectionView}
+        submitting={submitting}
         onManageReferences={() => {
           setConfirmOpen(false);
           setSelectionOpen(true);

@@ -1,4 +1,5 @@
 import { resolveProviderAssets } from "./asset-resolver";
+import { ALLOWED_GENERATED_VIDEO_MIME } from "./classify-generation-result";
 import {
   createGenerationId,
   findIdempotentGeneration,
@@ -28,8 +29,30 @@ import type {
   GenerationRecord,
   VideoGenerationInput,
 } from "./types";
+import type { AssetRecord } from "@/workflow/types";
 import { validateGenerationSettings } from "./validate-settings";
 import type { FetchLike } from "./provider/types";
+
+/** 单进程内转存锁：防止轮询与手动 transfer 并发产生双份资产（非多实例方案） */
+const transferInFlight = new Map<
+  string,
+  Promise<{
+    generation: GenerationRecord;
+    asset: AssetRecord | null;
+    idempotent: boolean;
+  }>
+>();
+
+function hasValidCompletedVideoAsset(record: GenerationRecord): boolean {
+  const asset = record.resultAsset;
+  if (!asset) return false;
+  if (asset.assetType !== "generatedVideo") return false;
+  if (!ALLOWED_GENERATED_VIDEO_MIME.has(asset.mimeType)) return false;
+  if (!record.localVideoAssetId) return false;
+  if (record.localVideoAssetId !== asset.id) return false;
+  if (!Number.isFinite(asset.sizeBytes) || asset.sizeBytes <= 0) return false;
+  return true;
+}
 
 export async function submitVideoGeneration(params: {
   input: VideoGenerationInput;
@@ -100,6 +123,11 @@ export async function submitVideoGeneration(params: {
   const id = createGenerationId();
   const now = new Date().toISOString();
   const mediaAssetIds = resolvedMedia.map((m) => m.assetId);
+
+  // 在落盘与 Provider 提交前登记幂等键，避免并发相同 key 创建多条任务
+  if (params.idempotencyKey) {
+    rememberIdempotencyKey(params.idempotencyKey, id);
+  }
 
   let record: GenerationRecord = {
     id,
@@ -172,10 +200,6 @@ export async function submitVideoGeneration(params: {
     throw Object.assign(new Error(message), { generation: record, code });
   }
 
-  if (params.idempotencyKey) {
-    rememberIdempotencyKey(params.idempotencyKey, id);
-  }
-
   return record;
 }
 
@@ -195,11 +219,12 @@ export async function refreshGenerationStatus(
     return current;
   }
 
-  // 已有本地结果则直接收口为完成，避免 Mock 内存任务丢失后把成功态刷成失败
-  if (current.localVideoAssetId || current.resultAsset) {
-    if (current.status === "downloading") {
+  // 已有合法 generatedVideo 则收口完成；缺任一关键条件不伪装 completed。
+  if (hasValidCompletedVideoAsset(current)) {
+    if (current.status === "downloading" || current.status === "processing") {
       return updateGenerationRecord(generationId, {
         status: "completed",
+        localVideoAssetId: current.resultAsset!.id,
         progressLabel: current.isMock
           ? "Mock 演示结果，不是真实 AI 视频"
           : "已完成",
@@ -209,6 +234,20 @@ export async function refreshGenerationStatus(
       });
     }
     return current;
+  }
+
+  // 有残缺结果资产但不完整：保持/标为转存失败，不回退图片、不伪造完成
+  if (
+    current.resultAsset &&
+    !hasValidCompletedVideoAsset(current) &&
+    (current.status === "downloading" || current.status === "processing")
+  ) {
+    return updateGenerationRecord(generationId, {
+      status: "resultTransferFailed",
+      errorCode: "RESULT_ASSET_INCOMPLETE",
+      errorMessage: "结果视频资产不完整，不能标记为已完成",
+      progressLabel: "结果转存失败",
+    });
   }
 
   if (!options?.force && shouldThrottlePoll(generationId)) {
@@ -244,42 +283,14 @@ export async function refreshGenerationStatus(
     (status.status === "downloading" || status.rawTaskStatus === "SUCCEEDED") &&
     !next.localVideoAssetId
   ) {
-    try {
-      next = await updateGenerationRecord(generationId, {
-        status: "downloading",
-        progressLabel: next.isMock
-          ? "Mock · 正在转存"
-          : "正在转存结果视频",
-        remoteVideoUrl: remoteUrl,
-      });
-      const transferred = await transferRemoteVideoToLocal({
-        projectId: next.projectId,
-        remoteVideoUrl: remoteUrl,
-        title: options?.title ?? "镜头",
-        generationId,
-        isMock: next.isMock,
-      });
-      next = await updateGenerationRecord(generationId, {
-        status: "completed",
-        progressLabel: next.isMock
-          ? "Mock 演示结果，不是真实 AI 视频"
-          : "已完成",
-        localVideoAssetId: transferred.asset.id,
-        resultAsset: transferred.asset,
-        completedAt: new Date().toISOString(),
-        errorCode: null,
-        errorMessage: null,
-      });
-    } catch (err) {
-      next = await updateGenerationRecord(generationId, {
-        status: "resultTransferFailed",
-        errorCode: "RESULT_TRANSFER_FAILED",
-        errorMessage:
-          err instanceof Error ? err.message : "结果视频转存失败",
-        progressLabel: "结果转存失败",
-        remoteVideoUrl: remoteUrl,
-      });
-    }
+    const transferred = await retryTransferGeneration(generationId, {
+      title: options?.title ?? "镜头",
+    }).catch(async (err) => {
+      const failed = await readGenerationRecord(generationId);
+      if (failed) return { generation: failed, asset: null, idempotent: false };
+      throw err;
+    });
+    next = transferred.generation;
   }
 
   return next;
@@ -308,6 +319,120 @@ export async function cancelVideoGeneration(
     progressLabel: "已取消",
     completedAt: new Date().toISOString(),
   });
+}
+
+/**
+ * 转存重试（幂等）：已有有效 generatedVideo 时不重复复制文件。
+ * 单进程内对同一 generationId 串行化；多实例生产需共享锁/唯一约束，本函数不提供。
+ */
+export async function retryTransferGeneration(
+  generationId: string,
+  options?: { title?: string },
+): Promise<{
+  generation: GenerationRecord;
+  asset: AssetRecord | null;
+  idempotent: boolean;
+}> {
+  const existing = transferInFlight.get(generationId);
+  if (existing) return existing;
+
+  const run = (async () => {
+    const record = await readGenerationRecord(generationId);
+    if (!record) {
+      throw Object.assign(new Error("任务不存在"), { code: "NOT_FOUND" });
+    }
+
+    if (hasValidCompletedVideoAsset(record)) {
+      if (record.status === "completed") {
+        return {
+          generation: record,
+          asset: record.resultAsset,
+          idempotent: true,
+        };
+      }
+      const recovered = await updateGenerationRecord(generationId, {
+        status: "completed",
+        localVideoAssetId: record.resultAsset!.id,
+        progressLabel: record.isMock
+          ? "Mock 演示结果，不是真实 AI 视频"
+          : "已完成",
+        completedAt: record.completedAt ?? new Date().toISOString(),
+        errorCode: null,
+        errorMessage: null,
+      });
+      return {
+        generation: recovered,
+        asset: recovered.resultAsset,
+        idempotent: true,
+      };
+    }
+
+    if (!record.remoteVideoUrl) {
+      throw Object.assign(new Error("没有可转存的远程视频地址"), {
+        code: "NO_REMOTE_URL",
+      });
+    }
+
+    await updateGenerationRecord(generationId, {
+      status: "downloading",
+      progressLabel: record.isMock
+        ? "Mock · 正在转存"
+        : "正在转存结果视频",
+      remoteVideoUrl: record.remoteVideoUrl,
+    });
+
+    try {
+      const transferred = await transferRemoteVideoToLocal({
+        projectId: record.projectId,
+        remoteVideoUrl: record.remoteVideoUrl,
+        title: options?.title ?? "镜头",
+        generationId,
+        isMock: record.isMock,
+      });
+      if (
+        transferred.asset.assetType !== "generatedVideo" ||
+        !ALLOWED_GENERATED_VIDEO_MIME.has(transferred.asset.mimeType) ||
+        transferred.asset.sizeBytes <= 0
+      ) {
+        throw new Error("转存结果不是合法 generatedVideo");
+      }
+      const generation = await updateGenerationRecord(generationId, {
+        status: "completed",
+        localVideoAssetId: transferred.asset.id,
+        resultAsset: transferred.asset,
+        progressLabel: record.isMock
+          ? "Mock 演示结果，不是真实 AI 视频"
+          : "已完成",
+        completedAt: new Date().toISOString(),
+        errorCode: null,
+        errorMessage: null,
+      });
+      return {
+        generation,
+        asset: transferred.asset,
+        idempotent: false,
+      };
+    } catch (err) {
+      await updateGenerationRecord(generationId, {
+        status: "resultTransferFailed",
+        errorCode: "RESULT_TRANSFER_FAILED",
+        errorMessage: err instanceof Error ? err.message : "结果视频转存失败",
+        progressLabel: "结果转存失败",
+        remoteVideoUrl: record.remoteVideoUrl,
+      });
+      throw Object.assign(
+        new Error(err instanceof Error ? err.message : "转存失败"),
+        { code: "RESULT_TRANSFER_FAILED" },
+      );
+    }
+  })();
+
+  transferInFlight.set(generationId, run);
+  try {
+    return await run;
+  } finally {
+    transferInFlight.delete(generationId);
+  }
 }
 
 export function getVideoGenerationPublicConfig() {
