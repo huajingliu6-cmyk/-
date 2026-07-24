@@ -21,35 +21,122 @@ const positionSchema = z.object({
   y: z.number().finite(),
 });
 
-const assetFields = {
-  assetId: z.string(),
-  assetUrl: z.string(),
-  fileName: z.string(),
+export const assetTypeSchema = z.enum([
+  "characterImage",
+  "sceneImage",
+  "referenceImage",
+  "audio",
+  "directorReference",
+  "generatedImage",
+  "generatedVideo",
+  "propImage",
+]);
+
+export const assetRecordSchema = z.object({
+  id: z.string().min(1),
+  projectId: z.string().min(1),
+  assetType: assetTypeSchema,
+  name: z.string(),
+  originalFileName: z.string(),
   mimeType: z.string(),
   sizeBytes: z.number().finite().nonnegative(),
-  uploadStatus: uploadStatusSchema,
-  errorMessage: z.string(),
-};
+  url: z.string(),
+  thumbnailUrl: z.string(),
+  metadata: z.record(
+    z.string(),
+    z.union([z.string(), z.number(), z.boolean(), z.null()]),
+  ),
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
+});
+
+const characterReferenceItemSchema = z.object({
+  assetId: z.string(),
+  poseTag: z.enum([
+    "front",
+    "side",
+    "back",
+    "halfBody",
+    "closeUp",
+    "custom",
+  ]),
+  label: z.string(),
+});
+
+const characterVariantSchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  ageStage: z.string(),
+  costume: z.string(),
+  referenceAssetIds: z.array(z.string()),
+  primaryAssetId: z.string(),
+  references: z.array(characterReferenceItemSchema),
+});
 
 export const characterNodeDataSchema = z.object({
   title: z.string(),
   characterName: z.string(),
   description: z.string(),
-  ...assetFields,
+  appearancePrompt: z.string().default(""),
+  voicePrompt: z.string().default(""),
+  voiceAssetId: z.string().default(""),
+  imageModel: z.string().default("AnyCook"),
+  stylePreset: z.string().default(""),
+  aspectRatio: z.string().default("9:16"),
+  resolution: z.string().default("2K"),
+  primaryVariantId: z.string(),
+  selectedVariantId: z.string(),
+  variants: z.array(characterVariantSchema),
+  uploadStatus: uploadStatusSchema,
+  appearanceStatus: jobStatusSchema.default("idle"),
+  voiceStatus: jobStatusSchema.default("idle"),
+  errorMessage: z.string(),
+  generationHistoryIds: z.array(z.string()).default([]),
+  voiceHistoryIds: z.array(z.string()).default([]),
+});
+
+const sceneViewpointSchema = z.object({
+  id: z.string().min(1),
+  tag: z.enum([
+    "front",
+    "left",
+    "right",
+    "topDown",
+    "lowAngle",
+    "panorama",
+    "custom",
+  ]),
+  label: z.string(),
+  assetId: z.string(),
 });
 
 export const sceneNodeDataSchema = z.object({
   title: z.string(),
   sceneName: z.string(),
   description: z.string(),
-  ...assetFields,
+  generationPrompt: z.string().default(""),
+  timeOfDay: z.string(),
+  weather: z.string(),
+  visualStyle: z.string(),
+  referenceAssetIds: z.array(z.string()),
+  primaryAssetId: z.string(),
+  viewpoints: z.array(sceneViewpointSchema),
+  immersivePreviewEnabled: z.literal(false),
+  uploadStatus: uploadStatusSchema,
+  generationStatus: jobStatusSchema.default("idle"),
+  errorMessage: z.string(),
+  generationHistoryIds: z.array(z.string()).default([]),
 });
 
-export const directorNodeDataSchema = z.object({
+export const videoShotNodeDataSchema = z.object({
   title: z.string(),
+  shotNumber: z.number().int().positive(),
+  generationInstruction: z.string(),
+  duration: z.number().finite().min(1).max(15),
   shotSize: z.enum([
     "extremeWide",
     "wide",
+    "full",
     "medium",
     "closeUp",
     "extremeCloseUp",
@@ -60,6 +147,7 @@ export const directorNodeDataSchema = z.object({
     "highAngle",
     "topDown",
     "dutchAngle",
+    "overShoulder",
   ]),
   cameraMovement: z.enum([
     "static",
@@ -71,22 +159,31 @@ export const directorNodeDataSchema = z.object({
     "orbit",
     "handheld",
   ]),
-  lens: z.enum(["wide", "standard", "telephoto"]),
-  movementSpeed: z.enum(["slow", "medium", "fast"]),
-  description: z.string(),
-});
-
-export const videoGeneratorNodeDataSchema = z.object({
-  title: z.string(),
-  generationInstruction: z.string(),
+  actionDescription: z.string(),
+  colorTone: z.string(),
+  focalLength: z.enum(["18mm", "24mm", "35mm", "50mm", "85mm", "135mm"]),
+  aspectRatio: z.string(),
+  resolution: z.string(),
   provider: z.string(),
   model: z.string(),
-  aspectRatio: z.string(),
-  duration: z.number().finite(),
-  resolution: z.string(),
+  stylePreset: z.string().default(""),
+  referenceMode: z.string().default("full"),
+  creditEstimate: z.number().finite().nonnegative().default(10),
+  attachedAssetIds: z.array(z.string()).default([]),
+  continuityMode: z.enum([
+    "standalone",
+    "continueClip",
+    "startFrame",
+    "startAndEndFrame",
+  ]),
+  sourceVideoAssetId: z.string(),
+  startFrameAssetId: z.string(),
+  endFrameAssetId: z.string(),
   status: jobStatusSchema,
   progress: z.number().finite().min(0).max(100),
   errorMessage: z.string(),
+  resultAssetId: z.string(),
+  generationHistoryIds: z.array(z.string()).default([]),
 });
 
 export const imageNodeDataSchema = z.object({
@@ -96,8 +193,15 @@ export const imageNodeDataSchema = z.object({
     "endFrame",
     "style",
     "composition",
+    "action",
+    "prop",
+    "general",
   ]),
-  ...assetFields,
+  assetIds: z.array(z.string()),
+  primaryAssetId: z.string(),
+  description: z.string(),
+  uploadStatus: uploadStatusSchema,
+  errorMessage: z.string(),
 });
 
 export const textNodeDataSchema = z.object({
@@ -115,21 +219,20 @@ export const textNodeDataSchema = z.object({
 
 export const audioNodeDataSchema = z.object({
   title: z.string(),
+  audioType: z.enum(["voice", "music", "soundEffect", "rhythmReference"]),
   assetId: z.string(),
-  assetUrl: z.string(),
-  fileName: z.string(),
-  mimeType: z.string(),
-  sizeBytes: z.number().finite().nonnegative(),
   duration: z.number().finite().nonnegative(),
   uploadStatus: uploadStatusSchema,
   errorMessage: z.string(),
 });
 
-export const videoOutputNodeDataSchema = z.object({
+export const propNodeDataSchema = z.object({
   title: z.string(),
-  videoUrl: z.string(),
-  posterUrl: z.string(),
-  status: jobStatusSchema,
+  propName: z.string(),
+  description: z.string(),
+  assetIds: z.array(z.string()),
+  primaryAssetId: z.string(),
+  uploadStatus: uploadStatusSchema,
   errorMessage: z.string(),
 });
 
@@ -147,18 +250,11 @@ export const sceneNodeSchema = z.object({
   data: sceneNodeDataSchema,
 });
 
-export const directorNodeSchema = z.object({
+export const videoShotNodeSchema = z.object({
   id: z.string().min(1),
-  type: z.literal("director"),
+  type: z.literal("videoShot"),
   position: positionSchema,
-  data: directorNodeDataSchema,
-});
-
-export const videoGeneratorNodeSchema = z.object({
-  id: z.string().min(1),
-  type: z.literal("videoGenerator"),
-  position: positionSchema,
-  data: videoGeneratorNodeDataSchema,
+  data: videoShotNodeDataSchema,
 });
 
 export const imageNodeSchema = z.object({
@@ -182,22 +278,21 @@ export const audioNodeSchema = z.object({
   data: audioNodeDataSchema,
 });
 
-export const videoOutputNodeSchema = z.object({
+export const propNodeSchema = z.object({
   id: z.string().min(1),
-  type: z.literal("videoOutput"),
+  type: z.literal("prop"),
   position: positionSchema,
-  data: videoOutputNodeDataSchema,
+  data: propNodeDataSchema,
 });
 
 export const workflowNodeSchema = z.discriminatedUnion("type", [
   characterNodeSchema,
   sceneNodeSchema,
-  directorNodeSchema,
-  videoGeneratorNodeSchema,
+  videoShotNodeSchema,
   imageNodeSchema,
   textNodeSchema,
   audioNodeSchema,
-  videoOutputNodeSchema,
+  propNodeSchema,
 ]);
 
 export const workflowEdgeSchema = z.object({
@@ -215,12 +310,14 @@ export const workflowViewportSchema = z.object({
 });
 
 export const workflowDocumentSchema = z.object({
-  version: z.literal(2),
+  version: z.literal(3),
   projectId: z.string().min(1),
   revision: z.number().int().nonnegative(),
   nodes: z.array(workflowNodeSchema),
   edges: z.array(workflowEdgeSchema),
   viewport: workflowViewportSchema,
+  assets: z.array(assetRecordSchema),
+  shotOrder: z.array(z.string()),
   updatedAt: z.string().min(1),
 });
 

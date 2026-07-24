@@ -12,18 +12,45 @@ export type UploadStatus = "empty" | "uploading" | "ready" | "error";
 export type WorkflowNodeType =
   | "character"
   | "scene"
-  | "director"
-  | "videoGenerator"
+  | "videoShot"
   | "image"
   | "text"
   | "audio"
-  | "videoOutput";
+  | "prop";
+
+export type AssetType =
+  | "characterImage"
+  | "sceneImage"
+  | "referenceImage"
+  | "audio"
+  | "directorReference"
+  | "generatedImage"
+  | "generatedVideo"
+  | "propImage";
+
+export type AssetRecord = {
+  id: string;
+  projectId: string;
+  assetType: AssetType;
+  name: string;
+  originalFileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  url: string;
+  thumbnailUrl: string;
+  metadata: Record<string, string | number | boolean | null>;
+  createdAt: string;
+  updatedAt: string;
+};
 
 export type ImageReferenceType =
   | "startFrame"
   | "endFrame"
   | "style"
-  | "composition";
+  | "composition"
+  | "action"
+  | "prop"
+  | "general";
 
 export type TextType =
   | "script"
@@ -32,9 +59,12 @@ export type TextType =
   | "subtitle"
   | "instruction";
 
+export type AudioType = "voice" | "music" | "soundEffect" | "rhythmReference";
+
 export type ShotSize =
   | "extremeWide"
   | "wide"
+  | "full"
   | "medium"
   | "closeUp"
   | "extremeCloseUp";
@@ -44,7 +74,8 @@ export type CameraAngle =
   | "lowAngle"
   | "highAngle"
   | "topDown"
-  | "dutchAngle";
+  | "dutchAngle"
+  | "overShoulder";
 
 export type CameraMovement =
   | "static"
@@ -56,67 +87,152 @@ export type CameraMovement =
   | "orbit"
   | "handheld";
 
-export type LensType = "wide" | "standard" | "telephoto";
+export type FocalLength =
+  | "18mm"
+  | "24mm"
+  | "35mm"
+  | "50mm"
+  | "85mm"
+  | "135mm";
 
 export type MovementSpeed = "slow" | "medium" | "fast";
 
-export type CharacterReferenceNodeData = {
+export type ContinuityMode =
+  | "standalone"
+  | "continueClip"
+  | "startFrame"
+  | "startAndEndFrame";
+
+export type CharacterPoseTag =
+  | "front"
+  | "side"
+  | "back"
+  | "halfBody"
+  | "closeUp"
+  | "custom";
+
+export type SceneViewpointTag =
+  | "front"
+  | "left"
+  | "right"
+  | "topDown"
+  | "lowAngle"
+  | "panorama"
+  | "custom";
+
+export type CharacterReferenceItem = {
+  assetId: string;
+  poseTag: CharacterPoseTag;
+  label: string;
+};
+
+export type CharacterVariant = {
+  id: string;
+  name: string;
+  ageStage: string;
+  costume: string;
+  referenceAssetIds: string[];
+  primaryAssetId: string;
+  references: CharacterReferenceItem[];
+};
+
+export type SceneViewpoint = {
+  id: string;
+  tag: SceneViewpointTag;
+  label: string;
+  assetId: string;
+};
+
+export type CharacterNodeData = {
   title: string;
   characterName: string;
   description: string;
-  assetId: string;
-  assetUrl: string;
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
+  /** AI 外貌生成提示词 */
+  appearancePrompt: string;
+  /** AI 声音生成提示词 */
+  voicePrompt: string;
+  /** 角色音色/试听音频素材 */
+  voiceAssetId: string;
+  /** 外貌生图模型，默认 AnyCook */
+  imageModel: string;
+  stylePreset: string;
+  aspectRatio: string;
+  resolution: string;
+  primaryVariantId: string;
+  selectedVariantId: string;
+  variants: CharacterVariant[];
   uploadStatus: UploadStatus;
+  appearanceStatus: JobStatus;
+  voiceStatus: JobStatus;
   errorMessage: string;
+  /** 外貌 AI 生成历史（新→旧） */
+  generationHistoryIds: string[];
+  /** 声音 AI 生成历史（新→旧） */
+  voiceHistoryIds: string[];
 };
 
-export type SceneReferenceNodeData = {
+export type SceneNodeData = {
   title: string;
   sceneName: string;
   description: string;
-  assetId: string;
-  assetUrl: string;
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
+  /** AI 场景图生成提示词 */
+  generationPrompt: string;
+  timeOfDay: string;
+  weather: string;
+  visualStyle: string;
+  referenceAssetIds: string[];
+  primaryAssetId: string;
+  viewpoints: SceneViewpoint[];
+  /** 预留：360/720 场景预览尚未启用 */
+  immersivePreviewEnabled: false;
   uploadStatus: UploadStatus;
+  generationStatus: JobStatus;
   errorMessage: string;
+  /** 场景图 AI 生成历史（新→旧） */
+  generationHistoryIds: string[];
 };
 
-export type DirectorNodeData = {
+export type VideoShotNodeData = {
   title: string;
+  shotNumber: number;
+  generationInstruction: string;
+  duration: number;
   shotSize: ShotSize;
   cameraAngle: CameraAngle;
   cameraMovement: CameraMovement;
-  lens: LensType;
-  movementSpeed: MovementSpeed;
-  description: string;
-};
-
-export type VideoGeneratorNodeData = {
-  title: string;
-  generationInstruction: string;
+  actionDescription: string;
+  colorTone: string;
+  focalLength: FocalLength;
+  aspectRatio: string;
+  resolution: string;
   provider: string;
   model: string;
-  aspectRatio: string;
-  duration: number;
-  resolution: string;
+  /** 画面风格预设 */
+  stylePreset: string;
+  /** 参考模式文案键：full | style | composition */
+  referenceMode: string;
+  /** 界面展示的预估消耗（占位） */
+  creditEstimate: number;
+  /** 直接挂在视频节点上的素材（上传 / 资产库） */
+  attachedAssetIds: string[];
+  continuityMode: ContinuityMode;
+  sourceVideoAssetId: string;
+  startFrameAssetId: string;
+  endFrameAssetId: string;
   status: JobStatus;
   progress: number;
   errorMessage: string;
+  resultAssetId: string;
+  /** 视频 AI 生成历史（新→旧） */
+  generationHistoryIds: string[];
 };
 
-export type ImageReferenceNodeData = {
+export type ImageNodeData = {
   title: string;
   referenceType: ImageReferenceType;
-  assetId: string;
-  assetUrl: string;
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
+  assetIds: string[];
+  primaryAssetId: string;
+  description: string;
   uploadStatus: UploadStatus;
   errorMessage: string;
 };
@@ -125,39 +241,36 @@ export type TextNodeData = {
   title: string;
   content: string;
   textType: TextType;
-  /** 从旧 PromptNode.negativePrompt 迁移保留 */
   legacyNegativePrompt?: string;
 };
 
-export type AudioReferenceNodeData = {
+export type AudioNodeData = {
   title: string;
+  audioType: AudioType;
   assetId: string;
-  assetUrl: string;
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
   duration: number;
   uploadStatus: UploadStatus;
   errorMessage: string;
 };
 
-export type VideoOutputNodeData = {
+export type PropNodeData = {
   title: string;
-  videoUrl: string;
-  posterUrl: string;
-  status: JobStatus;
+  propName: string;
+  description: string;
+  assetIds: string[];
+  primaryAssetId: string;
+  uploadStatus: UploadStatus;
   errorMessage: string;
 };
 
 export type WorkflowNodeDataByType = {
-  character: CharacterReferenceNodeData;
-  scene: SceneReferenceNodeData;
-  director: DirectorNodeData;
-  videoGenerator: VideoGeneratorNodeData;
-  image: ImageReferenceNodeData;
+  character: CharacterNodeData;
+  scene: SceneNodeData;
+  videoShot: VideoShotNodeData;
+  image: ImageNodeData;
   text: TextNodeData;
-  audio: AudioReferenceNodeData;
-  videoOutput: VideoOutputNodeData;
+  audio: AudioNodeData;
+  prop: PropNodeData;
 };
 
 export type WorkflowNodeBase<T extends WorkflowNodeType = WorkflowNodeType> = {
@@ -167,24 +280,22 @@ export type WorkflowNodeBase<T extends WorkflowNodeType = WorkflowNodeType> = {
   data: WorkflowNodeDataByType[T];
 };
 
-export type CharacterReferenceNode = WorkflowNodeBase<"character">;
-export type SceneReferenceNode = WorkflowNodeBase<"scene">;
-export type DirectorNode = WorkflowNodeBase<"director">;
-export type VideoGeneratorNode = WorkflowNodeBase<"videoGenerator">;
-export type ImageReferenceNode = WorkflowNodeBase<"image">;
+export type CharacterNode = WorkflowNodeBase<"character">;
+export type SceneNode = WorkflowNodeBase<"scene">;
+export type VideoShotNode = WorkflowNodeBase<"videoShot">;
+export type ImageNode = WorkflowNodeBase<"image">;
 export type TextNode = WorkflowNodeBase<"text">;
-export type AudioReferenceNode = WorkflowNodeBase<"audio">;
-export type VideoOutputNode = WorkflowNodeBase<"videoOutput">;
+export type AudioNode = WorkflowNodeBase<"audio">;
+export type PropNode = WorkflowNodeBase<"prop">;
 
 export type WorkflowNode =
-  | CharacterReferenceNode
-  | SceneReferenceNode
-  | DirectorNode
-  | VideoGeneratorNode
-  | ImageReferenceNode
+  | CharacterNode
+  | SceneNode
+  | VideoShotNode
+  | ImageNode
   | TextNode
-  | AudioReferenceNode
-  | VideoOutputNode;
+  | AudioNode
+  | PropNode;
 
 export type WorkflowEdge = {
   id: string;
@@ -201,12 +312,14 @@ export type WorkflowViewport = {
 };
 
 export type WorkflowDocument = {
-  version: 2;
+  version: 3;
   projectId: string;
   revision: number;
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   viewport: WorkflowViewport;
+  assets: AssetRecord[];
+  shotOrder: string[];
   updatedAt: string;
 };
 
@@ -220,25 +333,28 @@ export type ConnectionAttempt = {
 };
 
 export type VideoGenerationInput = {
-  videoNodeId: string;
-  generationInstruction: string;
+  shotId: string;
+  instruction: string;
   characters: Array<{
     nodeId: string;
     characterName: string;
-    assetId: string;
-    assetUrl: string;
+    variantName: string;
+    referenceAssetIds: string[];
+    referenceUrls: string[];
   }>;
   scenes: Array<{
     nodeId: string;
     sceneName: string;
-    assetId: string;
-    assetUrl: string;
+    primaryAssetId: string;
+    primaryUrl: string;
+    viewpointAssetIds: string[];
+    viewpointUrls: string[];
   }>;
-  images: Array<{
+  referenceImages: Array<{
     nodeId: string;
     referenceType: ImageReferenceType;
-    assetId: string;
-    assetUrl: string;
+    assetIds: string[];
+    urls: string[];
   }>;
   texts: Array<{
     nodeId: string;
@@ -248,29 +364,39 @@ export type VideoGenerationInput = {
   }>;
   audios: Array<{
     nodeId: string;
+    audioType: AudioType;
     assetId: string;
-    assetUrl: string;
-    fileName: string;
+    url: string;
   }>;
-  director: {
-    nodeId: string;
-    shotSize: ShotSize;
-    cameraAngle: CameraAngle;
-    cameraMovement: CameraMovement;
-    lens: LensType;
-    movementSpeed: MovementSpeed;
-    description: string;
-  } | null;
+  duration: number;
+  aspectRatio: string;
+  resolution: string;
+  continuity: ContinuityMode;
+  model: string;
+  startFrameAssetId: string;
+  endFrameAssetId: string;
   summary: {
     characterCount: number;
     sceneCount: number;
     imageCount: number;
     textCount: number;
     audioCount: number;
-    hasDirector: boolean;
   };
 };
 
 export type VideoGenerationInputResult =
   | { ok: true; input: VideoGenerationInput }
   | { ok: false; errors: string[] };
+
+/** 界面布局偏好（仅 localStorage，不进 WorkflowDocument） */
+export type WorkbenchLayoutMode = "canvas" | "assets" | "storyboard";
+export type QuickCreateDockPosition = "top" | "left";
+export type NodeDensity = "fixed" | "free";
+
+export type WorkbenchLayoutPrefs = {
+  layoutMode: WorkbenchLayoutMode;
+  dockPosition: QuickCreateDockPosition;
+  nodeDensity: NodeDensity;
+  assetPanelCollapsed: boolean;
+  shotBarCollapsed: boolean;
+};

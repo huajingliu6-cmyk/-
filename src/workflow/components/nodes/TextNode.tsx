@@ -1,7 +1,8 @@
 "use client";
 
-import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { HANDLES } from "@/workflow/connection-rules";
+import { type NodeProps } from "@xyflow/react";
+import { MentionTextarea } from "@/workflow/components/MentionTextarea";
+import { NodePorts } from "@/workflow/components/nodes/NodePorts";
 import { useWorkflowStore } from "@/workflow/store";
 import type { TextNodeData } from "@/workflow/types";
 
@@ -43,19 +44,14 @@ export function TextNodeView({ id, selected }: NodeProps) {
       <div className="mb-2 truncate text-sm text-zinc-100">
         {nodeData.title || "文本节点"}
       </div>
-      <textarea
-        className="nodrag nopan nowheel h-24 w-full resize-none rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-200 outline-none focus:border-cyan-500"
+      <MentionTextarea
+        variant="dark"
+        className="h-24 border-zinc-700 bg-zinc-950 text-[11px] text-zinc-200 focus:border-cyan-500"
         value={nodeData.content}
-        placeholder="输入剧本、对白、旁白或补充描述…"
-        onChange={(e) => updateNodeData(id, { content: e.target.value })}
-        onMouseDown={(e) => e.stopPropagation()}
+        placeholder="输入剧本、对白、旁白或补充描述，键入 @ 引用素材…"
+        onChange={(content) => updateNodeData(id, { content })}
       />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id={HANDLES.textOutput}
-        className="!h-3 !w-3 !border-2 !border-zinc-900 !bg-cyan-400"
-      />
+      <NodePorts />
     </div>
   );
 }

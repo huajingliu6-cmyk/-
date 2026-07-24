@@ -50,7 +50,17 @@ next-env.d.ts
 
 # local workflow data (dev-only JSON store)
 /data/workflows/*.json
+/data/workflows/*.tmp
 !/data/workflows/.gitkeep
+/data/workflows/*.bak.json
+
+# local auth users (password hashes)
+/data/users.json
+/data/users.json.*
+
+# generation API configs (may contain keys)
+/data/generation-api-configs.json
+/data/generation-api-configs.json.*
 
 # local uploaded assets (dev-only file store; not for Vercel production)
 /data/assets/**

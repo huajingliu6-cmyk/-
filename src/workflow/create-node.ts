@@ -1,4 +1,7 @@
 import type {
+  CharacterNodeData,
+  CharacterVariant,
+  WorkflowDocument,
   WorkflowNode,
   WorkflowNodeType,
 } from "./types";
@@ -7,9 +10,48 @@ export function createNodeId(type: WorkflowNodeType) {
   return `${type}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+function createDefaultCharacterVariant(): CharacterVariant {
+  const id = `variant-${crypto.randomUUID().slice(0, 8)}`;
+  return {
+    id,
+    name: "默认形象",
+    ageStage: "",
+    costume: "",
+    referenceAssetIds: [],
+    primaryAssetId: "",
+    references: [],
+  };
+}
+
+export function createDefaultCharacterData(): CharacterNodeData {
+  const variant = createDefaultCharacterVariant();
+  return {
+    title: "角色",
+    characterName: "",
+    description: "",
+    appearancePrompt: "",
+    voicePrompt: "",
+    voiceAssetId: "",
+    imageModel: "AnyCook",
+    stylePreset: "",
+    aspectRatio: "9:16",
+    resolution: "2K",
+    primaryVariantId: variant.id,
+    selectedVariantId: variant.id,
+    variants: [variant],
+    uploadStatus: "empty",
+    appearanceStatus: "idle",
+    voiceStatus: "idle",
+    errorMessage: "",
+    generationHistoryIds: [],
+    voiceHistoryIds: [],
+  };
+}
+
 export function createNodeByType(
   type: WorkflowNodeType,
   position: { x: number; y: number },
+  shotNumber = 1,
 ): WorkflowNode {
   const id = createNodeId(type);
 
@@ -19,18 +61,7 @@ export function createNodeByType(
         id,
         type,
         position,
-        data: {
-          title: "角色参考",
-          characterName: "",
-          description: "",
-          assetId: "",
-          assetUrl: "",
-          fileName: "",
-          mimeType: "",
-          sizeBytes: 0,
-          uploadStatus: "empty",
-          errorMessage: "",
-        },
+        data: createDefaultCharacterData(),
       };
     case "scene":
       return {
@@ -38,49 +69,56 @@ export function createNodeByType(
         type,
         position,
         data: {
-          title: "场景参考",
+          title: "场景",
           sceneName: "",
           description: "",
-          assetId: "",
-          assetUrl: "",
-          fileName: "",
-          mimeType: "",
-          sizeBytes: 0,
+          generationPrompt: "",
+          timeOfDay: "白天",
+          weather: "晴",
+          visualStyle: "",
+          referenceAssetIds: [],
+          primaryAssetId: "",
+          viewpoints: [],
+          immersivePreviewEnabled: false,
           uploadStatus: "empty",
+          generationStatus: "idle",
           errorMessage: "",
+          generationHistoryIds: [],
         },
       };
-    case "director":
+    case "videoShot":
       return {
         id,
         type,
         position,
         data: {
-          title: "3D 导演台",
+          title: `镜头 ${shotNumber}`,
+          shotNumber,
+          generationInstruction: "",
+          duration: 5,
           shotSize: "medium",
           cameraAngle: "eyeLevel",
           cameraMovement: "static",
-          lens: "standard",
-          movementSpeed: "medium",
-          description: "",
-        },
-      };
-    case "videoGenerator":
-      return {
-        id,
-        type,
-        position,
-        data: {
-          title: "视频生成",
-          generationInstruction: "",
+          actionDescription: "",
+          colorTone: "",
+          focalLength: "50mm",
+          aspectRatio: "9:16",
+          resolution: "720P",
           provider: "demo-provider",
-          model: "demo-video-v1",
-          aspectRatio: "16:9",
-          duration: 5,
-          resolution: "1280x720",
+          model: "demo-video",
+          stylePreset: "",
+          referenceMode: "omni",
+          creditEstimate: 50,
+          attachedAssetIds: [],
+          continuityMode: "standalone",
+          sourceVideoAssetId: "",
+          startFrameAssetId: "",
+          endFrameAssetId: "",
           status: "idle",
           progress: 0,
           errorMessage: "",
+          resultAssetId: "",
+          generationHistoryIds: [],
         },
       };
     case "image":
@@ -90,12 +128,10 @@ export function createNodeByType(
         position,
         data: {
           title: "图片参考",
-          referenceType: "style",
-          assetId: "",
-          assetUrl: "",
-          fileName: "",
-          mimeType: "",
-          sizeBytes: 0,
+          referenceType: "general",
+          assetIds: [],
+          primaryAssetId: "",
+          description: "",
           uploadStatus: "empty",
           errorMessage: "",
         },
@@ -117,29 +153,44 @@ export function createNodeByType(
         type,
         position,
         data: {
-          title: "音频参考",
+          title: "音频",
+          audioType: "voice",
           assetId: "",
-          assetUrl: "",
-          fileName: "",
-          mimeType: "",
-          sizeBytes: 0,
           duration: 0,
           uploadStatus: "empty",
           errorMessage: "",
         },
       };
-    case "videoOutput":
+    case "prop":
       return {
         id,
         type,
         position,
         data: {
-          title: "视频结果",
-          videoUrl: "",
-          posterUrl: "",
-          status: "idle",
+          title: "道具",
+          propName: "",
+          description: "",
+          assetIds: [],
+          primaryAssetId: "",
+          uploadStatus: "empty",
           errorMessage: "",
         },
       };
   }
+}
+
+export function createEmptyDocument(
+  projectId: string,
+): WorkflowDocument {
+  return {
+    version: 3,
+    projectId,
+    revision: 0,
+    updatedAt: new Date().toISOString(),
+    viewport: { x: 0, y: 0, zoom: 1 },
+    nodes: [],
+    edges: [],
+    assets: [],
+    shotOrder: [],
+  };
 }

@@ -1,7 +1,9 @@
 "use client";
 
-import Image from "next/image";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { AssetThumb } from "@/workflow/components/AssetThumb";
+import { BrandMark } from "@/workflow/components/BrandMark";
+import { StableAudioPlayer } from "@/workflow/components/StableAudioPlayer";
 import { uploadAssetFile } from "@/workflow/lib/upload-asset";
 import type { UploadStatus } from "@/workflow/types";
 
@@ -37,10 +39,29 @@ export function AssetUploadControls({
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [localPreview, setLocalPreview] = useState<string | null>(null);
+  const localPreviewRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (localPreviewRef.current) {
+        URL.revokeObjectURL(localPreviewRef.current);
+      }
+    };
+  }, []);
 
   const pick = () => inputRef.current?.click();
 
+  const clearLocalPreview = () => {
+    if (localPreviewRef.current) {
+      URL.revokeObjectURL(localPreviewRef.current);
+      localPreviewRef.current = null;
+    }
+    setLocalPreview(null);
+  };
+
   const clear = () => {
+    clearLocalPreview();
     onChange({
       assetId: "",
       assetUrl: "",
@@ -56,6 +77,14 @@ export function AssetUploadControls({
   const onFile = async (file: File | undefined) => {
     if (!file) return;
     setBusy(true);
+
+    if (kind === "image") {
+      clearLocalPreview();
+      const objectUrl = URL.createObjectURL(file);
+      localPreviewRef.current = objectUrl;
+      setLocalPreview(objectUrl);
+    }
+
     onChange({
       assetId: "",
       assetUrl: "",
@@ -69,15 +98,18 @@ export function AssetUploadControls({
     try {
       const uploaded = await uploadAssetFile(file);
       onChange({
-        assetId: uploaded.assetId,
-        assetUrl: uploaded.assetUrl,
-        fileName: uploaded.fileName,
+        assetId: uploaded.id,
+        assetUrl: uploaded.url,
+        fileName: uploaded.originalFileName,
         mimeType: uploaded.mimeType,
         sizeBytes: uploaded.sizeBytes,
         uploadStatus: "ready",
         errorMessage: "",
       });
+      // 稍后再释放 blob，等服务端图接上，减少闪白
+      window.setTimeout(() => clearLocalPreview(), 400);
     } catch (error) {
+      clearLocalPreview();
       onChange({
         assetId: "",
         assetUrl: "",
@@ -94,6 +126,9 @@ export function AssetUploadControls({
     }
   };
 
+  const previewSrc =
+    uploadStatus === "ready" && assetUrl ? assetUrl : localPreview;
+
   return (
     <div className="nodrag nopan space-y-2">
       <input
@@ -104,21 +139,38 @@ export function AssetUploadControls({
         onChange={(e) => void onFile(e.target.files?.[0])}
       />
 
-      {kind === "image" && assetUrl && uploadStatus === "ready" && (
-        <div className="relative h-28 w-full overflow-hidden rounded-lg border border-zinc-700">
-          <Image
-            src={assetUrl}
+      {kind === "image" && previewSrc && (
+        <div className="relative h-28 w-full overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950">
+          <AssetThumb
+            src={previewSrc}
             alt={fileName || "预览"}
-            fill
-            unoptimized
-            className="object-cover"
             sizes="240px"
+          />
+          {busy || uploadStatus === "uploading" ? (
+            <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/45">
+              <BrandMark size={28} spin />
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {kind === "image" && !previewSrc && (
+        <div className="flex h-28 w-full items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-950/70">
+          <BrandMark
+            size={28}
+            spin={busy || uploadStatus === "uploading"}
           />
         </div>
       )}
 
       {kind === "audio" && assetUrl && uploadStatus === "ready" && (
-        <audio controls src={assetUrl} className="w-full" />
+        <StableAudioPlayer src={assetUrl} />
+      )}
+
+      {kind === "audio" && (busy || uploadStatus === "uploading") && (
+        <div className="flex items-center justify-center py-3">
+          <BrandMark size={22} spin />
+        </div>
       )}
 
       <div className="flex flex-wrap gap-2">
@@ -131,10 +183,10 @@ export function AssetUploadControls({
             pick();
           }}
         >
-          {assetUrl ? "替换" : "上传"}
+          {assetUrl || localPreview ? "替换" : "上传"}
           {kind === "image" ? "图片" : "音频"}
         </button>
-        {(assetUrl || uploadStatus === "error") && (
+        {(assetUrl || localPreview || uploadStatus === "error") && (
           <button
             type="button"
             className="rounded-lg border border-zinc-700 px-2 py-1 text-[11px] text-zinc-400"
@@ -151,9 +203,6 @@ export function AssetUploadControls({
 
       {fileName && (
         <div className="truncate text-[11px] text-zinc-500">{fileName}</div>
-      )}
-      {uploadStatus === "uploading" && (
-        <div className="text-[11px] text-sky-300">上传中…</div>
       )}
       {errorMessage && (
         <div className="text-[11px] text-rose-300">{errorMessage}</div>

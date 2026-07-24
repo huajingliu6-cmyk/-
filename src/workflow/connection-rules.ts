@@ -2,87 +2,13 @@ import type {
   ConnectionAttempt,
   WorkflowEdge,
   WorkflowNode,
-  WorkflowNodeType,
 } from "./types";
 
-/** Handle ID 约定 */
+/** 统一端口：左 in（接收参考）/ 右 out（作为参考） */
 export const HANDLES = {
-  characterOutput: "character-output",
-  sceneOutput: "scene-output",
-  directorOutput: "director-output",
-  imageOutput: "image-output",
-  textOutput: "text-output",
-  audioOutput: "audio-output",
-  characterInput: "character-input",
-  sceneInput: "scene-input",
-  directorInput: "director-input",
-  imageInput: "image-input",
-  textInput: "text-input",
-  audioInput: "audio-input",
-  videoOutput: "video-output",
-  videoInput: "video-input",
+  in: "in",
+  out: "out",
 } as const;
-
-type AllowedRule = {
-  sourceType: WorkflowNodeType;
-  targetType: WorkflowNodeType;
-  sourceHandle: string;
-  targetHandle: string;
-};
-
-const ALLOWED_CONNECTIONS: AllowedRule[] = [
-  {
-    sourceType: "character",
-    targetType: "videoGenerator",
-    sourceHandle: HANDLES.characterOutput,
-    targetHandle: HANDLES.characterInput,
-  },
-  {
-    sourceType: "scene",
-    targetType: "videoGenerator",
-    sourceHandle: HANDLES.sceneOutput,
-    targetHandle: HANDLES.sceneInput,
-  },
-  {
-    sourceType: "director",
-    targetType: "videoGenerator",
-    sourceHandle: HANDLES.directorOutput,
-    targetHandle: HANDLES.directorInput,
-  },
-  {
-    sourceType: "image",
-    targetType: "videoGenerator",
-    sourceHandle: HANDLES.imageOutput,
-    targetHandle: HANDLES.imageInput,
-  },
-  {
-    sourceType: "text",
-    targetType: "videoGenerator",
-    sourceHandle: HANDLES.textOutput,
-    targetHandle: HANDLES.textInput,
-  },
-  {
-    sourceType: "audio",
-    targetType: "videoGenerator",
-    sourceHandle: HANDLES.audioOutput,
-    targetHandle: HANDLES.audioInput,
-  },
-  {
-    sourceType: "videoGenerator",
-    targetType: "videoOutput",
-    sourceHandle: HANDLES.videoOutput,
-    targetHandle: HANDLES.videoInput,
-  },
-];
-
-const REFERENCE_TYPES: WorkflowNodeType[] = [
-  "character",
-  "scene",
-  "director",
-  "image",
-  "text",
-  "audio",
-];
 
 export type ConnectionValidationResult =
   | { ok: true }
@@ -96,74 +22,29 @@ function findNode(
 }
 
 /**
- * 校验是否允许建立连接（纯函数，可在客户端与 API 共用）
+ * 任意节点都可通过 out → in 互连（A 作为 B 的参考素材）。
+ * 禁止自环、重复边与成环。
  */
 export function validateConnection(
   attempt: ConnectionAttempt,
   existingEdges: WorkflowEdge[],
 ): ConnectionValidationResult {
-  const {
-    sourceNodeId,
-    targetNodeId,
-    sourceHandle,
-    targetHandle,
-    sourceType,
-    targetType,
-  } = attempt;
+  const { sourceNodeId, targetNodeId, sourceHandle, targetHandle } = attempt;
 
   if (sourceNodeId === targetNodeId) {
     return { ok: false, message: "不允许将节点连接到自身" };
   }
 
-  if (!sourceHandle || !targetHandle) {
-    return { ok: false, message: "必须从有效的连接端口连出和连入" };
-  }
-
-  if (sourceType === "videoOutput") {
-    return { ok: false, message: "视频结果节点不能作为连接起点" };
-  }
-
-  if (
-    sourceType === "videoGenerator" &&
-    REFERENCE_TYPES.includes(targetType)
-  ) {
-    return {
-      ok: false,
-      message: "视频生成节点不能连接到素材节点",
-    };
-  }
-
-  if (
-    REFERENCE_TYPES.includes(sourceType) &&
-    REFERENCE_TYPES.includes(targetType)
-  ) {
-    return {
-      ok: false,
-      message: "参考素材节点之间不能相互连接",
-    };
-  }
-
-  const rule = ALLOWED_CONNECTIONS.find(
-    (r) =>
-      r.sourceType === sourceType &&
-      r.targetType === targetType &&
-      r.sourceHandle === sourceHandle &&
-      r.targetHandle === targetHandle,
-  );
-
-  if (!rule) {
-    return {
-      ok: false,
-      message: `不允许的连接：${sourceType} → ${targetType}`,
-    };
+  if (sourceHandle !== HANDLES.out || targetHandle !== HANDLES.in) {
+    return { ok: false, message: "请从右侧端口连出，并连接到左侧接收端口" };
   }
 
   const duplicate = existingEdges.some(
     (e) =>
       e.source === sourceNodeId &&
       e.target === targetNodeId &&
-      e.sourceHandle === sourceHandle &&
-      e.targetHandle === targetHandle,
+      e.sourceHandle === HANDLES.out &&
+      e.targetHandle === HANDLES.in,
   );
 
   if (duplicate) {
@@ -207,7 +88,6 @@ export function validateConnectionFromGraph(
   );
 }
 
-/** 校验整份文档中的边是否全部合法 */
 export function validateAllEdges(
   nodes: WorkflowNode[],
   edges: WorkflowEdge[],

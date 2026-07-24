@@ -6,7 +6,9 @@ import { migrateWorkflowDocument } from "../migrate";
 import { sanitizeWorkflowForPersist } from "../lib/sanitize-workflow";
 import { useWorkflowStore } from "../store";
 
-const AUTOSAVE_MS = 900;
+/** 文字编辑等常规 dirty：停顿后保存 */
+const AUTOSAVE_MS = 400;
+
 const BACKUP_PREFIX = "workflow-backup:";
 
 function backupKey(projectId: string) {
@@ -36,17 +38,23 @@ export function readLocalBackup(
 export function useWorkflowAutosave(projectId: string) {
   const document = useWorkflowStore((s) => s.document);
   const saveStatus = useWorkflowStore((s) => s.saveStatus);
+  const saveEpoch = useWorkflowStore((s) => s.saveEpoch);
   const setDocument = useWorkflowStore((s) => s.setDocument);
+  const acknowledgeSave = useWorkflowStore((s) => s.acknowledgeSave);
   const setSaveStatus = useWorkflowStore((s) => s.setSaveStatus);
   const setLoadError = useWorkflowStore((s) => s.setLoadError);
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestIdRef = useRef(0);
   const loadedRef = useRef(false);
+  const lastHandledEpochRef = useRef(0);
+  /** 发起保存时的 revision，用于避免用旧响应覆盖更新中的文档 */
+  const savingRevisionRef = useRef<number | null>(null);
 
   const persist = useCallback(
     async (doc: WorkflowDocument) => {
       const requestId = ++requestIdRef.current;
+      savingRevisionRef.current = doc.revision;
       setSaveStatus("saving");
       const sanitized = sanitizeWorkflowForPersist(doc);
       writeLocalBackup(sanitized);
@@ -69,16 +77,23 @@ export function useWorkflowAutosave(projectId: string) {
         }
 
         const saved = migrateWorkflowDocument(payload);
-        setDocument(saved, "saved");
-        writeLocalBackup(saved);
+        // 不整表 setDocument，避免上传后画布闪烁
+        acknowledgeSave(saved.revision, saved.updatedAt);
+        writeLocalBackup({
+          ...useWorkflowStore.getState().document,
+          revision: saved.revision,
+          updatedAt: saved.updatedAt,
+        });
       } catch (error) {
         if (requestId !== requestIdRef.current) return;
         const message =
           error instanceof Error ? error.message : "保存失败，请稍后重试";
         setSaveStatus("error", message);
+      } finally {
+        savingRevisionRef.current = null;
       }
     },
-    [projectId, setDocument, setSaveStatus],
+    [projectId, acknowledgeSave, setSaveStatus],
   );
 
   const saveNow = useCallback(() => {
@@ -111,12 +126,14 @@ export function useWorkflowAutosave(projectId: string) {
         setDocument(doc, "loaded");
         writeLocalBackup(doc);
         loadedRef.current = true;
+        lastHandledEpochRef.current = useWorkflowStore.getState().saveEpoch;
       } catch (error) {
         if (cancelled) return;
         const backup = readLocalBackup(projectId);
         if (backup) {
           setDocument(backup, "loaded");
           loadedRef.current = true;
+          lastHandledEpochRef.current = useWorkflowStore.getState().saveEpoch;
           setSaveStatus(
             "error",
             "服务器加载失败，已使用本地备份（可能不是最新）",
@@ -135,19 +152,32 @@ export function useWorkflowAutosave(projectId: string) {
     };
   }, [projectId, setDocument, setSaveStatus, setLoadError]);
 
+  /** 文字编辑等：dirty 后短暂停顿再保存 */
   useEffect(() => {
     if (!loadedRef.current) return;
     if (saveStatus !== "dirty") return;
 
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
-      void persist(document);
+      void persist(useWorkflowStore.getState().document);
     }, AUTOSAVE_MS);
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, [document, saveStatus, persist]);
+
+  /** 生成完成 / 上传素材 / 移动节点等：立即保存 */
+  useEffect(() => {
+    if (!loadedRef.current) return;
+    if (saveEpoch === 0) return;
+    if (saveEpoch === lastHandledEpochRef.current) return;
+    lastHandledEpochRef.current = saveEpoch;
+    // 微任务：确保同一 tick 内的 store 更新已合并后再读取 document
+    queueMicrotask(() => {
+      saveNow();
+    });
+  }, [saveEpoch, saveNow]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

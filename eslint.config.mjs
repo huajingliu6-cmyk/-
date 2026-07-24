@@ -13,6 +13,13 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    files: ["src/workflow/components/AssetThumb.tsx"],
+    rules: {
+      // 画布缩略图需用原生 img，避免 next/image 在节点选中时闪烁
+      "@next/next/no-img-element": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

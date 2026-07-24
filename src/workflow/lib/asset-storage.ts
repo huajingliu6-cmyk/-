@@ -17,6 +17,7 @@ export const AUDIO_MIME = new Set([
   "audio/mp4",
   "audio/x-m4a",
   "audio/m4a",
+  "audio/aac",
 ]);
 
 const EXT_BY_MIME: Record<string, string> = {
@@ -29,6 +30,7 @@ const EXT_BY_MIME: Record<string, string> = {
   "audio/mp4": ".m4a",
   "audio/x-m4a": ".m4a",
   "audio/m4a": ".m4a",
+  "audio/aac": ".aac",
 };
 
 const ALLOWED_EXT = new Set([
@@ -39,6 +41,7 @@ const ALLOWED_EXT = new Set([
   ".mp3",
   ".wav",
   ".m4a",
+  ".aac",
 ]);
 
 export type StoredAssetMeta = {
@@ -66,7 +69,7 @@ export function classifyAsset(
   const ext = extensionFromName(fileName);
   if (!ALLOWED_EXT.has(ext) && ext !== ".jpeg") {
     return {
-      error: `不支持的文件扩展名：${ext || "（无）"}。图片支持 JPG/PNG/WEBP，音频支持 MP3/WAV/M4A`,
+      error: `不支持的文件扩展名：${ext || "（无）"}。图片支持 JPG/PNG/WEBP，音频支持 MP3/WAV/M4A/AAC`,
     };
   }
 
@@ -78,14 +81,14 @@ export function classifyAsset(
   }
 
   if (AUDIO_MIME.has(mimeType)) {
-    if (![".mp3", ".wav", ".m4a"].includes(ext)) {
+    if (![".mp3", ".wav", ".m4a", ".aac"].includes(ext)) {
       return { error: "音频 MIME 类型与扩展名不匹配" };
     }
     return { kind: "audio", ext: EXT_BY_MIME[mimeType] ?? ".mp3" };
   }
 
   return {
-    error: `不支持的文件类型：${mimeType || "未知"}。图片支持 JPG/PNG/WEBP，音频支持 MP3/WAV/M4A`,
+    error: `不支持的文件类型：${mimeType || "未知"}。图片支持 JPG/PNG/WEBP，音频支持 MP3/WAV/M4A/AAC`,
   };
 }
 
@@ -143,4 +146,65 @@ export async function resolveAssetPath(
     "application/octet-stream";
 
   return { filePath: resolved, mimeType };
+}
+
+export type AssetIndexEntry = {
+  assetId: string;
+  fileName: string;
+};
+
+/**
+ * 元数据仅存于 WorkflowDocument.assets；此函数为兼容占位，不写入侧车 JSON。
+ */
+export async function saveAssetRecordMeta(): Promise<void> {
+  return;
+}
+
+/** 扫描本地 assets 目录，返回已上传文件的 assetId 索引（不含 WorkflowDocument 元数据）。 */
+export async function loadAssetIndex(): Promise<AssetIndexEntry[]> {
+  await ensureAssetsDir();
+  const entries = await fs.readdir(ASSETS_DIR);
+  const index: AssetIndexEntry[] = [];
+
+  for (const fileName of entries) {
+    const match = fileName.match(
+      /^([0-9a-fA-F-]{36})(\.[a-zA-Z0-9]+)$/,
+    );
+    if (!match) continue;
+
+    const assetId = match[1];
+    const filePath = path.join(ASSETS_DIR, fileName);
+    const resolved = path.resolve(filePath);
+    if (!resolved.startsWith(path.resolve(ASSETS_DIR) + path.sep)) {
+      continue;
+    }
+
+    index.push({ assetId, fileName });
+  }
+
+  return index;
+}
+
+/** 删除磁盘上的素材文件；assetId 非法或文件不存在时返回 false。 */
+export async function deleteAssetFile(assetId: string): Promise<boolean> {
+  if (!/^[0-9a-fA-F-]{36}$/.test(assetId)) {
+    return false;
+  }
+
+  const resolvedAsset = await resolveAssetPath(assetId);
+  if (!resolvedAsset) {
+    return false;
+  }
+
+  const assetsRoot = path.resolve(ASSETS_DIR);
+  if (!resolvedAsset.filePath.startsWith(assetsRoot + path.sep)) {
+    return false;
+  }
+
+  try {
+    await fs.unlink(resolvedAsset.filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }

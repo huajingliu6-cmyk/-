@@ -1,21 +1,57 @@
 "use client";
 
-import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { HANDLES } from "@/workflow/connection-rules";
-import { AssetUploadControls } from "@/workflow/components/AssetUploadControls";
+import { useRef, useState } from "react";
+import { type NodeProps } from "@xyflow/react";
+import { NodePorts } from "@/workflow/components/nodes/NodePorts";
+import { BrandMark } from "@/workflow/components/BrandMark";
+import { StableAudioPlayer } from "@/workflow/components/StableAudioPlayer";
+import { useAssetById } from "@/workflow/hooks/useAssetById";
+import { uploadAssetFile } from "@/workflow/lib/upload-asset";
 import { useWorkflowStore } from "@/workflow/store";
-import type { AudioReferenceNodeData } from "@/workflow/types";
+import type { AudioNodeData } from "@/workflow/types";
 
 export function AudioNodeView({ id, selected }: NodeProps) {
+  const projectId = useWorkflowStore((s) => s.projectId);
   const nodeData = useWorkflowStore(
     (s) =>
       s.document.nodes.find((n) => n.id === id)?.data as
-        | AudioReferenceNodeData
+        | AudioNodeData
         | undefined,
   );
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
+  const commitNodeAssets = useWorkflowStore((s) => s.commitNodeAssets);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const asset = useAssetById(nodeData?.assetId);
 
   if (!nodeData) return null;
+
+  const onUpload = async (file: File | undefined) => {
+    if (!file) return;
+    setUploading(true);
+
+    try {
+      const uploaded = await uploadAssetFile(file, {
+        assetType: "audio",
+        projectId,
+        name: file.name,
+      });
+      commitNodeAssets(id, [uploaded], {
+        assetId: uploaded.id,
+        uploadStatus: "ready",
+        errorMessage: "",
+      });
+    } catch (error) {
+      updateNodeData(id, {
+        uploadStatus: "error",
+        errorMessage:
+          error instanceof Error ? error.message : "上传失败，请重试",
+      });
+    } finally {
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  };
 
   return (
     <div
@@ -33,26 +69,46 @@ export function AudioNodeView({ id, selected }: NodeProps) {
       <div className="mb-2 truncate text-sm text-zinc-100">
         {nodeData.title || "音频参考"}
       </div>
-      <AssetUploadControls
-        kind="audio"
-        accept="audio/mpeg,audio/wav,audio/mp4,audio/x-m4a,audio/m4a,.mp3,.wav,.m4a"
-        assetUrl={nodeData.assetUrl}
-        fileName={nodeData.fileName}
-        uploadStatus={nodeData.uploadStatus}
-        errorMessage={nodeData.errorMessage}
-        onChange={(patch) =>
-          updateNodeData(id, {
-            ...patch,
-            duration: patch.duration ?? nodeData.duration,
-          })
-        }
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id={HANDLES.audioOutput}
-        className="!h-3 !w-3 !border-2 !border-zinc-900 !bg-amber-400"
-      />
+
+      <div className="nodrag nopan space-y-2">
+        {asset && nodeData.uploadStatus === "ready" && (
+          <StableAudioPlayer src={asset.url} />
+        )}
+
+        {(!asset || uploading || nodeData.uploadStatus === "uploading") && (
+          <div className="flex min-h-[52px] items-center justify-center rounded-lg border border-zinc-700/80 bg-zinc-950/70">
+            <BrandMark
+              size={22}
+              spin={uploading || nodeData.uploadStatus === "uploading"}
+            />
+          </div>
+        )}
+
+        <button
+          type="button"
+          className="w-full rounded-lg border border-zinc-600 bg-zinc-800 px-2 py-1 text-[11px] text-zinc-100"
+          disabled={uploading}
+          onClick={() => inputRef.current?.click()}
+        >
+          {asset ? "替换音频" : "上传音频"}
+        </button>
+
+        <input
+          ref={inputRef}
+          type="file"
+          accept="audio/mpeg,audio/wav,audio/mp4,audio/x-m4a,audio/m4a,audio/aac,.mp3,.wav,.m4a,.aac"
+          className="hidden"
+          onChange={(e) => void onUpload(e.target.files?.[0])}
+        />
+      </div>
+
+      {nodeData.errorMessage && (
+        <div className="mt-1 text-[11px] text-rose-300">
+          {nodeData.errorMessage}
+        </div>
+      )}
+
+      <NodePorts />
     </div>
   );
 }
