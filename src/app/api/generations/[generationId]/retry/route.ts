@@ -6,7 +6,7 @@ import {
 } from "@/video-generation/generation-store";
 import { loadWorkflow } from "@/workflow/lib/workflow-storage";
 import { buildVideoGenerationInput } from "@/workflow/lib/build-video-generation-input";
-import { submitVideoGeneration } from "@/video-generation/service";
+import { retryVideoGeneration } from "@/video-generation/service";
 import {
   listCapabilitiesForProvider,
   pickCapability,
@@ -14,9 +14,19 @@ import {
 import { getVideoProviderRuntimeConfig } from "@/video-generation/provider/config";
 import { MAX_REFERENCE_SELECTION_IDS_IN_REQUEST } from "@/video-generation/reference-media";
 import { sanitizeGenerationForClient } from "@/video-generation/secure-transfer";
+import { IdempotencyError } from "@/video-generation/idempotency";
 
 const bodySchema = z.object({
   confirmPaidGeneration: z.boolean().optional().default(false),
+  /**
+   * 重新生成必须使用新的幂等键（不得复用旧任务键）。
+   * 可能产生新的 Provider 费用。
+   */
+  idempotencyKey: z.string().min(1).max(120),
+  /**
+   * 若上一任务为 unknownOutcome，须显式确认可能重复计费。
+   */
+  acknowledgePossibleDuplicateCharge: z.boolean().optional().default(false),
   /**
    * 可选客户端快照；权威选择来自最新 WorkflowDocument。
    * 不得用旧任务 requestSnapshot 覆盖。
@@ -49,7 +59,10 @@ export async function POST(
     const parsed = bodySchema.safeParse(json);
     if (!parsed.success) {
       return NextResponse.json(
-        { code: "INVALID_BODY", message: "参数无效" },
+        {
+          code: "INVALID_BODY",
+          message: parsed.error.issues[0]?.message ?? "参数无效",
+        },
         { status: 400 },
       );
     }
@@ -84,18 +97,36 @@ export async function POST(
       );
     }
 
-    const generation = await submitVideoGeneration({
+    const generation = await retryVideoGeneration({
+      previousGenerationId: oldId,
       input: built.input,
       unsupportedAudioLabels: built.unsupportedAudioLabels,
       confirmPaidGeneration: parsed.data.confirmPaidGeneration,
+      idempotencyKey: parsed.data.idempotencyKey,
+      acknowledgePossibleDuplicateCharge:
+        parsed.data.acknowledgePossibleDuplicateCharge,
       title: parsed.data.title,
     });
 
     return NextResponse.json({
       generation: sanitizeGenerationForClient(generation),
       previousGenerationId: oldId,
+      billingNotice:
+        "重新生成使用新的幂等键与新的 generationId，可能产生新的 Provider 费用。",
     });
   } catch (error) {
+    if (error instanceof IdempotencyError) {
+      const status =
+        error.code === "DUPLICATE_CHARGE_ACK_REQUIRED" ? 409 : 400;
+      return NextResponse.json(
+        {
+          code: error.code,
+          message: error.message,
+          generationId: error.generationId,
+        },
+        { status },
+      );
+    }
     const err = error as Error & { code?: string };
     return NextResponse.json(
       {

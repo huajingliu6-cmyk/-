@@ -13,7 +13,9 @@ export type GenerationResultKind =
   | "invalidVideoAsset"
   | "missingVideoFile"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "unknownOutcome"
+  | "submitting";
 
 export type ClassifiedGenerationResult = {
   kind: GenerationResultKind;
@@ -114,11 +116,37 @@ export function classifyGenerationResult(params: {
     };
   }
 
+  if (status === "submitting") {
+    return {
+      kind: "submitting",
+      label: "提交中",
+      message: generation.progressLabel || "正在提交生成请求",
+      canPlay: false,
+      canDownload: false,
+      isMock: generation.isMock,
+      videoAsset: null,
+    };
+  }
+
   if (status === "processing" || status === "downloading") {
     return {
       kind: "processing",
       label: "处理中",
       message: generation.progressLabel || "正在生成或转存",
+      canPlay: false,
+      canDownload: false,
+      isMock: generation.isMock,
+      videoAsset: null,
+    };
+  }
+
+  if (status === "unknownOutcome") {
+    return {
+      kind: "unknownOutcome",
+      label: "结果待确认",
+      message:
+        generation.errorMessage ||
+        "提交结果暂时无法确认，为避免重复计费，系统已暂停自动重试。",
       canPlay: false,
       canDownload: false,
       isMock: generation.isMock,

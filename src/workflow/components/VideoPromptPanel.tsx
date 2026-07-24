@@ -278,7 +278,9 @@ export function VideoPromptPanel({
         }
 
         const nextStatus =
-          g.status === "failed" || g.status === "resultTransferFailed"
+          g.status === "failed" ||
+          g.status === "resultTransferFailed" ||
+          g.status === "unknownOutcome"
             ? "failed"
             : g.status === "cancelled"
               ? "cancelled"
@@ -300,9 +302,15 @@ export function VideoPromptPanel({
         if (
           g.status === "failed" ||
           g.status === "cancelled" ||
-          g.status === "resultTransferFailed"
+          g.status === "resultTransferFailed" ||
+          g.status === "unknownOutcome"
         ) {
-          setNotice(g.errorMessage || g.progressLabel);
+          setNotice(
+            g.status === "unknownOutcome"
+              ? g.errorMessage ||
+                  "提交结果暂时无法确认，为避免重复计费，系统已暂停自动重试。"
+              : g.errorMessage || g.progressLabel,
+          );
           stop();
         }
       } catch {
@@ -462,8 +470,20 @@ export function VideoPromptPanel({
         code?: string;
       };
       if (!res.ok || !payload.generation) {
+        // 未知结果：保留键并阻断同一请求自动重试
+        if (payload.code === "GENERATION_SUBMISSION_UNKNOWN") {
+          throw new Error(
+            payload.message ??
+              "提交结果暂时无法确认，为避免重复计费，系统已暂停自动重试。",
+          );
+        }
         // 服务端已给出明确业务结果 → 释放键，允许用户重新开确认会话再试
-        if (payload.generation || payload.code) {
+        if (
+          payload.generation ||
+          (payload.code &&
+            payload.code !== "IDEMPOTENCY_IN_PROGRESS" &&
+            payload.code !== "ACTIVE_GENERATION_ALREADY_EXISTS")
+        ) {
           idempotencyKeyRef.current = null;
         }
         throw new Error(payload.message ?? "提交失败");
@@ -478,6 +498,13 @@ export function VideoPromptPanel({
           payload.generation.errorMessage ??
             payload.message ??
             "提交失败",
+        );
+      }
+      if (payload.generation.status === "unknownOutcome") {
+        // 不释放键；禁止同一请求一键再次付费提交
+        throw new Error(
+          payload.generation.errorMessage ??
+            "提交结果暂时无法确认，为避免重复计费，系统已暂停自动重试。",
         );
       }
       // 成功受理（queued 等）后清空；同会话连点已用同一键命中服务端幂等
@@ -530,11 +557,19 @@ export function VideoPromptPanel({
   };
 
   const onRetry = async () => {
-    // 明确重新生成：新确认会话、新幂等键（不复用旧任务键）
+    // 明确重新生成：新确认会话、新幂等键（不复用旧任务键）；可能产生新费用
+    const wasUnknown =
+      generation?.status === "unknownOutcome" ||
+      notice.includes("暂时无法确认");
     idempotencyKeyRef.current =
       typeof crypto !== "undefined" && "randomUUID" in crypto
         ? `${nodeId}-${crypto.randomUUID()}`
         : `${nodeId}-${Date.now()}`;
+    if (wasUnknown) {
+      setNotice(
+        "重新生成将使用新的幂等键，可能产生重复计费。请确认后再提交。",
+      );
+    }
     setConfirmOpen(true);
   };
 

@@ -16,6 +16,7 @@ import type {
   ProviderSubmitResult,
 } from "../types";
 import type { VideoProvider } from "./types";
+import { ProviderOutcomeUnknownError } from "../idempotency/errors";
 
 type MockTask = {
   status: "queued" | "processing" | "completed" | "failed" | "cancelled";
@@ -31,6 +32,8 @@ type MockTask = {
 
 type MockTasksGlobal = typeof globalThis & {
   __infiniteCanvasMockTasks?: Map<string, MockTask>;
+  __infiniteCanvasMockSubmitHook?: (() => void | Promise<void>) | null;
+  __infiniteCanvasMockSubmitCount?: number;
 };
 
 /**
@@ -135,6 +138,15 @@ export class MockVideoProvider implements VideoProvider {
   async submitGeneration(
     input: ProviderGenerationInput,
   ): Promise<ProviderSubmitResult> {
+    const g = globalThis as MockTasksGlobal;
+    g.__infiniteCanvasMockSubmitCount =
+      (g.__infiniteCanvasMockSubmitCount ?? 0) + 1;
+
+    // 测试可注入：在“请求已发出”语义下抛出未知结果（不访问真实网络）
+    if (g.__infiniteCanvasMockSubmitHook) {
+      await g.__infiniteCanvasMockSubmitHook();
+    }
+
     // 提交前即校验：缺失/无效时不排队伪装成功
     const validated = await validateMockVideoSource();
     if (!validated.ok) {
@@ -269,6 +281,31 @@ export class MockVideoProvider implements VideoProvider {
 /** 测试辅助：清空内存任务 */
 export function resetMockVideoProviderTasks(): void {
   getTasks().clear();
+  const g = globalThis as MockTasksGlobal;
+  g.__infiniteCanvasMockSubmitHook = null;
+  g.__infiniteCanvasMockSubmitCount = 0;
+}
+
+/** 测试：注入 submit 钩子（可抛 ProviderOutcomeUnknownError） */
+export function setMockProviderSubmitHookForTests(
+  hook: (() => void | Promise<void>) | null,
+): void {
+  (globalThis as MockTasksGlobal).__infiniteCanvasMockSubmitHook = hook;
+}
+
+export function getMockProviderSubmitCountForTests(): number {
+  return (globalThis as MockTasksGlobal).__infiniteCanvasMockSubmitCount ?? 0;
+}
+
+export function resetMockProviderSubmitCountForTests(): void {
+  (globalThis as MockTasksGlobal).__infiniteCanvasMockSubmitCount = 0;
+}
+
+/** 便捷：注入未知结果（模拟请求已发送但无法确认接单） */
+export function injectMockProviderUnknownOutcomeForTests(): void {
+  setMockProviderSubmitHookForTests(() => {
+    throw new ProviderOutcomeUnknownError();
+  });
 }
 
 export function getMockCapabilityForMode(

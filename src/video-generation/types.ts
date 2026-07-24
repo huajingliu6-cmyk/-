@@ -15,13 +15,16 @@ export type WanGenerationMode = "textToVideo" | "referenceToVideo";
 
 export type GenerationJobStatus =
   | "validating"
+  | "submitting"
   | "queued"
   | "processing"
   | "downloading"
   | "completed"
   | "failed"
   | "cancelled"
-  | "resultTransferFailed";
+  | "resultTransferFailed"
+  /** Provider 是否接单未知；禁止自动重试同一请求 */
+  | "unknownOutcome";
 
 export type MetadataSource = "none" | "browser" | "server" | "provider";
 

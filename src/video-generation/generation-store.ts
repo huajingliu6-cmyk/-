@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import path from "path";
 import type { GenerationRecord } from "./types";
+import { clearIdempotencyStoreForTests } from "./idempotency";
 
 const DIR = path.join(process.cwd(), "data", "generations");
 
@@ -22,14 +23,32 @@ function filePath(id: string): string {
   return path.join(DIR, `${assertSafeGenerationId(id)}.json`);
 }
 
+/** Windows 上 rename 不能覆盖已存在目标；先写临时文件再替换。 */
+async function atomicWriteFile(target: string, contents: string): Promise<void> {
+  const tmp = `${target}.${process.pid}.${randomUUID()}.tmp`;
+  await fs.writeFile(tmp, contents, "utf8");
+  try {
+    await fs.rename(tmp, target);
+  } catch (err) {
+    const code =
+      err && typeof err === "object" && "code" in err
+        ? (err as { code?: unknown }).code
+        : undefined;
+    if (code === "EPERM" || code === "EEXIST") {
+      await fs.unlink(target).catch(() => undefined);
+      await fs.rename(tmp, target);
+      return;
+    }
+    await fs.unlink(tmp).catch(() => undefined);
+    throw err;
+  }
+}
+
 export async function saveGenerationRecord(
   record: GenerationRecord,
 ): Promise<void> {
   await ensureDir();
-  const target = filePath(record.id);
-  const tmp = `${target}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(record, null, 2), "utf8");
-  await fs.rename(tmp, target);
+  await atomicWriteFile(filePath(record.id), JSON.stringify(record, null, 2));
 }
 
 export async function readGenerationRecord(
@@ -63,29 +82,42 @@ export function createGenerationId(): string {
   return randomUUID();
 }
 
-/** 短时间幂等：同一 key 最近提交过则返回已有记录 */
-const recentKeys = new Map<string, { id: string; at: number }>();
-const IDEMPOTENCY_MS = 8_000;
-
-export function findIdempotentGeneration(
-  key: string,
-): string | null {
-  const hit = recentKeys.get(key);
-  if (!hit) return null;
-  if (Date.now() - hit.at > IDEMPOTENCY_MS) {
-    recentKeys.delete(key);
-    return null;
+/** 列出本地 generation 记录（单机开发扫描；非生产索引） */
+export async function listGenerationRecords(): Promise<GenerationRecord[]> {
+  await ensureDir();
+  const names = await fs.readdir(DIR);
+  const out: GenerationRecord[] = [];
+  for (const name of names) {
+    if (!name.endsWith(".json") || name.includes("..")) continue;
+    const id = name.slice(0, -5);
+    if (!SAFE_ID.test(id)) continue;
+    const record = await readGenerationRecord(id);
+    if (record) out.push(record);
   }
-  return hit.id;
+  return out;
 }
 
+/**
+ * @deprecated 进程内 8 秒 Map 已移除；保留空实现以免旧测试 import 断裂。
+ * 请使用持久化 idempotency store。
+ */
+export function findIdempotentGeneration(key: string): string | null {
+  void key;
+  return null;
+}
+
+/**
+ * @deprecated 见持久化 GenerationIdempotencyStore.reserve
+ */
 export function rememberIdempotencyKey(key: string, id: string): void {
-  recentKeys.set(key, { id, at: Date.now() });
+  void key;
+  void id;
+  // no-op：持久化路径在 service 中 reserve
 }
 
-/** 仅测试用：清空短时幂等缓存，避免用例互相污染 */
-export function clearIdempotencyKeysForTests(): void {
-  recentKeys.clear();
+/** 测试用：清空持久幂等目录（兼容旧名） */
+export async function clearIdempotencyKeysForTests(): Promise<void> {
+  await clearIdempotencyStoreForTests();
 }
 
 /** 服务端轮询节流 */

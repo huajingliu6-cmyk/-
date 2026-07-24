@@ -84,7 +84,7 @@ hostname 本身为 IP 时同样检查。任一私网地址 → 拒绝整个下�
 
 ## 测试
 
-自动化测试注入 DNS / HTTP transport，**不访问真实互联网**。阶段 3D-B3：**186** 项（Vitest；0 skipped / 0 todo）。
+自动化测试注入 DNS / HTTP transport，**不访问真实互联网**。阶段 3D-B3 基线为 186 项；含 3D-B1-A 后以 `npm test` 为准（当前 **207**）。
 
 浏览器 Mock 回归已通过：生成、转存、播放、下载、Range、metadata、参数对照；`file://` 分支正常；API 不暴露完整 `remoteVideoUrl`。
 

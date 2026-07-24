@@ -2,14 +2,25 @@ import { resolveProviderAssets } from "./asset-resolver";
 import { ALLOWED_GENERATED_VIDEO_MIME } from "./classify-generation-result";
 import {
   createGenerationId,
-  findIdempotentGeneration,
   markPolled,
   readGenerationRecord,
-  rememberIdempotencyKey,
   saveGenerationRecord,
   shouldThrottlePoll,
   updateGenerationRecord,
 } from "./generation-store";
+import {
+  IdempotencyError,
+  IDEMPOTENCY_SCOPE,
+  ProviderOutcomeUnknownError,
+  UNKNOWN_OUTCOME_USER_MESSAGE,
+  FileGenerationIdempotencyStore,
+  findActiveGenerationForShot,
+  fingerprintInputFromGeneration,
+  buildGenerationRequestFingerprint,
+  getIdempotencyStore,
+  reconcileByGenerationId,
+  reconcileGenerationIdempotencyRecord,
+} from "./idempotency";
 import {
   listCapabilitiesForProvider,
   pickCapability,
@@ -56,6 +67,36 @@ function hasValidCompletedVideoAsset(record: GenerationRecord): boolean {
   return true;
 }
 
+function errorCodeOf(err: unknown): string {
+  if (
+    err instanceof Error &&
+    "code" in err &&
+    typeof (err as { code?: unknown }).code === "string"
+  ) {
+    return (err as { code: string }).code;
+  }
+  return "SUBMIT_FAILED";
+}
+
+function errorMessageOf(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback;
+}
+
+async function returnExistingGeneration(
+  generationId: string,
+): Promise<GenerationRecord> {
+  const existing = await readGenerationRecord(generationId);
+  if (existing) return existing;
+  throw new IdempotencyError("IDEMPOTENCY_RECORD_CORRUPTED", {
+    generationId,
+  });
+}
+
+/**
+ * 提交视频生成（Mock 与真实 Provider 同一状态机）。
+ * 顺序：校验 → fingerprint → reserve → GenerationRecord → markSubmitting
+ * → Provider → markProviderAccepted(taskId) → 更新 GenerationRecord → markCommitted。
+ */
 export async function submitVideoGeneration(params: {
   input: VideoGenerationInput;
   unsupportedAudioLabels: string[];
@@ -63,15 +104,13 @@ export async function submitVideoGeneration(params: {
   idempotencyKey?: string;
   title?: string;
   fetchImpl?: FetchLike;
+  /**
+   * retryGeneration：明确新费用语义；仍走同一提交状态机。
+   * 若源任务为 unknownOutcome，须 acknowledgePossibleDuplicateCharge。
+   */
+  retryOfGenerationId?: string;
+  acknowledgePossibleDuplicateCharge?: boolean;
 }): Promise<GenerationRecord> {
-  if (params.idempotencyKey) {
-    const existingId = findIdempotentGeneration(params.idempotencyKey);
-    if (existingId) {
-      const existing = await readGenerationRecord(existingId);
-      if (existing) return existing;
-    }
-  }
-
   const runtime = getVideoProviderRuntimeConfig();
   const paidGate = paidGenerationAllowed(
     runtime,
@@ -81,6 +120,18 @@ export async function submitVideoGeneration(params: {
     throw Object.assign(new Error(paidGate.message), {
       code: paidGate.code,
     });
+  }
+
+  if (params.retryOfGenerationId) {
+    const previous = await readGenerationRecord(params.retryOfGenerationId);
+    if (previous?.status === "unknownOutcome") {
+      if (!params.acknowledgePossibleDuplicateCharge) {
+        throw new IdempotencyError("DUPLICATE_CHARGE_ACK_REQUIRED");
+      }
+    }
+    if (!params.idempotencyKey) {
+      throw new IdempotencyError("IDEMPOTENCY_KEY_REQUIRED");
+    }
   }
 
   const mode = selectWanGenerationMode(params.input);
@@ -117,22 +168,120 @@ export async function submitVideoGeneration(params: {
     forRealProvider: runtime.providerId === "aliyun-wan27",
   });
 
+  const fingerprint = buildGenerationRequestFingerprint(
+    fingerprintInputFromGeneration({
+      input: params.input,
+      providerId: runtime.providerId,
+      modelId: capability.modelId,
+    }),
+  );
+
+  const store = getIdempotencyStore();
+  const idempotencyKey = params.idempotencyKey;
+
+  if (idempotencyKey) {
+    const prior = await store.get(IDEMPOTENCY_SCOPE, idempotencyKey);
+    if (prior) {
+      await reconcileGenerationIdempotencyRecord({
+        scope: IDEMPOTENCY_SCOPE,
+        idempotencyKey,
+      });
+    }
+  }
+
+  // 同镜头 active 保护（不同 key 的多标签并发）
+  const active = await findActiveGenerationForShot({
+    projectId: params.input.projectId,
+    shotNodeId: params.input.shotId,
+    providerId: runtime.providerId,
+  });
+
+  const currentIdem = idempotencyKey
+    ? await store.get(IDEMPOTENCY_SCOPE, idempotencyKey)
+    : null;
+
+  if (active) {
+    const sameTask =
+      currentIdem !== null && currentIdem.generationId === active.id;
+    if (!sameTask) {
+      throw new IdempotencyError("ACTIVE_GENERATION_ALREADY_EXISTS", {
+        generationId: active.id,
+      });
+    }
+  }
+
+  let generationId = createGenerationId();
+  const reservedKey: string | null = idempotencyKey ?? null;
+
+  if (idempotencyKey) {
+    let outcome = await store.reserve({
+      scope: IDEMPOTENCY_SCOPE,
+      idempotencyKey,
+      requestFingerprint: fingerprint,
+      generationId,
+      projectId: params.input.projectId,
+      shotNodeId: params.input.shotId,
+      providerId: runtime.providerId,
+    });
+
+    if (outcome.kind === "safe_retry") {
+      if (store instanceof FileGenerationIdempotencyStore) {
+        const refreshed = await store.reReserveAfterSafeFailure({
+          scope: IDEMPOTENCY_SCOPE,
+          idempotencyKey,
+          requestFingerprint: fingerprint,
+          generationId,
+          projectId: params.input.projectId,
+          shotNodeId: params.input.shotId,
+          providerId: runtime.providerId,
+        });
+        outcome = { kind: "reserved", record: refreshed };
+      } else {
+        await store.releaseIfSafe(
+          IDEMPOTENCY_SCOPE,
+          idempotencyKey,
+          outcome.record.generationId,
+        );
+        outcome = await store.reserve({
+          scope: IDEMPOTENCY_SCOPE,
+          idempotencyKey,
+          requestFingerprint: fingerprint,
+          generationId,
+          projectId: params.input.projectId,
+          shotNodeId: params.input.shotId,
+          providerId: runtime.providerId,
+        });
+      }
+    }
+
+    if (outcome.kind === "existing") {
+      return returnExistingGeneration(outcome.record.generationId);
+    }
+    if (outcome.kind === "in_progress") {
+      const gen = await readGenerationRecord(outcome.record.generationId);
+      if (gen) return gen;
+      throw new IdempotencyError("IDEMPOTENCY_IN_PROGRESS", {
+        generationId: outcome.record.generationId,
+      });
+    }
+    if (outcome.kind === "blocked_unknown") {
+      throw new IdempotencyError("GENERATION_SUBMISSION_UNKNOWN", {
+        generationId: outcome.record.generationId,
+      });
+    }
+    generationId = outcome.record.generationId;
+  }
+
   const provider = createVideoProvider({
     config: runtime,
     fetchImpl: params.fetchImpl,
   });
 
-  const id = createGenerationId();
   const now = new Date().toISOString();
   const mediaAssetIds = resolvedMedia.map((m) => m.assetId);
 
-  // 在落盘与 Provider 提交前登记幂等键，避免并发相同 key 创建多条任务
-  if (params.idempotencyKey) {
-    rememberIdempotencyKey(params.idempotencyKey, id);
-  }
-
   let record: GenerationRecord = {
-    id,
+    id: generationId,
     projectId: params.input.projectId,
     shotNodeId: params.input.shotId,
     providerId: runtime.providerId,
@@ -146,7 +295,6 @@ export async function submitVideoGeneration(params: {
     requestSnapshot: {
       prompt: params.input.prompt,
       settings,
-      /** 真正发送的素材顺序（含首帧在 resolved 中的位置） */
       mediaAssetIds,
       unsupportedAudioLabels: params.unsupportedAudioLabels,
     },
@@ -168,41 +316,167 @@ export async function submitVideoGeneration(params: {
     createdAt: now,
     updatedAt: now,
     completedAt: null,
-    idempotencyKey: params.idempotencyKey ?? null,
+    idempotencyKey: idempotencyKey ?? null,
   };
-  await saveGenerationRecord(record);
 
   try {
-    const submitted = await provider.submitGeneration({
-      generationId: id,
-      input: params.input,
-      capability,
-      resolvedMedia,
-    });
-    record = await updateGenerationRecord(id, {
-      providerTaskId: submitted.providerTaskId,
-      status: submitted.status,
-      progressLabel: submitted.progressLabel,
-      progress: null,
-    });
+    await saveGenerationRecord(record);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "提交失败";
-    const code =
-      err instanceof Error &&
-      "code" in err &&
-      typeof (err as { code?: unknown }).code === "string"
-        ? (err as { code: string }).code
-        : "SUBMIT_FAILED";
-    record = await updateGenerationRecord(id, {
-      status: "failed",
-      errorCode: code,
-      errorMessage: message,
-      progressLabel: "提交失败",
-    });
-    throw Object.assign(new Error(message), { generation: record, code });
+    if (reservedKey) {
+      await store
+        .markSafeFailure(
+          IDEMPOTENCY_SCOPE,
+          reservedKey,
+          generationId,
+          "GENERATION_RECORD_SAVE_FAILED",
+        )
+        .catch(() => undefined);
+    }
+    throw err;
   }
 
-  return record;
+  try {
+    if (reservedKey) {
+      await store.markSubmitting(
+        IDEMPOTENCY_SCOPE,
+        reservedKey,
+        generationId,
+      );
+    }
+    record = await updateGenerationRecord(generationId, {
+      status: "submitting",
+      progressLabel: "正在提交",
+    });
+
+    let submitted;
+    try {
+      submitted = await provider.submitGeneration({
+        generationId,
+        input: params.input,
+        capability,
+        resolvedMedia,
+      });
+    } catch (err) {
+      if (
+        err instanceof ProviderOutcomeUnknownError ||
+        errorCodeOf(err) === "GENERATION_SUBMISSION_UNKNOWN"
+      ) {
+        if (reservedKey) {
+          await store.markUnknownOutcome(
+            IDEMPOTENCY_SCOPE,
+            reservedKey,
+            generationId,
+            "GENERATION_SUBMISSION_UNKNOWN",
+          );
+        }
+        record = await updateGenerationRecord(generationId, {
+          status: "unknownOutcome",
+          errorCode: "GENERATION_SUBMISSION_UNKNOWN",
+          errorMessage: UNKNOWN_OUTCOME_USER_MESSAGE,
+          progressLabel: "提交结果待确认",
+        });
+        throw Object.assign(new Error(UNKNOWN_OUTCOME_USER_MESSAGE), {
+          generation: record,
+          code: "GENERATION_SUBMISSION_UNKNOWN",
+        });
+      }
+
+      const code = errorCodeOf(err);
+      const message = errorMessageOf(err, "提交失败");
+      if (reservedKey) {
+        await store.markSafeFailure(
+          IDEMPOTENCY_SCOPE,
+          reservedKey,
+          generationId,
+          code,
+        );
+      }
+      record = await updateGenerationRecord(generationId, {
+        status: "failed",
+        errorCode: code,
+        errorMessage: message,
+        progressLabel: "提交失败",
+      });
+      throw Object.assign(new Error(message), { generation: record, code });
+    }
+
+    // Provider 返回 taskId 后优先持久化到幂等记录
+    if (reservedKey) {
+      await store.markProviderAccepted(
+        IDEMPOTENCY_SCOPE,
+        reservedKey,
+        generationId,
+        submitted.providerTaskId,
+      );
+    }
+
+    try {
+      record = await updateGenerationRecord(generationId, {
+        providerTaskId: submitted.providerTaskId,
+        status: submitted.status,
+        progressLabel: submitted.progressLabel,
+        progress: null,
+      });
+    } catch (err) {
+      // 幂等记录已有 taskId，后续对账可补写；不删除幂等记录
+      if (reservedKey) {
+        // 保持 providerAccepted，不 markCommitted
+      }
+      throw err;
+    }
+
+    if (reservedKey) {
+      await store.markCommitted(
+        IDEMPOTENCY_SCOPE,
+        reservedKey,
+        generationId,
+      );
+    }
+
+    return record;
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      "code" in err &&
+      (err as { code?: string }).code === "GENERATION_SUBMISSION_UNKNOWN"
+    ) {
+      throw err;
+    }
+    if (
+      err instanceof Error &&
+      "generation" in err
+    ) {
+      throw err;
+    }
+    throw err;
+  }
+}
+
+/**
+ * retryGeneration：新 generationId + 新幂等键 + 最新 Workflow；可能产生新费用。
+ * 与 retryTransfer（不调用 Provider）严格区分。
+ */
+export async function retryVideoGeneration(params: {
+  previousGenerationId: string;
+  input: VideoGenerationInput;
+  unsupportedAudioLabels: string[];
+  confirmPaidGeneration: boolean;
+  idempotencyKey: string;
+  acknowledgePossibleDuplicateCharge?: boolean;
+  title?: string;
+  fetchImpl?: FetchLike;
+}): Promise<GenerationRecord> {
+  return submitVideoGeneration({
+    input: params.input,
+    unsupportedAudioLabels: params.unsupportedAudioLabels,
+    confirmPaidGeneration: params.confirmPaidGeneration,
+    idempotencyKey: params.idempotencyKey,
+    title: params.title,
+    fetchImpl: params.fetchImpl,
+    retryOfGenerationId: params.previousGenerationId,
+    acknowledgePossibleDuplicateCharge:
+      params.acknowledgePossibleDuplicateCharge,
+  });
 }
 
 export async function refreshGenerationStatus(
@@ -212,37 +486,52 @@ export async function refreshGenerationStatus(
   const current = await readGenerationRecord(generationId);
   if (!current) throw new Error("生成任务不存在");
 
+  // GET 时可触发对账，但不创建新任务、不调用 Provider 提交
+  if (current.idempotencyKey) {
+    await reconcileByGenerationId(generationId).catch(() => null);
+  }
+
+  const afterReconcile = (await readGenerationRecord(generationId)) ?? current;
+
   if (
-    current.status === "completed" ||
-    current.status === "failed" ||
-    current.status === "cancelled" ||
-    current.status === "resultTransferFailed"
+    afterReconcile.status === "completed" ||
+    afterReconcile.status === "failed" ||
+    afterReconcile.status === "cancelled" ||
+    afterReconcile.status === "resultTransferFailed" ||
+    afterReconcile.status === "unknownOutcome"
   ) {
-    return current;
+    return afterReconcile;
+  }
+
+  if (afterReconcile.status === "submitting") {
+    return afterReconcile;
   }
 
   // 已有合法 generatedVideo 则收口完成；缺任一关键条件不伪装 completed。
-  if (hasValidCompletedVideoAsset(current)) {
-    if (current.status === "downloading" || current.status === "processing") {
+  if (hasValidCompletedVideoAsset(afterReconcile)) {
+    if (
+      afterReconcile.status === "downloading" ||
+      afterReconcile.status === "processing"
+    ) {
       return updateGenerationRecord(generationId, {
         status: "completed",
-        localVideoAssetId: current.resultAsset!.id,
-        progressLabel: current.isMock
+        localVideoAssetId: afterReconcile.resultAsset!.id,
+        progressLabel: afterReconcile.isMock
           ? "Mock 演示结果，不是真实 AI 视频"
           : "已完成",
-        completedAt: current.completedAt ?? new Date().toISOString(),
+        completedAt: afterReconcile.completedAt ?? new Date().toISOString(),
         errorCode: null,
         errorMessage: null,
       });
     }
-    return current;
+    return afterReconcile;
   }
 
-  // 有残缺结果资产但不完整：保持/标为转存失败，不回退图片、不伪造完成
   if (
-    current.resultAsset &&
-    !hasValidCompletedVideoAsset(current) &&
-    (current.status === "downloading" || current.status === "processing")
+    afterReconcile.resultAsset &&
+    !hasValidCompletedVideoAsset(afterReconcile) &&
+    (afterReconcile.status === "downloading" ||
+      afterReconcile.status === "processing")
   ) {
     return updateGenerationRecord(generationId, {
       status: "resultTransferFailed",
@@ -253,30 +542,42 @@ export async function refreshGenerationStatus(
   }
 
   if (!options?.force && shouldThrottlePoll(generationId)) {
-    return current;
+    return afterReconcile;
   }
   markPolled(generationId);
 
-  if (!current.providerTaskId) {
-    return current;
+  if (!afterReconcile.providerTaskId) {
+    // 尝试从幂等记录补写
+    if (afterReconcile.idempotencyKey) {
+      const reconciled = await reconcileGenerationIdempotencyRecord({
+        scope: IDEMPOTENCY_SCOPE,
+        idempotencyKey: afterReconcile.idempotencyKey,
+      }).catch(() => null);
+      if (reconciled?.generation?.providerTaskId) {
+        return reconciled.generation;
+      }
+    }
+    return afterReconcile;
   }
 
   const provider = createVideoProvider();
-  const status = await provider.getGenerationStatus(current.providerTaskId);
+  const status = await provider.getGenerationStatus(
+    afterReconcile.providerTaskId,
+  );
 
   let next = await updateGenerationRecord(generationId, {
     status: status.status,
     progressLabel: status.progressLabel,
     progress: null,
-    remoteVideoUrl: status.remoteVideoUrl ?? current.remoteVideoUrl,
+    remoteVideoUrl: status.remoteVideoUrl ?? afterReconcile.remoteVideoUrl,
     providerResolution:
-      status.providerResolution ?? current.providerResolution,
+      status.providerResolution ?? afterReconcile.providerResolution,
     providerAspectRatio:
-      status.providerAspectRatio ?? current.providerAspectRatio,
+      status.providerAspectRatio ?? afterReconcile.providerAspectRatio,
     providerDurationSeconds:
-      status.providerDurationSeconds ?? current.providerDurationSeconds,
-    errorCode: status.errorCode ?? current.errorCode,
-    errorMessage: status.errorMessage ?? current.errorMessage,
+      status.providerDurationSeconds ?? afterReconcile.providerDurationSeconds,
+    errorCode: status.errorCode ?? afterReconcile.errorCode,
+    errorMessage: status.errorMessage ?? afterReconcile.errorMessage,
   });
 
   const remoteUrl = status.remoteVideoUrl ?? next.remoteVideoUrl;
@@ -325,6 +626,7 @@ export async function cancelVideoGeneration(
 
 /**
  * 转存重试（幂等）：已有有效 generatedVideo 时不重复复制文件。
+ * 不调用 Provider，不生成新的付费任务。
  * 单进程内对同一 generationId 串行化；多实例生产需共享锁/唯一约束，本函数不提供。
  */
 export async function retryTransferGeneration(

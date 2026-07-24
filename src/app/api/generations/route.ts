@@ -15,6 +15,7 @@ import {
 import { getVideoProviderRuntimeConfig } from "@/video-generation/provider/config";
 import { selectWanGenerationMode } from "@/video-generation/select-wan-mode";
 import { MAX_REFERENCE_SELECTION_IDS_IN_REQUEST } from "@/video-generation/reference-media";
+import { IdempotencyError } from "@/video-generation/idempotency";
 
 const postSchema = z.object({
   projectId: z.string().min(1),
@@ -44,6 +45,26 @@ export async function GET() {
     config: publicConfig,
     capabilities,
   });
+}
+
+function statusForCode(code: string): number {
+  if (code === "PAID_GENERATION_DISABLED") return 403;
+  if (
+    code === "MISSING_DASHSCOPE_API_KEY" ||
+    code === "MISSING_DASHSCOPE_WORKSPACE_ID" ||
+    code === "IDEMPOTENCY_STORE_UNAVAILABLE"
+  ) {
+    return 503;
+  }
+  if (
+    code === "IDEMPOTENCY_IN_PROGRESS" ||
+    code === "ACTIVE_GENERATION_ALREADY_EXISTS" ||
+    code === "GENERATION_SUBMISSION_UNKNOWN" ||
+    code === "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST"
+  ) {
+    return 409;
+  }
+  return 400;
 }
 
 export async function POST(request: NextRequest) {
@@ -112,19 +133,22 @@ export async function POST(request: NextRequest) {
       generation: sanitizeGenerationForClient(record),
     });
   } catch (error) {
+    if (error instanceof IdempotencyError) {
+      return NextResponse.json(
+        {
+          code: error.code,
+          message: error.message,
+          generationId: error.generationId,
+        },
+        { status: statusForCode(error.code) },
+      );
+    }
     const err = error as Error & {
       code?: string;
       errors?: unknown;
       generation?: GenerationRecord;
     };
     const code = err.code ?? "SUBMIT_FAILED";
-    const status =
-      code === "PAID_GENERATION_DISABLED"
-        ? 403
-        : code === "MISSING_DASHSCOPE_API_KEY" ||
-            code === "MISSING_DASHSCOPE_WORKSPACE_ID"
-          ? 503
-          : 400;
     return NextResponse.json(
       {
         code,
@@ -134,7 +158,7 @@ export async function POST(request: NextRequest) {
           ? sanitizeGenerationForClient(err.generation)
           : undefined,
       },
-      { status },
+      { status: statusForCode(code) },
     );
   }
 }

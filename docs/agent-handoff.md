@@ -9,7 +9,7 @@
 - **项目目标**：资产驱动的 AI 视频创作工作台。用户在无限画布上编排角色、场景、参考素材与视频镜头，经确认后提交异步视频生成，并将结果登记为本地 `generatedVideo` 资产。
 - **技术栈**：Next.js 16、React 19、React Flow（`@xyflow/react`）、Zustand、Zod、Vitest、Tailwind CSS 4。
 - **当前分支**：`feat/react-flow-migration`
-- **当前稳定基线**：阶段 3D-A 为 `60e6935`；阶段 3D-B3（SSRF 安全转存）完成后以 `git log -1` 为准。
+- **当前稳定基线**：阶段 3D-B1-A（持久幂等）完成后以 `git log -1` 为准；其前一提交为 3D-B3 SSRF `3db6d3a`。
 - **页面入口**：`/`、`/login`、`/workflow`
 - **本地启动**：
 
@@ -28,40 +28,47 @@ npm run dev
 |------|------|
 | `src/workflow` | React Flow 工作台 UI 与领域 |
 | `src/video-generation` | Provider、生成任务、转存、参数对照、Range、metadata |
+| `src/video-generation/idempotency` | 持久幂等接口、fingerprint、文件 store、对账 |
 | `src/video-generation/secure-transfer` | 真实结果 SSRF 防护、TransferSource、安全下载、URL 脱敏 |
 | `src/app/api/generations` | 异步生成 HTTP API |
 | `src/app/api/assets` | 本地资产；generatedVideo 支持 Range |
 | `data/workflows` | WorkflowDocument JSON（开发） |
-| `data/assets` / `data/generations` / `data/generated-videos` / `data/mock` | 运行时数据（gitignore；仅 `.gitkeep` / README） |
+| `data/assets` / `data/generations` / `data/idempotency` / `data/generated-videos` / `data/mock` | 运行时数据（gitignore；仅 `.gitkeep` / README） |
 
-**`data/` 只适合本地单机开发**，不适合多实例或无状态部署；生产需 OSS / 对象存储。
+**`data/` 只适合本地单机开发**，不适合多实例或无状态部署；生产需 OSS / 对象存储 + 共享幂等后端。
 
 ---
 
-# 阶段 3D-A（已完成）
+# 阶段 3D-B1-A（已完成）
 
-Mock 完整端到端验收、故障恢复加固与浏览器人工验收 **已通过**。
+持久化幂等、Provider 提交日志与未知结果保护。
 
-## 本阶段实现要点
+要点：
 
-1. **前端同步提交锁**：`VideoPromptPanel` 使用 `submittingRef`（同步）+ `submitting` state；确认抽屉在 `submitting` 时禁用按钮。不依赖下一次 render 的 disabled。
-2. **稳定幂等键**：打开确认 / 明确重试时用 `crypto.randomUUID()`（非 `Math.random` / 非每次点击 `Date.now()`）。同会话连点共用一键；成功受理或业务失败后释放；纯网络异常保留键以便短时重试。
-3. **服务端幂等**：`rememberIdempotencyKey` 在调用 Provider **之前**登记；相同键不创建第二条 GenerationRecord / 不二次提交 Provider。
-4. **转存幂等**：`retryTransferGeneration`；已有合法 `generatedVideo` 不重复复制；轮询与手动 transfer 共用单进程 `transferInFlight` 锁。
-5. **completed 条件**：须同时具备 `localVideoAssetId`、`resultAsset`、id 一致、`assetType=generatedVideo`、MIME∈允许集、`sizeBytes>0`；否则不伪装 completed。
-6. **自动化**：`src/video-generation/__tests__/mock-e2e-service.test.ts`
-7. **人工清单**：`docs/mock-end-to-end-checklist.md`（浏览器验收已通过）
+1. `GenerationIdempotencyStore` 接口；本地 `FileGenerationIdempotencyStore`（`data/idempotency/`）。
+2. 状态机：`reserved → submitting → providerAccepted → committed`；旁路 `safeFailure` / `unknownOutcome`。
+3. `buildGenerationRequestFingerprint()`：稳定规范化 + SHA-256（不含明文 prompt / 密钥 / base64 / 签名 URL）。
+4. 提交顺序：reserve → GenerationRecord → markSubmitting → Provider → **先** markProviderAccepted(taskId) → 更新 GenerationRecord → markCommitted。
+5. GenerationRecord 缺 taskId 时可 reconcile 补写；**永不**在对账中重调 Provider。
+6. `unknownOutcome`：不自动重试、不释放 key；UI 阻断文案；Mock 可注入。
+7. `retryGeneration`（新 key / 可能新费用）与 `retryTransfer`（不调 Provider）分离。
+8. 同镜头 active 任务默认阻止第二单（多标签不同 key）。
+9. Windows：目标已存在时为 unlink→rename，**有短暂缺失窗口**，**不是** DB 事务原子；详见 `docs/generation-idempotency.md`。
+10. **不宣称**多机器并发安全；文件锁 ≠ DB 唯一约束。
+11. 未接真实 Provider；默认仍 `mock` + `ALLOW_PAID_GENERATION=false`。
 
-## 幂等存储限制（重要）
+详见：`docs/generation-idempotency.md`。
 
-- 当前幂等为 **进程内 Map，约 8 秒窗口**。
-- **仅适用于单实例本地开发**。
-- **不是**生产级防重复计费保护。
-- 多实例生产必须改为数据库或 Redis 等 **持久共享幂等记录**；转存并发亦需共享锁或唯一约束。单进程 `transferInFlight` **不能**解决多实例竞争。
+---
+
+# 阶段 3D-A / 3D-B3（已完成）
+
+- 3D-A：Mock e2e、防连点、转存幂等、completed 收口（原进程内 8s Map 已被 3D-B1-A 持久化取代）。
+- 3D-B3：真实结果 SSRF 防护；详见 `docs/secure-provider-result-transfer.md`。
 
 ## Mock 不代表真实模型能力
 
-Mock 只验证流程、播放、转存与参数记录；`overallStatus=mockOnly`。未调用阿里云、未付费。
+Mock 只验证流程、播放、转存与参数记录。未调用阿里云、未付费。
 
 ## 全局 Undo/Redo
 
@@ -74,29 +81,9 @@ Mock 只验证流程、播放、转存与参数记录；`overallStatus=mockOnly`
 - React Flow 工作台、WorkflowDocument v4、自动保存（不触发生成）
 - Mock / 万相 Provider 抽象；默认 mock；付费双门闩
 - 阶段 3A–3C：可播放 Mock、参数对照、参考素材选择 UI
-- 阶段 3D-A：幂等 / 防连点 / 转存幂等 / completed 收口 / e2e 测试 / 人工验收
-- 阶段 3D-B3：真实结果 SSRF 防护、域名白名单、Mock/Provider 转存隔离、客户端 URL 脱敏
-
----
-
-# 阶段 3D-B3（已完成）
-
-真实 Provider 结果安全转存与 SSRF 防护 **已完成**。未开启付费，未调用阿里云。
-
-要点：
-
-1. `TransferSource`：`mockFile` vs `providerHttps`，由 GenerationRecord 派生。
-2. `WAN_RESULT_ALLOWED_HOSTS` 默认空 → 真实转存阻止。
-3. HTTPS-only、私网/保留 IP 拦截、手动重定向、custom lookup DNS。
-4. 流式下载、200MB、超时、ftyp、失败清理临时文件。
-5. 客户端 API 不返回完整 `remoteVideoUrl`（`hasRemoteVideo` + 脱敏摘要）。
-6. 详见 `docs/secure-provider-result-transfer.md`。
-
-官方文档不保证固定 OSS 结果域名；白名单须管理员在首次人工确认后配置。
-
-**浏览器 Mock 回归已通过**：生成 / 转存 / 播放 / 下载 / Range / metadata / 参数对照正常；`file://` 分支未被破坏；API 不暴露完整签名 URL；无阿里云与付费请求。
-
-**仍不允许**设置 `ALLOW_PAID_GENERATION=true`（缺持久幂等、完整所有权、限流预算等）。
+- 阶段 3D-A：防连点 / 转存幂等 / completed 收口 / e2e
+- 阶段 3D-B3：SSRF 安全转存、域名白名单、URL 脱敏
+- 阶段 3D-B1-A：持久幂等、fingerprint、unknown outcome、同镜头并发保护
 
 ---
 
@@ -108,7 +95,7 @@ Mock 只验证流程、播放、转存与参数记录；`overallStatus=mockOnly`
 - 密钥仅服务端；禁止 `NEXT_PUBLIC_` 暴露
 - 自动保存、metadata PATCH、页面刷新 **不会**自动提交新 generation
 - `createVideoProvider` 硬分支；Aliyun **失败不回退** Mock
-- 禁止提交：视频、generation JSON、用户素材、`.env.local`、密钥
+- 禁止提交：视频、generation JSON、幂等运行时记录、用户素材、`.env.local`、密钥
 
 ---
 
@@ -119,16 +106,14 @@ Mock 只验证流程、播放、转存与参数记录；`overallStatus=mockOnly`
 | `npm run lint` | 0 |
 | `npx eslint . --max-warnings=0` | 0 |
 | `npm run typecheck` | 0 |
-| `npm test` | 0；**186** 项（Vitest 为准；0 failed / 0 skipped / 0 todo） |
+| `npm test` | 0；**207** 项（Vitest；0 failed / 0 skipped / 0 todo） |
 | `npm run build` | 0 |
-
-浏览器人工验收（3D-A Mock 全流程 + 3D-B3 Mock 回归）：**已通过**。
 
 ---
 
 # 下一阶段
 
-**持久幂等与 Provider 任务原子性（3D-B1）**
+**Provider 官方契约复核与最低成本试跑准备**
 
 不要自动付费；不要 push；不要 eslint-disable / `any` / `@ts-ignore`。
 
@@ -137,8 +122,9 @@ Mock 只验证流程、播放、转存与参数记录；`overallStatus=mockOnly`
 # 已知风险
 
 - `data/` 仅本地开发；生产需对象存储
+- 本地文件幂等 **仅单机器**；Windows unlink→rename 有短暂缺失窗口；多实例需 Postgres/Redis
 - 浏览器 metadata 非服务端可信验证
-- 进程内幂等 Map / 转存锁非多实例方案
+- 转存锁仍为单进程 `transferInFlight`
 - 真实 Provider 尚未付费 e2e
 - 全局 Undo/Redo 未实现
 - 权限非生产级多用户隔离（缺少完整 userId 所有权时，签名 URL 即使脱敏仍须防 IDOR）
@@ -149,6 +135,7 @@ Mock 只验证流程、播放、转存与参数记录；`overallStatus=mockOnly`
 
 # 相关文档
 
+- `docs/generation-idempotency.md`
 - `docs/mock-end-to-end-checklist.md`
 - `docs/mock-video-setup.md`
 - `docs/generation-parameter-comparison.md`
@@ -159,4 +146,4 @@ Mock 只验证流程、播放、转存与参数记录；`overallStatus=mockOnly`
 
 ---
 
-*文档对应阶段 3D-B3 完成态。*
+*文档对应阶段 3D-B1-A 完成态。*

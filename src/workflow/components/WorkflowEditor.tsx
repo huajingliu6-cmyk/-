@@ -265,7 +265,9 @@ const StableReactFlow = memo(function StableReactFlow({
       <MiniMap
         className="!cursor-pointer !border !border-zinc-700 !bg-zinc-900"
         maskColor="rgba(0,0,0,0.55)"
-        nodeColor="#334155"
+        nodeColor="#64748b"
+        nodeStrokeColor="#94a3b8"
+        nodeStrokeWidth={1}
         pannable
         zoomable
         onClick={onMiniMapClick}
@@ -462,9 +464,26 @@ function WorkflowCanvas({
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      // 忽略测量回写：新节点 mount 后 dimensions 会触发整表 setNodes，是连点闪烁主因之一
+      // dimensions 必须写回：MiniMap 依赖 nodeHasDimensions；忽略会导致小地图空白。
+      // 仅跳过「尺寸未变」的测量，避免图片加载等反复触发整表重渲闪烁。
       const meaningful = changes.filter((change) => {
-        if (change.type === "dimensions") return false;
+        if (change.type === "dimensions") {
+          const dims = change.dimensions;
+          if (
+            !dims ||
+            !Number.isFinite(dims.width) ||
+            !Number.isFinite(dims.height) ||
+            dims.width <= 0 ||
+            dims.height <= 0
+          ) {
+            return false;
+          }
+          const current = nodesRef.current.find((n) => n.id === change.id);
+          const prevW = current?.measured?.width ?? current?.width;
+          const prevH = current?.measured?.height ?? current?.height;
+          if (prevW === dims.width && prevH === dims.height) return false;
+          return true;
+        }
         if (change.type === "select") {
           const current = nodesRef.current.find((n) => n.id === change.id);
           if (!current) return true;
@@ -807,6 +826,7 @@ function WorkflowCanvas({
   /**
    * 拖动结束：只把坐标同步进内存，不触发自动保存。
    * 下次编辑文字 / 生成内容保存时会带上最新位置。
+   * 注意：不得在 setNodes updater 内调用 commitGraph（会触发别的组件 setState）。
    */
   const onNodeDragStop: OnNodeDrag = useCallback(
     (_event, draggedNode) => {
@@ -817,16 +837,15 @@ function WorkflowCanvas({
           : { horizontal: null, vertical: null },
       );
       touchLastEditedNode(draggedNode.id);
-      setNodes((current) => {
-        const local = current.find((n) => n.id === draggedNode.id);
-        const position = local?.position ?? draggedNode.position;
-        const next = current.map((n) =>
-          n.id === draggedNode.id ? { ...n, position: { ...position } } : n,
-        );
-        nodesRef.current = next;
-        commitGraph(next, edgesRef.current, { persist: false });
-        return next;
-      });
+      const current = nodesRef.current;
+      const local = current.find((n) => n.id === draggedNode.id);
+      const position = local?.position ?? draggedNode.position;
+      const next = current.map((n) =>
+        n.id === draggedNode.id ? { ...n, position: { ...position } } : n,
+      );
+      nodesRef.current = next;
+      setNodes(next);
+      commitGraph(next, edgesRef.current, { persist: false });
     },
     [commitGraph, touchLastEditedNode],
   );

@@ -43,6 +43,11 @@ yarn-error.log*
 /data/generations/**
 !/data/generations/.gitkeep
 
+# local persistent idempotency records (dev-only; never commit runtime keys)
+/data/idempotency/**
+!/data/idempotency/.gitkeep
+!/data/idempotency/README.md
+
 # vercel
 .vercel
 

@@ -37,7 +37,7 @@ function buildStructuralMp4Fixture(extraBytes = 512): Buffer {
 
 function baseInput(overrides?: Partial<VideoGenerationInput>): VideoGenerationInput {
   return {
-    shotId: "shot-e2e-1",
+    shotId: `shot-e2e-${randomUUID()}`,
     projectId: "demo-e2e",
     prompt: "e2e mock flow",
     resolution: "720P",
@@ -108,7 +108,7 @@ describe("阶段 3D-A Mock service 端到端", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(async () => {
-    clearIdempotencyKeysForTests();
+    await clearIdempotencyKeysForTests();
     resetMockVideoProviderTasks();
     process.env.VIDEO_PROVIDER = "mock";
     process.env.ALLOW_PAID_GENERATION = "false";
@@ -139,7 +139,7 @@ describe("阶段 3D-A Mock service 端到端", () => {
       assetIds.splice(0),
     );
     resetMockVideoProviderTasks();
-    clearIdempotencyKeysForTests();
+    await clearIdempotencyKeysForTests();
     for (const dir of tmpDirs.splice(0)) {
       await fs.rm(dir, { recursive: true, force: true });
     }
@@ -169,17 +169,18 @@ describe("阶段 3D-A Mock service 端到端", () => {
     expect(fetchCalls).toBe(0);
   });
 
-  it("相同 idempotencyKey 不创建重复任务", async () => {
+  it("相同 idempotencyKey 与相同 fingerprint 不创建重复任务", async () => {
     const key = `idem-${randomUUID()}`;
+    const input = baseInput();
     const a = await submitVideoGeneration({
-      input: baseInput(),
+      input,
       unsupportedAudioLabels: [],
       confirmPaidGeneration: false,
       idempotencyKey: key,
     });
     generationIds.push(a.id);
     const b = await submitVideoGeneration({
-      input: baseInput({ prompt: "different prompt should be ignored" }),
+      input,
       unsupportedAudioLabels: [],
       confirmPaidGeneration: false,
       idempotencyKey: key,
@@ -188,17 +189,44 @@ describe("阶段 3D-A Mock service 端到端", () => {
     expect(b.requestSnapshot.prompt).toBe("e2e mock flow");
   });
 
-  it("retry 使用最新工作流输入且不复用旧 providerTaskId", async () => {
-    const first = await submitVideoGeneration({
-      input: baseInput({ prompt: "old prompt", durationSeconds: 5 }),
+  it("相同 idempotencyKey 不同 fingerprint 被拒绝", async () => {
+    const key = `idem-fp-${randomUUID()}`;
+    const a = await submitVideoGeneration({
+      input: baseInput(),
       unsupportedAudioLabels: [],
       confirmPaidGeneration: false,
+      idempotencyKey: key,
+    });
+    generationIds.push(a.id);
+    await expect(
+      submitVideoGeneration({
+        input: baseInput({ prompt: "different prompt must not reuse key" }),
+        unsupportedAudioLabels: [],
+        confirmPaidGeneration: false,
+        idempotencyKey: key,
+      }),
+    ).rejects.toMatchObject({
+      code: "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST",
+    });
+  });
+
+  it("retry 使用最新工作流输入、新幂等键且不复用旧 providerTaskId", async () => {
+    const shotId = `shot-retry-${randomUUID()}`;
+    const first = await submitVideoGeneration({
+      input: baseInput({ shotId, prompt: "old prompt", durationSeconds: 5 }),
+      unsupportedAudioLabels: [],
+      confirmPaidGeneration: false,
+      idempotencyKey: `retry-old-${randomUUID()}`,
     });
     generationIds.push(first.id);
     const oldTaskId = first.providerTaskId;
 
+    // 先完成或取消，否则同镜头 active 会阻止第二单
+    await cancelVideoGeneration(first.id);
+
     const retry = await submitVideoGeneration({
       input: baseInput({
+        shotId,
         prompt: "latest workflow prompt",
         durationSeconds: 8,
         resolution: "1080P",
@@ -208,6 +236,7 @@ describe("阶段 3D-A Mock service 端到端", () => {
       }),
       unsupportedAudioLabels: [],
       confirmPaidGeneration: false,
+      idempotencyKey: `retry-new-${randomUUID()}`,
     });
     generationIds.push(retry.id);
 
@@ -224,8 +253,9 @@ describe("阶段 3D-A Mock service 端到端", () => {
   });
 
   it("仅 queued/validating 可取消；processing 后不能伪装取消成功", async () => {
+    const shotId = `shot-cancel-${randomUUID()}`;
     const queued = await submitVideoGeneration({
-      input: baseInput(),
+      input: baseInput({ shotId }),
       unsupportedAudioLabels: [],
       confirmPaidGeneration: false,
     });
@@ -235,7 +265,7 @@ describe("阶段 3D-A Mock service 端到端", () => {
     expect(cancelled.status).toBe("cancelled");
 
     const again = await submitVideoGeneration({
-      input: baseInput({ prompt: "cancel-processing" }),
+      input: baseInput({ shotId, prompt: "cancel-processing" }),
       unsupportedAudioLabels: [],
       confirmPaidGeneration: false,
     });
