@@ -143,6 +143,19 @@ active：`validating` / `submitting` / `queued` / `processing` / `downloading` /
 
 中文文案不暴露内部路径或密钥。
 
+## 本机一次性付费测试（3D-B6-C）
+
+真实 Provider 提交顺序与持久幂等一致，并额外联动 Guard：
+
+1. 专用 `POST /api/local-paid-test/submit`（非普通 `/api/generations`）
+2. fingerprint → reserve → GenerationRecord（`localOneShotPaidTest`）→ Guard submitting → 幂等 submitting → Provider
+3. 幂等先写 `providerTaskId` → Guard providerAccepted → GenerationRecord → committed
+4. `unknownOutcome`：Guard 与幂等同时锁定；禁止自动重试
+5. Token / nonce / 确认短语**不**进入幂等记录或 GenerationRecord
+
+普通 `POST /api/generations` 在 `VIDEO_PROVIDER=aliyun-wan27` 时一律拒绝（`PAID_SUBMISSION_REQUIRES_LOCAL_TEST_GATE`）。
+本机一次性模式下 `retryGeneration` 永久拒绝；`retryTransfer` 允许。
+
 ## 真实付费前剩余风险
 
 - 多实例仍需 Postgres/Redis 唯一约束或共享锁
@@ -162,5 +175,5 @@ active：`validating` / `submitting` / `queued` / `processing` / `downloading` /
 
 ## 下一阶段
 
-接线一次性真实提交路径（Guard ↔ 幂等），但仍用注入 Provider 做零网络验证。
+阶段 3D-B6-C 已完成零网络接线与验证。下一步为**人工真实测试前最终只读预检**；勿自动付费。
 人工真实试跑须配合 `docs/wan27-local-one-shot-test-gate.md`；Agent 永远不能自动付费。

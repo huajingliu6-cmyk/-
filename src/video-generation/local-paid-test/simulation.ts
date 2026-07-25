@@ -3,6 +3,7 @@ import type { VideoGenerationInput } from "../types";
 import { FileWanLocalPaidTestGuardStore } from "./guard-store";
 import { assertLocalPaidTestSpec } from "./spec";
 import { LocalPaidTestError } from "./errors";
+import { hashLocalPaidTestArmNonce } from "./arm-nonce";
 import type { LocalPaidTestGuardState, WanLocalPaidTestGuardRecord } from "./types";
 
 export type LocalPaidTestSimulationStep =
@@ -99,7 +100,9 @@ export async function runLocalPaidTestSimulation(options: {
   }
 
   // 2) arm
-  guard = await store.arm({});
+  guard = await store.arm({
+    armNonceHash: hashLocalPaidTestArmNonce(`sim-nonce-${randomUUID()}`),
+  });
   push("arm", guard.state === "armed", guard, "Guard → armed");
 
   // 3) readiness_pass（规格）
@@ -121,7 +124,9 @@ export async function runLocalPaidTestSimulation(options: {
       "确认 Provider 未接单 → failedBeforeSubmit",
     );
     // 可重新 arm
-    guard = await store.arm({});
+    guard = await store.arm({
+      armNonceHash: hashLocalPaidTestArmNonce(`sim-nonce-${randomUUID()}`),
+    });
     push("arm", guard.state === "armed", guard, "failedBeforeSubmit 后重新 arm");
   }
 

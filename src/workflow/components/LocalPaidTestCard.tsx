@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { LOCAL_PAID_TEST_SUBMIT_WARNING } from "@/video-generation/local-paid-test/constants";
 
 type PublicBits = {
   localPaidTestModeEnabled: boolean;
@@ -12,7 +13,8 @@ type PublicBits = {
   allowlistConfigured: boolean;
   costNotice?: string;
   phaseNotice: string;
-  realSubmitEnabled: false;
+  realSubmitPathWired?: boolean;
+  realSubmitEnabled: boolean;
 };
 
 type GuardBits = {
@@ -20,6 +22,7 @@ type GuardBits = {
   armedAt: string | null;
   updatedAt: string;
   lastErrorCode: string | null;
+  generationId?: string | null;
 };
 
 type Check = { key: string; status: string; message: string };
@@ -31,12 +34,13 @@ type PanelData = {
   guard: GuardBits | null;
   checks: Check[];
   allowlistWarning: string | null;
+  readyForOneShotLocalTest: boolean;
 };
 
 /**
  * 本机一次性付费测试卡片。
- * 仅 development + 模式开启 + 管理员可见。
- * 「确认一次付费测试」本阶段始终禁用。
+ * Arm nonce 仅保存在 React 内存；刷新后丢失，需重新 Arm。
+ * 「确认一次付费测试」仅在 request readiness 通过且持有 nonce 时可点。
  */
 export function LocalPaidTestCard() {
   const [data, setData] = useState<PanelData | null>(null);
@@ -45,6 +49,14 @@ export function LocalPaidTestCard() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  /** 仅内存：不写 LocalStorage / SessionStorage / URL */
+  const [armNonce, setArmNonce] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState("");
+  const [shotNodeId, setShotNodeId] = useState("");
+  /** 提交瞬间锁定：与 busy 同步，避免连点；不依赖下一帧才禁用 */
+  const [submitLocked, setSubmitLocked] = useState(false);
+  /** 仅事件处理器内同步防重入；不在 render 读取 */
+  const submitInFlightRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,6 +82,7 @@ export function LocalPaidTestCard() {
               guard: null,
               checks: [],
               allowlistWarning: null,
+              readyForOneShotLocalTest: false,
             });
           }
           return;
@@ -82,6 +95,7 @@ export function LocalPaidTestCard() {
           readiness?: {
             checks: Check[];
             allowlistEmptyWarning: string | null;
+            readyForOneShotLocalTest?: boolean;
           };
         };
         if (!cancelled) {
@@ -92,6 +106,9 @@ export function LocalPaidTestCard() {
             guard: payload.guard ?? null,
             checks: payload.readiness?.checks ?? [],
             allowlistWarning: payload.readiness?.allowlistEmptyWarning ?? null,
+            readyForOneShotLocalTest: Boolean(
+              payload.readiness?.readyForOneShotLocalTest,
+            ),
           });
         }
       } catch {
@@ -113,6 +130,7 @@ export function LocalPaidTestCard() {
             guard: null,
             checks: [],
             allowlistWarning: null,
+            readyForOneShotLocalTest: false,
           });
         }
       }
@@ -130,8 +148,28 @@ export function LocalPaidTestCard() {
     checks,
     allowlistWarning,
     confirmationPhraseHint,
+    readyForOneShotLocalTest,
   } = data;
   const blockers = checks.filter((c) => c.status === "fail");
+  const guardState = guard?.state ?? "unarmed";
+  const isUnknown = guardState === "unknownOutcome";
+  const isTransferPending = guardState === "transferPending";
+  const isSubmitting =
+    busy ||
+    submitLocked ||
+    guardState === "submitting" ||
+    guardState === "providerAccepted";
+
+  const canSubmit =
+    readyForOneShotLocalTest &&
+    Boolean(armNonce) &&
+    guardState === "armed" &&
+    !isSubmitting &&
+    !isUnknown &&
+    Boolean(projectId.trim()) &&
+    Boolean(shotNodeId.trim()) &&
+    Boolean(token.trim()) &&
+    Boolean(phrase.trim());
 
   async function onArm() {
     setBusy(true);
@@ -148,19 +186,26 @@ export function LocalPaidTestCard() {
       const payload = (await res.json()) as {
         message?: string;
         notice?: string;
+        armNonce?: string;
       };
       setToken("");
       setPhrase("");
       if (!res.ok) {
+        setArmNonce(null);
         setNotice(payload.message ?? "武装失败");
       } else {
-        setNotice(payload.notice ?? "已武装");
+        setArmNonce(payload.armNonce ?? null);
+        setNotice(
+          payload.notice ??
+            "已武装（提交凭证仅保存在本页内存，刷新后需重新武装）",
+        );
         setReloadKey((k) => k + 1);
       }
     } catch {
       setNotice("武装请求失败");
       setToken("");
       setPhrase("");
+      setArmNonce(null);
     } finally {
       setBusy(false);
     }
@@ -212,6 +257,87 @@ export function LocalPaidTestCard() {
     }
   }
 
+  async function onSubmitPaid() {
+    if (submitInFlightRef.current || submitLocked || busy || !armNonce) return;
+    if (
+      !readyForOneShotLocalTest ||
+      guardState !== "armed" ||
+      isUnknown ||
+      !projectId.trim() ||
+      !shotNodeId.trim() ||
+      !token.trim() ||
+      !phrase.trim()
+    ) {
+      return;
+    }
+    submitInFlightRef.current = true;
+    setSubmitLocked(true);
+    setBusy(true);
+    setNotice(null);
+    const nonceSnapshot = armNonce;
+    const tokenSnapshot = token;
+    const phraseSnapshot = phrase;
+    // 立即清空敏感输入，避免重复提交
+    setToken("");
+    setPhrase("");
+    setArmNonce(null);
+    try {
+      const res = await fetch("/api/local-paid-test/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: projectId.trim(),
+          shotNodeId: shotNodeId.trim(),
+          confirmPaidGeneration: true,
+          token: tokenSnapshot,
+          confirmationPhrase: phraseSnapshot,
+          armNonce: nonceSnapshot,
+          idempotencyKey: `local-one-shot-${crypto.randomUUID()}`,
+        }),
+      });
+      const payload = (await res.json()) as {
+        message?: string;
+        notice?: string;
+        code?: string;
+      };
+      if (!res.ok) {
+        setNotice(payload.message ?? "提交失败");
+      } else {
+        setNotice(payload.notice ?? "已提交一次性测试任务");
+      }
+      setReloadKey((k) => k + 1);
+    } catch {
+      setNotice("提交请求失败");
+    } finally {
+      submitInFlightRef.current = false;
+      setSubmitLocked(false);
+      setBusy(false);
+    }
+  }
+
+  async function onRetryTransfer() {
+    if (!guard?.generationId) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const res = await fetch(
+        `/api/generations/${encodeURIComponent(guard.generationId)}/transfer`,
+        { method: "POST" },
+      );
+      const payload = (await res.json()) as { message?: string };
+      if (!res.ok) {
+        setNotice(payload.message ?? "转存重试失败");
+      } else {
+        setNotice("转存重试完成");
+      }
+      setReloadKey((k) => k + 1);
+    } catch {
+      setNotice("转存重试失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section
       className="pointer-events-auto w-[min(420px,calc(100vw-2rem))] rounded-xl border border-amber-500/40 bg-zinc-950/95 p-4 text-zinc-100 shadow-xl"
@@ -242,10 +368,18 @@ export function LocalPaidTestCard() {
         <dd>
           {publicConfig.allowlistConfigured ? "已配置" : "空（转存将阻止）"}
         </dd>
+        <dt className="text-zinc-500">内存凭证</dt>
+        <dd>{armNonce ? "已持有（刷新会丢失）" : "无（需重新 Arm）"}</dd>
       </dl>
 
       {allowlistWarning ? (
         <p className="mt-2 text-xs text-amber-200/90">{allowlistWarning}</p>
+      ) : null}
+
+      {isUnknown ? (
+        <p className="mt-2 text-xs font-medium text-red-300" role="alert">
+          提交结果无法确认，为避免重复计费，一次性测试已锁定。请勿再次提交。
+        </p>
       ) : null}
 
       {blockers.length > 0 ? (
@@ -273,12 +407,28 @@ export function LocalPaidTestCard() {
           value={phrase}
           onChange={(e) => setPhrase(e.target.value)}
         />
+        <input
+          type="text"
+          autoComplete="off"
+          placeholder="projectId（提交时用）"
+          className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs"
+          value={projectId}
+          onChange={(e) => setProjectId(e.target.value)}
+        />
+        <input
+          type="text"
+          autoComplete="off"
+          placeholder="shotNodeId（提交时用）"
+          className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs"
+          value={shotNodeId}
+          onChange={(e) => setShotNodeId(e.target.value)}
+        />
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || isUnknown}
           onClick={() => void onArm()}
           className="rounded bg-amber-600/90 px-2.5 py-1 text-xs font-medium text-black disabled:opacity-50"
         >
@@ -302,13 +452,35 @@ export function LocalPaidTestCard() {
         </button>
         <button
           type="button"
-          disabled
-          title="本阶段禁用真实付费提交"
-          className="cursor-not-allowed rounded bg-zinc-800 px-2.5 py-1 text-xs text-zinc-500"
+          disabled={!canSubmit}
+          title={
+            canSubmit
+              ? LOCAL_PAID_TEST_SUBMIT_WARNING
+              : "需通过 readiness、完成 Arm，并填写 Token / 确认短语"
+          }
+          onClick={() => void onSubmitPaid()}
+          className="rounded bg-red-700/90 px-2.5 py-1 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
         >
           确认一次付费测试
         </button>
+        {isTransferPending ? (
+          <button
+            type="button"
+            disabled={busy || !guard?.generationId}
+            onClick={() => void onRetryTransfer()}
+            className="rounded border border-amber-500/60 px-2.5 py-1 text-xs disabled:opacity-50"
+          >
+            重试转存
+          </button>
+        ) : null}
       </div>
+
+      <p className="mt-2 text-xs text-amber-200/80">
+        {LOCAL_PAID_TEST_SUBMIT_WARNING}
+      </p>
+      <p className="mt-1 text-xs text-zinc-500">
+        本机一次性模式禁止重新生成（retryGeneration）；转存失败时仅允许重试转存。
+      </p>
 
       {notice ? (
         <p className="mt-2 text-xs text-emerald-300/90" role="status">

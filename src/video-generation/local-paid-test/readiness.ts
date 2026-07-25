@@ -169,10 +169,12 @@ export function buildWan27LocalPaidTestEnvironmentReadiness(options: {
     .filter((c) => c.key !== "result_allowlist")
     .every((c) => c.status === "pass");
 
-  // 默认实际环境：即使 criticalPass，本阶段也强制 readyForPaidSubmission=false
-  // 仅当显式 allowOneShotReadyIfConfigured（测试注入）时 readyForOneShotLocalTest 可为 true
+  // criticalPass 时 readyForOneShotLocalTest 可为 true（含注入假配置的测试）。
+  // readyForPaidSubmission 仍恒为 false：非通用付费入口。
   const readyForOneShotLocalTest =
-    options.allowOneShotReadyIfConfigured === true && criticalPass;
+    options.allowOneShotReadyIfConfigured === false
+      ? false
+      : criticalPass;
 
   return {
     readyForOneShotLocalTest,

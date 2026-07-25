@@ -21,4 +21,7 @@ export const LOCAL_PAID_TEST_COST_NOTICE =
   "费用上限来自管理员人工确认，最终费用以阿里云控制台结算为准。";
 
 export const LOCAL_PAID_TEST_PHASE_NOTICE =
-  "本阶段仅完成零费用演练，不会发送真实请求。";
+  "专用真实提交路径已接线；默认 mock / 付费关闭环境下仍禁止真实调用。页面刷新后需重新 Arm。";
+
+export const LOCAL_PAID_TEST_SUBMIT_WARNING =
+  "该操作未来会创建一个可能产生费用的真实任务。";

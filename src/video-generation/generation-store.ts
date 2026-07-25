@@ -4,7 +4,29 @@ import path from "path";
 import type { GenerationRecord } from "./types";
 import { clearIdempotencyStoreForTests } from "./idempotency";
 
-const DIR = path.join(process.cwd(), "data", "generations");
+const DEFAULT_DIR = path.join(process.cwd(), "data", "generations");
+
+type GenerationStoreGlobal = typeof globalThis & {
+  __infiniteCanvasGenerationStoreRoot?: string;
+};
+
+function StoreGlobal(): GenerationStoreGlobal {
+  return globalThis as GenerationStoreGlobal;
+}
+
+function getGenerationsDir(): string {
+  return StoreGlobal().__infiniteCanvasGenerationStoreRoot ?? DEFAULT_DIR;
+}
+
+/** 测试可注入临时目录；传 null 恢复默认。正式路径禁止写测试数据。 */
+export function setGenerationStoreRootForTests(root: string | null): void {
+  const g = StoreGlobal();
+  if (root === null) {
+    delete g.__infiniteCanvasGenerationStoreRoot;
+  } else {
+    g.__infiniteCanvasGenerationStoreRoot = root;
+  }
+}
 
 const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
 
@@ -16,12 +38,13 @@ export function assertSafeGenerationId(id: string): string {
 }
 
 async function ensureDir() {
-  await fs.mkdir(DIR, { recursive: true });
+  await fs.mkdir(getGenerationsDir(), { recursive: true });
 }
 
 function filePath(id: string): string {
-  return path.join(DIR, `${assertSafeGenerationId(id)}.json`);
+  return path.join(getGenerationsDir(), `${assertSafeGenerationId(id)}.json`);
 }
+
 
 /** Windows 上 rename 不能覆盖已存在目标；先写临时文件再替换。 */
 async function atomicWriteFile(target: string, contents: string): Promise<void> {
@@ -85,7 +108,7 @@ export function createGenerationId(): string {
 /** 列出本地 generation 记录（单机开发扫描；非生产索引） */
 export async function listGenerationRecords(): Promise<GenerationRecord[]> {
   await ensureDir();
-  const names = await fs.readdir(DIR);
+  const names = await fs.readdir(getGenerationsDir());
   const out: GenerationRecord[] = [];
   for (const name of names) {
     if (!name.endsWith(".json") || name.includes("..")) continue;

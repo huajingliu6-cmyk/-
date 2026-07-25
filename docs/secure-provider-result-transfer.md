@@ -88,12 +88,14 @@ hostname 本身为 IP 时同样检查。任一私网地址 → 拒绝整个下�
 
 浏览器 Mock 回归已通过：生成、转存、播放、下载、Range、metadata、参数对照；`file://` 分支正常；API 不暴露完整 `remoteVideoUrl`。
 
-## 付费开关
+## 付费开关与本机一次性入口
 
-当前 **仍不允许** `ALLOW_PAID_GENERATION=true` 作为日常默认。SSRF 转存加固与持久幂等是启用真实 Provider 的必要前提；阶段 3D-B6-A 另增加 Readiness / Dry Run，且 **`readyForPaidSubmission` 硬性为 false**。
+当前 **仍不允许** `ALLOW_PAID_GENERATION=true` 作为日常默认。SSRF 转存加固与持久幂等是启用真实 Provider 的必要前提。
 
-首次真实成功后若 allowlist 为空：Provider 可能已成功，本地转存被阻止 → 管理员确认脱敏 hostname → 本机写入 exact host → 重启 → `retryTransfer`（不新建付费任务）。详见 `docs/wan27-first-paid-test.md`。
+阶段 3D-B6-C：真实提交仅允许本机专用 `POST /api/local-paid-test/submit`。普通 generation API 不能绕过。`readyForPaidSubmission` 仍默认 false。
+
+首次真实成功后若 allowlist 为空：Provider 可能已成功，本地转存被阻止 → Guard `transferPending` → 管理员确认脱敏 hostname → 本机写入 exact host → 重启 → `retryTransfer`（不新建付费任务）。详见 `docs/wan27-first-paid-test.md`。
 
 ## 下一阶段
 
-按 `docs/wan27-first-paid-test.md` 在解除阶段付费门闩后做本机一次最低成本人工试跑。本阶段不开启自动付费，不调用阿里云。
+**人工真实测试前最终只读预检**，再按 `docs/wan27-first-paid-test.md` 决定是否人工试跑。本阶段不开启自动付费，不调用阿里云；未产生费用。

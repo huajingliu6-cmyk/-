@@ -1,10 +1,10 @@
-# 本机一次性付费测试闸门（阶段 3D-B6-B）
+# 本机一次性付费测试闸门（阶段 3D-B6-C）
 
-严格受限、**默认关闭**、仅限本机 `development` 的一次性真实付费测试准备与零费用 Simulation。
+严格受限、**默认关闭**、仅限本机 `development` 的一次性真实付费测试准备与提交路径。
 
-**状态：3D-B6-B 已完成**（含零费用浏览器验收）。当前只支持 **Arm / Dry Run / Simulation**；真实提交路径**尚未接线**；「确认一次付费测试」**仍禁用**。
+**状态：3D-B6-C 已完成接线与零网络验证。** 专用 submit 已实现；普通 generation API 无法绕过；默认 mock / false 下仍禁止真实调用；「确认一次付费测试」仅在 readiness + Arm nonce 通过时可点。
 
-**本阶段不执行真实付费。** Agent / 测试 / 构建永远不得触发真实 Provider 请求。
+**本阶段自动化不执行真实付费。** Agent / 测试 / 构建永远不得触发真实 Provider 请求。
 
 ---
 
@@ -26,7 +26,56 @@
 
 - `production` 永远拒绝（`LOCAL_PAID_TEST_NOT_ALLOWED_IN_PRODUCTION`）
 - `test` 只能 Simulation / 注入，禁止真实联网闸门
-- 脚本 `npm run dev:local-paid-test` 仅绑定 `127.0.0.1`（经 `next dev --help` 核对 `-H`），**不**设置密钥或付费开关
+- 脚本 `npm run dev:local-paid-test` 仅绑定 `127.0.0.1`，**不**设置密钥或付费开关
+
+## 专用提交 API
+
+`POST /api/local-paid-test/submit`
+
+- 管理员 + development + 本机模式 + **环回 Host** + **同源 Origin** + Token + 确认短语 + Arm nonce + Guard=armed
+- 拒绝 GET、query、页面加载、自动保存、Dry Run、Simulation 触发
+- 客户端只能提交：`projectId` / `shotNodeId` / `confirmPaidGeneration` / Token / 确认短语 / Arm nonce / 幂等键
+- 禁止客户端指定：Provider ID、Endpoint、模型 ID、`remoteVideoUrl`、`providerTaskId`
+- 服务端从最新 WorkflowDocument 构建 input，并强制最低规格
+
+确认短语：`我已确认本次测试可能产生费用且只提交一次`
+
+## Loopback / Origin / CSRF
+
+`validateLocalPaidTestRequestOrigin()`：
+
+- Host：`127.0.0.1` / `localhost`（含端口）
+- Origin 必须存在且与 Host 同 hostname/端口；拒绝 `null` / `file://` / 公网 / 局域网 / `0.0.0.0`
+- `Sec-Fetch-Site` 若存在须为 `same-origin`
+- 拒绝带非本机代理痕迹的 `Forwarded` / `X-Forwarded-*`（不信任客户端转发头）
+- 错误信息不回显完整恶意 Header
+
+错误码：`LOCAL_PAID_TEST_LOOPBACK_REQUIRED` / `LOCAL_PAID_TEST_ORIGIN_INVALID` / `LOCAL_PAID_TEST_CSRF_REJECTED` / `LOCAL_PAID_TEST_PROXY_NOT_ALLOWED`
+
+## Arm nonce
+
+- Arm 成功生成高熵 nonce，**仅在响应中返回一次**
+- Guard 只存 `armNonceHash`（SHA-256）；不存原文
+- 不进日志 / URL / LocalStorage / SessionStorage / GenerationRecord / 幂等 / WorkflowDocument
+- 前端仅 React 内存；刷新丢失 → 重新输入 Token/短语并 Arm
+- 已 armed 且未提交时可轮换 nonce（旧立即失效）
+- 恒定时间哈希比较；离开 armed 后不能用旧 nonce 创建新任务
+
+错误码：`LOCAL_PAID_TEST_NONCE_REQUIRED` / `INVALID` / `REUSED` / `LOCAL_PAID_TEST_REQUEST_MISMATCH`
+
+重放语义：相同 nonce + 相同 fingerprint → 返回已有 generation / in-progress；不同 fingerprint → 拒绝。
+
+## 普通 API 防绕过
+
+`assertPaidGenerationSubmissionPolicy`：
+
+| source | 行为 |
+|---|---|
+| `normalGenerationApi` | 真实 Provider 一律拒绝（`PAID_SUBMISSION_REQUIRES_LOCAL_TEST_GATE`） |
+| `retryGeneration` | 本机一次性模式或真实 Provider → 拒绝 |
+| `localOneShotPaidTest` | 仅专用 submit 路径 |
+
+Mock 普通 generation 不受影响。客户端按钮禁用不是唯一保护。
 
 ## 固定最低规格（闸门专用）
 
@@ -35,77 +84,62 @@
 - 无首帧 / 无角色 / 场景 / 图片 / 视频 / 音频 / 音色参考
 - 同时仅一个任务；禁止其他 active generation
 
-服务端强制校验；不能靠前端或手改 JSON 绕过。不修改普通 `ModelCapability`，不影响 Mock。
-
 ## Guard 状态机
 
-路径：`data/paid-test-guard/`（运行时 JSON gitignore；可跟踪 `.gitkeep` / README）
+路径：`data/paid-test-guard/`（运行时 JSON gitignore）
 
 状态：`unarmed` → `armed` → `submitting` → `providerAccepted` → `transferPending` → `completed` / `consumed`
 
-旁路：`failedBeforeSubmit`（可人工重新 Arm）、`unknownOutcome`（锁定）
+旁路：`failedBeforeSubmit`（可重新 Arm）、`unknownOutcome`（锁定）
 
-规则摘要：
+字段可含：`armNonceHash`、`armedAt`、`generationId`、`providerTaskId`、`lastErrorCode`、`requestFingerprint`
 
-- 进入 `submitting` 后默认视为名额可能已消耗；超时不得自动回到 `armed`
-- `unknownOutcome`：禁止重提；文案「提交结果无法确认，为避免重复计费，一次性测试已锁定。」
-- `retryTransfer` 允许，不创建新任务、不消耗第二名额
-- `retryGeneration` 在本机一次性模式永远禁止（`LOCAL_PAID_TEST_ALREADY_CONSUMED`）
-- 刷新页面不自动改 Guard
-- 单机器文件保护，**不是**生产预算 / 多实例系统；Windows unlink→rename 有短暂缺失窗口
+## 提交顺序
 
-Guard 文件禁止含：API Key、Token、Prompt、base64、视频/签名 URL、本机路径。
+1. 验证管理员与本机来源
+2. 加载最新 Workflow
+3. 验证最低规格
+4. Token / 确认短语 / nonce
+5. Guard=armed
+6. fingerprint
+7. 幂等 reserve
+8. GenerationRecord（`localOneShotPaidTest=true`）
+9. Guard → submitting
+10. 幂等 → submitting
+11. Provider
+12. 幂等 providerAccepted（先写 taskId）
+13. Guard providerAccepted
+14. GenerationRecord.providerTaskId
+15. 幂等 committed
 
-## Token 与确认短语
+Provider 前失败 → `safeFailure` + `failedBeforeSubmit`。不确定结果 → 双方 `unknownOutcome`（禁止自动重试）。Provider 后绝不回到 `armed`。
 
-- 确认短语固定：`我已确认本次测试可能产生费用且只提交一次`
-- Token：`crypto.timingSafeEqual`（先比长度）
-- Token 不进日志 / Guard / GenerationRecord / 幂等 / API 响应
-- 页面 password 输入，提交后清空；不进 LocalStorage / URL
+## 轮询与转存联动
 
-## 人工价格确认
+- 排队/生成中：Guard 保持 `providerAccepted`
+- Provider FAILED / CANCELED → Guard `consumed`
+- Provider UNKNOWN → `unknownOutcome`
+- SUCCEEDED 但 allowlist 空 → generation 转存失败 + Guard `transferPending`
+- `retryTransfer`：不调 Provider、不第二名额；成功 → `completed`
+- 多次轮询不重复提交 Provider
 
-- `WAN_TEST_PRICE_CONFIRMED_ON` 必须等于服务端本地当天
-- `WAN_TEST_MAX_COST_CNY` 为正数且 ≤ 硬上限 10
-- 不硬编码模型单价；不查余额/账单
-- UI：`费用上限来自管理员人工确认，最终费用以阿里云控制台结算为准。`
+## retry
 
-## 两级 Readiness
+- `retryGeneration`：本机一次性模式永远拒绝
+- `retryTransfer`：允许；allowlist 未配置继续阻止
 
-1. `buildWan27LocalPaidTestEnvironmentReadiness` — 环境
-2. `validateWan27OneShotPaidRequest` — 具体请求规格与确认
+## Simulation（仍可用）
 
-默认 `readyForPaidSubmission=false`。本阶段实际运行环境保持 false。
-测试仅可通过注入假环境使 `readyForOneShotLocalTest=true`。
-Readiness 不联网、不改 Guard、不建 generation。
+零费用假 Provider / 临时目录；不写正式 generation / 幂等 / 视频。
 
-## allowlist 为空
+## UI
 
-- `readyForResultTransfer=false`
-- 警告：可提交但转存会被阻止；人工审批 hostname 后 `retryTransfer`
-- **不**关闭 SSRF
-
-## 未来真实提交顺序（本阶段只用 Simulation 演练）
-
-验证 Workflow → 规格 → Token/armed → 幂等 reserve → GenerationRecord → Guard submitting → Provider → providerAccepted → …
-
-本阶段「确认一次付费测试」按钮**继续禁用**。
-
-## Simulation
-
-- 假 Provider / `sim-fake-task-*`
-- 临时目录，不写正式 generation / 幂等 / 视频
-- `simulation=true`；UI 不得当作真实成功
-- 演练全状态机与重复提交 / retry 语义
-- **不产生费用、不访问网络**
-
-## 本机绑定要求（真实测试日文档）
-
-单进程 · 仅 `127.0.0.1` · 无隧道 · 无局域网共享 · 单标签 · 管理员密码已改 · 测完恢复 `VIDEO_PROVIDER=mock` 与 `ALLOW_PAID_GENERATION=false`
-
-## 归档 Guard
-
-`markConsumed` 或删除 `data/paid-test-guard/*.json`（勿提交）。`failedBeforeSubmit` 可人工重新 Arm；`unknownOutcome` 需人工排查，禁止普通按钮清除。
+- Arm 后 nonce 存组件内存；提交前再次输入 Token + 确认短语
+- Token 为 password；提交后清空 Token / 短语 / nonce
+- 「确认一次付费测试」仅 readiness 通过且持有 nonce 时可点
+- 默认 mock/false 继续禁用
+- 文案：「该操作未来会创建一个可能产生费用的真实任务。」
+- `unknownOutcome` 强阻断；`transferPending` 只显示重试转存
 
 ## 生产仍缺
 
@@ -113,11 +147,13 @@ Readiness 不联网、不改 Guard、不建 generation。
 
 ## 验证基线
 
-- Vitest：**≥241**（Failed / Skipped / Todo = 0）
+- Vitest：**≥247**（Failed / Skipped / Todo = 0）
+- 零网络浏览器回归已通过（Arm nonce 内存、刷新重 Arm、错误拒绝、默认按钮禁用、Mock 不受影响）
 - 默认仍：`VIDEO_PROVIDER=mock`、`ALLOW_PAID_GENERATION=false`、`WAN_RESULT_ALLOWED_HOSTS` 空、`readyForPaidSubmission=false`
+- 全部自动化测试使用假 Provider，零网络；本阶段没有产生费用
 
 ## 下一阶段
 
-接线一次性真实提交路径，但仍使用注入 Provider 做零网络验证；真实付费与真实阿里云调用继续禁止，直至人工清单全部完成。
+**人工真实测试前最终只读预检**，再决定是否按 `docs/wan27-first-paid-test.md` 做本机一次最低成本人工试跑。Agent 不得自动执行。
 
-文档不含真实 Token / 密钥 / Workspace / allowlist / 用户素材。
+文档不含真实 Token / 密钥 / nonce / Workspace / allowlist / 用户素材。

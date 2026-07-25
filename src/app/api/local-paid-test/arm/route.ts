@@ -6,6 +6,8 @@ import {
   LocalPaidTestError,
   armLocalPaidTest,
   LOCAL_PAID_TEST_CONFIRMATION_PHRASE,
+  readLocalPaidTestOriginHeaders,
+  validateLocalPaidTestRequestOrigin,
 } from "@/video-generation/local-paid-test";
 
 const bodySchema = z.object({
@@ -18,6 +20,10 @@ export async function POST(request: NextRequest) {
   if (!auth.ok) return auth.response;
 
   try {
+    validateLocalPaidTestRequestOrigin(
+      readLocalPaidTestOriginHeaders(request.headers),
+    );
+
     const json: unknown = await request.json();
     const parsed = bodySchema.safeParse(json);
     if (!parsed.success) {
@@ -30,9 +36,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 不记录 token
+    // 不记录 token / nonce
     const store = new FileWanLocalPaidTestGuardStore({ namespace: "live" });
-    const guard = await armLocalPaidTest({
+    const { guard, armNonce } = await armLocalPaidTest({
       store,
       token: parsed.data.token,
       confirmationPhrase: parsed.data.confirmationPhrase,
@@ -41,18 +47,24 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      armNonce,
       guard: {
         state: guard.state,
         armedAt: guard.armedAt,
         updatedAt: guard.updatedAt,
       },
       confirmationPhraseRequired: LOCAL_PAID_TEST_CONFIRMATION_PHRASE,
-      notice: "已武装：尚未调用 Provider，不会产生费用。",
+      notice:
+        "已武装：请在本页内存中保留提交凭证；刷新页面后需重新武装。尚未调用 Provider。",
     });
   } catch (err) {
     if (err instanceof LocalPaidTestError) {
       const status =
-        err.code === "LOCAL_PAID_TEST_NOT_ALLOWED_IN_PRODUCTION"
+        err.code === "LOCAL_PAID_TEST_NOT_ALLOWED_IN_PRODUCTION" ||
+        err.code === "LOCAL_PAID_TEST_LOOPBACK_REQUIRED" ||
+        err.code === "LOCAL_PAID_TEST_ORIGIN_INVALID" ||
+        err.code === "LOCAL_PAID_TEST_CSRF_REJECTED" ||
+        err.code === "LOCAL_PAID_TEST_PROXY_NOT_ALLOWED"
           ? 403
           : err.code === "LOCAL_PAID_TEST_TOKEN_INVALID" ||
               err.code === "LOCAL_PAID_TEST_CONFIRMATION_INVALID"

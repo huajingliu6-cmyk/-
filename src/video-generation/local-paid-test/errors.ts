@@ -1,4 +1,4 @@
-/** 本机一次性付费测试结构化错误（中文不暴露 Token / 密钥 / 路径） */
+/** 本机一次性付费测试结构化错误（中文不暴露 Token / 密钥 / 路径 / Header） */
 
 export const LOCAL_PAID_TEST_ERROR_MESSAGES = {
   LOCAL_PAID_TEST_DISABLED: "本机一次性付费测试未启用。",
@@ -25,6 +25,26 @@ export const LOCAL_PAID_TEST_ERROR_MESSAGES = {
   LOCAL_PAID_TEST_GUARD_UNAVAILABLE: "一次性测试守卫存储暂时不可用。",
   LOCAL_PAID_TEST_ACTIVE_GENERATION_EXISTS:
     "存在进行中的生成任务，禁止武装或提交一次性测试。",
+  LOCAL_PAID_TEST_LOOPBACK_REQUIRED:
+    "一次性付费测试仅允许从本机环回地址发起。",
+  LOCAL_PAID_TEST_ORIGIN_INVALID:
+    "请求来源 Origin 无效或不匹配，已拒绝。",
+  LOCAL_PAID_TEST_CSRF_REJECTED:
+    "跨站请求被拒绝，请从本机同源页面操作。",
+  LOCAL_PAID_TEST_PROXY_NOT_ALLOWED:
+    "检测到非本机代理转发头，已拒绝本次请求。",
+  LOCAL_PAID_TEST_NONCE_REQUIRED: "缺少一次性提交凭证，请重新武装后再试。",
+  LOCAL_PAID_TEST_NONCE_INVALID: "一次性提交凭证无效，请重新武装后再试。",
+  LOCAL_PAID_TEST_NONCE_REUSED:
+    "一次性提交凭证已使用或已失效，禁止再次创建任务。",
+  LOCAL_PAID_TEST_REQUEST_MISMATCH:
+    "请求内容与已武装的提交凭证不匹配，已拒绝。",
+  PAID_SUBMISSION_REQUIRES_LOCAL_TEST_GATE:
+    "真实付费提交仅允许通过本机一次性测试入口，普通生成接口已拒绝。",
+  LOCAL_PAID_TEST_CLIENT_FIELD_FORBIDDEN:
+    "客户端不得指定 Provider、Endpoint、模型或远程任务字段。",
+  LOCAL_PAID_TEST_CONFIRM_REQUIRED: "必须明确确认本次付费生成。",
+  LOCAL_PAID_TEST_IDEMPOTENCY_REQUIRED: "必须提供有效的幂等键。",
 } as const;
 
 export type LocalPaidTestErrorCode = keyof typeof LOCAL_PAID_TEST_ERROR_MESSAGES;

@@ -15,8 +15,10 @@ export type WanLocalPaidTestGuardRecord = {
   /** 可选：关联 generation（正式或 simulation 命名空间） */
   generationId: string | null;
   providerTaskId: string | null;
-  /** 安全指纹：不含 prompt / token / key */
+  /** 安全指纹：不含 prompt / token / key / nonce */
   requestFingerprint: string | null;
+  /** SHA-256 of arm nonce only — never store raw nonce */
+  armNonceHash: string | null;
   armedAt: string | null;
   updatedAt: string;
   lastErrorCode: string | null;
@@ -45,8 +47,13 @@ export type LocalPaidTestPublicConfig = {
   confirmationPhraseRequired: true;
   costNotice: string;
   phaseNotice: string;
-  /** 本阶段真实提交仍关闭 */
-  realSubmitEnabled: false;
+  /**
+   * 专用提交路径已接线；默认环境仍因 mock/false 等检查保持不可提交。
+   * 按钮可用性另看 readiness，不单靠此字段。
+   */
+  realSubmitPathWired: true;
+  /** @deprecated 使用 realSubmitPathWired；保留兼容旧 UI 类型 */
+  realSubmitEnabled: boolean;
 };
 
 export type LocalPaidTestEnvironmentReadiness = {

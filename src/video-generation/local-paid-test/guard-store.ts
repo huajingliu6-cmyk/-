@@ -12,6 +12,7 @@ export type WanLocalPaidTestGuardStore = {
   get(): Promise<WanLocalPaidTestGuardRecord>;
   arm(input: {
     requestFingerprint?: string | null;
+    armNonceHash: string;
   }): Promise<WanLocalPaidTestGuardRecord>;
   markSubmitting(input: {
     generationId: string;
@@ -60,6 +61,7 @@ function defaultRecord(
     generationId: null,
     providerTaskId: null,
     requestFingerprint: null,
+    armNonceHash: null,
     armedAt: null,
     updatedAt: new Date().toISOString(),
     lastErrorCode: null,
@@ -85,7 +87,7 @@ export function parseGuardRecord(raw: string): WanLocalPaidTestGuardRecord {
   if (!GUARD_STATES.has(obj.state)) {
     throw new LocalPaidTestError("LOCAL_PAID_TEST_GUARD_CORRUPTED");
   }
-  // 拒绝敏感字段混入
+  // 拒绝敏感字段混入（含原始 nonce）
   const forbidden = [
     "token",
     "apiKey",
@@ -94,6 +96,8 @@ export function parseGuardRecord(raw: string): WanLocalPaidTestGuardRecord {
     "authorization",
     "remoteVideoUrl",
     "base64",
+    "armNonce",
+    "nonce",
   ];
   for (const key of forbidden) {
     if (key in obj) {
@@ -116,6 +120,10 @@ export function parseGuardRecord(raw: string): WanLocalPaidTestGuardRecord {
       typeof obj.requestFingerprint === "string" ||
       obj.requestFingerprint === null
         ? (obj.requestFingerprint as string | null)
+        : null,
+    armNonceHash:
+      typeof obj.armNonceHash === "string" || obj.armNonceHash === null
+        ? (obj.armNonceHash as string | null)
         : null,
     armedAt:
       typeof obj.armedAt === "string" || obj.armedAt === null
@@ -180,13 +188,14 @@ export class FileWanLocalPaidTestGuardStore
   }
 
   private serialize(record: WanLocalPaidTestGuardRecord): string {
-    // 明确只序列化安全字段
+    // 明确只序列化安全字段（不含原始 nonce / token）
     const safe: WanLocalPaidTestGuardRecord = {
       version: 1,
       state: record.state,
       generationId: record.generationId,
       providerTaskId: record.providerTaskId,
       requestFingerprint: record.requestFingerprint,
+      armNonceHash: record.armNonceHash,
       armedAt: record.armedAt,
       updatedAt: record.updatedAt,
       lastErrorCode: record.lastErrorCode,
@@ -247,13 +256,22 @@ export class FileWanLocalPaidTestGuardStore
     }
   }
 
+  /**
+   * Arm 或轮换 nonce。
+   * 已 armed 且尚未提交时：完整验证后写入新 armNonceHash，旧 nonce 立即失效。
+   */
   async arm(input: {
     requestFingerprint?: string | null;
+    armNonceHash: string;
   }): Promise<WanLocalPaidTestGuardRecord> {
+    if (!input.armNonceHash.trim()) {
+      throw new LocalPaidTestError("LOCAL_PAID_TEST_GUARD_CORRUPTED");
+    }
     const current = await this.get();
     if (
       current.state !== "unarmed" &&
-      current.state !== "failedBeforeSubmit"
+      current.state !== "failedBeforeSubmit" &&
+      current.state !== "armed"
     ) {
       if (
         current.state === "submitting" ||
@@ -262,21 +280,10 @@ export class FileWanLocalPaidTestGuardStore
       ) {
         throw new LocalPaidTestError("LOCAL_PAID_TEST_ALREADY_IN_PROGRESS");
       }
-      if (
-        current.state === "completed" ||
-        current.state === "consumed" ||
-        current.state === "unknownOutcome" ||
-        current.state === "armed"
-      ) {
-        if (current.state === "armed") {
-          // 已 armed：返回当前，不调用 Provider
-          return current;
-        }
-        if (current.state === "unknownOutcome") {
-          throw new LocalPaidTestError("LOCAL_PAID_TEST_UNKNOWN_OUTCOME");
-        }
-        throw new LocalPaidTestError("LOCAL_PAID_TEST_ALREADY_CONSUMED");
+      if (current.state === "unknownOutcome") {
+        throw new LocalPaidTestError("LOCAL_PAID_TEST_UNKNOWN_OUTCOME");
       }
+      throw new LocalPaidTestError("LOCAL_PAID_TEST_ALREADY_CONSUMED");
     }
     const now = new Date().toISOString();
     const next: WanLocalPaidTestGuardRecord = {
@@ -285,6 +292,7 @@ export class FileWanLocalPaidTestGuardStore
       generationId: null,
       providerTaskId: null,
       requestFingerprint: input.requestFingerprint ?? null,
+      armNonceHash: input.armNonceHash,
       armedAt: now,
       updatedAt: now,
       lastErrorCode: null,
@@ -415,6 +423,7 @@ export class FileWanLocalPaidTestGuardStore
       state: "failedBeforeSubmit",
       generationId: null,
       providerTaskId: null,
+      armNonceHash: null,
       updatedAt: new Date().toISOString(),
       lastErrorCode: input.errorCode,
     };
@@ -446,6 +455,7 @@ export class FileWanLocalPaidTestGuardStore
     const next: WanLocalPaidTestGuardRecord = {
       ...current,
       state: "consumed",
+      armNonceHash: null,
       updatedAt: new Date().toISOString(),
     };
     await this.writeAtomic(next);

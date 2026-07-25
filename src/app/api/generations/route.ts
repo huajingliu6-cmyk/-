@@ -51,7 +51,12 @@ export async function GET() {
 }
 
 function statusForCode(code: string): number {
-  if (code === "PAID_GENERATION_DISABLED") return 403;
+  if (
+    code === "PAID_GENERATION_DISABLED" ||
+    code === "PAID_SUBMISSION_REQUIRES_LOCAL_TEST_GATE"
+  ) {
+    return 403;
+  }
   if (
     code === "MISSING_DASHSCOPE_API_KEY" ||
     code === "MISSING_DASHSCOPE_WORKSPACE_ID" ||

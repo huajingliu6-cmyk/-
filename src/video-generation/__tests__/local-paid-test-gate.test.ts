@@ -14,6 +14,7 @@ import {
   formatLocalDateYmd,
   getLocalPaidTestPublicConfig,
   getLocalPaidTestRuntimeConfig,
+  hashLocalPaidTestArmNonce,
   parseGuardRecord,
   runLocalPaidTestSimulation,
   validateMaxCostCny,
@@ -22,6 +23,10 @@ import {
   LocalPaidTestError,
 } from "@/video-generation/local-paid-test";
 import type { VideoGenerationInput } from "@/video-generation/types";
+
+function testNonceHash(label = "n"): string {
+  return hashLocalPaidTestArmNonce(`test-arm-nonce-${label}`);
+}
 
 function t2vInput(
   patch: Partial<VideoGenerationInput> = {},
@@ -85,6 +90,7 @@ describe("local paid test config defaults", () => {
     });
     expect(pub.localPaidTestModeEnabled).toBe(false);
     expect(pub.realSubmitEnabled).toBe(false);
+    expect(pub.realSubmitPathWired).toBe(true);
     expect(pub.tokenConfigured).toBe(false);
   });
 
@@ -268,7 +274,7 @@ describe("local paid test guard", () => {
       store.markSubmitting({ generationId: "g" }),
     ).rejects.toMatchObject({ code: "LOCAL_PAID_TEST_NOT_ARMED" });
 
-    await store.arm({});
+    await store.arm({ armNonceHash: testNonceHash() });
     expect((await store.get()).state).toBe("armed");
 
     await store.markSubmitting({ generationId: "g1" });
@@ -305,14 +311,14 @@ describe("local paid test guard", () => {
       rootDir: dir,
       namespace: "simulation",
     });
-    await store.arm({});
+    await store.arm({ armNonceHash: testNonceHash() });
     await store.markFailedBeforeSubmit({ errorCode: "X" });
-    await store.arm({});
+    await store.arm({ armNonceHash: testNonceHash() });
     expect((await store.get()).state).toBe("armed");
 
     await store.markSubmitting({ generationId: "g" });
     await store.markUnknownOutcome({ errorCode: "U" });
-    await expect(store.arm({})).rejects.toMatchObject({
+    await expect(store.arm({ armNonceHash: testNonceHash() })).rejects.toMatchObject({
       code: "LOCAL_PAID_TEST_UNKNOWN_OUTCOME",
     });
   });
@@ -322,7 +328,7 @@ describe("local paid test guard", () => {
       rootDir: dir,
       namespace: "simulation",
     });
-    await store.arm({});
+    await store.arm({ armNonceHash: testNonceHash() });
     const file = path.join(dir, "simulation-one-shot-guard.json");
     const raw = await fs.readFile(file, "utf8");
     expect(raw).not.toContain("token");
@@ -465,6 +471,9 @@ describe("token never enters guard payload", () => {
     );
     expect(raw).not.toContain("test-token-32chars-aaaaaaaaaaaa");
     expect(raw).not.toContain("sk-fake");
+    expect(raw).not.toMatch(/"armNonce"\s*:/);
+    // hash may be present but not the raw token
+    expect(JSON.parse(raw).armNonceHash).toBeTruthy();
     await fs.rm(dir, { recursive: true, force: true });
   });
 });

@@ -31,6 +31,7 @@ export async function GET() {
         maxCostConfigured: publicConfig.maxCostConfigured,
         allowlistConfigured: publicConfig.allowlistConfigured,
         realSubmitEnabled: false,
+        realSubmitPathWired: true,
         phaseNotice: publicConfig.phaseNotice,
       },
       confirmationPhraseHint: null,
@@ -43,7 +44,6 @@ export async function GET() {
   const readiness = buildWan27LocalPaidTestEnvironmentReadiness({
     env,
     guardState: guard.state,
-    allowOneShotReadyIfConfigured: false,
   });
 
   return NextResponse.json({
@@ -73,7 +73,7 @@ export async function GET() {
 // POST 保留空：Arm / Simulation 走子路径，避免误触
 export async function POST() {
   return NextResponse.json(
-    { code: "METHOD_NOT_ALLOWED", message: "请使用 /arm 或 /simulation 子路径。" },
+    { code: "METHOD_NOT_ALLOWED", message: "请使用 /arm、/simulation 或 /submit 子路径。" },
     { status: 405 },
   );
 }

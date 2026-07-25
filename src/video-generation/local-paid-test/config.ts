@@ -8,6 +8,7 @@ import {
   LOCAL_PAID_TEST_MAX_TASKS,
   LOCAL_PAID_TEST_PHASE_NOTICE,
 } from "./constants";
+
 import { LocalPaidTestError } from "./errors";
 import type { LocalPaidTestPublicConfig } from "./types";
 
@@ -150,6 +151,8 @@ export function getLocalPaidTestPublicConfig(
     confirmationPhraseRequired: true,
     costNotice: LOCAL_PAID_TEST_COST_NOTICE,
     phaseNotice: LOCAL_PAID_TEST_PHASE_NOTICE,
+    realSubmitPathWired: true,
+    // 默认环境仍不可真实提交；由 readiness / 专用 API 门闩决定
     realSubmitEnabled: false,
   };
 }

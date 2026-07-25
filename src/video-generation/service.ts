@@ -45,6 +45,13 @@ import type { AssetRecord } from "@/workflow/types";
 import { validateGenerationSettings } from "./validate-settings";
 import type { FetchLike } from "./provider/types";
 import type { SafeDownloadDeps } from "./secure-transfer/safe-download";
+import {
+  assertPaidGenerationSubmissionPolicy,
+  assertRetryGenerationBlockedForLocalPaidTest,
+  getLocalPaidTestGuardStore,
+  getLocalPaidTestRuntimeConfig,
+  syncLocalPaidTestGuardFromGeneration,
+} from "./local-paid-test";
 
 /** 单进程内转存锁：防止轮询与手动 transfer 并发产生双份资产（非多实例方案） */
 const transferInFlight = new Map<
@@ -65,6 +72,17 @@ function hasValidCompletedVideoAsset(record: GenerationRecord): boolean {
   if (record.localVideoAssetId !== asset.id) return false;
   if (!Number.isFinite(asset.sizeBytes) || asset.sizeBytes <= 0) return false;
   return true;
+}
+
+async function syncOneShotGuardIfNeeded(
+  generation: GenerationRecord,
+): Promise<void> {
+  if (!generation.localOneShotPaidTest) return;
+  const guardStore = getLocalPaidTestGuardStore();
+  await syncLocalPaidTestGuardFromGeneration({
+    generation,
+    guardStore,
+  }).catch(() => undefined);
 }
 
 function errorCodeOf(err: unknown): string {
@@ -121,6 +139,14 @@ export async function submitVideoGeneration(params: {
       code: paidGate.code,
     });
   }
+
+  // 普通 API 永远不能提交真实 Provider；仅本机一次性专用入口可以。
+  assertPaidGenerationSubmissionPolicy({
+    source: params.retryOfGenerationId
+      ? "retryGeneration"
+      : "normalGenerationApi",
+    runtimeConfig: runtime,
+  });
 
   if (params.retryOfGenerationId) {
     const previous = await readGenerationRecord(params.retryOfGenerationId);
@@ -466,6 +492,17 @@ export async function retryVideoGeneration(params: {
   title?: string;
   fetchImpl?: FetchLike;
 }): Promise<GenerationRecord> {
+  const runtime = getVideoProviderRuntimeConfig();
+  const localCfg = getLocalPaidTestRuntimeConfig();
+  if (localCfg.localPaidTestMode) {
+    const guard = await getLocalPaidTestGuardStore().get();
+    assertRetryGenerationBlockedForLocalPaidTest(guard.state);
+  }
+  assertPaidGenerationSubmissionPolicy({
+    source: "retryGeneration",
+    runtimeConfig: runtime,
+  });
+
   return submitVideoGeneration({
     input: params.input,
     unsupportedAudioLabels: params.unsupportedAudioLabels,
@@ -566,7 +603,10 @@ export async function refreshGenerationStatus(
   );
 
   let next = await updateGenerationRecord(generationId, {
-    status: status.status,
+    status:
+      status.rawTaskStatus === "UNKNOWN"
+        ? "failed"
+        : status.status,
     progressLabel: status.progressLabel,
     progress: null,
     remoteVideoUrl: status.remoteVideoUrl ?? afterReconcile.remoteVideoUrl,
@@ -576,7 +616,10 @@ export async function refreshGenerationStatus(
       status.providerAspectRatio ?? afterReconcile.providerAspectRatio,
     providerDurationSeconds:
       status.providerDurationSeconds ?? afterReconcile.providerDurationSeconds,
-    errorCode: status.errorCode ?? afterReconcile.errorCode,
+    errorCode:
+      status.rawTaskStatus === "UNKNOWN"
+        ? "PROVIDER_TASK_UNKNOWN"
+        : (status.errorCode ?? afterReconcile.errorCode),
     errorMessage: status.errorMessage ?? afterReconcile.errorMessage,
   });
 
@@ -596,6 +639,7 @@ export async function refreshGenerationStatus(
     next = transferred.generation;
   }
 
+  await syncOneShotGuardIfNeeded(next);
   return next;
 }
 
@@ -648,6 +692,7 @@ export async function retryTransferGeneration(
 
     if (hasValidCompletedVideoAsset(record)) {
       if (record.status === "completed") {
+        await syncOneShotGuardIfNeeded(record);
         return {
           generation: record,
           asset: record.resultAsset,
@@ -664,6 +709,7 @@ export async function retryTransferGeneration(
         errorCode: null,
         errorMessage: null,
       });
+      await syncOneShotGuardIfNeeded(recovered);
       return {
         generation: recovered,
         asset: recovered.resultAsset,
@@ -711,6 +757,7 @@ export async function retryTransferGeneration(
         errorCode: null,
         errorMessage: null,
       });
+      await syncOneShotGuardIfNeeded(generation);
       return {
         generation,
         asset: transferred.asset,
@@ -727,13 +774,14 @@ export async function retryTransferGeneration(
           : err instanceof Error
             ? err.message
             : "结果视频转存失败";
-      await updateGenerationRecord(generationId, {
+      const failed = await updateGenerationRecord(generationId, {
         status: "resultTransferFailed",
         errorCode: code,
         errorMessage: message,
         progressLabel: "结果转存失败",
         remoteVideoUrl: record.remoteVideoUrl,
       });
+      await syncOneShotGuardIfNeeded(failed);
       throw Object.assign(new Error(message), { code });
     }
   })();

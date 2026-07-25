@@ -189,6 +189,11 @@ export type GenerationRecord = {
   updatedAt: string;
   completedAt: string | null;
   idempotencyKey: string | null;
+  /**
+   * 本机一次性付费测试创建的 generation。
+   * 用于轮询 / retryTransfer 联动 Guard；不含 Token / nonce。
+   */
+  localOneShotPaidTest?: boolean;
 };
 
 export type ProviderGenerationInput = {
