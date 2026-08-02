@@ -13,6 +13,7 @@ import type {
   ReserveInput,
   ReserveOutcome,
 } from "./types";
+import { resolveAppDataPath } from "@/persistence/data-root";
 
 const SAFE_HEX = /^[a-f0-9]{64}$/;
 
@@ -27,7 +28,7 @@ export class FileGenerationIdempotencyStore
   private readonly rootDir: string;
 
   constructor(rootDir?: string) {
-    this.rootDir = rootDir ?? path.join(process.cwd(), "data", "idempotency");
+    this.rootDir = rootDir ?? resolveAppDataPath("idempotency");
   }
 
   private async ensureDir(): Promise<void> {

@@ -6,7 +6,7 @@ import path from "path";
 export const FORBIDDEN_PLACEHOLDER_MP4_SHA256 =
   "22e88b51d8b29a44f39161a33aaeff037a66451360dfd4e49861f79b14548e61";
 
-const DEFAULT_RELATIVE = path.join("data", "mock", "mock-video.mp4");
+const DEFAULT_RELATIVE_SEGMENTS = ["mock", "mock-video.mp4"] as const;
 
 const IMAGE_MAGIC: Array<{ name: string; bytes: number[] }> = [
   { name: "PNG", bytes: [0x89, 0x50, 0x4e, 0x47] },
@@ -45,7 +45,7 @@ function containsBoxType(buf: Buffer, type: string): boolean {
 
 /**
  * 解析 Mock 视频源路径。
- * - 默认：`<cwd>/data/mock/mock-video.mp4`
+ * - 默认：`<APP_DATA_DIR>/mock/mock-video.mp4`（未设置 APP_DATA_DIR 时为 `<cwd>/data/mock/...`）
  * - 或环境变量 MOCK_VIDEO_FILE（绝对路径或相对 cwd）
  * 客户端不可控制此路径。
  */
@@ -54,14 +54,20 @@ export function resolveMockVideoSourcePath(
   cwd: string = process.cwd(),
 ): { ok: true; absolutePath: string } | MockVideoValidationErr {
   const raw = (env.MOCK_VIDEO_FILE ?? "").trim();
+  const dataRoot =
+    (env.APP_DATA_DIR ?? env.DATA_ROOT ?? "").trim()
+      ? path.isAbsolute((env.APP_DATA_DIR ?? env.DATA_ROOT)!.trim())
+        ? path.normalize((env.APP_DATA_DIR ?? env.DATA_ROOT)!.trim())
+        : path.resolve(cwd, (env.APP_DATA_DIR ?? env.DATA_ROOT)!.trim())
+      : path.join(cwd, "data");
   const candidate = raw
     ? path.isAbsolute(raw)
       ? raw
       : path.resolve(cwd, raw)
-    : path.resolve(cwd, DEFAULT_RELATIVE);
+    : path.join(dataRoot, ...DEFAULT_RELATIVE_SEGMENTS);
 
   const resolved = path.resolve(candidate);
-  const mockRoot = path.resolve(cwd, "data", "mock");
+  const mockRoot = path.resolve(dataRoot, "mock");
 
   if (raw) {
     // 显式环境变量：禁止穿越到明显危险位置；仍必须是 .mp4

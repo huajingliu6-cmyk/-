@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
+import { resolveAppDataPath } from "@/persistence/data-root";
 import {
   clearIdempotencyKeysForTests,
   readGenerationRecord,
@@ -86,7 +87,7 @@ async function cleanupGenerationArtifacts(ids: string[], assetIds: string[]) {
     );
     await fs.unlink(file).catch(() => undefined);
   }
-  const assetsDir = path.join(process.cwd(), "data", "assets");
+  const assetsDir = resolveAppDataPath("assets");
   const entries = await fs.readdir(assetsDir).catch(() => [] as string[]);
   for (const assetId of assetIds) {
     for (const name of entries) {

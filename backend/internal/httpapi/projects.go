@@ -1,0 +1,407 @@
+package httpapi
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"golang.org/x/crypto/scrypt"
+
+	"infinite-canvas/backend/internal/cache"
+	"infinite-canvas/backend/internal/postgres"
+)
+
+const projectNamespace = "projects"
+const projectCatalogKey = "catalog"
+const maxProjectWriteAttempts = 6
+const projectNameMaxLength = 80
+const projectHighlightsMaxLength = 4000
+
+type ProjectRecord struct {
+	ProjectID       string  `json:"projectId"`
+	RootFolderID    string  `json:"rootFolderId"`
+	Name            string  `json:"name"`
+	OwnerID         string  `json:"ownerId"`
+	CreationSource  string  `json:"creationSource"`
+	ProjectMode     string  `json:"projectMode"`
+	Status          string  `json:"status"`
+	Highlights      string  `json:"highlights"`
+	PasswordEnabled bool    `json:"passwordEnabled"`
+	PasswordHash    *string `json:"passwordHash"`
+	PasswordSalt    *string `json:"passwordSalt"`
+	CreatedAt       string  `json:"createdAt"`
+	UpdatedAt       string  `json:"updatedAt"`
+}
+
+type projectPublic struct {
+	ProjectID       string `json:"projectId"`
+	RootFolderID    string `json:"rootFolderId"`
+	Name            string `json:"name"`
+	OwnerID         string `json:"ownerId"`
+	CreationSource  string `json:"creationSource"`
+	ProjectMode     string `json:"projectMode"`
+	Status          string `json:"status"`
+	Highlights      string `json:"highlights"`
+	PasswordEnabled bool   `json:"passwordEnabled"`
+	CreatedAt       string `json:"createdAt"`
+	UpdatedAt       string `json:"updatedAt"`
+}
+
+type projectCatalog struct {
+	Version     int               `json:"version"`
+	Projects    []ProjectRecord   `json:"projects"`
+	Idempotency map[string]string `json:"idempotency"`
+}
+
+type Projects struct {
+	store *postgres.Store
+	cache *cache.Documents
+}
+
+func NewProjects(store *postgres.Store, documentCache *cache.Documents) *Projects {
+	return &Projects{store: store, cache: documentCache}
+}
+
+func (handler *Projects) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	path := strings.TrimPrefix(request.URL.Path, "/v1/projects")
+	if path == "" || path == "/" {
+		switch request.Method {
+		case http.MethodGet:
+			handler.list(writer, request)
+		case http.MethodPost:
+			handler.create(writer, request)
+		default:
+			writer.Header().Set("Allow", "GET, POST")
+			writeError(writer, http.StatusMethodNotAllowed, "method not allowed")
+		}
+		return
+	}
+
+	path = strings.TrimPrefix(path, "/")
+	if strings.HasPrefix(path, "by-idempotency/") {
+		if request.Method != http.MethodGet {
+			writer.Header().Set("Allow", "GET")
+			writeError(writer, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		handler.getByIdempotency(writer, request, strings.TrimPrefix(path, "by-idempotency/"))
+		return
+	}
+	if path == "" || strings.Contains(path, "/") || strings.Contains(path, "..") {
+		writeError(writer, http.StatusBadRequest, "invalid project path")
+		return
+	}
+	switch request.Method {
+	case http.MethodGet:
+		handler.get(writer, request, path)
+	case http.MethodPatch:
+		handler.patch(writer, request, path)
+	default:
+		writer.Header().Set("Allow", "GET, PATCH")
+		writeError(writer, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func emptyProjectCatalog() projectCatalog {
+	return projectCatalog{Version: 1, Projects: []ProjectRecord{}, Idempotency: map[string]string{}}
+}
+
+func normalizeProjectCatalog(catalog projectCatalog) projectCatalog {
+	if catalog.Version == 0 {
+		catalog.Version = 1
+	}
+	if catalog.Projects == nil {
+		catalog.Projects = []ProjectRecord{}
+	}
+	if catalog.Idempotency == nil {
+		catalog.Idempotency = map[string]string{}
+	}
+	return catalog
+}
+
+func (handler *Projects) readCatalog(request *http.Request) (int64, projectCatalog, error) {
+	if handler.cache != nil {
+		if document, ok := handler.cache.Get(request.Context(), projectNamespace, projectCatalogKey); ok {
+			var catalog projectCatalog
+			if json.Unmarshal(document.Value, &catalog) == nil {
+				return document.Revision, normalizeProjectCatalog(catalog), nil
+			}
+		}
+	}
+	document, err := handler.store.GetDocument(request.Context(), projectNamespace, projectCatalogKey)
+	if errors.Is(err, postgres.ErrNotFound) {
+		return 0, emptyProjectCatalog(), nil
+	}
+	if err != nil {
+		return 0, projectCatalog{}, err
+	}
+	var catalog projectCatalog
+	if err := json.Unmarshal(document.Value, &catalog); err != nil {
+		return 0, projectCatalog{}, err
+	}
+	if handler.cache != nil {
+		_ = handler.cache.Set(request.Context(), document)
+	}
+	return document.Revision, normalizeProjectCatalog(catalog), nil
+}
+
+func (handler *Projects) mutateCatalog(request *http.Request, mutate func(*projectCatalog) (any, bool, error)) (any, error) {
+	for attempt := 0; attempt < maxProjectWriteAttempts; attempt++ {
+		revision, catalog, err := handler.readCatalog(request)
+		if err != nil {
+			return nil, err
+		}
+		result, changed, err := mutate(&catalog)
+		if err != nil || !changed {
+			return result, err
+		}
+		value, err := json.Marshal(catalog)
+		if err != nil {
+			return nil, err
+		}
+		document, err := handler.store.PutDocument(request.Context(), projectNamespace, projectCatalogKey, &revision, value)
+		if errors.Is(err, postgres.ErrRevisionConflict) {
+			if handler.cache != nil {
+				_ = handler.cache.Delete(request.Context(), projectNamespace, projectCatalogKey)
+			}
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if handler.cache != nil {
+			_ = handler.cache.Set(request.Context(), document)
+		}
+		return result, nil
+	}
+	return nil, postgres.ErrRevisionConflict
+}
+
+func (handler *Projects) list(writer http.ResponseWriter, request *http.Request) {
+	revision, catalog, err := handler.readCatalog(request)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "project catalog read failed")
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"projects": catalog.Projects, "revision": revision})
+}
+
+func (handler *Projects) get(writer http.ResponseWriter, request *http.Request, projectID string) {
+	_, catalog, err := handler.readCatalog(request)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "project catalog read failed")
+		return
+	}
+	for _, project := range catalog.Projects {
+		if project.ProjectID == projectID {
+			writeJSON(writer, http.StatusOK, map[string]any{"project": project})
+			return
+		}
+	}
+	writeError(writer, http.StatusNotFound, "project not found")
+}
+
+func (handler *Projects) getByIdempotency(writer http.ResponseWriter, request *http.Request, idempotencyKey string) {
+	ownerID := strings.TrimSpace(request.Header.Get("X-Actor-Id"))
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if ownerID == "" || idempotencyKey == "" {
+		writeError(writer, http.StatusBadRequest, "owner and idempotency key are required")
+		return
+	}
+	_, catalog, err := handler.readCatalog(request)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "project catalog read failed")
+		return
+	}
+	projectID := catalog.Idempotency[ownerID+":"+idempotencyKey]
+	for _, project := range catalog.Projects {
+		if project.ProjectID == projectID {
+			writeJSON(writer, http.StatusOK, map[string]any{"project": publicProject(project)})
+			return
+		}
+	}
+	writeError(writer, http.StatusNotFound, "project not found")
+}
+
+func (handler *Projects) create(writer http.ResponseWriter, request *http.Request) {
+	ownerID := strings.TrimSpace(request.Header.Get("X-Actor-Id"))
+	if ownerID == "" {
+		writeError(writer, http.StatusBadRequest, "X-Actor-Id is required")
+		return
+	}
+	var input struct {
+		Name            string  `json:"name"`
+		CreationSource  string  `json:"creationSource"`
+		ProjectMode     string  `json:"projectMode"`
+		Highlights      string  `json:"highlights"`
+		PasswordEnabled bool    `json:"passwordEnabled"`
+		ProjectPassword *string `json:"projectPassword"`
+		IdempotencyKey  string  `json:"idempotencyKey"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
+	if err := decoder.Decode(&input); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid project payload")
+		return
+	}
+	input.Name = strings.TrimSpace(input.Name)
+	input.Highlights = strings.TrimSpace(input.Highlights)
+	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
+	if input.Name == "" || utf8.RuneCountInString(input.Name) > projectNameMaxLength {
+		writeError(writer, http.StatusBadRequest, "invalid project name")
+		return
+	}
+	if input.CreationSource != "story" && input.CreationSource != "script-upload" {
+		writeError(writer, http.StatusBadRequest, "invalid creation source")
+		return
+	}
+	if input.ProjectMode != "canvas" && input.ProjectMode != "full-stack" {
+		writeError(writer, http.StatusBadRequest, "invalid project mode")
+		return
+	}
+	if utf8.RuneCountInString(input.Highlights) > projectHighlightsMaxLength {
+		writeError(writer, http.StatusBadRequest, "project highlights too long")
+		return
+	}
+	passwordHash, passwordSalt, err := projectPassword(input.PasswordEnabled, input.ProjectPassword)
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	projectID, err := newProjectID()
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "project id generation failed")
+		return
+	}
+	now := requestTime()
+	project := ProjectRecord{
+		ProjectID: projectID, RootFolderID: projectID, Name: input.Name, OwnerID: ownerID,
+		CreationSource: input.CreationSource, ProjectMode: input.ProjectMode, Status: "draft",
+		Highlights: input.Highlights, PasswordEnabled: input.PasswordEnabled,
+		PasswordHash: passwordHash, PasswordSalt: passwordSalt, CreatedAt: now, UpdatedAt: now,
+	}
+	result, err := handler.mutateCatalog(request, func(catalog *projectCatalog) (any, bool, error) {
+		indexKey := ownerID + ":" + input.IdempotencyKey
+		if input.IdempotencyKey != "" {
+			if existingID := catalog.Idempotency[indexKey]; existingID != "" {
+				for _, existing := range catalog.Projects {
+					if existing.ProjectID == existingID {
+						return struct {
+							Project projectPublic `json:"project"`
+							Reused  bool          `json:"reused"`
+						}{publicProject(existing), true}, false, nil
+					}
+				}
+			}
+		}
+		for _, existing := range catalog.Projects {
+			if existing.Name == project.Name {
+				return nil, false, errProjectNameConflict
+			}
+		}
+		catalog.Projects = append(catalog.Projects, project)
+		if input.IdempotencyKey != "" {
+			catalog.Idempotency[indexKey] = project.ProjectID
+		}
+		return struct {
+			Project projectPublic `json:"project"`
+			Reused  bool          `json:"reused"`
+		}{publicProject(project), false}, true, nil
+	})
+	if errors.Is(err, errProjectNameConflict) {
+		writeJSON(writer, http.StatusConflict, map[string]any{"error": "project name already exists", "code": "PROJECT_NAME_CONFLICT"})
+		return
+	}
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "project create failed")
+		return
+	}
+	writeJSON(writer, http.StatusCreated, result)
+}
+
+func (handler *Projects) patch(writer http.ResponseWriter, request *http.Request, projectID string) {
+	var input struct {
+		Highlights *string `json:"highlights"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
+	if err := decoder.Decode(&input); err != nil || input.Highlights == nil {
+		writeError(writer, http.StatusBadRequest, "invalid project payload")
+		return
+	}
+	highlights := strings.TrimSpace(*input.Highlights)
+	if utf8.RuneCountInString(highlights) > projectHighlightsMaxLength {
+		writeError(writer, http.StatusBadRequest, "project highlights too long")
+		return
+	}
+	result, err := handler.mutateCatalog(request, func(catalog *projectCatalog) (any, bool, error) {
+		for index, project := range catalog.Projects {
+			if project.ProjectID != projectID {
+				continue
+			}
+			project.Highlights = highlights
+			project.UpdatedAt = requestTime()
+			catalog.Projects[index] = project
+			return map[string]any{"project": publicProject(project)}, true, nil
+		}
+		return nil, false, postgres.ErrNotFound
+	})
+	if errors.Is(err, postgres.ErrNotFound) {
+		writeError(writer, http.StatusNotFound, "project not found")
+		return
+	}
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "project update failed")
+		return
+	}
+	writeJSON(writer, http.StatusOK, result)
+}
+
+var errProjectNameConflict = errors.New("project name conflict")
+
+func publicProject(project ProjectRecord) projectPublic {
+	return projectPublic{
+		ProjectID: project.ProjectID, RootFolderID: project.RootFolderID, Name: project.Name,
+		OwnerID: project.OwnerID, CreationSource: project.CreationSource, ProjectMode: project.ProjectMode,
+		Status: project.Status, Highlights: project.Highlights, PasswordEnabled: project.PasswordEnabled,
+		CreatedAt: project.CreatedAt, UpdatedAt: project.UpdatedAt,
+	}
+}
+
+func projectPassword(enabled bool, password *string) (*string, *string, error) {
+	if !enabled {
+		return nil, nil, nil
+	}
+	if password == nil || strings.TrimSpace(*password) == "" {
+		return nil, nil, errors.New("project password is required")
+	}
+	saltBytes := make([]byte, 16)
+	if _, err := rand.Read(saltBytes); err != nil {
+		return nil, nil, err
+	}
+	salt := hex.EncodeToString(saltBytes)
+	hashBytes, err := scrypt.Key([]byte(*password), []byte(salt), 16384, 8, 1, 64)
+	if err != nil {
+		return nil, nil, err
+	}
+	hash := hex.EncodeToString(hashBytes)
+	return &hash, &salt, nil
+}
+
+func newProjectID() (string, error) {
+	value := make([]byte, 6)
+	if _, err := rand.Read(value); err != nil {
+		return "", err
+	}
+	return "p_" + hex.EncodeToString(value), nil
+}
+
+func requestTime() string {
+	return timeNow().UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
+var timeNow = func() time.Time { return time.Now() }

@@ -9,6 +9,8 @@ import {
   hashFileSha256,
   validateMockVideoSource,
 } from "../validate-mock-video-source";
+import { resolveAppDataPath } from "@/persistence/data-root";
+import { isRemoteDataOnly } from "@/persistence/remote-data-client";
 import type {
   ProviderCancelResult,
   ProviderGenerationInput,
@@ -58,6 +60,13 @@ async function materializeMockVideoCopy(): Promise<{
   sizeBytes: number;
   sha256: string;
 }> {
+  if (isRemoteDataOnly()) {
+    throw Object.assign(
+      new Error("Remote mock generation must be provided by an internal service"),
+      { code: "REMOTE_MOCK_PROVIDER_REQUIRES_INTERNAL_SERVICE" },
+    );
+  }
+
   const validated = await validateMockVideoSource();
   if (!validated.ok) {
     throw Object.assign(new Error(validated.message), {
@@ -65,7 +74,7 @@ async function materializeMockVideoCopy(): Promise<{
     });
   }
 
-  const dir = path.join(process.cwd(), "data", "generated-videos");
+  const dir = resolveAppDataPath("generated-videos");
   await fs.mkdir(dir, { recursive: true });
   const id = randomUUID();
   const fileName = `${id}-mock.mp4`;
@@ -147,6 +156,13 @@ export class MockVideoProvider implements VideoProvider {
       await g.__infiniteCanvasMockSubmitHook();
     }
 
+    if (isRemoteDataOnly()) {
+      throw Object.assign(
+        new Error("Remote mock generation must be provided by an internal service"),
+        { code: "REMOTE_MOCK_PROVIDER_REQUIRES_INTERNAL_SERVICE" },
+      );
+    }
+
     // 提交前即校验：缺失/无效时不排队伪装成功
     const validated = await validateMockVideoSource();
     if (!validated.ok) {
@@ -171,6 +187,16 @@ export class MockVideoProvider implements VideoProvider {
   async getGenerationStatus(
     providerTaskId: string,
   ): Promise<ProviderStatusResult> {
+    if (!getTasks().has(providerTaskId) && !providerTaskId.startsWith("mock-")) {
+      return {
+        providerTaskId,
+        status: "failed",
+        progressLabel: "Mock · 任务不存在",
+        errorCode: "MOCK_TASK_NOT_FOUND",
+        errorMessage: "Mock Provider 不能查询非 Mock 任务",
+        rawTaskStatus: "FAILED",
+      };
+    }
     const task = ensureTask(providerTaskId);
 
     if (task.status === "cancelled") {
@@ -199,7 +225,12 @@ export class MockVideoProvider implements VideoProvider {
         status: "downloading",
         progressLabel: "Mock · 准备转存",
         remoteVideoUrl: task.remoteUrl,
-        providerResolution: task.resolution === "1080P" ? "1080" : "720",
+        providerResolution:
+          task.resolution === "1080P"
+            ? "1080"
+            : task.resolution === "480P"
+              ? "480"
+              : "720",
         providerAspectRatio: task.aspectRatio ?? undefined,
         providerDurationSeconds: task.durationSeconds,
         rawTaskStatus: "SUCCEEDED",
@@ -229,7 +260,12 @@ export class MockVideoProvider implements VideoProvider {
         status: "downloading",
         progressLabel: "Mock · 准备转存",
         remoteVideoUrl: task.remoteUrl,
-        providerResolution: task.resolution === "1080P" ? "1080" : "720",
+        providerResolution:
+          task.resolution === "1080P"
+            ? "1080"
+            : task.resolution === "480P"
+              ? "480"
+              : "720",
         providerAspectRatio: task.aspectRatio ?? undefined,
         providerDurationSeconds: task.durationSeconds,
         rawTaskStatus: "SUCCEEDED",

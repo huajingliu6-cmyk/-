@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/auth/session";
 import { getUserById } from "@/auth/users";
 import type { AuthUser } from "@/auth/types";
+import { isRemoteDataServiceError } from "@/persistence/remote-data-client";
 
 export async function requireSessionUser(): Promise<
   { ok: true; user: AuthUser } | { ok: false; response: NextResponse }
@@ -22,7 +23,21 @@ export async function requireSessionUser(): Promise<
       response: NextResponse.json({ error: "登录已失效" }, { status: 401 }),
     };
   }
-  const user = await getUserById(session.userId);
+  let user;
+  try {
+    user = await getUserById(session.userId);
+  } catch (error) {
+    if (isRemoteDataServiceError(error)) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: "内网数据服务不可用" },
+          { status: 503 },
+        ),
+      };
+    }
+    throw error;
+  }
   if (!user) {
     return {
       ok: false,

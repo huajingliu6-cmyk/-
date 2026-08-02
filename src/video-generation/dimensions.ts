@@ -6,13 +6,20 @@ export type OutputDimensions = {
 };
 
 /**
- * 官方文档映射表（万相 2.7 文生/参考生视频）：
- * 720P / 1080P × 五种比例 → 宽*高
+ * 分辨率 × 五种比例 → 宽*高。
+ * 720P / 1080P 对齐万相 2.7 文档；480P 为画布 / HTTP 扩展档位。
  */
 const DIMENSION_TABLE: Record<
   VideoResolution,
   Record<VideoAspectRatio, OutputDimensions>
 > = {
+  "480P": {
+    "16:9": { width: 854, height: 480 },
+    "9:16": { width: 480, height: 854 },
+    "1:1": { width: 640, height: 640 },
+    "4:3": { width: 736, height: 552 },
+    "3:4": { width: 552, height: 736 },
+  },
   "720P": {
     "16:9": { width: 1280, height: 720 },
     "9:16": { width: 720, height: 1280 },
@@ -37,7 +44,7 @@ export function resolveOutputDimensions(
 }
 
 export function isVideoResolution(value: string): value is VideoResolution {
-  return value === "720P" || value === "1080P";
+  return value === "480P" || value === "720P" || value === "1080P";
 }
 
 export function isVideoAspectRatio(value: string): value is VideoAspectRatio {

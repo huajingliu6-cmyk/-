@@ -30,6 +30,7 @@ import {
 } from "@/workflow/lib/request-character-generation";
 import { uploadAssetFile } from "@/workflow/lib/upload-asset";
 import { useWorkflowStore } from "@/workflow/store";
+import { GlassSelect } from "@/shell/glass-select";
 import type { CharacterNodeData, CharacterVariant } from "@/workflow/types";
 
 type GenMode = "appearance" | "voice";
@@ -39,27 +40,27 @@ type Props = {
 };
 
 const STYLE_OPTIONS = [
-  { value: "", label: "风格" },
-  { value: "realistic", label: "写实" },
-  { value: "anime", label: "动漫" },
-  { value: "cinematic", label: "电影感" },
-  { value: "illustration", label: "插画" },
+  { id: "", label: "风格" },
+  { id: "realistic", label: "写实" },
+  { id: "anime", label: "动漫" },
+  { id: "cinematic", label: "电影感" },
+  { id: "illustration", label: "插画" },
 ];
 
 const IMAGE_MODEL_OPTIONS = [
-  { value: "AnyCook", label: "AnyCook" },
-  { value: "AnyCook Pro", label: "AnyCook Pro" },
+  { id: "AnyCook", label: "AnyCook" },
+  { id: "AnyCook Pro", label: "AnyCook Pro" },
 ];
 
 const ASPECT_OPTIONS = [
-  { value: "9:16", label: "9:16" },
-  { value: "16:9", label: "16:9" },
+  { id: "9:16", label: "9:16" },
+  { id: "16:9", label: "16:9" },
 ];
 
 const RESOLUTION_OPTIONS = [
-  { value: "1K", label: "1K" },
-  { value: "2K", label: "2K" },
-  { value: "4K", label: "4K" },
+  { id: "1K", label: "1K" },
+  { id: "2K", label: "2K" },
+  { id: "4K", label: "4K" },
 ];
 
 function selectedVariant(data: CharacterNodeData): CharacterVariant | undefined {
@@ -75,8 +76,8 @@ function normalizeAspect(value: string): string {
 }
 
 function normalizeResolution(value: string): string {
-  const hit = RESOLUTION_OPTIONS.find((opt) => opt.value === value);
-  if (hit) return hit.value;
+  const hit = RESOLUTION_OPTIONS.find((opt) => opt.id === value);
+  if (hit) return hit.id;
   if (value.includes("4K") || value.includes("3840") || value.includes("2160"))
     return "4K";
   if (
@@ -430,81 +431,59 @@ export function CharacterPromptPanel({ nodeId }: Props) {
               <Plus className="h-3.5 w-3.5" />
             </GlassIconButton>
 
-            <label className={glass.selectWrap} title="风格">
-              <Smile className="h-3 w-3 shrink-0 text-zinc-500" />
-              <select
-                className="nodrag nopan max-w-[5.5rem] bg-transparent outline-none"
-                value={stylePreset}
-                disabled={busy}
-                onChange={(e) =>
-                  updateNodeData(nodeId, { stylePreset: e.target.value })
-                }
-              >
-                {STYLE_OPTIONS.map((opt) => (
-                  <option key={opt.value || "none"} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className={glass.selectWrap} title="生图模型">
-              <ChartNoAxesColumn className="h-3 w-3 shrink-0 text-zinc-500" />
-              <select
-                className="nodrag nopan max-w-[7rem] bg-transparent outline-none"
-                value={
-                  IMAGE_MODEL_OPTIONS.some((o) => o.value === imageModel)
-                    ? imageModel
-                    : "AnyCook"
-                }
-                disabled={busy}
-                onChange={(e) =>
-                  updateNodeData(nodeId, { imageModel: e.target.value })
-                }
-              >
-                {IMAGE_MODEL_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <select
-              className={glass.select}
-              value={aspectRatio}
+            <GlassSelect
+              variant="toolbar"
+              label="风格"
+              title="风格"
               disabled={busy}
+              value={stylePreset}
+              options={STYLE_OPTIONS}
+              leadingIcon={<Smile className="h-3 w-3" />}
+              onChange={(id) => updateNodeData(nodeId, { stylePreset: id })}
+            />
+
+            <GlassSelect
+              variant="toolbar"
+              label="生图模型"
+              title="生图模型"
+              disabled={busy}
+              value={
+                IMAGE_MODEL_OPTIONS.some((o) => o.id === imageModel)
+                  ? imageModel
+                  : "AnyCook"
+              }
+              options={IMAGE_MODEL_OPTIONS}
+              leadingIcon={<ChartNoAxesColumn className="h-3 w-3" />}
+              onChange={(id) => updateNodeData(nodeId, { imageModel: id })}
+            />
+
+            <GlassSelect
+              variant="toolbar"
+              label="比例"
               title="比例"
-              onChange={(e) =>
-                updateNodeData(nodeId, {
-                  aspectRatio: normalizeAspect(e.target.value),
-                })
-              }
-            >
-              {ASPECT_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-
-            <select
-              className={glass.select}
-              value={resolution}
               disabled={busy}
-              title="分辨率"
-              onChange={(e) =>
+              value={aspectRatio}
+              options={ASPECT_OPTIONS}
+              onChange={(id) =>
                 updateNodeData(nodeId, {
-                  resolution: normalizeResolution(e.target.value),
+                  aspectRatio: normalizeAspect(id),
                 })
               }
-            >
-              {RESOLUTION_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+            />
+
+            <GlassSelect
+              variant="toolbar"
+              label="分辨率"
+              title="分辨率"
+              disabled={busy}
+              value={resolution}
+              options={RESOLUTION_OPTIONS}
+              onChange={(id) =>
+                updateNodeData(nodeId, {
+                  resolution: normalizeResolution(id),
+                })
+              }
+            />
           </>
         ) : (
           <span className={`${glass.status} text-zinc-600`}>角色声音生成</span>

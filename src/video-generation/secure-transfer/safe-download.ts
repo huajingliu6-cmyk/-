@@ -58,6 +58,13 @@ export type SafeDownloadResult = {
   contentType: string;
 };
 
+export type SafeDownloadBufferResult = {
+  buffer: Buffer;
+  sizeBytes: number;
+  sha256: string;
+  contentType: string;
+};
+
 async function defaultResolveAll(hostname: string): Promise<ResolvedAddress[]> {
   const results = await dnsPromises.lookup(hostname, {
     all: true,
@@ -279,6 +286,141 @@ async function streamBodyToFile(params: {
     sha256: hash.digest("hex"),
     head: Buffer.concat(headChunks),
   };
+}
+
+async function streamBodyToBuffer(params: {
+  body: AsyncIterable<Buffer>;
+  maxBytes: number;
+  contentLength: number | null;
+  signal: AbortSignal;
+}): Promise<{ buffer: Buffer; sizeBytes: number; sha256: string; head: Buffer }> {
+  const hash = createHash("sha256");
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of params.body) {
+    if (params.signal.aborted) throw new TransferError("RESULT_DOWNLOAD_TIMEOUT");
+    total += chunk.byteLength;
+    if (total > params.maxBytes) throw new TransferError("RESULT_FILE_TOO_LARGE");
+    hash.update(chunk);
+    chunks.push(Buffer.from(chunk));
+  }
+  if (
+    params.contentLength != null &&
+    Number.isFinite(params.contentLength) &&
+    params.contentLength >= 0 &&
+    total !== params.contentLength
+  ) {
+    throw new TransferError("RESULT_CONTENT_LENGTH_MISMATCH");
+  }
+  const buffer = Buffer.concat(chunks, total);
+  return {
+    buffer,
+    sizeBytes: total,
+    sha256: hash.digest("hex"),
+    head: buffer.subarray(0, Math.min(64, buffer.byteLength)),
+  };
+}
+
+async function safeDownloadProviderVideo<T>(params: {
+  remoteUrl: string;
+  deps?: SafeDownloadDeps;
+  consume: (input: {
+    body: AsyncIterable<Buffer>;
+    maxBytes: number;
+    contentLength: number | null;
+    signal: AbortSignal;
+    contentType: string;
+  }) => Promise<T & { sizeBytes: number; sha256: string; head: Buffer }>;
+}): Promise<T & { sizeBytes: number; sha256: string; contentType: string }> {
+  const deps = params.deps ?? {};
+  const allowedHosts = deps.allowedHosts ?? getWanResultAllowedHosts();
+  const maxBytes = deps.maxBytes ?? MAX_PROVIDER_VIDEO_BYTES;
+  const maxRedirects = deps.maxRedirects ?? MAX_PROVIDER_REDIRECTS;
+  const timeoutMs = deps.timeoutMs ?? PROVIDER_DOWNLOAD_TIMEOUT_MS;
+  const connectTimeoutMs = deps.connectTimeoutMs ?? PROVIDER_CONNECT_TIMEOUT_MS;
+  const resolveAll = deps.resolveAll ?? defaultResolveAll;
+  const overall = AbortSignal.timeout(timeoutMs);
+  const visited = new Set<string>();
+  let currentUrl = params.remoteUrl;
+
+  for (let hop = 0; hop <= maxRedirects; hop += 1) {
+    if (overall.aborted) throw new TransferError("RESULT_DOWNLOAD_TIMEOUT");
+    const validated = assertValidProviderResultUrl({ url: currentUrl, allowedHosts });
+    const normalizedKey = validated.href.split("#")[0]!;
+    if (visited.has(normalizedKey)) throw new TransferError("RESULT_REDIRECT_NOT_ALLOWED");
+    visited.add(normalizedKey);
+    const verified = await resolvePublicAddresses(validated.hostname, resolveAll);
+    const response = deps.httpGet
+      ? await deps.httpGet(validated.href, { signal: overall, verifiedAddresses: verified })
+      : await nativeHttpsGet(validated, { signal: overall, verifiedAddresses: verified, connectTimeoutMs });
+    if (response.statusCode >= 300 && response.statusCode < 400) {
+      const location = headerGet(response.headers, "location");
+      if (!location) throw new TransferError("RESULT_REDIRECT_NOT_ALLOWED");
+      for await (const chunk of response.body) void chunk;
+      if (hop >= maxRedirects) throw new TransferError("RESULT_TOO_MANY_REDIRECTS");
+      try {
+        currentUrl = new URL(location, validated).href;
+      } catch {
+        throw new TransferError("RESULT_REDIRECT_NOT_ALLOWED");
+      }
+      continue;
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw new TransferError("RESULT_TRANSFER_FAILED", `下载远程结果失败（HTTP ${response.statusCode}）`);
+    }
+    const contentType = headerGet(response.headers, "content-type") ?? "";
+    if (isAcceptableProviderContentType(contentType) === "reject") {
+      throw new TransferError("RESULT_CONTENT_TYPE_INVALID");
+    }
+    const rawLength = headerGet(response.headers, "content-length");
+    const contentLength = rawLength ? Number(rawLength) : null;
+    if (contentLength != null && Number.isFinite(contentLength) && contentLength > maxBytes) {
+      throw new TransferError("RESULT_FILE_TOO_LARGE");
+    }
+    const consumed = await params.consume({
+      body: response.body,
+      maxBytes,
+      contentLength: contentLength != null && Number.isFinite(contentLength) ? contentLength : null,
+      signal: overall,
+      contentType,
+    });
+    if (
+      consumed.sizeBytes <= 0 ||
+      looksLikeHtmlOrXml(consumed.head) ||
+      looksLikeJson(consumed.head) ||
+      !bufferHasMp4Ftyp(consumed.head)
+    ) {
+      throw new TransferError("RESULT_VIDEO_STRUCTURE_INVALID");
+    }
+    const result = { ...consumed } as T & {
+      sizeBytes: number;
+      sha256: string;
+      head?: Buffer;
+    };
+    delete result.head;
+    return { ...result, contentType: contentType || "video/mp4" };
+  }
+  throw new TransferError("RESULT_TOO_MANY_REDIRECTS");
+}
+
+export async function safeDownloadProviderVideoToBuffer(params: {
+  remoteUrl: string;
+  deps?: SafeDownloadDeps;
+}): Promise<SafeDownloadBufferResult> {
+  try {
+    return await safeDownloadProviderVideo({
+      remoteUrl: params.remoteUrl,
+      deps: params.deps,
+      consume: ({ body, maxBytes, contentLength, signal }) =>
+        streamBodyToBuffer({ body, maxBytes, contentLength, signal }),
+    });
+  } catch (error) {
+    if (error instanceof TransferError) throw error;
+    if (error && typeof error === "object" && "name" in error && (error as { name: string }).name === "TimeoutError") {
+      throw new TransferError("RESULT_DOWNLOAD_TIMEOUT");
+    }
+    throw new TransferError("RESULT_TRANSFER_FAILED", error instanceof Error ? error.message : "下载远程结果失败");
+  }
 }
 
 /**

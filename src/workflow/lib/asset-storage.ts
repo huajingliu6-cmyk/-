@@ -1,8 +1,18 @@
 import { randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import path from "path";
+import { resolveAppDataPath } from "@/persistence/data-root";
+import {
+  deleteRemoteBlob,
+  getRemoteBlob,
+  isRemoteDataOnly,
+  putRemoteBlob,
+  type RemoteBlob,
+} from "@/persistence/remote-data-client";
 
-const ASSETS_DIR = path.join(process.cwd(), "data", "assets");
+function assetsDir(): string {
+  return resolveAppDataPath("assets");
+}
 
 export const IMAGE_MIME = new Set([
   "image/jpeg",
@@ -57,8 +67,17 @@ export type StoredAssetMeta = {
   kind: "image" | "audio" | "video";
 };
 
+const SAFE_ASSET_ID = /^[0-9a-fA-F-]{36}$/;
+
+export function workflowAssetStorageKey(assetId: string): string {
+  if (!SAFE_ASSET_ID.test(assetId) || assetId.includes("..")) {
+    throw new Error("INVALID_WORKFLOW_ASSET_ID");
+  }
+  return `workflow-assets/${assetId}`;
+}
+
 export async function ensureAssetsDir() {
-  await fs.mkdir(ASSETS_DIR, { recursive: true });
+  await fs.mkdir(assetsDir(), { recursive: true });
 }
 
 function extensionFromName(fileName: string): string {
@@ -103,14 +122,28 @@ export async function saveAssetFile(params: {
   kind: "image" | "audio" | "video";
   ext: string;
 }): Promise<StoredAssetMeta> {
-  await ensureAssetsDir();
-
   const assetId = randomUUID();
+  if (isRemoteDataOnly()) {
+    await putRemoteBlob({
+      storageKey: workflowAssetStorageKey(assetId),
+      contentType: params.mimeType,
+      body: params.buffer,
+    });
+    return {
+      assetId,
+      assetUrl: `/api/assets/${assetId}`,
+      fileName: path.basename(params.fileName).slice(0, 180),
+      mimeType: params.mimeType,
+      sizeBytes: params.buffer.byteLength,
+      kind: params.kind,
+    };
+  }
+  await ensureAssetsDir();
   // 禁止使用用户原始文件名作为磁盘文件名，防止路径穿越
   const diskName = `${assetId}${params.ext}`;
-  const diskPath = path.join(ASSETS_DIR, diskName);
+  const diskPath = path.join(assetsDir(), diskName);
   const resolved = path.resolve(diskPath);
-  if (!resolved.startsWith(path.resolve(ASSETS_DIR) + path.sep)) {
+  if (!resolved.startsWith(path.resolve(assetsDir()) + path.sep)) {
     throw new Error("非法文件路径");
   }
 
@@ -126,6 +159,10 @@ export async function saveAssetFile(params: {
   };
 }
 
+export function readRemoteAssetFile(assetId: string): Promise<RemoteBlob | null> {
+  return getRemoteBlob(workflowAssetStorageKey(assetId));
+}
+
 export async function resolveAssetPath(
   assetId: string,
 ): Promise<{ filePath: string; mimeType: string } | null> {
@@ -134,13 +171,13 @@ export async function resolveAssetPath(
   }
 
   await ensureAssetsDir();
-  const entries = await fs.readdir(ASSETS_DIR);
+  const entries = await fs.readdir(assetsDir());
   const match = entries.find((name) => name.startsWith(`${assetId}.`));
   if (!match) return null;
 
-  const filePath = path.join(ASSETS_DIR, match);
+  const filePath = path.join(assetsDir(), match);
   const resolved = path.resolve(filePath);
-  if (!resolved.startsWith(path.resolve(ASSETS_DIR) + path.sep)) {
+  if (!resolved.startsWith(path.resolve(assetsDir()) + path.sep)) {
     return null;
   }
 
@@ -167,7 +204,7 @@ export async function saveAssetRecordMeta(): Promise<void> {
 /** 扫描本地 assets 目录，返回已上传文件的 assetId 索引（不含 WorkflowDocument 元数据）。 */
 export async function loadAssetIndex(): Promise<AssetIndexEntry[]> {
   await ensureAssetsDir();
-  const entries = await fs.readdir(ASSETS_DIR);
+  const entries = await fs.readdir(assetsDir());
   const index: AssetIndexEntry[] = [];
 
   for (const fileName of entries) {
@@ -177,9 +214,9 @@ export async function loadAssetIndex(): Promise<AssetIndexEntry[]> {
     if (!match) continue;
 
     const assetId = match[1];
-    const filePath = path.join(ASSETS_DIR, fileName);
+    const filePath = path.join(assetsDir(), fileName);
     const resolved = path.resolve(filePath);
-    if (!resolved.startsWith(path.resolve(ASSETS_DIR) + path.sep)) {
+    if (!resolved.startsWith(path.resolve(assetsDir()) + path.sep)) {
       continue;
     }
 
@@ -191,6 +228,10 @@ export async function loadAssetIndex(): Promise<AssetIndexEntry[]> {
 
 /** 删除磁盘上的素材文件；assetId 非法或文件不存在时返回 false。 */
 export async function deleteAssetFile(assetId: string): Promise<boolean> {
+  if (isRemoteDataOnly()) {
+    await deleteRemoteBlob(workflowAssetStorageKey(assetId));
+    return true;
+  }
   if (!/^[0-9a-fA-F-]{36}$/.test(assetId)) {
     return false;
   }
@@ -200,7 +241,7 @@ export async function deleteAssetFile(assetId: string): Promise<boolean> {
     return false;
   }
 
-  const assetsRoot = path.resolve(ASSETS_DIR);
+  const assetsRoot = path.resolve(assetsDir());
   if (!resolvedAsset.filePath.startsWith(assetsRoot + path.sep)) {
     return false;
   }

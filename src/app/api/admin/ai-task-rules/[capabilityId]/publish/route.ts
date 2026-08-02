@@ -1,0 +1,34 @@
+import { NextResponse } from "next/server";
+import { requireSystemAdmin } from "@/auth/require-access";
+import { publishRule } from "@/ai-config/task-rules-store";
+import {
+  aiConfigErrorResponse,
+  parseCapabilityId,
+} from "@/app/api/admin/ai-admin-helpers";
+
+type RouteContext = { params: Promise<{ capabilityId: string }> };
+
+export async function POST(request: Request, context: RouteContext) {
+  const auth = await requireSystemAdmin();
+  if (!auth.ok) return auth.response;
+  const { capabilityId: raw } = await context.params;
+  const capabilityId = parseCapabilityId(raw);
+  if (!capabilityId) {
+    return NextResponse.json({ error: "无效的 capabilityId" }, { status: 400 });
+  }
+  try {
+    const body = (await request.json()) as {
+      expectedRevision?: number | null;
+      idempotencyKey?: string;
+    };
+    const result = await publishRule(
+      capabilityId,
+      body.expectedRevision ?? null,
+      body.idempotencyKey ?? `pub_${Date.now()}`,
+      auth.user.id,
+    );
+    return NextResponse.json(result);
+  } catch (err) {
+    return aiConfigErrorResponse(err);
+  }
+}

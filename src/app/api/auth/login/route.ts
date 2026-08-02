@@ -4,11 +4,11 @@ import {
   SESSION_COOKIE,
   sessionCookieOptions,
 } from "@/auth/session";
-import { authenticateUser, ensureAdminUser } from "@/auth/users";
+import { authenticateUser } from "@/auth/users";
+import { isRemoteDataServiceError } from "@/persistence/remote-data-client";
 
 export async function POST(request: Request) {
   try {
-    await ensureAdminUser();
     const body = (await request.json()) as {
       username?: string;
       password?: string;
@@ -42,6 +42,9 @@ export async function POST(request: Request) {
     response.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
     return response;
   } catch (error) {
+    if (isRemoteDataServiceError(error)) {
+      return NextResponse.json({ error: "内网数据服务不可用" }, { status: 503 });
+    }
     const message =
       error instanceof Error ? error.message : "登录失败，请稍后重试";
     return NextResponse.json({ error: message }, { status: 500 });

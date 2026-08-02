@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/auth/session";
 
-const PUBLIC_PATHS = new Set(["/login"]);
+/** 欢迎首页公开；登录入口在首页右上角 */
+const PUBLIC_PATHS = new Set(["/", "/login"]);
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;
@@ -17,20 +18,25 @@ function isPublicPath(pathname: string): boolean {
   return false;
 }
 
+function redirectToHomeLogin(request: NextRequest, nextPath?: string) {
+  const homeUrl = new URL("/", request.url);
+  homeUrl.searchParams.set("login", "1");
+  if (nextPath && nextPath.startsWith("/") && !nextPath.startsWith("//")) {
+    homeUrl.searchParams.set("next", nextPath);
+  }
+  return NextResponse.redirect(homeUrl);
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // 旧 /login 入口统一到首页右上角登录
+  if (pathname === "/login") {
+    const next = request.nextUrl.searchParams.get("next") ?? undefined;
+    return redirectToHomeLogin(request, next);
+  }
+
   if (isPublicPath(pathname)) {
-    // 已登录访问登录页 → 回首页
-    if (pathname === "/login") {
-      const token = request.cookies.get(SESSION_COOKIE)?.value;
-      if (token) {
-        const session = await verifySessionToken(token);
-        if (session) {
-          return NextResponse.redirect(new URL("/", request.url));
-        }
-      }
-    }
     return NextResponse.next();
   }
 
@@ -39,16 +45,24 @@ export async function middleware(request: NextRequest) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("next", pathname);
-    return NextResponse.redirect(loginUrl);
+    return redirectToHomeLogin(request, pathname);
   }
 
   const session = await verifySessionToken(token);
   if (!session) {
-    const response = pathname.startsWith("/api/")
-      ? NextResponse.json({ error: "登录已失效，请重新登录" }, { status: 401 })
-      : NextResponse.redirect(new URL("/login", request.url));
+    if (pathname.startsWith("/api/")) {
+      const response = NextResponse.json(
+        { error: "登录已失效，请重新登录" },
+        { status: 401 },
+      );
+      response.cookies.set(SESSION_COOKIE, "", {
+        httpOnly: true,
+        path: "/",
+        maxAge: 0,
+      });
+      return response;
+    }
+    const response = redirectToHomeLogin(request, pathname);
     response.cookies.set(SESSION_COOKIE, "", {
       httpOnly: true,
       path: "/",

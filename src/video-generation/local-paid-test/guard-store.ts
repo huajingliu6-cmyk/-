@@ -1,8 +1,10 @@
 import { randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import path from "path";
+import { resolveAppDataPath } from "@/persistence/data-root";
+import { isRemoteDataOnly, requestRemoteData } from "@/persistence/remote-data-client";
 import { LOCAL_PAID_TEST_GUARD_FILE_NAME } from "./constants";
-import { LocalPaidTestError } from "./errors";
+import { LocalPaidTestError, type LocalPaidTestErrorCode } from "./errors";
 import type {
   LocalPaidTestGuardState,
   WanLocalPaidTestGuardRecord,
@@ -68,6 +70,44 @@ function defaultRecord(
     simulation: namespace === "simulation",
     namespace,
   };
+}
+
+const REMOTE_GUARD_ENDPOINT = "/v1/local-paid-test-guard";
+
+async function remoteGuardRequest(
+  namespace: "live" | "simulation",
+  action?: string,
+  input: Record<string, unknown> = {},
+): Promise<WanLocalPaidTestGuardRecord> {
+  let response: Response;
+  try {
+    response = await requestRemoteData(
+      action
+        ? REMOTE_GUARD_ENDPOINT
+        : `${REMOTE_GUARD_ENDPOINT}?namespace=${encodeURIComponent(namespace)}`,
+      action
+        ? {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ action, namespace, ...input }),
+          }
+        : {},
+    );
+  } catch {
+    throw new LocalPaidTestError("LOCAL_PAID_TEST_GUARD_UNAVAILABLE");
+  }
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as
+      | { code?: LocalPaidTestErrorCode }
+      | null;
+    throw new LocalPaidTestError(
+      payload?.code ?? "LOCAL_PAID_TEST_GUARD_UNAVAILABLE",
+    );
+  }
+  const payload = (await response.json()) as {
+    record: WanLocalPaidTestGuardRecord;
+  };
+  return parseGuardRecord(JSON.stringify(payload.record));
 }
 
 export function parseGuardRecord(raw: string): WanLocalPaidTestGuardRecord {
@@ -158,9 +198,21 @@ export class FileWanLocalPaidTestGuardStore
     namespace?: "live" | "simulation";
   }) {
     this.namespace = options?.namespace ?? "live";
+    if (
+      (process.env.REMOTE_DATA_ONLY === 'true' ||
+        process.env.NODE_ENV === 'production') &&
+      !options?.rootDir
+    ) {
+      this.rootDir = '';
+      this.fileName =
+        this.namespace === 'simulation'
+          ? 'simulation-one-shot-guard.json'
+          : LOCAL_PAID_TEST_GUARD_FILE_NAME;
+      return;
+    }
     this.rootDir =
       options?.rootDir ??
-      path.join(process.cwd(), "data", "paid-test-guard");
+      resolveAppDataPath("paid-test-guard");
     // 固定安全文件名，绝不来自用户输入
     this.fileName =
       this.namespace === "simulation"
@@ -187,7 +239,7 @@ export class FileWanLocalPaidTestGuardStore
     await fs.mkdir(this.rootDir, { recursive: true });
   }
 
-  private serialize(record: WanLocalPaidTestGuardRecord): string {
+  protected serialize(record: WanLocalPaidTestGuardRecord): string {
     // 明确只序列化安全字段（不含原始 nonce / token）
     const safe: WanLocalPaidTestGuardRecord = {
       version: 1,
@@ -209,7 +261,11 @@ export class FileWanLocalPaidTestGuardStore
    * 同目录临时文件写入后 rename。
    * Windows 目标已存在：unlink → rename（短暂缺失窗口）。
    */
-  private async writeAtomic(record: WanLocalPaidTestGuardRecord): Promise<void> {
+  protected async writeAtomic(
+    record: WanLocalPaidTestGuardRecord,
+    previous?: WanLocalPaidTestGuardRecord,
+  ): Promise<void> {
+    void previous;
     await this.ensureDir();
     const target = this.resolvePath();
     const tmp = path.join(
@@ -240,6 +296,9 @@ export class FileWanLocalPaidTestGuardStore
   }
 
   async get(): Promise<WanLocalPaidTestGuardRecord> {
+    if (isRemoteDataOnly()) {
+      return remoteGuardRequest(this.namespace);
+    }
     try {
       const raw = await fs.readFile(this.resolvePath(), "utf8");
       return parseGuardRecord(raw);
@@ -264,6 +323,9 @@ export class FileWanLocalPaidTestGuardStore
     requestFingerprint?: string | null;
     armNonceHash: string;
   }): Promise<WanLocalPaidTestGuardRecord> {
+    if (isRemoteDataOnly()) {
+      return remoteGuardRequest(this.namespace, "arm", input);
+    }
     if (!input.armNonceHash.trim()) {
       throw new LocalPaidTestError("LOCAL_PAID_TEST_GUARD_CORRUPTED");
     }
@@ -299,7 +361,7 @@ export class FileWanLocalPaidTestGuardStore
       simulation: this.namespace === "simulation",
       namespace: this.namespace,
     };
-    await this.writeAtomic(next);
+    await this.writeAtomic(next, current);
     return next;
   }
 
@@ -307,6 +369,9 @@ export class FileWanLocalPaidTestGuardStore
     generationId: string;
     requestFingerprint?: string | null;
   }): Promise<WanLocalPaidTestGuardRecord> {
+    if (isRemoteDataOnly()) {
+      return remoteGuardRequest(this.namespace, "markSubmitting", input);
+    }
     const current = await this.get();
     if (current.state !== "armed") {
       if (
@@ -336,7 +401,7 @@ export class FileWanLocalPaidTestGuardStore
       updatedAt: new Date().toISOString(),
       lastErrorCode: null,
     };
-    await this.writeAtomic(next);
+    await this.writeAtomic(next, current);
     return next;
   }
 
@@ -344,6 +409,9 @@ export class FileWanLocalPaidTestGuardStore
     generationId: string;
     providerTaskId: string;
   }): Promise<WanLocalPaidTestGuardRecord> {
+    if (isRemoteDataOnly()) {
+      return remoteGuardRequest(this.namespace, "markProviderAccepted", input);
+    }
     if (!input.providerTaskId.trim()) {
       throw new LocalPaidTestError("LOCAL_PAID_TEST_GUARD_CORRUPTED");
     }
@@ -362,7 +430,7 @@ export class FileWanLocalPaidTestGuardStore
       updatedAt: new Date().toISOString(),
       lastErrorCode: null,
     };
-    await this.writeAtomic(next);
+    await this.writeAtomic(next, current);
     return next;
   }
 
@@ -370,6 +438,9 @@ export class FileWanLocalPaidTestGuardStore
     generationId: string;
     providerTaskId: string;
   }): Promise<WanLocalPaidTestGuardRecord> {
+    if (isRemoteDataOnly()) {
+      return remoteGuardRequest(this.namespace, "markTransferPending", input);
+    }
     const current = await this.get();
     if (
       current.state !== "providerAccepted" &&
@@ -384,7 +455,7 @@ export class FileWanLocalPaidTestGuardStore
       providerTaskId: input.providerTaskId,
       updatedAt: new Date().toISOString(),
     };
-    await this.writeAtomic(next);
+    await this.writeAtomic(next, current);
     return next;
   }
 
@@ -392,6 +463,9 @@ export class FileWanLocalPaidTestGuardStore
     generationId: string;
     providerTaskId?: string | null;
   }): Promise<WanLocalPaidTestGuardRecord> {
+    if (isRemoteDataOnly()) {
+      return remoteGuardRequest(this.namespace, "markCompleted", input);
+    }
     const current = await this.get();
     const next: WanLocalPaidTestGuardRecord = {
       ...current,
@@ -401,13 +475,16 @@ export class FileWanLocalPaidTestGuardStore
       updatedAt: new Date().toISOString(),
       lastErrorCode: null,
     };
-    await this.writeAtomic(next);
+    await this.writeAtomic(next, current);
     return next;
   }
 
   async markFailedBeforeSubmit(input: {
     errorCode: string;
   }): Promise<WanLocalPaidTestGuardRecord> {
+    if (isRemoteDataOnly()) {
+      return remoteGuardRequest(this.namespace, "markFailedBeforeSubmit", input);
+    }
     const current = await this.get();
     if (
       current.state === "providerAccepted" ||
@@ -427,7 +504,7 @@ export class FileWanLocalPaidTestGuardStore
       updatedAt: new Date().toISOString(),
       lastErrorCode: input.errorCode,
     };
-    await this.writeAtomic(next);
+    await this.writeAtomic(next, current);
     return next;
   }
 
@@ -435,6 +512,9 @@ export class FileWanLocalPaidTestGuardStore
     generationId?: string | null;
     errorCode: string;
   }): Promise<WanLocalPaidTestGuardRecord> {
+    if (isRemoteDataOnly()) {
+      return remoteGuardRequest(this.namespace, "markUnknownOutcome", input);
+    }
     const current = await this.get();
     if (current.state === "completed" || current.state === "consumed") {
       throw new LocalPaidTestError("LOCAL_PAID_TEST_GUARD_CORRUPTED");
@@ -446,11 +526,14 @@ export class FileWanLocalPaidTestGuardStore
       updatedAt: new Date().toISOString(),
       lastErrorCode: input.errorCode,
     };
-    await this.writeAtomic(next);
+    await this.writeAtomic(next, current);
     return next;
   }
 
   async markConsumed(): Promise<WanLocalPaidTestGuardRecord> {
+    if (isRemoteDataOnly()) {
+      return remoteGuardRequest(this.namespace, "markConsumed");
+    }
     const current = await this.get();
     const next: WanLocalPaidTestGuardRecord = {
       ...current,
@@ -458,7 +541,7 @@ export class FileWanLocalPaidTestGuardStore
       armNonceHash: null,
       updatedAt: new Date().toISOString(),
     };
-    await this.writeAtomic(next);
+    await this.writeAtomic(next, current);
     return next;
   }
 }

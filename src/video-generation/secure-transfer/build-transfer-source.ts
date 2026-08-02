@@ -1,4 +1,5 @@
 import type { GenerationRecord, VideoProviderId } from "../types";
+import { parseRemoteProviderResultUrl } from "../remote-provider-result";
 import { TransferError } from "./errors";
 import type { TransferSource } from "./types";
 
@@ -31,6 +32,31 @@ export function buildTransferSourceFromGeneration(
       kind: "mockFile",
       providerId: "mock",
       fileUrl: url,
+    };
+  }
+
+  if (record.providerId === "http") {
+    if (record.isMock) {
+      throw new TransferError("TRANSFER_SOURCE_MISMATCH");
+    }
+    if (parseRemoteProviderResultUrl(url)) {
+      return {
+        kind: "remoteProviderBlob",
+        providerId: "http",
+        remoteBlobUrl: url,
+      };
+    }
+    if (url.startsWith("file://")) {
+      return {
+        kind: "mockFile",
+        providerId: "http",
+        fileUrl: url,
+      };
+    }
+    return {
+      kind: "providerHttps",
+      providerId: "http",
+      remoteUrl: url,
     };
   }
 

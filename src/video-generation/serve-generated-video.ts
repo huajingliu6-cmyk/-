@@ -4,6 +4,7 @@ import path from "path";
 import { Readable } from "stream";
 import type { AssetRecord } from "@/workflow/types";
 import { resolveAssetPath } from "@/workflow/lib/asset-storage";
+import { readRemoteAssetFile } from "@/workflow/lib/asset-storage";
 import { loadWorkflow } from "@/workflow/lib/workflow-storage";
 import { readGenerationRecord } from "./generation-store";
 import {
@@ -11,12 +12,17 @@ import {
   buildSafeVideoDownloadName,
 } from "./classify-generation-result";
 import { parseSingleByteRange } from "./parse-byte-range";
+import { resolveAppDataPath } from "@/persistence/data-root";
+import { isRemoteDataOnly } from "@/persistence/remote-data-client";
 
-const ASSETS_DIR = path.join(process.cwd(), "data", "assets");
+function assetsDir(): string {
+  return resolveAppDataPath("assets");
+}
 
 export type ResolvedGeneratedVideoFile = {
   assetId: string;
   filePath: string;
+  body: Buffer | null;
   mimeType: string;
   sizeBytes: number;
   asset: AssetRecord;
@@ -32,7 +38,7 @@ export type ResolveGeneratedVideoError = {
 };
 
 function isPathInsideAssetsDir(resolvedPath: string): boolean {
-  const root = path.resolve(ASSETS_DIR);
+  const root = path.resolve(assetsDir());
   const normalized = path.resolve(resolvedPath);
   return (
     normalized === root || normalized.startsWith(root + path.sep)
@@ -190,6 +196,29 @@ export async function resolveGeneratedVideoForServe(params: {
     };
   }
 
+  if (isRemoteDataOnly()) {
+    const blob = await readRemoteAssetFile(assetId);
+    if (!blob) {
+      return { ok: false, status: 404, code: "FILE_MISSING", message: "视频文件不存在" };
+    }
+    if (blob.contentType !== "video/mp4") {
+      return { ok: false, status: 415, code: "UNSUPPORTED_MEDIA_TYPE", message: "Blob 不是允许的视频类型" };
+    }
+    return {
+      ok: true,
+      value: {
+        assetId,
+        filePath: "",
+        body: blob.body,
+        mimeType: blob.contentType,
+        sizeBytes: blob.body.byteLength,
+        asset,
+        isMock,
+        downloadFileName: buildSafeVideoDownloadName({ isMock, shotNumber: params.shotNumber }),
+      },
+    };
+  }
+
   const resolved = await resolveAssetPath(assetId);
   if (!resolved) {
     return {
@@ -236,6 +265,7 @@ export async function resolveGeneratedVideoForServe(params: {
     value: {
       assetId,
       filePath: resolved.filePath,
+      body: null,
       mimeType: "video/mp4",
       sizeBytes,
       asset,

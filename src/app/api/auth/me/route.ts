@@ -1,11 +1,11 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/auth/session";
-import { ensureAdminUser, getUserById } from "@/auth/users";
+import { getUserById } from "@/auth/users";
+import { isRemoteDataServiceError } from "@/persistence/remote-data-client";
 
 export async function GET() {
   try {
-    await ensureAdminUser();
     const jar = await cookies();
     const token = jar.get(SESSION_COOKIE)?.value;
     if (!token) {
@@ -21,6 +21,9 @@ export async function GET() {
     }
     return NextResponse.json({ user });
   } catch (error) {
+    if (isRemoteDataServiceError(error)) {
+      return NextResponse.json({ error: "内网数据服务不可用" }, { status: 503 });
+    }
     const message =
       error instanceof Error ? error.message : "获取登录状态失败";
     return NextResponse.json({ error: message }, { status: 500 });

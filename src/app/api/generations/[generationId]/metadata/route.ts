@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { requireVideoCanvasAccessForGeneration } from "@/auth/require-access";
 import { assertSafeGenerationId } from "@/video-generation/generation-store";
 import { updateGenerationBrowserMetadata } from "@/video-generation/update-browser-metadata";
 import { sanitizeGenerationForClient } from "@/video-generation/secure-transfer";
@@ -20,6 +21,8 @@ const bodySchema = z.object({
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
     const { generationId: rawId } = await context.params;
+    const gated = await requireVideoCanvasAccessForGeneration(rawId);
+    if (!gated.ok) return gated.response;
     const generationId = assertSafeGenerationId(rawId);
     const json: unknown = await request.json();
     const parsed = bodySchema.safeParse(json);

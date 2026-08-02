@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
+import { resolveAppDataPath } from "@/persistence/data-root";
 import {
   clearIdempotencyKeysForTests,
   readGenerationRecord,
@@ -109,7 +110,7 @@ describe("阶段 3D-B1-A 持久化幂等", () => {
 
     for (const id of generationIds.splice(0)) {
       await fs
-        .unlink(path.join(process.cwd(), "data", "generations", `${id}.json`))
+        .unlink(resolveAppDataPath("generations", `${id}.json`))
         .catch(() => undefined);
     }
     resetMockVideoProviderTasks();

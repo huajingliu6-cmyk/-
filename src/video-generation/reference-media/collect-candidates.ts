@@ -1,4 +1,5 @@
 import { HANDLES } from "@/workflow/connection-rules";
+import { parseMentionAssetIds } from "@/workflow/lib/mention-tokens";
 import type {
   AssetRecord,
   CharacterNode,
@@ -363,6 +364,101 @@ export function collectReferenceMediaCandidates(
         disabledReason: check.disabledReason,
       });
     }
+  }
+
+  // 提示词 @素材：未连线的库内素材也可作为参考候选
+  const mentionedIds = parseMentionAssetIds(
+    videoNode.data.generationInstruction || "",
+  );
+  for (const assetId of mentionedIds) {
+    if (seen.has(assetId)) continue;
+    const asset = assetById(document.assets, assetId);
+    if (!asset) {
+      pushCandidate(pool, seen, {
+        assetId,
+        mediaKind: "image",
+        referenceKind: "general",
+        sourceNodeId: videoNode.id,
+        sourceNodeType: videoNode.type,
+        sourceNodeTitle: videoNode.data.title || videoNode.id,
+        label: "提示词引用",
+        fileName: "",
+        mimeType: "",
+        eligible: false,
+        disabledReason: "素材记录缺失",
+      });
+      continue;
+    }
+
+    if (asset.assetType === "audio") continue;
+
+    const mime = (asset.mimeType || "").toLowerCase();
+    const isVideo =
+      asset.assetType === "generatedVideo" ||
+      ALLOWED_REFERENCE_VIDEO_MIME.has(mime);
+
+    if (isVideo) {
+      if (!capability.supportsReferenceVideos) {
+        pushCandidate(pool, seen, {
+          assetId,
+          mediaKind: "video",
+          referenceKind: "referenceVideo",
+          sourceNodeId: videoNode.id,
+          sourceNodeType: videoNode.type,
+          sourceNodeTitle: videoNode.data.title || videoNode.id,
+          label: asset.name || "提示词引用",
+          fileName: asset.originalFileName || asset.name || "",
+          mimeType: asset.mimeType || "",
+          url: asset.url,
+          thumbnailUrl: asset.thumbnailUrl || asset.url,
+          eligible: false,
+          disabledReason: "当前模型不支持参考视频",
+        });
+      } else {
+        const check = evaluateEligibility({
+          asset,
+          mediaKind: "video",
+          projectId: document.projectId,
+        });
+        pushCandidate(pool, seen, {
+          assetId,
+          mediaKind: "video",
+          referenceKind: "referenceVideo",
+          sourceNodeId: videoNode.id,
+          sourceNodeType: videoNode.type,
+          sourceNodeTitle: videoNode.data.title || videoNode.id,
+          label: asset.name || "提示词引用",
+          fileName: asset.originalFileName || asset.name || "",
+          mimeType: asset.mimeType || "",
+          url: asset.url,
+          thumbnailUrl: asset.thumbnailUrl || asset.url,
+          eligible: check.eligible,
+          disabledReason: check.disabledReason,
+        });
+      }
+      continue;
+    }
+
+    const check = evaluateEligibility({
+      asset,
+      mediaKind: "image",
+      projectId: document.projectId,
+    });
+    pushCandidate(pool, seen, {
+      assetId,
+      mediaKind: "image",
+      referenceKind: "general",
+      sourceNodeId: videoNode.id,
+      sourceNodeType: videoNode.type,
+      sourceNodeTitle: videoNode.data.title || videoNode.id,
+      label: asset.name || "提示词引用",
+      fileName: asset.originalFileName || asset.name || "",
+      mimeType: asset.mimeType || "",
+      url: asset.url,
+      thumbnailUrl: asset.thumbnailUrl || asset.url,
+      eligible: check.eligible,
+      disabledReason: check.disabledReason,
+    });
   }
 
   // 当前能力不支持参考图时，标记图片候选不可选（仍保留来源展示）

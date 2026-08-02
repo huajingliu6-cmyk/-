@@ -57,6 +57,7 @@ export type GenerationIdempotencyStore = {
   readonly backendKind: "file-local" | "postgres" | "redis";
 
   reserve(input: ReserveInput): Promise<ReserveOutcome>;
+  reReserveAfterSafeFailure(input: ReserveInput): Promise<IdempotencyRecord>;
   get(
     scope: IdempotencyScope,
     key: string,
@@ -98,4 +99,5 @@ export type GenerationIdempotencyStore = {
     key: string,
     generationId: string,
   ): Promise<boolean>;
+  listAll(): Promise<IdempotencyRecord[]>;
 };

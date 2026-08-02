@@ -1,0 +1,115 @@
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    read_only: true
+    init: true
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      REMOTE_DATA_ONLY: "true"
+      GO_BACKEND_INTERNAL_URL: http://api:8080
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?required}
+      VIDEO_PROVIDER: mock
+      ALLOW_PAID_GENERATION: "false"
+      TEXT_LLM_PROVIDER: mock
+    ports:
+      - "${WEB_PORT:-3080}:3000"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,uid=1001,gid=1001
+      - /app/.next/cache:rw,noexec,nosuid,size=256m,uid=1001,gid=1001
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [edge, internal]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>{if(r.status>=500)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${POSTGRES_DB:?required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  blobstore-init:
+    image: alpine:3.22
+    restart: "no"
+    read_only: true
+    command: ["sh", "-c", "chown -R 65532:65532 /data && chmod 0750 /data"]
+    volumes:
+      - blobstore_data:/data
+    networks: [internal]
+
+  blobstore:
+    build:
+      context: ../backend
+      dockerfile: Blobstore.Dockerfile
+    restart: unless-stopped
+    read_only: true
+    environment:
+      BLOBSTORE_LISTEN_ADDRESS: 0.0.0.0:8090
+      BLOBSTORE_DATA_ROOT: /var/lib/infinite-canvas-blobs
+      BLOBSTORE_INTERNAL_TOKEN: ${BLOBSTORE_INTERNAL_TOKEN:?required}
+    volumes:
+      - blobstore_data:/var/lib/infinite-canvas-blobs
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "/infinite-canvas-blobstore", "healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    depends_on:
+      blobstore-init:
+        condition: service_completed_successfully
+
+  api:
+    build: ../backend
+    restart: unless-stopped
+    read_only: true
+    environment:
+      BACKEND_LISTEN_ADDRESS: 0.0.0.0:8080
+      DATABASE_URL: ${DATABASE_URL:?required}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?required}
+      BLOB_STORAGE_DRIVER: remotefile
+      BLOBSTORE_INTERNAL_URL: http://blobstore:8090
+      BLOBSTORE_INTERNAL_TOKEN: ${BLOBSTORE_INTERNAL_TOKEN:?required}
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      blobstore:
+        condition: service_healthy
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "/infinite-canvas-api", "healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+networks:
+  edge:
+  internal:
+    internal: true
+
+volumes:
+  postgres_data:
+  blobstore_data:

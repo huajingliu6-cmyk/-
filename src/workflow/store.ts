@@ -7,6 +7,15 @@ import type {
   WorkflowViewport,
 } from "./types";
 import { createDefaultWorkflow, DEMO_PROJECT_ID } from "./default-workflow";
+import {
+  canRedoDocumentHistory,
+  canUndoDocumentHistory,
+  createEmptyDocumentHistory,
+  pushDocumentHistory,
+  redoDocumentHistory,
+  undoDocumentHistory,
+  type DocumentHistoryState,
+} from "./lib/document-history";
 
 export type SaveStatus =
   | "loading"
@@ -106,7 +115,37 @@ type WorkflowStore = {
    * 内容变更时钟：标 dirty 时递增；视口平移不递增，避免画布无意义重渲。
    */
   contentEpoch: number;
+  /** 文档级撤销/重做栈（不含视口平移） */
+  documentHistory: DocumentHistoryState;
+  /** 仅 undo/redo 时递增，供画布结构重灌 */
+  historyEpoch: number;
+  undo: () => boolean;
+  redo: () => boolean;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
+  clearDocumentHistory: () => void;
 };
+
+function applyDocumentMutation(
+  get: () => WorkflowStore,
+  set: (
+    partial:
+      | Partial<WorkflowStore>
+      | ((state: WorkflowStore) => Partial<WorkflowStore>),
+  ) => void,
+  nextDocument: WorkflowDocument,
+  extras: Partial<WorkflowStore> = {},
+) {
+  const state = get();
+  set({
+    document: nextDocument,
+    documentHistory: pushDocumentHistory(state.documentHistory, state.document),
+    saveStatus: "dirty",
+    saveError: null,
+    contentEpoch: state.contentEpoch + 1,
+    ...extras,
+  });
+}
 
 export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   projectId: DEMO_PROJECT_ID,
@@ -119,6 +158,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   connectionError: null,
   saveEpoch: 0,
   contentEpoch: 0,
+  documentHistory: createEmptyDocumentHistory(),
+  historyEpoch: 0,
 
   setProjectId: (id) => set({ projectId: id }),
 
@@ -129,6 +170,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       saveStatus: status,
       saveError: null,
       loadError: null,
+      documentHistory: createEmptyDocumentHistory(),
     }),
 
   acknowledgeSave: (revision, updatedAt) => {
@@ -149,33 +191,28 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   setNodes: (nodes) => {
-    const { document, saveEpoch, contentEpoch } = get();
-    set({
-      document: {
+    const { document, saveEpoch } = get();
+    applyDocumentMutation(
+      get,
+      set,
+      {
         ...document,
         nodes,
         shotOrder: pruneShotOrder(document.shotOrder, nodes),
       },
-      saveStatus: "dirty",
-      saveError: null,
-      saveEpoch: saveEpoch + 1,
-      contentEpoch: contentEpoch + 1,
-    });
+      { saveEpoch: saveEpoch + 1 },
+    );
   },
 
   setEdges: (edges) => {
-    const { document, saveEpoch, contentEpoch } = get();
-    set({
-      document: { ...document, edges },
-      saveStatus: "dirty",
-      saveError: null,
+    const { document, saveEpoch } = get();
+    applyDocumentMutation(get, set, { ...document, edges }, {
       saveEpoch: saveEpoch + 1,
-      contentEpoch: contentEpoch + 1,
     });
   },
 
   replaceGraph: (nodes, edges, options) => {
-    const { document, saveEpoch, contentEpoch } = get();
+    const { document, saveEpoch } = get();
     const persist = options?.persist !== false;
     const immediate = options?.immediate !== false;
     const prevById = new Map(document.nodes.map((n) => [n.id, n]));
@@ -216,34 +253,29 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       shotOrder: pruneShotOrder(document.shotOrder, nextNodes),
     };
 
-    // 仅布局（拖动节点）：写入内存，不 dirty、不自动保存
+    // 仅布局（拖动节点）：写入内存，不 dirty、不自动保存、不进历史
     if (!persist) {
       set({ document: nextDocument });
       return;
     }
 
-    set({
-      document: nextDocument,
-      saveStatus: "dirty",
-      saveError: null,
-      contentEpoch: contentEpoch + 1,
+    applyDocumentMutation(get, set, nextDocument, {
       ...(immediate ? { saveEpoch: saveEpoch + 1 } : {}),
     });
   },
 
   removeEdge: (edgeId) => {
-    const { document, saveEpoch, contentEpoch } = get();
+    const { document, saveEpoch } = get();
     if (!document.edges.some((e) => e.id === edgeId)) return;
-    set({
-      document: {
+    applyDocumentMutation(
+      get,
+      set,
+      {
         ...document,
         edges: document.edges.filter((e) => e.id !== edgeId),
       },
-      saveStatus: "dirty",
-      saveError: null,
-      saveEpoch: saveEpoch + 1,
-      contentEpoch: contentEpoch + 1,
-    });
+      { saveEpoch: saveEpoch + 1 },
+    );
   },
 
   setViewport: (viewport) => {
@@ -263,7 +295,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   updateNodeData: (nodeId, data) => {
-    const { document, contentEpoch } = get();
+    const { document } = get();
     const target = document.nodes.find((node) => node.id === nodeId);
     if (!target) return;
 
@@ -285,12 +317,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         data: { ...node.data, ...data },
       } as WorkflowNode;
     });
-    set({
-      document: { ...document, nodes },
-      saveStatus: "dirty",
-      saveError: null,
+    applyDocumentMutation(get, set, { ...document, nodes }, {
       lastEditedNodeId: nodeId,
-      contentEpoch: contentEpoch + 1,
     });
   },
 
@@ -329,7 +357,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   commitNodeAssets: (nodeId, assets, data) => {
-    const { document, contentEpoch } = get();
+    const { document, saveEpoch } = get();
     const map = new Map(document.assets.map((asset) => [asset.id, asset]));
     for (const asset of assets) {
       map.set(asset.id, asset);
@@ -341,134 +369,124 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         data: { ...node.data, ...data },
       } as WorkflowNode;
     });
-    set({
-      document: {
+    applyDocumentMutation(
+      get,
+      set,
+      {
         ...document,
         assets: Array.from(map.values()),
         nodes,
       },
-      saveStatus: "dirty",
-      saveError: null,
-      lastEditedNodeId: nodeId,
-      saveEpoch: get().saveEpoch + 1,
-      contentEpoch: contentEpoch + 1,
-    });
+      {
+        lastEditedNodeId: nodeId,
+        saveEpoch: saveEpoch + 1,
+      },
+    );
   },
 
   addNode: (node) => {
-    const { document, contentEpoch } = get();
+    const { document } = get();
     const shotOrder =
       node.type === "videoShot"
         ? appendVideoShotsToOrder(document.shotOrder, [node])
         : document.shotOrder;
-    set({
-      document: {
+    applyDocumentMutation(
+      get,
+      set,
+      {
         ...document,
         nodes: [...document.nodes, node],
         shotOrder,
       },
-      saveStatus: "dirty",
-      saveError: null,
-      selectedNodeId: node.id,
-      lastEditedNodeId: node.id,
-      contentEpoch: contentEpoch + 1,
-    });
+      {
+        selectedNodeId: node.id,
+        lastEditedNodeId: node.id,
+      },
+    );
   },
 
   addNodesAndEdges: (nodes, edges) => {
-    const { document, contentEpoch } = get();
+    const { document } = get();
     const focusId = nodes[0]?.id ?? get().selectedNodeId;
-    set({
-      document: {
+    applyDocumentMutation(
+      get,
+      set,
+      {
         ...document,
         nodes: [...document.nodes, ...nodes],
         edges: [...document.edges, ...edges],
         shotOrder: appendVideoShotsToOrder(document.shotOrder, nodes),
       },
-      saveStatus: "dirty",
-      saveError: null,
-      selectedNodeId: focusId,
-      lastEditedNodeId: nodes[0]?.id ?? get().lastEditedNodeId,
-      // 走防抖保存，避免连点新建时每次都立刻 PUT 造成闪烁
-      contentEpoch: contentEpoch + 1,
-    });
+      {
+        selectedNodeId: focusId,
+        lastEditedNodeId: nodes[0]?.id ?? get().lastEditedNodeId,
+      },
+    );
   },
 
   addAsset: (asset) => {
-    const { document, saveEpoch, contentEpoch } = get();
+    const { document, saveEpoch } = get();
     const exists = document.assets.some((a) => a.id === asset.id);
-    set({
-      document: {
+    applyDocumentMutation(
+      get,
+      set,
+      {
         ...document,
         assets: exists
           ? document.assets.map((a) => (a.id === asset.id ? asset : a))
           : [...document.assets, asset],
       },
-      saveStatus: "dirty",
-      saveError: null,
-      saveEpoch: saveEpoch + 1,
-      contentEpoch: contentEpoch + 1,
-    });
+      { saveEpoch: saveEpoch + 1 },
+    );
   },
 
   addAssets: (assets) => {
     if (assets.length === 0) return;
-    const { document, saveEpoch, contentEpoch } = get();
+    const { document, saveEpoch } = get();
     const map = new Map(document.assets.map((a) => [a.id, a]));
     for (const asset of assets) {
       map.set(asset.id, asset);
     }
-    set({
-      document: {
+    applyDocumentMutation(
+      get,
+      set,
+      {
         ...document,
         assets: Array.from(map.values()),
       },
-      saveStatus: "dirty",
-      saveError: null,
-      saveEpoch: saveEpoch + 1,
-      contentEpoch: contentEpoch + 1,
-    });
+      { saveEpoch: saveEpoch + 1 },
+    );
   },
 
   updateAsset: (assetId, patch) => {
-    const { document, contentEpoch } = get();
-    set({
-      document: {
-        ...document,
-        assets: document.assets.map((asset) =>
-          asset.id === assetId
-            ? { ...asset, ...patch, updatedAt: new Date().toISOString() }
-            : asset,
-        ),
-      },
-      saveStatus: "dirty",
-      saveError: null,
-      contentEpoch: contentEpoch + 1,
+    const { document } = get();
+    applyDocumentMutation(get, set, {
+      ...document,
+      assets: document.assets.map((asset) =>
+        asset.id === assetId
+          ? { ...asset, ...patch, updatedAt: new Date().toISOString() }
+          : asset,
+      ),
     });
   },
 
   removeAsset: (assetId) => {
-    const { document, saveEpoch, contentEpoch } = get();
-    set({
-      document: {
+    const { document, saveEpoch } = get();
+    applyDocumentMutation(
+      get,
+      set,
+      {
         ...document,
         assets: document.assets.filter((a) => a.id !== assetId),
       },
-      saveStatus: "dirty",
-      saveError: null,
-      saveEpoch: saveEpoch + 1,
-      contentEpoch: contentEpoch + 1,
-    });
+      { saveEpoch: saveEpoch + 1 },
+    );
   },
 
   setShotOrder: (shotOrder) => {
-    const { document, saveEpoch, contentEpoch } = get();
-    set({
-      document: { ...document, shotOrder },
-      saveStatus: "dirty",
-      saveError: null,
+    const { document, saveEpoch } = get();
+    applyDocumentMutation(get, set, { ...document, shotOrder }, {
       saveEpoch: saveEpoch + 1,
-      contentEpoch: contentEpoch + 1,
     });
   },
 
@@ -500,4 +518,43 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           ? state.contentEpoch
           : state.contentEpoch + 1,
     })),
+
+  undo: () => {
+    const state = get();
+    const result = undoDocumentHistory(state.documentHistory, state.document);
+    if (!result) return false;
+    set({
+      document: result.document,
+      documentHistory: result.history,
+      saveStatus: "dirty",
+      saveError: null,
+      contentEpoch: state.contentEpoch + 1,
+      historyEpoch: state.historyEpoch + 1,
+      selectedNodeId: null,
+    });
+    return true;
+  },
+
+  redo: () => {
+    const state = get();
+    const result = redoDocumentHistory(state.documentHistory, state.document);
+    if (!result) return false;
+    set({
+      document: result.document,
+      documentHistory: result.history,
+      saveStatus: "dirty",
+      saveError: null,
+      contentEpoch: state.contentEpoch + 1,
+      historyEpoch: state.historyEpoch + 1,
+      selectedNodeId: null,
+    });
+    return true;
+  },
+
+  canUndo: () => canUndoDocumentHistory(get().documentHistory),
+
+  canRedo: () => canRedoDocumentHistory(get().documentHistory),
+
+  clearDocumentHistory: () =>
+    set({ documentHistory: createEmptyDocumentHistory() }),
 }));

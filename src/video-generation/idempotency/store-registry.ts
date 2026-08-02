@@ -1,5 +1,7 @@
 import type { GenerationIdempotencyStore } from "./types";
 import { FileGenerationIdempotencyStore } from "./file-store";
+import { isRemoteDataOnly } from "@/persistence/remote-data-client";
+import { RemoteGenerationIdempotencyStore } from "./remote-store";
 
 export {
   IDEMPOTENCY_RECORD_TTL_MS,
@@ -14,7 +16,9 @@ type StoreGlobal = typeof globalThis & {
 export function getIdempotencyStore(): GenerationIdempotencyStore {
   const g = StoreGlobal();
   if (!g.__infiniteCanvasIdempotencyStore) {
-    g.__infiniteCanvasIdempotencyStore = new FileGenerationIdempotencyStore();
+    g.__infiniteCanvasIdempotencyStore = isRemoteDataOnly()
+      ? new RemoteGenerationIdempotencyStore()
+      : new FileGenerationIdempotencyStore();
   }
   return g.__infiniteCanvasIdempotencyStore;
 }

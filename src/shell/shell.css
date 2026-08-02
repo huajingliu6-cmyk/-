@@ -1,0 +1,725 @@
+/* 公共顶部导航 + 登录穿梭转场（挂在 shell 组件） */
+
+.shell-header {
+  --shell-header-h: 68px;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  height: var(--shell-header-h);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(7, 8, 16, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: #f4f1ff;
+}
+
+.shell-header__inner {
+  margin: 0 auto;
+  display: flex;
+  height: 100%;
+  max-width: 1400px;
+  align-items: center;
+  gap: 12px;
+  padding: 0 24px;
+}
+
+@media (min-width: 1280px) {
+  .shell-header__inner {
+    padding: 0 32px;
+  }
+}
+
+.shell-back {
+  display: inline-flex;
+  height: 40px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0 12px;
+  color: rgba(244, 241, 255, 0.88);
+  font-size: 13px;
+  font-weight: 500;
+  backdrop-filter: blur(12px) saturate(125%);
+  -webkit-backdrop-filter: blur(12px) saturate(125%);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.shell-back:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(167, 139, 250, 0.35);
+  transform: translateY(-1px);
+}
+
+.shell-back:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.9);
+  outline-offset: 2px;
+}
+
+.shell-back.is-bounce {
+  animation: shell-chip-bounce 0.28s cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+
+.shell-back__label {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .shell-back__label {
+    display: inline;
+  }
+}
+
+.shell-back-divider {
+  width: 1px;
+  height: 22px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.12);
+  margin-right: 2px;
+}
+
+.shell-brand {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.shell-brand__name {
+  display: none;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+@media (min-width: 640px) {
+  .shell-brand__name {
+    display: inline;
+  }
+}
+
+/* 统一顶部控件回弹 */
+@keyframes shell-chip-bounce {
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(0.96);
+  }
+  65% {
+    transform: scale(1.03);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.shell-chip {
+  display: inline-flex;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 12px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 500;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease,
+    color 0.2s ease;
+}
+
+.shell-chip:hover {
+  transform: translateY(-1px);
+}
+
+.shell-chip:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.9);
+  outline-offset: 2px;
+}
+
+.shell-chip.is-bounce {
+  animation: shell-chip-bounce 0.28s cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+
+.shell-chip--glass {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(244, 241, 255, 0.9);
+  backdrop-filter: blur(12px) saturate(125%);
+  -webkit-backdrop-filter: blur(12px) saturate(125%);
+}
+
+.shell-chip--glass:hover {
+  background: rgba(255, 255, 255, 0.11);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.shell-chip--guide {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(12, 14, 28, 0.45);
+  color: rgba(244, 241, 255, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.shell-chip--guide:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.shell-chip--login {
+  border: none;
+  background: linear-gradient(
+    120deg,
+    #7c3aed 0%,
+    #db2777 50%,
+    #2563eb 100%
+  );
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(168, 85, 247, 0.32);
+}
+
+.shell-chip--login:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 10px 28px rgba(236, 72, 153, 0.35);
+}
+
+.shell-credits {
+  min-width: 14.5rem;
+  justify-content: flex-start;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.shell-credits__sep {
+  color: rgba(255, 255, 255, 0.28);
+  font-weight: 500;
+}
+
+.shell-credits__value--frozen {
+  color: rgba(251, 191, 36, 0.92);
+}
+
+.shell-credits--btn:hover {
+  border-color: rgba(167, 139, 250, 0.35);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.12);
+}
+
+.shell-credits__label {
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 500;
+}
+
+.shell-credits__value {
+  color: #e9d5ff;
+  font-weight: 600;
+}
+
+.shell-credits__value--muted {
+  color: rgba(255, 255, 255, 0.45);
+  font-weight: 500;
+}
+
+.shell-credits__skeleton {
+  display: inline-block;
+  height: 12px;
+  width: 3.5rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.shell-nav {
+  display: none;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+@media (min-width: 1024px) {
+  .shell-nav {
+    display: flex;
+  }
+}
+
+.shell-nav__item {
+  position: relative;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 13px;
+  text-decoration: none;
+  transition:
+    color 0.2s ease,
+    transform 0.2s ease,
+    background 0.2s ease;
+  border-radius: 10px;
+}
+
+.shell-nav__item:hover {
+  color: rgba(255, 255, 255, 0.92);
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.shell-nav__item:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.9);
+  outline-offset: 2px;
+}
+
+.shell-nav__item.is-active {
+  color: #fff;
+}
+
+.shell-nav__item.is-active::after {
+  content: "";
+  position: absolute;
+  left: 15%;
+  right: 15%;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #a78bfa, #ec4899, #38bdf8);
+  box-shadow: 0 0 10px rgba(167, 139, 250, 0.35);
+}
+
+.shell-nav__item.is-bounce {
+  animation: shell-chip-bounce 0.28s cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+
+.shell-account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.shell-account--end {
+  margin-left: auto;
+}
+
+.shell-notification {
+  position: relative;
+}
+
+.shell-notification__btn {
+  position: relative;
+  display: inline-flex;
+  height: 40px;
+  width: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+}
+
+.shell-notification__badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #c45c5c;
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.shell-notification__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: min(360px, 86vw);
+  max-height: 420px;
+  overflow: auto;
+  z-index: 80;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(12, 14, 24, 0.98);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.shell-notification__panel-head {
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.shell-notification__empty {
+  margin: 0;
+  padding: 16px;
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.shell-notification__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.shell-notification__row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.shell-notification__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 36px 10px 12px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.shell-notification__delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+}
+
+.shell-notification__delete:hover {
+  background: rgba(196, 92, 92, 0.35);
+  color: #fff;
+}
+
+.shell-notification__item.is-unread {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.shell-notification__item strong {
+  font-size: 13px;
+}
+
+.shell-notification__item span {
+  font-size: 12px;
+  opacity: 0.8;
+  line-height: 1.4;
+}
+
+.shell-notification__time {
+  opacity: 0.55 !important;
+}
+
+/* 模块内容区：轻量进入（Header 不参与） */
+.shell-outlet--enter {
+  animation: shell-outlet-in 0.22s ease-out both;
+}
+
+@keyframes shell-outlet-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.shell-portal-blank {
+  background: #070811;
+}
+
+.shell-avatar {
+  display: flex;
+  height: 40px;
+  align-items: center;
+  gap: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  padding: 0 10px 0 6px;
+  color: rgba(244, 241, 255, 0.92);
+  backdrop-filter: blur(12px) saturate(125%);
+  -webkit-backdrop-filter: blur(12px) saturate(125%);
+}
+
+/* 与 chip 回弹一致，避免 is-bounce 无动画导致 class 卡住 */
+.shell-avatar.is-bounce {
+  animation: shell-chip-bounce 0.28s cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+
+.shell-avatar__mark {
+  display: flex;
+  height: 28px;
+  width: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #8b5cf6, #ec4899);
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+}
+
+/* —— 登录穿梭转场 —— */
+.login-portal {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+  perspective: 1200px;
+}
+
+.login-portal.is-active {
+  pointer-events: all;
+}
+
+.login-portal__stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: rgba(7, 8, 17, 0.2);
+}
+
+.login-portal__ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(40vw, 280px);
+  height: min(40vw, 280px);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0.2);
+  opacity: 0;
+  filter: blur(8px);
+  pointer-events: none;
+  background: radial-gradient(
+    circle,
+    rgba(167, 139, 250, 0.55) 0%,
+    rgba(236, 72, 153, 0.28) 40%,
+    rgba(56, 189, 248, 0.12) 65%,
+    transparent 72%
+  );
+  box-shadow: 0 0 40px rgba(124, 58, 237, 0.35);
+}
+
+.login-portal__ring--2 {
+  background: radial-gradient(
+    circle,
+    rgba(236, 72, 153, 0.45) 0%,
+    rgba(124, 58, 237, 0.2) 45%,
+    transparent 70%
+  );
+}
+
+.login-portal__ring--3 {
+  background: radial-gradient(
+    circle,
+    rgba(56, 189, 248, 0.4) 0%,
+    rgba(167, 139, 250, 0.18) 50%,
+    transparent 72%
+  );
+}
+
+.login-portal__ring--4 {
+  background: conic-gradient(
+    from 120deg,
+    rgba(138, 63, 252, 0.35),
+    rgba(255, 59, 141, 0.28),
+    rgba(52, 120, 255, 0.3),
+    rgba(138, 63, 252, 0.35)
+  );
+  filter: blur(14px);
+}
+
+.login-portal__vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse 55% 50% at 50% 50%,
+    transparent 20%,
+    rgba(7, 8, 17, 0.55) 70%,
+    rgba(7, 8, 17, 0.92) 100%
+  );
+  opacity: 0;
+}
+
+.login-portal.is-exit .login-portal__ring {
+  animation: login-portal-ring-out 0.56s ease-out forwards;
+}
+
+.login-portal.is-exit .login-portal__ring--2 {
+  animation-delay: 0.05s;
+}
+
+.login-portal.is-exit .login-portal__ring--3 {
+  animation-delay: 0.1s;
+}
+
+.login-portal.is-exit .login-portal__ring--4 {
+  animation-delay: 0.02s;
+}
+
+.login-portal.is-exit .login-portal__vignette {
+  animation: login-portal-fade-in 0.5s ease-out forwards;
+}
+
+.login-portal.is-enter .login-portal__ring {
+  animation: login-portal-ring-in 0.55s ease-out forwards;
+}
+
+.login-portal.is-enter .login-portal__vignette {
+  animation: login-portal-fade-out 0.55s ease-out forwards;
+  opacity: 1;
+}
+
+@keyframes login-portal-ring-out {
+  0% {
+    opacity: 0.2;
+    transform: translate(-50%, -50%) scale(0.2);
+  }
+  35% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(8);
+  }
+}
+
+@keyframes login-portal-ring-in {
+  0% {
+    opacity: 0.55;
+    transform: translate(-50%, -50%) scale(6);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.4);
+  }
+}
+
+@keyframes login-portal-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes login-portal-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* 页面钻入 / 出现（作用于应用根容器，不影响转场遮罩） */
+html.login-portal-exit .shell-app-root {
+  animation: login-portal-page-exit 0.56s ease-in forwards;
+  transform-origin: 50% 45%;
+}
+
+html.login-portal-enter .shell-app-root {
+  animation: login-portal-page-enter 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: 50% 45%;
+}
+
+@keyframes login-portal-page-exit {
+  from {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.12);
+    filter: blur(8px);
+  }
+}
+
+@keyframes login-portal-page-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.91);
+    filter: blur(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+}
+
+html.login-portal-lock,
+html.login-portal-lock body {
+  overflow: hidden !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-chip:hover,
+  .shell-nav__item:hover {
+    transform: none;
+  }
+
+  .shell-chip.is-bounce,
+  .shell-nav__item.is-bounce,
+  .shell-back.is-bounce,
+  .shell-avatar.is-bounce,
+  .shell-outlet--enter {
+    animation: none !important;
+  }
+
+  .shell-back:hover {
+    transform: none;
+  }
+
+  .login-portal__ring,
+  .login-portal__vignette,
+  html.login-portal-exit .shell-app-root,
+  html.login-portal-enter .shell-app-root {
+    animation: none !important;
+  }
+
+  html.login-portal-exit .shell-app-root {
+    opacity: 0;
+    transition: opacity 0.18s ease;
+  }
+
+  html.login-portal-enter .shell-app-root {
+    opacity: 1;
+    transition: opacity 0.2s ease;
+  }
+}

@@ -1,0 +1,608 @@
+// Batch A — formal persistence foundation (PostgreSQL + Prisma Migrate)
+// Project is the root container (rootFolderId === projectId); no ProjectFolder table.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  admin
+  user
+}
+
+enum UserStatus {
+  active
+  disabled
+}
+
+enum ProjectCreationSource {
+  story
+  script_upload
+}
+
+enum ProjectMode {
+  canvas
+  full_stack
+}
+
+enum ProjectLifecycleStatus {
+  draft
+  active
+  archived
+}
+
+enum ProjectStage {
+  story_creation
+  script_processing
+  asset_management
+  storyboard
+  workspace
+}
+
+enum ProjectMemberRole {
+  owner
+  editor
+  viewer
+}
+
+enum ProjectDocumentType {
+  story_brief
+  story_output
+  original_script
+  original_novel
+  converted_script
+  corrected_script
+  script_episode
+}
+
+enum ProjectDocumentStatus {
+  draft
+  ready
+  archived
+}
+
+enum DocumentVersionSource {
+  autosave
+  manual
+  ai_generation
+}
+
+enum TextOutputKind {
+  story
+  script
+}
+
+enum ScriptGenerationMode {
+  discuss_outline
+  direct_episode
+}
+
+enum GenerationStatus {
+  idle
+  queued
+  running
+  completed
+  failed
+  cancelled
+}
+
+enum ScriptEpisodeStatus {
+  draft
+  editing
+  saved
+}
+
+enum ProjectFilePurpose {
+  original_script
+  original_novel
+  converted_script
+  exported_document
+  audio_asset
+  image_asset
+  video_asset
+  workflow_asset
+}
+
+enum ProjectFileStatus {
+  pending
+  ready
+  failed
+  deleted
+}
+
+enum StorageDriver {
+  local
+  aliyun_oss
+}
+
+enum NovelConversionStatus {
+  uploaded
+  queued
+  processing
+  completed
+  failed
+  cancelled
+}
+
+enum AssetStatus {
+  draft
+  completed
+  pending
+}
+
+enum AudioAssetType {
+  music
+  sfx
+  narration
+}
+
+enum CreditLedgerType {
+  reserve
+  charge
+  release
+  topup
+  adjust
+  legacy_opening_balance
+}
+
+enum RechargeOrderStatus {
+  pending
+  paid
+  closed
+  refunded
+  failed
+}
+
+model User {
+  id           String     @id
+  username     String     @unique
+  displayName  String
+  email        String?
+  avatar       String?
+  role         UserRole
+  status       UserStatus @default(active)
+  passwordHash String
+  passwordSalt String
+  createdAt    DateTime
+  updatedAt    DateTime
+
+  ownedProjects      Project[]              @relation("ProjectOwner")
+  memberships        ProjectMember[]
+  creationDrafts     ProjectCreationDraft[]
+  creditAccount      CreditAccount?
+  rechargeOrders     RechargeOrder[]
+  uploadedFiles      ProjectFile[]          @relation("FileUploader")
+  createdDocuments   ProjectDocument[]      @relation("DocumentCreator")
+  updatedDocuments   ProjectDocument[]      @relation("DocumentUpdater")
+  createdVersions    DocumentVersion[]      @relation("VersionCreator")
+  createdEpisodes    ScriptEpisode[]        @relation("EpisodeCreator")
+  updatedEpisodes    ScriptEpisode[]        @relation("EpisodeUpdater")
+  createdCharacters  CharacterAsset[]       @relation("CharacterCreator")
+  updatedCharacters  CharacterAsset[]       @relation("CharacterUpdater")
+  createdScenes      SceneAsset[]           @relation("SceneCreator")
+  updatedScenes      SceneAsset[]           @relation("SceneUpdater")
+  createdProps       PropAsset[]            @relation("PropCreator")
+  updatedProps       PropAsset[]            @relation("PropUpdater")
+  createdAudios      AudioAsset[]           @relation("AudioCreator")
+  updatedAudios      AudioAsset[]           @relation("AudioUpdater")
+  novelTasks         NovelConversionTask[]
+  generations        GenerationRecord[]
+
+  @@index([updatedAt])
+}
+
+model Project {
+  id                     String                 @id
+  ownerId                String
+  /// Reserved for future workspace/team; unused in Batch A
+  workspaceId            String?
+  name                   String
+  passwordEnabled        Boolean                @default(false)
+  passwordHash           String?
+  passwordSalt           String?
+  highlights             String                 @default("")
+  creationSource         ProjectCreationSource
+  projectMode            ProjectMode
+  status                 ProjectLifecycleStatus @default(draft)
+  currentStage           ProjectStage
+  revision               Int                    @default(1)
+  creationIdempotencyKey String?                @unique
+  rootFolderId           String
+  createdAt              DateTime
+  updatedAt              DateTime
+
+  owner              User                   @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  members            ProjectMember[]
+  documents          ProjectDocument[]
+  storyState         StoryWorkspaceState?
+  episodes           ScriptEpisode[]
+  files              ProjectFile[]
+  novelTasks         NovelConversionTask[]
+  characters         CharacterAsset[]
+  scenes             SceneAsset[]
+  props              PropAsset[]
+  audios             AudioAsset[]
+  workflowDocument   WorkflowDocument?
+  generations        GenerationRecord[]
+  creditLedgerEntries CreditLedgerEntry[]
+
+  @@index([ownerId])
+  @@index([updatedAt])
+  @@index([currentStage])
+}
+
+model ProjectMember {
+  id        String            @id
+  projectId String
+  userId    String
+  role      ProjectMemberRole
+  createdAt DateTime
+  updatedAt DateTime
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+model ProjectCreationDraft {
+  id              String                @id @default(cuid())
+  userId          String
+  workspaceId     String                @default("default")
+  creationSource  ProjectCreationSource
+  projectName     String                @default("")
+  projectKeyPoints String               @default("")
+  projectMode     ProjectMode
+  updatedAt       DateTime              @updatedAt
+  createdAt       DateTime              @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+}
+
+model ProjectDocument {
+  id             String                @id
+  projectId      String
+  /// Logical folder id (equals project.rootFolderId today); not a separate table
+  folderId       String?
+  type           ProjectDocumentType
+  title          String                @default("")
+  content        String                @default("")
+  status         ProjectDocumentStatus @default(draft)
+  revision       Int                   @default(1)
+  currentVersion Int                   @default(0)
+  createdBy      String
+  updatedBy      String
+  createdAt      DateTime
+  updatedAt      DateTime
+
+  project  Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creator  User              @relation("DocumentCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  updater  User              @relation("DocumentUpdater", fields: [updatedBy], references: [id], onDelete: Restrict)
+  versions DocumentVersion[]
+  episodes ScriptEpisode[]   @relation("EpisodeSourceDocument")
+  novelResults NovelConversionTask[] @relation("NovelResultDocument")
+  generations GenerationRecord[]
+
+  @@index([projectId, type])
+  @@index([updatedAt])
+}
+
+model DocumentVersion {
+  id           String                @id @default(cuid())
+  documentId   String
+  version      Int
+  content      String
+  source       DocumentVersionSource
+  modelKey     String?
+  inputTokens  Int?
+  outputTokens Int?
+  pointsCost   BigInt?
+  createdBy    String
+  createdAt    DateTime
+
+  document ProjectDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  creator  User            @relation("VersionCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+
+  @@unique([documentId, version])
+}
+
+model StoryWorkspaceState {
+  id                   String                 @id @default(cuid())
+  projectId            String                 @unique
+  brief                String                 @default("")
+  outputKind           TextOutputKind         @default(story)
+  modelKey             String                 @default("")
+  targetChars          Int                    @default(800)
+  scriptGenerationMode ScriptGenerationMode?
+  perEpisodeChars      Int?
+  currentDocumentId    String?
+  resultText           String                 @default("")
+  generationStatus     GenerationStatus       @default(idle)
+  revision             Int                    @default(1)
+  createdAt            DateTime
+  updatedAt            DateTime
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model ScriptEpisode {
+  id               String              @id
+  projectId        String
+  sourceDocumentId String?
+  episodeNumber    Int
+  title            String              @default("")
+  content          String              @default("")
+  wordCount        Int                 @default(0)
+  status           ScriptEpisodeStatus @default(draft)
+  revision         Int                 @default(1)
+  createdBy        String
+  updatedBy        String
+  createdAt        DateTime
+  updatedAt        DateTime
+
+  project        Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceDocument ProjectDocument? @relation("EpisodeSourceDocument", fields: [sourceDocumentId], references: [id], onDelete: SetNull)
+  creator        User             @relation("EpisodeCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  updater        User             @relation("EpisodeUpdater", fields: [updatedBy], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, episodeNumber])
+  @@index([projectId, episodeNumber])
+}
+
+model ProjectFile {
+  id           String             @id
+  projectId    String
+  folderId     String?
+  purpose      ProjectFilePurpose
+  originalName String
+  mimeType     String
+  extension    String
+  size         BigInt
+  storageDriver StorageDriver
+  storageKey   String
+  checksum     String?
+  status       ProjectFileStatus  @default(pending)
+  uploadedBy   String
+  createdAt    DateTime
+  updatedAt    DateTime
+  deletedAt    DateTime?
+
+  project     Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  uploader    User                  @relation("FileUploader", fields: [uploadedBy], references: [id], onDelete: Restrict)
+  novelTasks  NovelConversionTask[]
+  audioAssets AudioAsset[]
+
+  @@index([projectId, purpose])
+  @@index([storageKey])
+  @@index([status])
+}
+
+model NovelConversionTask {
+  id               String                @id
+  projectId        String
+  sourceFileId     String
+  resultDocumentId String?
+  status           NovelConversionStatus @default(uploaded)
+  errorCode        String?
+  createdBy        String
+  createdAt        DateTime
+  startedAt        DateTime?
+  completedAt      DateTime?
+
+  project        Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceFile     ProjectFile      @relation(fields: [sourceFileId], references: [id], onDelete: Restrict)
+  resultDocument ProjectDocument? @relation("NovelResultDocument", fields: [resultDocumentId], references: [id], onDelete: SetNull)
+  creator        User             @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+
+  @@index([projectId, status])
+}
+
+model VoiceProfile {
+  id              String   @id @default(cuid())
+  publicKey       String   @unique
+  displayName     String
+  providerKey     String
+  providerVoiceId String
+  style           String
+  enabled         Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  characters CharacterAsset[]
+}
+
+model CharacterAsset {
+  id             String      @id
+  projectId      String
+  name           String
+  roleType       String      @default("")
+  description    String      @default("")
+  appearance     String      @default("")
+  costume        String      @default("")
+  ageText        String      @default("")
+  gender         String      @default("")
+  status         AssetStatus @default(draft)
+  voiceProfileId String?
+  revision       Int         @default(1)
+  createdBy      String
+  updatedBy      String
+  createdAt      DateTime
+  updatedAt      DateTime
+
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  voiceProfile VoiceProfile? @relation(fields: [voiceProfileId], references: [id], onDelete: SetNull)
+  creator      User          @relation("CharacterCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  updater      User          @relation("CharacterUpdater", fields: [updatedBy], references: [id], onDelete: Restrict)
+
+  @@index([projectId])
+}
+
+model SceneAsset {
+  id          String      @id
+  projectId   String
+  name        String
+  sceneType   String      @default("")
+  description String      @default("")
+  timeOfDay   String      @default("")
+  location    String      @default("")
+  visualStyle String      @default("")
+  status      AssetStatus @default(draft)
+  revision    Int         @default(1)
+  createdBy   String
+  updatedBy   String
+  createdAt   DateTime
+  updatedAt   DateTime
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creator User    @relation("SceneCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  updater User    @relation("SceneUpdater", fields: [updatedBy], references: [id], onDelete: Restrict)
+
+  @@index([projectId])
+}
+
+model PropAsset {
+  id          String      @id
+  projectId   String
+  name        String
+  propType    String      @default("")
+  purpose     String      @default("")
+  description String      @default("")
+  status      AssetStatus @default(draft)
+  revision    Int         @default(1)
+  createdBy   String
+  updatedBy   String
+  createdAt   DateTime
+  updatedAt   DateTime
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creator User    @relation("PropCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  updater User    @relation("PropUpdater", fields: [updatedBy], references: [id], onDelete: Restrict)
+
+  @@index([projectId])
+}
+
+model AudioAsset {
+  id         String         @id
+  projectId  String
+  fileId     String?
+  name       String
+  audioType  AudioAssetType
+  durationMs Int?
+  source     String         @default("")
+  status     AssetStatus    @default(draft)
+  revision   Int            @default(1)
+  createdBy  String
+  updatedBy  String
+  createdAt  DateTime
+  updatedAt  DateTime
+
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  file    ProjectFile? @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  creator User         @relation("AudioCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  updater User         @relation("AudioUpdater", fields: [updatedBy], references: [id], onDelete: Restrict)
+
+  @@index([projectId])
+}
+
+model WorkflowDocument {
+  id            String   @id @default(cuid())
+  projectId     String   @unique
+  schemaVersion Int
+  content       Json
+  revision      Int      @default(1)
+  createdAt     DateTime
+  updatedAt     DateTime
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model GenerationRecord {
+  id              String           @id
+  projectId       String
+  documentId      String?
+  generationType  String
+  modelKey        String
+  providerModel   String           @default("")
+  inputSnapshot   String           @default("")
+  outputContent   String           @default("")
+  requestedChars  Int?
+  actualChars     Int?
+  inputTokens     Int?
+  outputTokens    Int?
+  pointsReserved  BigInt           @default(0)
+  pointsCharged   BigInt           @default(0)
+  status          GenerationStatus
+  idempotencyKey  String           @unique
+  createdBy       String
+  createdAt       DateTime
+  completedAt     DateTime?
+
+  project  Project          @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  document ProjectDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  creator  User             @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  ledgerEntries CreditLedgerEntry[]
+
+  @@index([projectId, createdAt])
+}
+
+model CreditAccount {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  balance         BigInt   @default(0)
+  reservedBalance BigInt   @default(0)
+  revision        Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user    User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  entries CreditLedgerEntry[]
+}
+
+model CreditLedgerEntry {
+  id               String           @id
+  accountId        String
+  type             CreditLedgerType
+  amount           BigInt
+  balanceAfter     BigInt
+  projectId        String?
+  generationId     String?
+  rechargeOrderId  String?
+  idempotencyKey   String           @unique
+  description      String           @default("")
+  createdAt        DateTime
+
+  account        CreditAccount  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  project        Project?       @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  generation     GenerationRecord? @relation(fields: [generationId], references: [id], onDelete: Restrict)
+  rechargeOrder  RechargeOrder? @relation(fields: [rechargeOrderId], references: [id], onDelete: Restrict)
+
+  @@index([accountId, createdAt])
+}
+
+model RechargeOrder {
+  id             String              @id @default(cuid())
+  userId         String
+  orderNo        String              @unique
+  amount         BigInt
+  creditedPoints BigInt
+  paymentChannel String              @default("")
+  status         RechargeOrderStatus @default(pending)
+  idempotencyKey String              @unique
+  createdAt      DateTime            @default(now())
+  paidAt         DateTime?
+  closedAt       DateTime?
+  refundedAt     DateTime?
+
+  user    User                 @relation(fields: [userId], references: [id], onDelete: Restrict)
+  entries CreditLedgerEntry[]
+
+  @@index([userId, createdAt])
+}

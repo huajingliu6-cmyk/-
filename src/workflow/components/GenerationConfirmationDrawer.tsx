@@ -17,6 +17,7 @@ type PublicConfig = {
   allowPaidGeneration: boolean;
   hasApiKey: boolean;
   hasWorkspaceId: boolean;
+  hasEndpoint?: boolean;
   t2vModelId: string;
   r2vModelId: string;
 };
@@ -58,9 +59,12 @@ export function GenerationConfirmationDrawer({
 
   const providerId = config?.providerId ?? "mock";
   const isMock = providerId === "mock";
+  const isHttp = providerId === "http";
   const paidEnabled = Boolean(config?.allowPaidGeneration);
   const keysReady = Boolean(config?.hasApiKey && config?.hasWorkspaceId);
-  const canPaid = !isMock && paidEnabled && keysReady;
+  const httpReady = Boolean(config?.hasEndpoint);
+  const canPaid = !isMock && !isHttp && paidEnabled && keysReady;
+  const canHttp = isHttp && httpReady;
 
   const selectionBlocking = Boolean(
     !selectionView?.capabilityLoaded ||
@@ -193,10 +197,14 @@ export function GenerationConfirmationDrawer({
 
           <div className="rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
             {isMock
-              ? "当前为 Mock 模式，不会产生费用，结果将标记为演示视频。"
-              : paidEnabled
-                ? "真实付费生成已启用：确认后将调用阿里云百炼万相接口并产生费用。"
-                : "真实付费生成未启用（ALLOW_PAID_GENERATION=false）。"}
+              ? "当前为 Mock 模式，不会产生费用，结果将标记为演示视频。可在「管理 API」将视频镜头切换为 HTTP。"
+              : isHttp
+                ? httpReady
+                  ? "将调用后台「管理 API」中配置的视频镜头 HTTP 接口。"
+                  : "尚未配置视频镜头 API 地址，请管理员在「管理 API」中填写。"
+                : paidEnabled
+                  ? "真实付费生成已启用：确认后将调用阿里云百炼万相接口并产生费用。"
+                  : "真实付费生成未启用（ALLOW_PAID_GENERATION=false）。"}
           </div>
         </div>
 
@@ -216,6 +224,20 @@ export function GenerationConfirmationDrawer({
               disabled={selectionBlocking}
             >
               运行 Mock
+            </button>
+          ) : isHttp ? (
+            <button
+              type="button"
+              className="rounded-lg bg-zinc-900 px-3 py-1.5 text-[12px] text-white disabled:cursor-not-allowed disabled:bg-zinc-300"
+              onClick={onConfirmMock}
+              disabled={!canHttp || selectionBlocking}
+              title={
+                !httpReady
+                  ? "请先在「管理 API」配置视频镜头地址"
+                  : "确认生成"
+              }
+            >
+              确认生成
             </button>
           ) : (
             <button

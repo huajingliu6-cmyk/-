@@ -7,13 +7,18 @@ import type { VideoProviderId } from "../types";
 export type TransferSource =
   | {
       kind: "mockFile";
-      providerId: "mock";
+      providerId: "mock" | "http";
       fileUrl: string;
     }
   | {
       kind: "providerHttps";
-      providerId: "aliyun-wan27";
+      providerId: "aliyun-wan27" | "http";
       remoteUrl: string;
+    }
+  | {
+      kind: "remoteProviderBlob";
+      providerId: "http";
+      remoteBlobUrl: string;
     };
 
 export type AllowedHostRule =
@@ -30,5 +35,5 @@ export const PROVIDER_CONNECT_TIMEOUT_MS = 30_000;
 
 export type ProviderIdForTransfer = Extract<
   VideoProviderId,
-  "mock" | "aliyun-wan27"
+  "mock" | "aliyun-wan27" | "http"
 >;

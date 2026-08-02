@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { promises as fs } from "fs";
-import path from "path";
+import { resolveAppDataPath } from "@/persistence/data-root";
 import { parseSingleByteRange } from "@/video-generation/parse-byte-range";
 import {
   classifyVideoAspectRatio,
@@ -32,7 +32,7 @@ afterEach(async () => {
   for (const id of createdGenerationIds.splice(0)) {
     try {
       await fs.unlink(
-        path.join(process.cwd(), "data", "generations", `${id}.json`),
+        resolveAppDataPath("generations", `${id}.json`),
       );
     } catch {
       // ignore

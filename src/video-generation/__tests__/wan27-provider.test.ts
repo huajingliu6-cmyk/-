@@ -61,6 +61,13 @@ describe("dimensions", () => {
       height: 1920,
     });
   });
+
+  it("maps 480P 9:16", () => {
+    expect(resolveOutputDimensions("480P", "9:16")).toEqual({
+      width: 480,
+      height: 854,
+    });
+  });
 });
 
 describe("validateGenerationSettings", () => {

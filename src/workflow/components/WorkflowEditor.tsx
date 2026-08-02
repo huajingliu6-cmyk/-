@@ -53,6 +53,8 @@ import {
   type QuickCreateItem,
 } from "@/workflow/components/QuickCreateDock";
 import { ShotStrip } from "@/workflow/components/ShotStrip";
+import { StoryboardPanel } from "@/workflow/components/StoryboardPanel";
+import { MockSetupBanner } from "@/workflow/components/MockSetupBanner";
 import { HelperLinesOverlay } from "@/workflow/components/HelperLinesOverlay";
 import { LocalPaidTestCard } from "@/workflow/components/LocalPaidTestCard";
 import { uploadAssetFile } from "@/workflow/lib/upload-asset";
@@ -144,18 +146,38 @@ function nextShotNumber(nodes: WorkflowNode[]): number {
   return Math.max(...shots.map((s) => s.data.shotNumber)) + 1;
 }
 
+type AutosaveUi = {
+  backupBanner: string | null;
+};
+
 /** 自动保存桥：订阅 save 状态但不挂在画布树上，避免每次 dirty/saving 重渲 React Flow */
 function WorkflowAutosaveBridge({
   projectId,
   saveNowRef,
+  reloadFromServerRef,
+  dismissBackupBannerRef,
+  onAutosaveUi,
 }: {
   projectId: string;
   saveNowRef: React.MutableRefObject<() => void>;
+  reloadFromServerRef: React.MutableRefObject<() => void>;
+  dismissBackupBannerRef: React.MutableRefObject<() => void>;
+  onAutosaveUi: (ui: AutosaveUi) => void;
 }) {
-  const { saveNow } = useWorkflowAutosave(projectId);
+  const { saveNow, backupBanner, reloadFromServer, dismissBackupBanner } =
+    useWorkflowAutosave(projectId);
   useEffect(() => {
     saveNowRef.current = saveNow;
   }, [saveNow, saveNowRef]);
+  useEffect(() => {
+    reloadFromServerRef.current = reloadFromServer;
+  }, [reloadFromServer, reloadFromServerRef]);
+  useEffect(() => {
+    dismissBackupBannerRef.current = dismissBackupBanner;
+  }, [dismissBackupBanner, dismissBackupBannerRef]);
+  useEffect(() => {
+    onAutosaveUi({ backupBanner });
+  }, [backupBanner, onAutosaveUi]);
   return null;
 }
 
@@ -280,16 +302,29 @@ const StableReactFlow = memo(function StableReactFlow({
 
 function WorkflowCanvas({
   saveNowRef,
+  reloadFromServerRef,
+  dismissBackupBannerRef,
+  backupBanner,
 }: {
   saveNowRef: React.MutableRefObject<() => void>;
+  reloadFromServerRef: React.MutableRefObject<() => void>;
+  dismissBackupBannerRef: React.MutableRefObject<() => void>;
+  backupBanner: string | null;
 }) {
   const projectId = useWorkflowStore((s) => s.projectId) || DEMO_PROJECT_ID;
   // 只关心是否仍在首屏加载，避免 dirty/saving/saved 触发整画布重渲
   const stillLoading = useWorkflowStore((s) => s.saveStatus === "loading");
   const loadError = useWorkflowStore((s) => s.loadError);
+  const historyEpoch = useWorkflowStore((s) => s.historyEpoch);
+  const canUndo = useWorkflowStore((s) => s.documentHistory.past.length > 0);
+  const canRedo = useWorkflowStore((s) => s.documentHistory.future.length > 0);
+  const undo = useWorkflowStore((s) => s.undo);
+  const redo = useWorkflowStore((s) => s.redo);
+  const setLoadError = useWorkflowStore((s) => s.setLoadError);
   const [connectionError, setLocalConnectionError] = useState<string | null>(
     null,
   );
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
   const replaceGraphInStore = useWorkflowStore((s) => s.replaceGraph);
   const setViewportInStore = useWorkflowStore((s) => s.setViewport);
   const addNodesAndEdges = useWorkflowStore((s) => s.addNodesAndEdges);
@@ -382,6 +417,26 @@ function WorkflowCanvas({
       edgesRef.current = storeEdges;
     });
   }, []);
+
+  /** undo/redo 后重灌画布结构 */
+  useEffect(() => {
+    if (historyEpoch === 0) return;
+    if (!canvasReady) return;
+    let cancelled = false;
+    const snapshot = useWorkflowStore.getState().document;
+    const nextNodes = toFlowNodes(snapshot.nodes);
+    const nextEdges = toFlowEdges(snapshot.edges);
+    nodesRef.current = nextNodes;
+    edgesRef.current = nextEdges;
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      setNodes(nextNodes);
+      setEdges(nextEdges);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [historyEpoch, canvasReady]);
 
   useEffect(() => {
     // 仅首次从服务器加载完成后灌入一次；之后保存涨 revision 不得整表 setNodes
@@ -887,10 +942,27 @@ function WorkflowCanvas({
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (isTypingTarget(event.target)) return;
+
+      const mod = event.metaKey || event.ctrlKey;
+      if (mod && event.key.toLowerCase() === "z" && !event.shiftKey) {
+        event.preventDefault();
+        undo();
+        return;
+      }
+      if (
+        mod &&
+        (event.key.toLowerCase() === "y" ||
+          (event.key.toLowerCase() === "z" && event.shiftKey))
+      ) {
+        event.preventDefault();
+        redo();
+        return;
+      }
+
       if (event.code !== "Space" && event.key !== " ") return;
       if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
       if (event.repeat) return;
-      if (isTypingTarget(event.target)) return;
 
       const store = useWorkflowStore.getState();
       const targetId =
@@ -908,7 +980,13 @@ function WorkflowCanvas({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [focusNodeById]);
+  }, [focusNodeById, undo, redo]);
+
+  useEffect(() => {
+    if (!actionNotice) return;
+    const timer = window.setTimeout(() => setActionNotice(null), 3200);
+    return () => window.clearTimeout(timer);
+  }, [actionNotice]);
 
   const deleteNodeById = useCallback(
     (nodeId: string) => {
@@ -1227,12 +1305,53 @@ function WorkflowCanvas({
     layoutPrefs.layoutMode === "assets" || layoutPrefs.layoutMode === "canvas";
   const showStoryboard = layoutPrefs.layoutMode === "storyboard";
 
+  const onStoryboardPreview = useCallback(() => {
+    if (layoutPrefs.shotBarCollapsed) {
+      persistLayoutPrefs({ shotBarCollapsed: false });
+    }
+    setActionNotice("已展开底部分镜条，可在此浏览与排序镜头");
+  }, [layoutPrefs.shotBarCollapsed, persistLayoutPrefs]);
+
+  const onGenerateVideo = useCallback(() => {
+    if (showStoryboard) {
+      persistLayoutPrefs({ layoutMode: "canvas" });
+    }
+    const store = useWorkflowStore.getState();
+    const shots = store.document.nodes.filter(
+      (n): n is VideoShotNode => n.type === "videoShot",
+    );
+    if (shots.length === 0) {
+      setActionNotice("请先创建一个视频镜头，再在镜头节点中检查并生成");
+      return;
+    }
+    const targetId =
+      (store.selectedNodeId &&
+        shots.some((s) => s.id === store.selectedNodeId) &&
+        store.selectedNodeId) ||
+      (store.lastEditedNodeId &&
+        shots.some((s) => s.id === store.lastEditedNodeId) &&
+        store.lastEditedNodeId) ||
+      shots[shots.length - 1]!.id;
+    focusNodeById(targetId);
+    setActionNotice("已聚焦视频镜头，请在节点下方提示栏中检查生成输入");
+  }, [focusNodeById, persistLayoutPrefs, showStoryboard]);
+
   if (loadError && !stillLoading && hydratedRevision === null) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-zinc-950 px-6 text-center text-sm text-rose-300">
         <div>
           <div className="mb-2 font-medium">工作流加载失败</div>
-          <div className="text-zinc-400">{loadError}</div>
+          <div className="mb-4 text-zinc-400">{loadError}</div>
+          <button
+            type="button"
+            className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-100 hover:bg-zinc-800"
+            onClick={() => {
+              setLoadError(null);
+              reloadFromServerRef.current();
+            }}
+          >
+            重试加载
+          </button>
         </div>
       </div>
     );
@@ -1261,6 +1380,11 @@ function WorkflowCanvas({
         onNodeDensityChange={(nodeDensity) =>
           persistLayoutPrefs({ nodeDensity })
         }
+        onStoryboardPreview={onStoryboardPreview}
+        onGenerateVideo={onGenerateVideo}
+        backupBanner={backupBanner}
+        onDismissBackupBanner={() => dismissBackupBannerRef.current()}
+        onReloadFromServer={() => reloadFromServerRef.current()}
       />
 
       <div className="pointer-events-none absolute bottom-4 left-4 z-[70]">
@@ -1284,6 +1408,7 @@ function WorkflowCanvas({
           <div className="relative min-h-0 min-w-0 flex-1">
             {/* 明确宽高，避免 React Flow 父级短暂 0×0 */}
             <div className="absolute inset-0">
+            <MockSetupBanner />
             {resumeMask && (
               <div
                 className="pointer-events-none absolute inset-0 z-[60] bg-[#0b0f14]/75 transition-opacity duration-300"
@@ -1291,9 +1416,14 @@ function WorkflowCanvas({
               />
             )}
             {showStoryboard ? (
-              <div className="flex h-full items-center justify-center bg-[#0b0f14] p-6 text-center text-sm text-zinc-400">
-                分镜视图尚未开放。请切换回「画布」模式继续编排节点与连接。
-              </div>
+              <StoryboardPanel
+                onSelectShot={(shotId) => {
+                  persistLayoutPrefs({ layoutMode: "canvas" });
+                  window.setTimeout(() => {
+                    focusNodeById(shotId);
+                  }, 0);
+                }}
+              />
             ) : hydratedRevision === null ? (
               <div
                 className="flex h-full w-full items-center justify-center bg-[#0b0f14]"
@@ -1345,6 +1475,12 @@ function WorkflowCanvas({
               </div>
             )}
 
+            {actionNotice && (
+              <div className="pointer-events-none absolute left-1/2 top-20 z-40 -translate-x-1/2 rounded-lg border border-sky-500/40 bg-sky-950/90 px-3 py-1.5 text-xs text-sky-100 shadow">
+                {actionNotice}
+              </div>
+            )}
+
             <NodeContextMenu
               menu={contextMenu}
               onClose={() => setContextMenu(null)}
@@ -1367,8 +1503,13 @@ function WorkflowCanvas({
               onAddNode={(type, flowPosition) => {
                 placeQuickCreate(type, flowPosition);
               }}
+              canUndo={canUndo}
+              canRedo={canRedo}
               onUndo={() => {
-                window.alert("撤销功能即将推出");
+                undo();
+              }}
+              onRedo={() => {
+                redo();
               }}
             />
 
@@ -1401,11 +1542,30 @@ function WorkflowCanvas({
 export function WorkflowEditor() {
   const projectId = useWorkflowStore((s) => s.projectId) || DEMO_PROJECT_ID;
   const saveNowRef = useRef<() => void>(() => {});
+  const reloadFromServerRef = useRef<() => void>(() => {});
+  const dismissBackupBannerRef = useRef<() => void>(() => {});
+  const [autosaveUi, setAutosaveUi] = useState<AutosaveUi>({
+    backupBanner: null,
+  });
+  const onAutosaveUi = useCallback((ui: AutosaveUi) => {
+    setAutosaveUi(ui);
+  }, []);
 
   return (
     <ReactFlowProvider>
-      <WorkflowAutosaveBridge projectId={projectId} saveNowRef={saveNowRef} />
-      <WorkflowCanvas saveNowRef={saveNowRef} />
+      <WorkflowAutosaveBridge
+        projectId={projectId}
+        saveNowRef={saveNowRef}
+        reloadFromServerRef={reloadFromServerRef}
+        dismissBackupBannerRef={dismissBackupBannerRef}
+        onAutosaveUi={onAutosaveUi}
+      />
+      <WorkflowCanvas
+        saveNowRef={saveNowRef}
+        reloadFromServerRef={reloadFromServerRef}
+        dismissBackupBannerRef={dismissBackupBannerRef}
+        backupBanner={autosaveUi.backupBanner}
+      />
     </ReactFlowProvider>
   );
 }

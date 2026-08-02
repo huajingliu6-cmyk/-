@@ -20,6 +20,9 @@ type Props = {
   onUploadFiles: (files: FileList) => void;
   onAddNode: (type: QuickCreateItem["type"], flowPosition: { x: number; y: number }) => void;
   onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
 };
 
 export function PaneContextMenu({
@@ -28,6 +31,9 @@ export function PaneContextMenu({
   onUploadFiles,
   onAddNode,
   onUndo,
+  onRedo,
+  canUndo = false,
+  canRedo = false,
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [showAddSubmenu, setShowAddSubmenu] = useState(false);
@@ -138,8 +144,14 @@ export function PaneContextMenu({
 
         <button
           type="button"
-          className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-zinc-800"
+          disabled={!canUndo}
+          className={`flex w-full items-center justify-between px-3 py-2 text-left ${
+            canUndo
+              ? "hover:bg-zinc-800"
+              : "cursor-not-allowed text-zinc-600"
+          }`}
           onClick={() => {
+            if (!canUndo) return;
             onUndo?.();
             onClose();
           }}
@@ -150,12 +162,20 @@ export function PaneContextMenu({
 
         <button
           type="button"
-          disabled
-          className="flex w-full cursor-not-allowed items-center justify-between px-3 py-2 text-left text-zinc-600"
-          title="重做尚未接入"
+          disabled={!canRedo}
+          className={`flex w-full items-center justify-between px-3 py-2 text-left ${
+            canRedo
+              ? "hover:bg-zinc-800"
+              : "cursor-not-allowed text-zinc-600"
+          }`}
+          onClick={() => {
+            if (!canRedo) return;
+            onRedo?.();
+            onClose();
+          }}
         >
           <span>重做</span>
-          <span className="text-[10px]">Ctrl+Y</span>
+          <span className="text-[10px] text-zinc-500">Ctrl+Y</span>
         </button>
       </div>
     </>

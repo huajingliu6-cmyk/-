@@ -59,6 +59,7 @@ function incomingSources(
 function normalizeResolution(raw: string): VideoResolution {
   if (isVideoResolution(raw)) return raw;
   if (raw.includes("1080")) return "1080P";
+  if (raw.includes("480")) return "480P";
   return "720P";
 }
 

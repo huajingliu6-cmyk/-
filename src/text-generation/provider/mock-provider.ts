@@ -1,0 +1,218 @@
+import type { TextGenerationProvider, ProviderTextGenerationInput } from "@/text-generation/provider/types";
+import type { ProviderTextStreamEvent } from "@/text-generation/types";
+
+export type MockTextRequestRecord = {
+  systemPrompt: string;
+  userPrompt: string;
+  at: string;
+};
+
+let lastMockTextRequest: MockTextRequestRecord | null = null;
+let mockTextCallCount = 0;
+
+export function getLastMockTextRequest(): MockTextRequestRecord | null {
+  return lastMockTextRequest;
+}
+
+export function clearLastMockTextRequest(): void {
+  lastMockTextRequest = null;
+  mockTextCallCount = 0;
+}
+
+export function getMockTextCallCount(): number {
+  return mockTextCallCount;
+}
+
+/** 开发/测试用流式假提供商，不产生真实费用 */
+export class MockTextProvider implements TextGenerationProvider {
+  estimateInputTokens(text: string): number {
+    return Math.max(1, Math.ceil(text.length / 2));
+  }
+
+  estimateMaxOutputTokens(
+    targetChars: number,
+    factor: number,
+    cap: number,
+  ): number {
+    return Math.min(cap, Math.ceil(targetChars * factor) + 32);
+  }
+
+  async *streamText(
+    input: ProviderTextGenerationInput,
+  ): AsyncGenerator<ProviderTextStreamEvent, void, unknown> {
+    mockTextCallCount += 1;
+    const lastUser =
+      input.messages
+        ?.filter((m) => m.role === "user")
+        .map((m) => m.content)
+        .at(-1) ?? input.userPrompt;
+    const systemJoined =
+      input.messages
+        ?.filter((m) => m.role === "system")
+        .map((m) => m.content)
+        .join("\n") || input.systemPrompt;
+    const userJoined =
+      input.messages
+        ?.map((m) => m.content)
+        .join("\n") || input.userPrompt;
+    lastMockTextRequest = {
+      systemPrompt: systemJoined,
+      userPrompt: lastUser,
+      at: new Date().toISOString(),
+    };
+    const seed = lastUser
+      .replace(/^创作材料：\n/, "")
+      .replace(
+        /\[UNTRUSTED_PROJECT_DATA\][\s\S]*?<DATA[^>]*>\n?([\s\S]*?)\n?<\/DATA>/,
+        "$1",
+      )
+      .slice(0, 40);
+    const isScriptSplit =
+      /script split blocks|块边界|startBlockId|【剧本块列表】/.test(
+        systemJoined + userJoined,
+      );
+    const redesignMatch = /^(.+?)重新设计/.exec(lastUser.trim());
+    const isEpisodeAssetDesign =
+      !redesignMatch &&
+      /影视资产策划师|episode_asset_design|"assets":\[\{"type"/.test(
+        systemJoined + userJoined,
+      );
+    const isEpisodes = /version.:1|"episodes"|正式剧集正文|恰好 1 集/.test(
+      systemJoined,
+    ) && !isScriptSplit && !isEpisodeAssetDesign;
+    const isOutline = /剧本大纲|规划文本/.test(systemJoined);
+
+    let body: string;
+    if (redesignMatch) {
+      const name = redesignMatch[1]!.trim() || "角色";
+      body = `${name}，真人电影级角色剧照，真实皮肤与光影，16:9，精细服装，电影灯光，高细节`;
+    } else     if (isScriptSplit) {
+      const blockIds = [
+        ...lastUser.matchAll(/\[?(B\d{6})\]?/g),
+      ].map((m) => m[1]!);
+      const uniqueIds = [...new Set(blockIds)];
+      if (uniqueIds.length === 0) {
+        uniqueIds.push("B000001");
+      }
+      const episodes =
+        uniqueIds.length >= 2
+          ? [
+              {
+                episodeNumber: 1,
+                title: "第一集",
+                startBlockId: uniqueIds[0],
+                endBlockId:
+                  uniqueIds[Math.floor(uniqueIds.length / 2) - 1] ??
+                  uniqueIds[0],
+              },
+              {
+                episodeNumber: 2,
+                title: "第二集",
+                startBlockId:
+                  uniqueIds[Math.floor(uniqueIds.length / 2)] ??
+                  uniqueIds[uniqueIds.length - 1],
+                endBlockId: uniqueIds[uniqueIds.length - 1],
+              },
+            ]
+          : [
+              {
+                episodeNumber: 1,
+                title: "第一集",
+                startBlockId: uniqueIds[0],
+                endBlockId: uniqueIds[0],
+              },
+            ];
+      body = JSON.stringify({ episodes });
+    } else if (isEpisodeAssetDesign) {
+      const nameHint =
+        /林清|掌柜|阿棠|雨|茶馆|铜匣|玉佩/.exec(lastUser)?.[0] ?? "旅人";
+      body = JSON.stringify({
+        version: 1,
+        assets: [
+          {
+            type: "character",
+            name: nameHint === "雨" ? "林清" : nameHint,
+            description: "本集关键角色",
+            design: {
+              role: "主角",
+              appearance: "清瘦",
+              usageInEpisode: "推动情节",
+              evidence: nameHint,
+            },
+          },
+          {
+            type: "scene",
+            name: "雨夜茶馆",
+            design: {
+              timeOfDay: "夜",
+              location: "茶馆",
+              style: "写实",
+              usageInEpisode: "开场",
+              evidence: "茶馆",
+            },
+          },
+          {
+            type: "prop",
+            name: "旧伞",
+            design: {
+              propType: "随身物",
+              usage: "遮雨",
+              usageInEpisode: "出场",
+              evidence: "伞",
+            },
+          },
+        ],
+      });
+    } else if (isEpisodes) {
+      const numberMatch = /【目标集号】第(\d+)集/.exec(lastUser);
+      const episodeNumber = numberMatch
+        ? Number.parseInt(numberMatch[1]!, 10)
+        : 1;
+      const title = `生成集${episodeNumber}`;
+      const content =
+        `第${episodeNumber}集正文。` +
+        `${seed || "根据大纲"}展开冲突与人物行动。` +
+        "场景清晰，对白简练，收束本集。";
+      body = JSON.stringify({
+        version: 1,
+        episodes: [{ number: episodeNumber, title, content }],
+      });
+    } else if (isOutline) {
+      body = [
+        "【故事核心】",
+        `${seed || "主角"}在突变中寻找真相。`,
+        "【主线冲突】",
+        "理想与现实、信任与背叛的拉扯。",
+        "【主要人物关系】",
+        "主角、对手、引路人形成三角张力。",
+        "【阶段推进】",
+        "开端铺垫 → 中段升级 → 高潮对决 → 收束余韵。",
+        "【结局方向】",
+        "付出代价后换来有限的和解。",
+      ].join("\n");
+    } else {
+      body =
+        `在一处被霓虹浸透的雨巷里，${seed || "一位旅人"}开始了冒险。` +
+        "风穿过旧招牌，像有人在低声讲述尚未写完的结局。" +
+        "他停在路口，听见远处鼓点与车流交织，终于决定迈出下一步。";
+    }
+
+    const chunkSize = 12;
+    for (let i = 0; i < body.length; i += chunkSize) {
+      if (input.signal?.aborted) {
+        yield { type: "error", code: "CANCELLED", message: "已取消" };
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 16));
+      yield { type: "delta", text: body.slice(i, i + chunkSize) };
+    }
+    yield {
+      type: "usage",
+      inputTokens: this.estimateInputTokens(
+        input.systemPrompt + input.userPrompt,
+      ),
+      outputTokens: Math.ceil(body.length / 2),
+    };
+    yield { type: "done" };
+  }
+}

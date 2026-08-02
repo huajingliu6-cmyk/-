@@ -1,5 +1,4 @@
 import { saveAssetFile } from "@/workflow/lib/asset-storage";
-import { getGenerationApiConfig } from "@/auth/api-config";
 import type { AssetRecord } from "@/workflow/types";
 
 export type SceneGenerationRequest = {
@@ -29,62 +28,23 @@ async function generateViaHttp(params: {
   prompt: string;
   sceneName: string;
 }): Promise<{ buffer: Buffer; mimeType: string; ext: string; fileName: string }> {
-  const res = await fetch(params.endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(params.apiKey ? { Authorization: `Bearer ${params.apiKey}` } : {}),
-    },
-    body: JSON.stringify({
-      prompt: params.prompt,
+  const { generateOpenAiCompatibleImage } = await import(
+    "@/ai-config/openai-compatible-image"
+  );
+  const generated = await generateOpenAiCompatibleImage({
+    endpoint: params.endpoint,
+    apiKey: params.apiKey,
+    prompt: params.prompt,
+    aspectRatio: "16:9",
+    extra: {
       sceneName: params.sceneName,
       kind: "scene",
-    }),
+    },
   });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(
-      `模型服务返回错误（${res.status}）：${text.slice(0, 200) || res.statusText}`,
-    );
-  }
-
-  const contentType = res.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    const json = (await res.json()) as {
-      url?: string;
-      base64?: string;
-      mimeType?: string;
-      error?: string;
-    };
-    if (json.error) throw new Error(json.error);
-    if (json.base64) {
-      const mimeType = json.mimeType || "image/png";
-      return {
-        buffer: Buffer.from(json.base64, "base64"),
-        mimeType,
-        ext: ".png",
-        fileName: "generated-scene.png",
-      };
-    }
-    if (json.url) {
-      const fileRes = await fetch(json.url);
-      if (!fileRes.ok) throw new Error("无法下载模型返回的素材 URL");
-      const mimeType = fileRes.headers.get("content-type") || "image/png";
-      return {
-        buffer: Buffer.from(await fileRes.arrayBuffer()),
-        mimeType,
-        ext: ".png",
-        fileName: "generated-scene.png",
-      };
-    }
-    throw new Error("模型服务响应缺少 base64 或 url 字段");
-  }
-
   return {
-    buffer: Buffer.from(await res.arrayBuffer()),
-    mimeType: contentType || "image/png",
-    ext: ".png",
+    buffer: generated.buffer,
+    mimeType: generated.mimeType,
+    ext: generated.mimeType.includes("jpeg") ? ".jpg" : ".png",
     fileName: "generated-scene.png",
   };
 }
@@ -102,9 +62,24 @@ export async function generateSceneImage(
     throw new Error("请先填写场景描述");
   }
 
-  const config = await getGenerationApiConfig("scene-image");
+  const { resolveAiCapabilityRuntimeConfig } = await import(
+    "@/ai-config/resolve"
+  );
+  const resolved = await resolveAiCapabilityRuntimeConfig(
+    "image.scene.generate",
+  );
+  const config = resolved.profile;
   const provider = config.provider;
   const endpoint = config.apiUrl.trim();
+
+  const { buildAssembledImagePrompt } = await import(
+    "@/ai-config/prompt-assembly"
+  );
+  const assembled = await buildAssembledImagePrompt({
+    capabilityId: "image.scene.generate",
+    userPrompt: prompt,
+  });
+  const effectivePrompt = assembled.finalPrompt;
 
   let buffer: Buffer;
   let mimeType: string;
@@ -119,7 +94,7 @@ export async function generateSceneImage(
     const generated = await generateViaHttp({
       endpoint,
       apiKey: config.apiKey,
-      prompt,
+      prompt: effectivePrompt,
       sceneName: request.sceneName,
     });
     buffer = generated.buffer;
@@ -156,7 +131,7 @@ export async function generateSceneImage(
     thumbnailUrl: stored.assetUrl,
     metadata: {
       source: mode === "mock" ? "mock" : "http-model",
-      prompt,
+      prompt: effectivePrompt,
       sceneNodeId: request.sceneNodeId,
       demo: mode === "mock",
     },

@@ -57,6 +57,8 @@ export function getWan27R2VCapability(modelId: string): ModelCapability {
   };
 }
 
+const CANVAS_RESOLUTIONS = ["480P", "720P", "1080P"] as const;
+
 /** Mock 与真实模型共用同一份能力边界，保证测试行为一致 */
 export function getMockCapabilities(): ProviderCapabilities {
   const t2v = getWan27T2VCapability("mock-wan27-t2v");
@@ -65,8 +67,56 @@ export function getMockCapabilities(): ProviderCapabilities {
     providerId: "mock",
     modes: ["textToVideo", "referenceToVideo"],
     models: [
-      { ...t2v, providerId: "mock", pricingNotice: "Mock 模式不计费。" },
-      { ...r2v, providerId: "mock", pricingNotice: "Mock 模式不计费。" },
+      {
+        ...t2v,
+        providerId: "mock",
+        supportedResolutions: [...CANVAS_RESOLUTIONS],
+        pricingNotice: "Mock 模式不计费。",
+      },
+      {
+        ...r2v,
+        providerId: "mock",
+        supportedResolutions: [...CANVAS_RESOLUTIONS],
+        pricingNotice: "Mock 模式不计费。",
+      },
+    ],
+  };
+}
+
+/** 后台「管理 API」HTTP 视频接口：能力边界与万相对齐，便于同一套校验 */
+export function getHttpCapabilities(params?: {
+  t2vModelId?: string;
+  r2vModelId?: string;
+}): ProviderCapabilities {
+  const t2vModelId = params?.t2vModelId ?? "http-video-t2v";
+  const r2vModelId = params?.r2vModelId ?? "http-video-r2v";
+  const t2v = getWan27T2VCapability(t2vModelId);
+  const r2v = getWan27R2VCapability(r2vModelId);
+  const withSeedanceLimits = (cap: ModelCapability): ModelCapability => {
+    if (!/seedance/i.test(cap.modelId)) return cap;
+    return {
+      ...cap,
+      minDurationSeconds: 4,
+      maxDurationSeconds: 15,
+      maxDurationWithReferenceVideoSeconds: 15,
+    };
+  };
+  return {
+    providerId: "http",
+    modes: ["textToVideo", "referenceToVideo"],
+    models: [
+      {
+        ...withSeedanceLimits(t2v),
+        providerId: "http",
+        supportedResolutions: [...CANVAS_RESOLUTIONS],
+        pricingNotice: "费用以所配置的 HTTP 视频接口为准。",
+      },
+      {
+        ...withSeedanceLimits(r2v),
+        providerId: "http",
+        supportedResolutions: [...CANVAS_RESOLUTIONS],
+        pricingNotice: "费用以所配置的 HTTP 视频接口为准。",
+      },
     ],
   };
 }
@@ -101,6 +151,12 @@ export function listCapabilitiesForProvider(
   modelIds?: { t2vModelId: string; r2vModelId: string },
 ): ProviderCapabilities {
   if (providerId === "mock") return getMockCapabilities();
+  if (providerId === "http") {
+    return getHttpCapabilities({
+      t2vModelId: modelIds?.t2vModelId ?? "http-video-t2v",
+      r2vModelId: modelIds?.r2vModelId ?? "http-video-r2v",
+    });
+  }
   return getAliyunWan27Capabilities({
     t2vModelId: modelIds?.t2vModelId ?? "wan2.7-t2v-2026-06-12",
     r2vModelId: modelIds?.r2vModelId ?? "wan2.7-r2v-2026-06-12",

@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { resolveAppDataPath } from "@/persistence/data-root";
+import { isRemoteDataOnly } from "@/persistence/remote-data-client";
 
-const DIR = path.join(process.cwd(), "data", "generated-videos");
+function generatedVideosDir(): string {
+  return resolveAppDataPath("generated-videos");
+}
 const SAFE = /^[a-zA-Z0-9._-]+$/;
 
 type RouteContext = { params: Promise<{ fileName: string }> };
@@ -11,13 +15,17 @@ export async function GET(
   _request: NextRequest,
   context: RouteContext,
 ) {
+  if (isRemoteDataOnly()) {
+    return NextResponse.json({ error: "文件不存在" }, { status: 404 });
+  }
   const { fileName } = await context.params;
   if (!SAFE.test(fileName) || fileName.includes("..")) {
     return NextResponse.json({ error: "非法文件名" }, { status: 400 });
   }
-  const filePath = path.join(DIR, fileName);
+  const dir = generatedVideosDir();
+  const filePath = path.join(dir, fileName);
   const resolved = path.resolve(filePath);
-  if (!resolved.startsWith(path.resolve(DIR) + path.sep)) {
+  if (!resolved.startsWith(path.resolve(dir) + path.sep)) {
     return NextResponse.json({ error: "非法路径" }, { status: 400 });
   }
   try {

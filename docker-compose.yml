@@ -1,0 +1,44 @@
+# Local PostgreSQL for development + isolated test DB.
+# Compatible with standard PostgreSQL / Alibaba Cloud RDS PostgreSQL targets.
+# Do not commit real credentials.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: infinite-canvas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ic_dev
+      POSTGRES_PASSWORD: ic_dev_password
+      POSTGRES_DB: infinite_canvas
+    ports:
+      - "5432:5432"
+    volumes:
+      - ic_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ic_dev -d infinite_canvas"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: infinite-canvas-postgres-test
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ic_test
+      POSTGRES_PASSWORD: ic_test_password
+      POSTGRES_DB: infinite_canvas_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - ic_pg_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ic_test -d infinite_canvas_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ic_pg_data:
+  ic_pg_test_data:

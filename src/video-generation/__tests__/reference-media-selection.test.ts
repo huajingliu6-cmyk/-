@@ -394,6 +394,24 @@ describe("collectReferenceMediaCandidates", () => {
     expect(candidates[0]?.mediaKind).toBe("video");
     expect(candidates[0]?.eligible).toBe(true);
   });
+
+  it("includes assets mentioned in generationInstruction without edges", () => {
+    const shot = createNodeByType("videoShot", { x: 0, y: 0 }, 1) as VideoShotNode;
+    shot.data.generationInstruction =
+      "用 @[主角](asset:m1) 和 @[背景](asset:m2) 生成镜头";
+    const doc = emptyDoc(
+      [shot],
+      [],
+      [asset("m1"), asset("m2"), asset("m3")],
+    );
+    const candidates = collectReferenceMediaCandidates({
+      document: doc,
+      videoShotNodeId: shot.id,
+      capability,
+    });
+    expect(candidates.map((c) => c.assetId).sort()).toEqual(["m1", "m2"]);
+    expect(candidates.every((c) => c.eligible)).toBe(true);
+  });
 });
 
 describe("resolveReferenceMediaSelection", () => {

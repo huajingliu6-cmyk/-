@@ -10,7 +10,6 @@ import {
   IDEMPOTENCY_SCOPE,
   ProviderOutcomeUnknownError,
   UNKNOWN_OUTCOME_USER_MESSAGE,
-  FileGenerationIdempotencyStore,
   findActiveGenerationForShot,
   fingerprintInputFromGeneration,
   buildGenerationRequestFingerprint,
@@ -324,33 +323,16 @@ export async function submitWan27LocalOneShotPaidTest(
   });
 
   if (outcome.kind === "safe_retry") {
-    if (store instanceof FileGenerationIdempotencyStore) {
-      const refreshed = await store.reReserveAfterSafeFailure({
-        scope: IDEMPOTENCY_SCOPE,
-        idempotencyKey,
-        requestFingerprint: fingerprint,
-        generationId,
-        projectId: input.projectId,
-        shotNodeId: input.shotId,
-        providerId: runtime.providerId,
-      });
-      outcome = { kind: "reserved", record: refreshed };
-    } else {
-      await store.releaseIfSafe(
-        IDEMPOTENCY_SCOPE,
-        idempotencyKey,
-        outcome.record.generationId,
-      );
-      outcome = await store.reserve({
-        scope: IDEMPOTENCY_SCOPE,
-        idempotencyKey,
-        requestFingerprint: fingerprint,
-        generationId,
-        projectId: input.projectId,
-        shotNodeId: input.shotId,
-        providerId: runtime.providerId,
-      });
-    }
+    const refreshed = await store.reReserveAfterSafeFailure({
+      scope: IDEMPOTENCY_SCOPE,
+      idempotencyKey,
+      requestFingerprint: fingerprint,
+      generationId,
+      projectId: input.projectId,
+      shotNodeId: input.shotId,
+      providerId: runtime.providerId,
+    });
+    outcome = { kind: "reserved", record: refreshed };
   }
 
   if (outcome.kind === "existing") {

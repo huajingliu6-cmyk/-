@@ -1,11 +1,17 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
+  outputFileTracingExcludes: {
+    "/*": ["./data/**/*"],
+  },
+  typescript: {
+    ignoreBuildErrors: false,
+    tsconfigPath: "tsconfig.build.json",
+  },
   images: {
-    // 本地开发素材预览（/api/assets/[id]）
     localPatterns: [{ pathname: "/api/assets/**" }],
   },
-  // 忽略 data/：自动保存写盘时不应触发 webpack HMR（否则白屏闪烁 / 保存循环）
   webpack: (config, { dev }) => {
     if (!dev) return config;
     const prev = config.watchOptions?.ignored;
@@ -17,6 +23,10 @@ const nextConfig: NextConfig = {
       "**/.git/**",
       "**/node_modules/**",
       "**/data/**",
+      "**/.next/**",
+      "**/coverage/**",
+      "**/*.tmp",
+      "**/*.tmp.*",
     ];
     config.watchOptions = {
       ...config.watchOptions,

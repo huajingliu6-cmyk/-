@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
+import { resolveAppDataPath } from "@/persistence/data-root";
 import {
   FORBIDDEN_PLACEHOLDER_MP4_SHA256,
   hashBufferSha256,
@@ -205,7 +206,7 @@ describe("transferRemoteVideoToLocal integrity", () => {
       await fs.unlink(f).catch(() => undefined);
     }
     for (const id of cleanupAssets.splice(0)) {
-      const dir = path.join(process.cwd(), "data", "assets");
+      const dir = resolveAppDataPath("assets");
       const entries = await fs.readdir(dir).catch(() => [] as string[]);
       for (const name of entries) {
         if (name.startsWith(id)) {
@@ -216,7 +217,7 @@ describe("transferRemoteVideoToLocal integrity", () => {
   });
 
   it("拒绝转存 98 B 伪 MP4", async () => {
-    const dir = path.join(process.cwd(), "data", "generated-videos");
+    const dir = resolveAppDataPath("generated-videos");
     await fs.mkdir(dir, { recursive: true });
     const file = path.join(dir, `forbidden-${randomSuffix()}.mp4`);
     await fs.writeFile(file, PLACEHOLDER_98);
@@ -234,7 +235,7 @@ describe("transferRemoteVideoToLocal integrity", () => {
   });
 
   it("转存后 sizeBytes 与 SHA-256 与源一致", async () => {
-    const dir = path.join(process.cwd(), "data", "generated-videos");
+    const dir = resolveAppDataPath("generated-videos");
     await fs.mkdir(dir, { recursive: true });
     const buf = buildStructuralMp4Fixture(4096);
     const file = path.join(dir, `ok-${randomSuffix()}.mp4`);

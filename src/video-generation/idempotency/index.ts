@@ -27,6 +27,7 @@ export {
 } from "./errors";
 export type { IdempotencyErrorCode } from "./errors";
 export { FileGenerationIdempotencyStore, parseIdempotencyRecord } from "./file-store";
+export { RemoteGenerationIdempotencyStore } from "./remote-store";
 export {
   clearIdempotencyStoreForTests,
   getIdempotencyStore,

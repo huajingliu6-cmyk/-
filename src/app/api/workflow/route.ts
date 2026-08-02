@@ -1,18 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireVideoCanvasAccess } from "@/auth/require-access";
 import { migrateWorkflowDocument, WorkflowMigrationError } from "@/workflow/migrate";
 import { dedupeWorkflowEdges, validateAllEdges } from "@/workflow/connection-rules";
-import { DEMO_PROJECT_ID } from "@/workflow/default-workflow";
 import { loadWorkflow, saveWorkflow } from "@/workflow/lib/workflow-storage";
 import { sanitizeWorkflowForPersist } from "@/workflow/lib/sanitize-workflow";
 
 /**
- * 开发阶段工作流 API。
- * 使用本地 JSON（data/workflows/*.json），不是生产数据库方案。
+ * 工作流 API：必须先通过视频画布项目权限；不回退 DEMO 绕过。
  */
 
 export async function GET(request: NextRequest) {
-  const projectId =
-    request.nextUrl.searchParams.get("projectId") ?? DEMO_PROJECT_ID;
+  const projectId = request.nextUrl.searchParams.get("projectId")?.trim() ?? "";
+  if (!projectId) {
+    return NextResponse.json(
+      { error: "缺少 projectId，无权读取工作流" },
+      { status: 400 },
+    );
+  }
+
+  const gated = await requireVideoCanvasAccess(projectId);
+  if (!gated.ok) return gated.response;
 
   try {
     const document = await loadWorkflow(projectId);
@@ -40,6 +47,18 @@ export async function PUT(request: NextRequest) {
           : "工作流数据校验失败";
       return NextResponse.json({ error: message }, { status: 400 });
     }
+
+    const projectId =
+      typeof parsed.projectId === "string" ? parsed.projectId.trim() : "";
+    if (!projectId) {
+      return NextResponse.json(
+        { error: "工作流缺少 projectId" },
+        { status: 400 },
+      );
+    }
+
+    const gated = await requireVideoCanvasAccess(projectId);
+    if (!gated.ok) return gated.response;
 
     const sanitized = sanitizeWorkflowForPersist(parsed);
     const withEdges = {

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import path from "path";
 import { afterEach, describe, expect, it } from "vitest";
+import { resolveAppDataPath } from "@/persistence/data-root";
 import {
   buildTransferSourceFromGeneration,
   classifyIpAddress,
@@ -590,7 +591,7 @@ describe("transfer isolation + redact + defaults", () => {
       await fs.unlink(f).catch(() => undefined);
     }
     for (const id of cleanupAssets.splice(0)) {
-      const dir = path.join(process.cwd(), "data", "assets");
+      const dir = resolveAppDataPath("assets");
       const entries = await fs.readdir(dir).catch(() => [] as string[]);
       for (const name of entries) {
         if (name.startsWith(id)) {
@@ -715,7 +716,7 @@ describe("transfer isolation + redact + defaults", () => {
   });
 
   it("Mock file:// 仍能成功；目录外拒绝；真实 Provider 不能用 file://", async () => {
-    const dir = path.join(process.cwd(), "data", "generated-videos");
+    const dir = resolveAppDataPath("generated-videos");
     await fs.mkdir(dir, { recursive: true });
     const buf = buildStructuralMp4(1024);
     const file = path.join(dir, `mock-ok-${randomUUID()}.mp4`);
@@ -734,7 +735,7 @@ describe("transfer isolation + redact + defaults", () => {
     cleanupFiles.push(ok.absolutePath);
     expect(ok.sizeBytes).toBe(buf.byteLength);
 
-    const outside = path.join(process.cwd(), "data", "mock", `out-${randomUUID()}.mp4`);
+    const outside = resolveAppDataPath("mock", `out-${randomUUID()}.mp4`);
     await fs.mkdir(path.dirname(outside), { recursive: true });
     await fs.writeFile(outside, buf);
     cleanupFiles.push(outside);

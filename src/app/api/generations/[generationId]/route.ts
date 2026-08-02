@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireVideoCanvasAccessForGeneration } from "@/auth/require-access";
 import { assertSafeGenerationId } from "@/video-generation/generation-store";
 import { refreshGenerationStatus } from "@/video-generation/service";
 import { compareRequestedAndActualGeneration } from "@/video-generation/compare-params";
@@ -13,6 +14,9 @@ export async function GET(
 ) {
   try {
     const { generationId: rawId } = await context.params;
+    const gated = await requireVideoCanvasAccessForGeneration(rawId);
+    if (!gated.ok) return gated.response;
+
     const generationId = assertSafeGenerationId(rawId);
     const record = await refreshGenerationStatus(generationId);
     const comparison = compareRequestedAndActualGeneration(record);

@@ -3,8 +3,18 @@ import { promises as fs } from "fs";
 import path from "path";
 import type { GenerationRecord } from "./types";
 import { clearIdempotencyStoreForTests } from "./idempotency";
+import { resolveAppDataPath } from "@/persistence/data-root";
+import { isRemoteDataOnly } from "@/persistence/remote-data-client";
+import {
+  listGenerationRecordsRemote,
+  readGenerationRecordRemote,
+  saveGenerationRecordRemote,
+  updateGenerationRecordRemote,
+} from "./remote-generation-store";
 
-const DEFAULT_DIR = path.join(process.cwd(), "data", "generations");
+function defaultGenerationsDir(): string {
+  return resolveAppDataPath("generations");
+}
 
 type GenerationStoreGlobal = typeof globalThis & {
   __infiniteCanvasGenerationStoreRoot?: string;
@@ -15,7 +25,7 @@ function StoreGlobal(): GenerationStoreGlobal {
 }
 
 function getGenerationsDir(): string {
-  return StoreGlobal().__infiniteCanvasGenerationStoreRoot ?? DEFAULT_DIR;
+  return StoreGlobal().__infiniteCanvasGenerationStoreRoot ?? defaultGenerationsDir();
 }
 
 /** 测试可注入临时目录；传 null 恢复默认。正式路径禁止写测试数据。 */
@@ -70,6 +80,11 @@ async function atomicWriteFile(target: string, contents: string): Promise<void> 
 export async function saveGenerationRecord(
   record: GenerationRecord,
 ): Promise<void> {
+  assertSafeGenerationId(record.id);
+  if (isRemoteDataOnly()) {
+    await saveGenerationRecordRemote(record);
+    return;
+  }
   await ensureDir();
   await atomicWriteFile(filePath(record.id), JSON.stringify(record, null, 2));
 }
@@ -77,6 +92,8 @@ export async function saveGenerationRecord(
 export async function readGenerationRecord(
   id: string,
 ): Promise<GenerationRecord | null> {
+  assertSafeGenerationId(id);
+  if (isRemoteDataOnly()) return readGenerationRecordRemote(id);
   try {
     const raw = await fs.readFile(filePath(id), "utf8");
     return JSON.parse(raw) as GenerationRecord;
@@ -89,6 +106,8 @@ export async function updateGenerationRecord(
   id: string,
   patch: Partial<GenerationRecord>,
 ): Promise<GenerationRecord> {
+  assertSafeGenerationId(id);
+  if (isRemoteDataOnly()) return updateGenerationRecordRemote(id, patch);
   const current = await readGenerationRecord(id);
   if (!current) throw new Error("生成任务不存在");
   const next: GenerationRecord = {
@@ -107,6 +126,7 @@ export function createGenerationId(): string {
 
 /** 列出本地 generation 记录（单机开发扫描；非生产索引） */
 export async function listGenerationRecords(): Promise<GenerationRecord[]> {
+  if (isRemoteDataOnly()) return listGenerationRecordsRemote();
   await ensureDir();
   const names = await fs.readdir(getGenerationsDir());
   const out: GenerationRecord[] = [];

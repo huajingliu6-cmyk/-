@@ -11,6 +11,7 @@ import {
   type KeyboardEvent,
   type TextareaHTMLAttributes,
 } from "react";
+import { createPortal } from "react-dom";
 import { Mic2 } from "lucide-react";
 import { AssetThumb } from "@/workflow/components/AssetThumb";
 import { glass } from "@/workflow/components/glass-ui";
@@ -33,7 +34,11 @@ type Props = {
   variant?: "glass" | "dark";
   rows?: number;
   onKeyDown?: TextareaHTMLAttributes<HTMLTextAreaElement>["onKeyDown"];
+  /** 从下拉选中素材并插入 @ 后回调（nextValue 为已插入 token 的完整文本） */
+  onMentionPick?: (asset: AssetRecord, nextValue: string) => void;
 };
+
+const MENU_WIDTH = 220;
 
 export function MentionTextarea({
   value,
@@ -45,22 +50,30 @@ export function MentionTextarea({
   variant = "glass",
   rows,
   onKeyDown,
+  onMentionPick,
 }: Props) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(
     null,
   );
+  const [mounted, setMounted] = useState(false);
 
   const assets = useWorkflowStore((s) => s.document.assets);
   const filtered = useMemo(
     () => (open ? filterAssetsByQuery(assets, query) : EMPTY),
     [open, assets, query],
   );
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
 
   const refreshMentionState = useCallback(
     (nextValue: string, caret: number) => {
@@ -78,28 +91,54 @@ export function MentionTextarea({
     [],
   );
 
-  useLayoutEffect(() => {
-    if (!open || !areaRef.current || !rootRef.current) {
+  const updateMenuPosition = useCallback(() => {
+    if (!open || !areaRef.current) {
       setMenuPos(null);
       return;
     }
     const area = areaRef.current;
-    const root = rootRef.current;
     const caret = area.selectionStart ?? value.length;
     const coords = getCaretCoordinates(area, caret);
-    const rootRect = root.getBoundingClientRect();
-    setMenuPos({
-      top: Math.min(coords.top + coords.height + 6, root.clientHeight - 8),
-      left: Math.min(Math.max(8, coords.left), rootRect.width - 220),
-    });
-  }, [open, query, value, filtered.length]);
+    const rect = area.getBoundingClientRect();
+    const preferredTop = rect.top + coords.top + coords.height + 6;
+    const preferredLeft = rect.left + coords.left;
+    const estimatedMenuHeight = Math.min(220, 48 + filtered.length * 40);
+    const flipUp =
+      preferredTop + estimatedMenuHeight > window.innerHeight - 8 &&
+      rect.top + coords.top - estimatedMenuHeight - 6 > 8;
+    const top = flipUp
+      ? rect.top + coords.top - estimatedMenuHeight - 6
+      : preferredTop;
+    const left = Math.min(
+      Math.max(8, preferredLeft),
+      window.innerWidth - MENU_WIDTH - 8,
+    );
+    setMenuPos({ top, left });
+  }, [open, value, filtered.length]);
+
+  useLayoutEffect(() => {
+    updateMenuPosition();
+  }, [updateMenuPosition, query]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onReposition = () => updateMenuPosition();
+    window.addEventListener("resize", onReposition);
+    // 画布平移/缩放时同步菜单位置
+    window.addEventListener("scroll", onReposition, true);
+    return () => {
+      window.removeEventListener("resize", onReposition);
+      window.removeEventListener("scroll", onReposition, true);
+    };
+  }, [open, updateMenuPosition]);
 
   useEffect(() => {
     if (!open) return;
     const onPointer = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     window.addEventListener("mousedown", onPointer);
     return () => window.removeEventListener("mousedown", onPointer);
@@ -112,6 +151,7 @@ export function MentionTextarea({
     const inserted = insertMentionAtCaret(value, caret, asset);
     if (!inserted) return;
     onChange(inserted.next);
+    onMentionPick?.(asset, inserted.next);
     setOpen(false);
     setQuery("");
     requestAnimationFrame(() => {
@@ -156,6 +196,88 @@ export function MentionTextarea({
     onKeyDown?.(event);
   };
 
+  const menu =
+    mounted && open && menuPos
+      ? createPortal(
+          <div
+            ref={menuRef}
+            id={listId}
+            role="listbox"
+            className={`fixed z-[10000] w-[220px] max-w-[min(220px,92vw)] ${
+              variant === "glass"
+                ? glass.popover
+                : "rounded-xl border border-zinc-700 bg-zinc-900 p-1.5 shadow-xl"
+            }`}
+            style={{ top: menuPos.top, left: menuPos.left }}
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            <div className="mb-1 px-1.5 text-[10px] font-medium text-zinc-500">
+              素材库
+            </div>
+            <div className="max-h-44 space-y-0.5 overflow-auto">
+              {filtered.length === 0 ? (
+                <div className="px-1.5 py-2 text-[10px] text-zinc-400">
+                  {assets.length === 0
+                    ? "素材库为空，请先上传素材"
+                    : "没有匹配的素材"}
+                </div>
+              ) : (
+                filtered.map((asset, index) => {
+                  const active = index === activeIndex;
+                  return (
+                    <button
+                      key={asset.id}
+                      type="button"
+                      role="option"
+                      aria-selected={active}
+                      className={`flex w-full items-center gap-2 rounded-xl px-1.5 py-1.5 text-left transition ${
+                        active
+                          ? variant === "glass"
+                            ? "bg-white/70"
+                            : "bg-zinc-800"
+                          : variant === "glass"
+                            ? "hover:bg-white/55"
+                            : "hover:bg-zinc-800/80"
+                      }`}
+                      onMouseEnter={() => setActiveIndex(index)}
+                      onClick={() => pickAsset(asset)}
+                    >
+                      <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded-lg border border-white/40 bg-zinc-200/40">
+                        {asset.assetType === "audio" ? (
+                          <div className="flex h-full w-full items-center justify-center text-zinc-500">
+                            <Mic2 className="h-3.5 w-3.5" />
+                          </div>
+                        ) : (
+                          <AssetThumb
+                            src={asset.thumbnailUrl || asset.url}
+                            alt={asset.name}
+                          />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div
+                          className={`truncate text-[11px] ${
+                            variant === "glass"
+                              ? "text-zinc-700"
+                              : "text-zinc-200"
+                          }`}
+                        >
+                          {asset.name}
+                        </div>
+                        <div className="truncate text-[9px] text-zinc-500">
+                          {asset.assetType}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>,
+          document.body,
+        )
+      : null;
+
   return (
     <div ref={rootRef} className="relative">
       <textarea
@@ -197,81 +319,7 @@ export function MentionTextarea({
         onBlur={onBlur}
         onMouseDown={(e) => e.stopPropagation()}
       />
-
-      {open && menuPos && (
-        <div
-          id={listId}
-          role="listbox"
-          className={`absolute z-50 w-[220px] max-w-[min(220px,92vw)] ${
-            variant === "glass"
-              ? glass.popover
-              : "rounded-xl border border-zinc-700 bg-zinc-900 p-1.5 shadow-xl"
-          }`}
-          style={{ top: menuPos.top, left: menuPos.left }}
-          onMouseDown={(e) => e.preventDefault()}
-        >
-          <div className="mb-1 px-1.5 text-[10px] font-medium text-zinc-500">
-            素材库
-          </div>
-          <div className="max-h-44 space-y-0.5 overflow-auto">
-            {filtered.length === 0 ? (
-              <div className="px-1.5 py-2 text-[10px] text-zinc-400">
-                {assets.length === 0
-                  ? "素材库为空，请先上传素材"
-                  : "没有匹配的素材"}
-              </div>
-            ) : (
-              filtered.map((asset, index) => {
-                const active = index === activeIndex;
-                return (
-                  <button
-                    key={asset.id}
-                    type="button"
-                    role="option"
-                    aria-selected={active}
-                    className={`flex w-full items-center gap-2 rounded-xl px-1.5 py-1.5 text-left transition ${
-                      active
-                        ? variant === "glass"
-                          ? "bg-white/70"
-                          : "bg-zinc-800"
-                        : variant === "glass"
-                          ? "hover:bg-white/55"
-                          : "hover:bg-zinc-800/80"
-                    }`}
-                    onMouseEnter={() => setActiveIndex(index)}
-                    onClick={() => pickAsset(asset)}
-                  >
-                    <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded-lg border border-white/40 bg-zinc-200/40">
-                      {asset.assetType === "audio" ? (
-                        <div className="flex h-full w-full items-center justify-center text-zinc-500">
-                          <Mic2 className="h-3.5 w-3.5" />
-                        </div>
-                      ) : (
-                        <AssetThumb
-                          src={asset.thumbnailUrl || asset.url}
-                          alt={asset.name}
-                        />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div
-                        className={`truncate text-[11px] ${
-                          variant === "glass" ? "text-zinc-700" : "text-zinc-200"
-                        }`}
-                      >
-                        {asset.name}
-                      </div>
-                      <div className="truncate text-[9px] text-zinc-500">
-                        {asset.assetType}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </div>
-      )}
+      {menu}
     </div>
   );
 }

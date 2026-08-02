@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireVideoCanvasAccessForGeneration } from "@/auth/require-access";
 import { assertSafeGenerationId } from "@/video-generation/generation-store";
 import { cancelVideoGeneration } from "@/video-generation/service";
 import { sanitizeGenerationForClient } from "@/video-generation/secure-transfer";
@@ -11,6 +12,9 @@ export async function POST(
 ) {
   try {
     const { generationId: rawId } = await context.params;
+    const gated = await requireVideoCanvasAccessForGeneration(rawId);
+    if (!gated.ok) return gated.response;
+
     const generationId = assertSafeGenerationId(rawId);
     const generation = await cancelVideoGeneration(generationId);
     return NextResponse.json({

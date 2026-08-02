@@ -7,20 +7,39 @@ import type { GenerationRecord, VideoProviderId } from "./types";
 import {
   FORBIDDEN_PLACEHOLDER_MP4_SHA256,
   hashFileSha256,
+  validateMockVideoSource,
 } from "@/video-generation/validate-mock-video-source";
 import { buildTransferSourceFromGeneration } from "./secure-transfer/build-transfer-source";
 import { TransferError } from "./secure-transfer/errors";
 import {
+  safeDownloadProviderVideoToBuffer,
   safeDownloadProviderVideoToTempFile,
   type SafeDownloadDeps,
 } from "./secure-transfer/safe-download";
 import type { TransferSource } from "./secure-transfer/types";
 import { redactRemoteUrlForLogs } from "./secure-transfer/redact-url";
+import { resolveAppDataPath } from "@/persistence/data-root";
+import { isRemoteDataOnly } from "@/persistence/remote-data-client";
+import { hashBufferSha256 } from "@/video-generation/validate-mock-video-source";
 
-const VIDEO_DIR = path.join(process.cwd(), "data", "generated-videos");
+import {
+  deleteRemoteProviderResult,
+  getRemoteProviderResult,
+} from "@/video-generation/remote-provider-result";
+import {
+  bufferHasMp4Ftyp,
+  isAcceptableProviderContentType,
+  looksLikeHtmlOrXml,
+  looksLikeJson,
+} from "@/video-generation/secure-transfer/mp4-structure";
+import { MAX_PROVIDER_VIDEO_BYTES } from "@/video-generation/secure-transfer/types";
+
+function videoDir(): string {
+  return resolveAppDataPath("generated-videos");
+}
 
 async function ensureDir() {
-  await fs.mkdir(VIDEO_DIR, { recursive: true });
+  await fs.mkdir(videoDir(), { recursive: true });
 }
 
 async function copyFileAtomically(
@@ -64,13 +83,18 @@ async function readLocalFileUrl(remoteUrl: string): Promise<{
     filePath = filePath.slice(1);
   }
   const absolutePath = path.resolve(filePath);
-  const generatedRoot = path.resolve(VIDEO_DIR);
-  // Mock 中间文件必须落在 data/generated-videos，防止任意 file:// 读取
-  if (
+  const generatedRoot = path.resolve(videoDir());
+  const insideGeneratedRoot =
     absolutePath !== generatedRoot &&
-    !absolutePath.startsWith(generatedRoot + path.sep)
-  ) {
-    throw new Error("非法本地视频路径（仅允许 data/generated-videos）");
+    absolutePath.startsWith(generatedRoot + path.sep);
+  if (!insideGeneratedRoot) {
+    if (!isRemoteDataOnly()) {
+      throw new Error("非法本地视频路径（仅允许 data/generated-videos）");
+    }
+    const validated = await validateMockVideoSource();
+    if (!validated.ok || path.resolve(validated.absolutePath) !== absolutePath) {
+      throw new Error("非法本地视频路径（仅允许已验证 Mock 源）");
+    }
   }
   const stat = await fs.stat(absolutePath);
   if (!stat.isFile() || stat.size <= 0) {
@@ -104,7 +128,7 @@ async function finalizeAssetFromFile(params: {
 }> {
   const id = randomUUID();
   const fileName = `${id}.mp4`;
-  const absolutePath = path.join(VIDEO_DIR, fileName);
+  const absolutePath = path.join(videoDir(), fileName);
 
   const integrity = await copyFileAtomically(
     params.sourcePath,
@@ -130,12 +154,7 @@ async function finalizeAssetFromFile(params: {
     ext: ".mp4",
   });
 
-  const assetDisk = path.join(
-    process.cwd(),
-    "data",
-    "assets",
-    `${stored.assetId}.mp4`,
-  );
+  const assetDisk = resolveAppDataPath("assets", `${stored.assetId}.mp4`);
   const assetStat = await fs.stat(assetDisk);
   const assetSha = await hashFileSha256(assetDisk);
   if (
@@ -180,6 +199,65 @@ async function finalizeAssetFromFile(params: {
   };
 }
 
+async function finalizeRemoteAssetFromBuffer(params: {
+  projectId: string;
+  title: string;
+  generationId: string;
+  isMock: boolean;
+  buffer: Buffer;
+  expectedSize: number;
+  expectedSha: string;
+}): Promise<{
+  asset: AssetRecord;
+  absolutePath: string;
+  sizeBytes: number;
+  sha256: string;
+}> {
+  if (
+    params.buffer.byteLength !== params.expectedSize ||
+    (await hashBufferSha256(params.buffer)) !== params.expectedSha
+  ) {
+    throw new Error("转存完整性校验失败，未创建资产记录");
+  }
+  const stored = await saveAssetFile({
+    buffer: params.buffer,
+    mimeType: "video/mp4",
+    fileName: `${params.title || "shot"}-${randomUUID()}.mp4`,
+    kind: "video",
+    ext: ".mp4",
+  });
+  const now = new Date().toISOString();
+  return {
+    asset: {
+      id: stored.assetId,
+      projectId: params.projectId,
+      assetType: "generatedVideo",
+      name: params.isMock
+        ? `${params.title || "镜头"}·Mock 演示结果`
+        : `${params.title || "镜头"}·生成视频`,
+      originalFileName: stored.fileName,
+      mimeType: "video/mp4",
+      sizeBytes: stored.sizeBytes,
+      url: stored.assetUrl,
+      thumbnailUrl: stored.assetUrl,
+      metadata: {
+        source: params.isMock ? "mock-provider" : "provider-transfer",
+        generationId: params.generationId,
+        mock: Boolean(params.isMock),
+        sha256: params.expectedSha,
+        notice: params.isMock
+          ? "Mock 演示结果，不是真实 AI 视频"
+          : "已转存到内网 Blob 服务",
+      },
+      createdAt: now,
+      updatedAt: now,
+    },
+    absolutePath: `workflow-assets/${stored.assetId}`,
+    sizeBytes: stored.sizeBytes,
+    sha256: params.expectedSha,
+  };
+}
+
 /**
  * 将 Provider 临时 URL / Mock 本地中间文件转存到开发环境本地磁盘。
  * 真实 Provider 必须走 TransferSource.providerHttps + SSRF 防护。
@@ -202,8 +280,6 @@ export async function transferRemoteVideoToLocal(params: {
   sizeBytes: number;
   sha256: string;
 }> {
-  await ensureDir();
-
   const source =
     params.source ??
     buildTransferSourceFromGeneration({
@@ -214,20 +290,92 @@ export async function transferRemoteVideoToLocal(params: {
 
   if (source.kind === "mockFile") {
     const local = await readLocalFileUrl(source.fileUrl);
+    if (isRemoteDataOnly()) {
+      const buffer = await fs.readFile(local.absolutePath);
+      return finalizeRemoteAssetFromBuffer({
+        projectId: params.projectId,
+        title: params.title,
+        generationId: params.generationId,
+        isMock: source.providerId === "mock",
+        buffer,
+        expectedSize: local.sizeBytes,
+        expectedSha: local.sha256,
+      });
+    }
+    await ensureDir();
     return finalizeAssetFromFile({
       projectId: params.projectId,
       title: params.title,
       generationId: params.generationId,
-      isMock: true,
+      isMock: source.providerId === "mock",
       sourcePath: local.absolutePath,
       expectedSize: local.sizeBytes,
       expectedSha: local.sha256,
     });
   }
 
+  if (source.kind === "remoteProviderBlob") {
+    if (!isRemoteDataOnly()) {
+      throw new TransferError("TRANSFER_SOURCE_MISMATCH");
+    }
+    const remote = await getRemoteProviderResult(source.remoteBlobUrl);
+    if (!remote) throw new TransferError("RESULT_TRANSFER_FAILED");
+    if (remote.body.byteLength <= 0) {
+      throw new TransferError("RESULT_VIDEO_STRUCTURE_INVALID");
+    }
+    if (remote.body.byteLength > MAX_PROVIDER_VIDEO_BYTES) {
+      throw new TransferError("RESULT_FILE_TOO_LARGE");
+    }
+    if (isAcceptableProviderContentType(remote.contentType) === "reject") {
+      throw new TransferError("RESULT_CONTENT_TYPE_INVALID");
+    }
+    if (
+      looksLikeHtmlOrXml(remote.body) ||
+      looksLikeJson(remote.body) ||
+      !bufferHasMp4Ftyp(remote.body)
+    ) {
+      throw new TransferError("RESULT_VIDEO_STRUCTURE_INVALID");
+    }
+    const sha256 = await hashBufferSha256(remote.body);
+    if (sha256 === FORBIDDEN_PLACEHOLDER_MP4_SHA256) {
+      throw new TransferError("RESULT_VIDEO_STRUCTURE_INVALID");
+    }
+    const finalized = await finalizeRemoteAssetFromBuffer({
+      projectId: params.projectId,
+      title: params.title,
+      generationId: params.generationId,
+      isMock: false,
+      buffer: remote.body,
+      expectedSize: remote.body.byteLength,
+      expectedSha: sha256,
+    });
+    await deleteRemoteProviderResult(source.remoteBlobUrl).catch(() => undefined);
+    return finalized;
+  }
+
+  if (isRemoteDataOnly()) {
+    const downloaded = await safeDownloadProviderVideoToBuffer({
+      remoteUrl: source.remoteUrl,
+      deps: params.downloadDeps,
+    });
+    if (downloaded.sha256 === FORBIDDEN_PLACEHOLDER_MP4_SHA256) {
+      throw new TransferError("RESULT_VIDEO_STRUCTURE_INVALID");
+    }
+    return finalizeRemoteAssetFromBuffer({
+      projectId: params.projectId,
+      title: params.title,
+      generationId: params.generationId,
+      isMock: false,
+      buffer: downloaded.buffer,
+      expectedSize: downloaded.sizeBytes,
+      expectedSha: downloaded.sha256,
+    });
+  }
+
   // providerHttps
+  await ensureDir();
   const downloadId = randomUUID();
-  const tempPath = path.join(VIDEO_DIR, `${downloadId}.download.tmp`);
+  const tempPath = path.join(videoDir(), `${downloadId}.download.tmp`);
   console.info(
     "[transfer] provider download start",
     redactRemoteUrlForLogs(source.remoteUrl),

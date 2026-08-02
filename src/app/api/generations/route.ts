@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { requireVideoCanvasAccess } from "@/auth/require-access";
 import { loadWorkflow } from "@/workflow/lib/workflow-storage";
 import { buildVideoGenerationInput } from "@/workflow/lib/build-video-generation-input";
 import {
-  getVideoGenerationPublicConfig,
+  resolveVideoGenerationPublicConfig,
   submitVideoGeneration,
 } from "@/video-generation/service";
 import { sanitizeGenerationForClient } from "@/video-generation/secure-transfer";
@@ -12,7 +13,7 @@ import {
   listCapabilitiesForProvider,
   pickCapability,
 } from "@/video-generation/model-capabilities";
-import { getVideoProviderRuntimeConfig } from "@/video-generation/provider/config";
+import { resolveVideoProviderRuntimeConfig } from "@/video-generation/provider/config";
 import { buildWan27ProviderReadinessReport } from "@/video-generation/provider/wan27-readiness";
 import { selectWanGenerationMode } from "@/video-generation/select-wan-mode";
 import { MAX_REFERENCE_SELECTION_IDS_IN_REQUEST } from "@/video-generation/reference-media";
@@ -36,8 +37,8 @@ const postSchema = z.object({
 });
 
 export async function GET() {
-  const runtime = getVideoProviderRuntimeConfig();
-  const publicConfig = getVideoGenerationPublicConfig();
+  const runtime = await resolveVideoProviderRuntimeConfig();
+  const publicConfig = await resolveVideoGenerationPublicConfig();
   const capabilities = listCapabilitiesForProvider(runtime.providerId, {
     t2vModelId: runtime.t2vModelId,
     r2vModelId: runtime.r2vModelId,
@@ -60,6 +61,9 @@ function statusForCode(code: string): number {
   if (
     code === "MISSING_DASHSCOPE_API_KEY" ||
     code === "MISSING_DASHSCOPE_WORKSPACE_ID" ||
+    code === "MISSING_HTTP_VIDEO_ENDPOINT" ||
+    code === "MISSING_HTTP_VIDEO_API_KEY" ||
+    code === "MISSING_HTTP_VIDEO_MODEL" ||
     code === "IDEMPOTENCY_STORE_UNAVAILABLE"
   ) {
     return 503;
@@ -90,8 +94,25 @@ export async function POST(request: NextRequest) {
     }
 
     const body = parsed.data;
+    const gated = await requireVideoCanvasAccess(body.projectId);
+    if (!gated.ok) return gated.response;
+
     const document = await loadWorkflow(body.projectId);
-    const runtime = getVideoProviderRuntimeConfig();
+    let runtime;
+    try {
+      runtime = await resolveVideoProviderRuntimeConfig(undefined, {
+        capabilityId: "video.workflow-node.generate",
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "该 AI 功能尚未由系统管理员完成配置，请联系管理员。";
+      return NextResponse.json(
+        { error: message, code: "AI_CAPABILITY_NOT_CONFIGURED" },
+        { status: 503 },
+      );
+    }
     const capabilities = listCapabilitiesForProvider(runtime.providerId, {
       t2vModelId: runtime.t2vModelId,
       r2vModelId: runtime.r2vModelId,
@@ -135,6 +156,7 @@ export async function POST(request: NextRequest) {
       confirmPaidGeneration: body.confirmPaidGeneration,
       idempotencyKey: body.idempotencyKey,
       title: body.title,
+      capabilityId: "video.workflow-node.generate",
     });
 
     return NextResponse.json({

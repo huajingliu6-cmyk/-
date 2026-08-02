@@ -1,0 +1,17 @@
+services:
+  ssdb:
+    build:
+      context: ./ssdb
+      dockerfile: Dockerfile
+    image: infinite-canvas/ssdb:1.9.9-local
+    restart: unless-stopped
+    volumes:
+      - ssdb_local_data:/var/lib/ssdb
+    networks: [ssdb_local_internal]
+
+networks:
+  ssdb_local_internal:
+    internal: true
+
+volumes:
+  ssdb_local_data:

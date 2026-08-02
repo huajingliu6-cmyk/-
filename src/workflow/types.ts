@@ -406,7 +406,7 @@ export type VideoGenerationInputResult =
   | { ok: true; input: VideoGenerationInput }
   | { ok: false; errors: string[] };
 
-/** 界面布局偏好（仅 localStorage，不进 WorkflowDocument） */
+/** 界面布局偏好（仅当前页面内存，不进 WorkflowDocument） */
 export type WorkbenchLayoutMode = "canvas" | "assets" | "storyboard";
 export type QuickCreateDockPosition = "top" | "left";
 export type NodeDensity = "fixed" | "free";

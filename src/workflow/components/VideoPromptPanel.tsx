@@ -17,12 +17,14 @@ import {
 } from "@/workflow/components/GenerationHistoryPopover";
 import { PromptReferenceChips } from "@/workflow/components/PromptReferenceChips";
 import { MentionTextarea } from "@/workflow/components/MentionTextarea";
+import { FrameSlotButton } from "@/workflow/components/FrameSlotButton";
 import { GenerationConfirmationDrawer } from "@/workflow/components/GenerationConfirmationDrawer";
 import { ReferenceMediaSelectionDrawer } from "@/workflow/components/ReferenceMediaSelectionDrawer";
 import { useDebouncedCommit } from "@/workflow/hooks/useDebouncedCommit";
 import { prependGenerationHistory } from "@/workflow/lib/generation-history";
 import { prepareReferenceMediaSelectionBundle } from "@/workflow/lib/prepare-reference-media-selection";
 import { useWorkflowStore } from "@/workflow/store";
+import { GlassSelect } from "@/shell/glass-select";
 import type { VideoShotNodeData } from "@/workflow/types";
 import type {
   GenerationRecord,
@@ -49,6 +51,7 @@ type PublicConfig = {
   allowPaidGeneration: boolean;
   hasApiKey: boolean;
   hasWorkspaceId: boolean;
+  hasEndpoint?: boolean;
   region: string;
   t2vModelId: string;
   r2vModelId: string;
@@ -236,6 +239,12 @@ export function VideoPromptPanel({
     };
 
     const tick = async () => {
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
       try {
         const res = await fetch(`/api/generations/${activeId}`);
         const payload = (await res.json()) as {
@@ -323,7 +332,16 @@ export function VideoPromptPanel({
     void tick();
     const pollMs = config?.recommendedPollIntervalMs ?? 3_500;
     pollRef.current = setInterval(() => void tick(), pollMs);
-    return stop;
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void tick();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [
     data?.activeGenerationId,
     nodeId,
@@ -355,7 +373,12 @@ export function VideoPromptPanel({
     data.status === "queued" ||
     Boolean(data.activeGenerationId && generation && !["completed", "failed", "cancelled", "resultTransferFailed"].includes(generation.status));
 
-  const hasFirstFrame = Boolean(data.startFrameAssetId);
+  const hasFirstFrame = Boolean(
+    data.startFrameAssetId || selectionView?.firstFrame,
+  );
+  const firstFrameFromEdgeOnly = Boolean(
+    selectionView?.firstFrame && !data.startFrameAssetId,
+  );
   const resolution: VideoResolution = isVideoResolution(data.resolution)
     ? data.resolution
     : "720P";
@@ -583,7 +606,11 @@ export function VideoPromptPanel({
     setConfirmOpen(true);
   };
 
-  const resolutionOptions = capability?.supportedResolutions ?? ["720P", "1080P"];
+  const resolutionOptions = capability?.supportedResolutions ?? [
+    "480P",
+    "720P",
+    "1080P",
+  ];
   const aspectOptions = capability?.supportedAspectRatios ?? [
     "16:9",
     "9:16",
@@ -662,36 +689,99 @@ export function VideoPromptPanel({
           disabled={busy}
           onChange={setValue}
           onBlur={() => flush()}
+          onMentionPick={(asset, nextValue) => {
+            // 立刻写回，避免防抖期间候选收集读不到 @token
+            updateNodeData(nodeId, { generationInstruction: nextValue });
+            if (!data || asset.assetType === "audio") return;
+            if (data.referenceSelectionMode !== "manual") return;
+            const ids = data.selectedReferenceAssetIds ?? [];
+            if (ids.includes(asset.id)) return;
+            updateNodeData(nodeId, {
+              selectedReferenceAssetIds: [...ids, asset.id],
+            });
+          }}
         />
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <select
-          className={glass.select}
-          value={hasFirstFrame ? "" : aspectRatio}
-          disabled={busy || hasFirstFrame}
+        <FrameSlotButton
+          label="首帧"
+          assetId={data.startFrameAssetId}
+          projectId={projectId}
+          disabled={busy}
+          previewUrl={selectionView?.firstFrame?.thumbnailUrl || selectionView?.firstFrame?.url}
+          previewLocked={firstFrameFromEdgeOnly}
           title={
-            hasFirstFrame
-              ? "已连接首帧，视频比例将根据首帧图片自动确定"
-              : "比例"
+            firstFrameFromEdgeOnly
+              ? "已通过连线设置首帧（在图片节点上管理）"
+              : "上传首帧图片"
           }
-          onChange={(e) => {
-            const v = e.target.value;
-            if (isVideoAspectRatio(v)) {
-              updateNodeData(nodeId, { aspectRatio: v });
+          onChange={(assetId, uploaded) => {
+            const endId = data.endFrameAssetId;
+            const patch = {
+              startFrameAssetId: assetId,
+              continuityMode:
+                assetId && endId
+                  ? ("startAndEndFrame" as const)
+                  : assetId
+                    ? ("startFrame" as const)
+                    : ("standalone" as const),
+            };
+            if (uploaded) {
+              commitNodeAssets(nodeId, [uploaded], patch);
+            } else {
+              updateNodeData(nodeId, patch);
             }
           }}
-        >
-          {hasFirstFrame ? (
-            <option value="">由首帧决定</option>
-          ) : (
-            aspectOptions.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))
-          )}
-        </select>
+          onUploadError={(message) => setNotice(message)}
+        />
+        <FrameSlotButton
+          label="尾帧"
+          assetId={data.endFrameAssetId}
+          projectId={projectId}
+          disabled={busy}
+          title="上传尾帧图片"
+          onChange={(assetId, uploaded) => {
+            const startId = data.startFrameAssetId;
+            const patch = {
+              endFrameAssetId: assetId,
+              continuityMode:
+                startId && assetId
+                  ? ("startAndEndFrame" as const)
+                  : startId
+                    ? ("startFrame" as const)
+                    : ("standalone" as const),
+            };
+            if (uploaded) {
+              commitNodeAssets(nodeId, [uploaded], patch);
+            } else {
+              updateNodeData(nodeId, patch);
+            }
+          }}
+          onUploadError={(message) => setNotice(message)}
+        />
+
+        <GlassSelect
+          variant="toolbar"
+          label="画面比例"
+          title={
+            hasFirstFrame
+              ? "已设置首帧，视频比例将根据首帧图片自动确定"
+              : "画面比例"
+          }
+          value={hasFirstFrame ? "" : aspectRatio}
+          disabled={busy || hasFirstFrame}
+          options={
+            hasFirstFrame
+              ? [{ id: "", label: "由首帧决定" }]
+              : aspectOptions.map((opt) => ({ id: opt, label: opt }))
+          }
+          onChange={(id) => {
+            if (isVideoAspectRatio(id)) {
+              updateNodeData(nodeId, { aspectRatio: id });
+            }
+          }}
+        />
 
         <DurationCombobox
           value={data.duration}
@@ -706,24 +796,22 @@ export function VideoPromptPanel({
           }
         />
 
-        <select
-          className={glass.select}
+        <GlassSelect
+          variant="toolbar"
+          label="画质"
+          title="画质"
           value={resolution}
           disabled={busy}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (isVideoResolution(v)) {
-              updateNodeData(nodeId, { resolution: v });
+          options={resolutionOptions.map((opt) => ({
+            id: opt,
+            label: opt,
+          }))}
+          onChange={(id) => {
+            if (isVideoResolution(id)) {
+              updateNodeData(nodeId, { resolution: id });
             }
           }}
-          title="画质"
-        >
-          {resolutionOptions.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </select>
+        />
 
         <div className="ml-auto flex items-center gap-1.5">
           <GenerationHistoryButton
@@ -806,7 +894,7 @@ export function VideoPromptPanel({
 
       {hasFirstFrame && (
         <div className="mt-1.5 text-[10px] text-amber-700">
-          已连接首帧，视频比例将根据首帧图片自动确定；首帧不占普通参考素材名额
+          已设置首帧，视频比例将根据首帧图片自动确定；首帧不占普通参考素材名额
         </div>
       )}
       {selectionView && selectionView.blockingErrors.length > 0 ? (

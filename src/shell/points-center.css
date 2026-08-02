@@ -1,0 +1,345 @@
+/* 积分中心弹窗 */
+
+.pc-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(5, 6, 14, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: pc-overlay-in 0.28s ease-out both;
+}
+
+.pc-overlay.is-closing {
+  animation: pc-overlay-out 0.2s ease-in both;
+}
+
+.pc-card {
+  position: relative;
+  display: flex;
+  width: min(720px, calc(100vw - 40px));
+  max-height: 80vh;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    radial-gradient(
+      ellipse 70% 50% at 20% 0%,
+      rgba(124, 58, 237, 0.16),
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse 50% 40% at 90% 10%,
+      rgba(56, 189, 248, 0.1),
+      transparent 50%
+    ),
+    rgba(12, 13, 22, 0.96);
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(167, 139, 250, 0.08);
+  color: #f4f1ff;
+  animation: pc-card-in 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pc-overlay.is-closing .pc-card {
+  animation: pc-card-out 0.2s ease-in both;
+}
+
+.pc-card__glow {
+  pointer-events: none;
+  position: absolute;
+  inset: -20% -10% auto;
+  height: 45%;
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    rgba(167, 139, 250, 0.18),
+    transparent 70%
+  );
+  filter: blur(18px);
+}
+
+.pc-header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 8px;
+}
+
+.pc-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.pc-close {
+  display: inline-flex;
+  height: 36px;
+  width: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.8);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.pc-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(167, 139, 250, 0.35);
+}
+
+.pc-close:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.9);
+  outline-offset: 2px;
+}
+
+.pc-balance {
+  position: relative;
+  z-index: 1;
+  padding: 8px 20px 16px;
+}
+
+.pc-balance__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 20px;
+}
+
+.pc-balance__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.pc-balance__value {
+  margin-top: 4px;
+  font-size: clamp(1.75rem, 3vw, 2.25rem);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  color: #e9d5ff;
+  line-height: 1.15;
+}
+
+.pc-balance__value--frozen {
+  color: rgba(251, 191, 36, 0.95);
+}
+
+.pc-balance__meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.pc-tabs {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0 16px;
+  scrollbar-width: none;
+}
+
+.pc-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.pc-tab {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 5.5rem;
+  border: none;
+  background: transparent;
+  padding: 10px 12px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+}
+
+.pc-tab:hover {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.pc-tab:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.9);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+
+.pc-tab[aria-selected="true"] {
+  color: #fff;
+}
+
+.pc-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #a78bfa, #ec4899, #38bdf8);
+}
+
+.pc-panel {
+  position: relative;
+  z-index: 1;
+  min-height: 220px;
+  overflow-y: auto;
+  padding: 16px 20px 20px;
+  animation: pc-panel-in 0.18s ease-out both;
+}
+
+.pc-state {
+  display: flex;
+  min-height: 180px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.pc-state strong {
+  color: rgba(255, 255, 255, 0.82);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.pc-recharge-todo {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  padding: 12px;
+  text-align: center;
+}
+
+.pc-recharge-todo p {
+  margin: 0;
+  max-width: 22rem;
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.pc-recharge-todo strong {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 14px;
+}
+
+@keyframes pc-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pc-overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes pc-card-in {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.94);
+    filter: blur(8px);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(0) scale(1.02);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes pc-card-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+@keyframes pc-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 640px) {
+  .pc-card {
+    width: calc(100vw - 24px);
+    max-height: 86svh;
+    border-radius: 18px;
+  }
+
+  .pc-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-left: 8px;
+    padding-right: 8px;
+    font-size: 12px;
+    text-align: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pc-overlay,
+  .pc-overlay.is-closing,
+  .pc-card,
+  .pc-overlay.is-closing .pc-card,
+  .pc-panel {
+    animation: none !important;
+  }
+
+  .pc-overlay {
+    opacity: 1;
+  }
+
+  .pc-overlay.is-closing {
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+}

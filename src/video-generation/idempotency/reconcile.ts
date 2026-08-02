@@ -6,7 +6,6 @@ import {
 import type { GenerationRecord } from "../types";
 import { SUBMITTING_STALE_MS } from "./constants";
 import { IdempotencyError } from "./errors";
-import { FileGenerationIdempotencyStore } from "./file-store";
 import { getIdempotencyStore } from "./store-registry";
 import type { IdempotencyRecord, IdempotencyScope } from "./types";
 
@@ -193,15 +192,6 @@ export async function reconcileByGenerationId(
   generationId: string,
 ): Promise<ReconcileResult | null> {
   const store = getIdempotencyStore();
-  if (!(store instanceof FileGenerationIdempotencyStore)) {
-    // 非文件后端：仅能通过 generation.idempotencyKey 对账
-    const generation = await readGenerationRecord(generationId);
-    if (!generation?.idempotencyKey) return null;
-    return reconcileGenerationIdempotencyRecord({
-      scope: "video-generation",
-      idempotencyKey: generation.idempotencyKey,
-    });
-  }
   const all = await store.listAll();
   const hit = all.find((r) => r.generationId === generationId);
   if (!hit) {
@@ -258,76 +248,74 @@ export async function findActiveGenerationForShot(params: {
 
   // 幂等层：unknownOutcome / submitting 也可能尚未写成 generation active
   const store = getIdempotencyStore();
-  if (store instanceof FileGenerationIdempotencyStore) {
-    const all = await store.listAll();
-    for (const idem of all) {
+  const all = await store.listAll();
+  for (const idem of all) {
+    if (
+      idem.projectId === params.projectId &&
+      idem.shotNodeId === params.shotNodeId &&
+      idem.providerId === params.providerId &&
+      (idem.state === "submitting" ||
+        idem.state === "reserved" ||
+        idem.state === "unknownOutcome" ||
+        idem.state === "providerAccepted")
+    ) {
       if (
-        idem.projectId === params.projectId &&
-        idem.shotNodeId === params.shotNodeId &&
-        idem.providerId === params.providerId &&
-        (idem.state === "submitting" ||
-          idem.state === "reserved" ||
-          idem.state === "unknownOutcome" ||
-          idem.state === "providerAccepted")
+        params.excludeGenerationId &&
+        idem.generationId === params.excludeGenerationId
       ) {
-        if (
-          params.excludeGenerationId &&
-          idem.generationId === params.excludeGenerationId
-        ) {
-          continue;
-        }
-        const gen = await readGenerationRecord(idem.generationId);
-        if (gen && ACTIVE_GENERATION_STATUSES.has(gen.status)) {
-          return gen;
-        }
-        if (!gen && idem.state === "unknownOutcome") {
-          // 合成阻断：无 generation 文件时仍阻止同镜头新 key
-          return {
-            id: idem.generationId,
-            projectId: idem.projectId,
-            shotNodeId: idem.shotNodeId,
-            providerId: idem.providerId as GenerationRecord["providerId"],
-            providerModelId: "",
-            providerTaskId: idem.providerTaskId ?? "",
-            mode: "textToVideo",
-            status: "unknownOutcome",
-            progress: null,
-            progressLabel: "提交结果待确认",
-            isMock: idem.providerId === "mock",
-            requestSnapshot: {
-              prompt: "",
-              settings: {
-                resolution: "720P",
-                aspectRatio: "9:16",
-                durationSeconds: 5,
-                watermark: false,
-                promptExtend: true,
-              },
-              mediaAssetIds: [],
-              unsupportedAudioLabels: [],
+        continue;
+      }
+      const gen = await readGenerationRecord(idem.generationId);
+      if (gen && ACTIVE_GENERATION_STATUSES.has(gen.status)) {
+        return gen;
+      }
+      if (!gen && idem.state === "unknownOutcome") {
+        // 合成阻断：无 generation 文件时仍阻止同镜头新 key
+        return {
+          id: idem.generationId,
+          projectId: idem.projectId,
+          shotNodeId: idem.shotNodeId,
+          providerId: idem.providerId as GenerationRecord["providerId"],
+          providerModelId: "",
+          providerTaskId: idem.providerTaskId ?? "",
+          mode: "textToVideo",
+          status: "unknownOutcome",
+          progress: null,
+          progressLabel: "提交结果待确认",
+          isMock: idem.providerId === "mock",
+          requestSnapshot: {
+            prompt: "",
+            settings: {
+              resolution: "720P",
+              aspectRatio: "9:16",
+              durationSeconds: 5,
+              watermark: false,
+              promptExtend: true,
             },
-            requestedResolution: "720P",
-            requestedAspectRatio: "9:16",
-            requestedDurationSeconds: 5,
-            providerResolution: null,
-            providerAspectRatio: null,
-            providerDurationSeconds: null,
-            actualWidth: null,
-            actualHeight: null,
-            actualDurationSeconds: null,
-            metadataSource: "none",
-            remoteVideoUrl: null,
-            localVideoAssetId: null,
-            resultAsset: null,
-            errorCode: "GENERATION_SUBMISSION_UNKNOWN",
-            errorMessage:
-              "提交结果暂时无法确认，为避免重复计费，系统已暂停自动重试。",
-            createdAt: idem.createdAt,
-            updatedAt: idem.updatedAt,
-            completedAt: null,
-            idempotencyKey: idem.idempotencyKey,
-          };
-        }
+            mediaAssetIds: [],
+            unsupportedAudioLabels: [],
+          },
+          requestedResolution: "720P",
+          requestedAspectRatio: "9:16",
+          requestedDurationSeconds: 5,
+          providerResolution: null,
+          providerAspectRatio: null,
+          providerDurationSeconds: null,
+          actualWidth: null,
+          actualHeight: null,
+          actualDurationSeconds: null,
+          metadataSource: "none",
+          remoteVideoUrl: null,
+          localVideoAssetId: null,
+          resultAsset: null,
+          errorCode: "GENERATION_SUBMISSION_UNKNOWN",
+          errorMessage:
+            "提交结果暂时无法确认，为避免重复计费，系统已暂停自动重试。",
+          createdAt: idem.createdAt,
+          updatedAt: idem.updatedAt,
+          completedAt: null,
+          idempotencyKey: idem.idempotencyKey,
+        };
       }
     }
   }

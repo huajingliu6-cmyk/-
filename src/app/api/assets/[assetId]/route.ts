@@ -1,12 +1,17 @@
 import { promises as fs } from "fs";
 import { NextRequest, NextResponse } from "next/server";
 import {
+  AUDIO_MIME,
   deleteAssetFile,
+  IMAGE_MIME,
+  readRemoteAssetFile,
   resolveAssetPath,
+  workflowAssetStorageKey,
 } from "@/workflow/lib/asset-storage";
 import { collectReferencedAssetIds } from "@/workflow/lib/asset-refs";
 import { loadWorkflow } from "@/workflow/lib/workflow-storage";
 import { DEMO_PROJECT_ID } from "@/workflow/default-workflow";
+import { isRemoteDataOnly } from "@/persistence/remote-data-client";
 import {
   buildVideoContentHeaders,
   planAssetContentResponse,
@@ -16,6 +21,15 @@ import {
 type RouteContext = {
   params: Promise<{ assetId: string }>;
 };
+
+const REMOTE_IMAGE_ASSET_TYPES = new Set([
+  "characterImage",
+  "sceneImage",
+  "referenceImage",
+  "directorReference",
+  "generatedImage",
+  "propImage",
+]);
 
 /**
  * 读取本地开发素材。
@@ -34,6 +48,76 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const shotNumberRaw = request.nextUrl.searchParams.get("shotNumber");
     const clientStoragePath = request.nextUrl.searchParams.get("storagePath");
     const shotNumber = shotNumberRaw ? Number(shotNumberRaw) : null;
+    const hasVideoContext = Boolean(
+      generationId || download || clientStoragePath || shotNumberRaw,
+    );
+
+    if (isRemoteDataOnly() && !hasVideoContext) {
+      if (!projectId) {
+        return NextResponse.json(
+          {
+            code: "CONTEXT_REQUIRED",
+            message: "读取远端图片或音频需要 projectId",
+          },
+          { status: 400 },
+        );
+      }
+      try {
+        workflowAssetStorageKey(assetId);
+      } catch {
+        return NextResponse.json(
+          { code: "INVALID_ASSET_ID", message: "非法素材 ID" },
+          { status: 400 },
+        );
+      }
+
+      const document = await loadWorkflow(projectId);
+      const asset = document.assets.find((item) => item.id === assetId);
+      if (!asset || asset.projectId !== projectId) {
+        return NextResponse.json(
+          { code: "NOT_FOUND", message: "素材不存在" },
+          { status: 404 },
+        );
+      }
+
+      if (asset.assetType !== "generatedVideo") {
+        const isImage = IMAGE_MIME.has(asset.mimeType);
+        const isAudio = AUDIO_MIME.has(asset.mimeType);
+        const typeMatches =
+          (isImage && REMOTE_IMAGE_ASSET_TYPES.has(asset.assetType)) ||
+          (isAudio && asset.assetType === "audio");
+        if (!typeMatches) {
+          return NextResponse.json(
+            { code: "INVALID_ASSET_TYPE", message: "素材类型与 MIME 不匹配" },
+            { status: 422 },
+          );
+        }
+
+        const blob = await readRemoteAssetFile(assetId);
+        if (!blob) {
+          return NextResponse.json(
+            { code: "NOT_FOUND", message: "素材文件不存在" },
+            { status: 404 },
+          );
+        }
+        if (blob.contentType !== asset.mimeType) {
+          return NextResponse.json(
+            { code: "MIME_MISMATCH", message: "素材 MIME 校验失败" },
+            { status: 422 },
+          );
+        }
+
+        return new NextResponse(new Uint8Array(blob.body), {
+          status: 200,
+          headers: {
+            "Content-Type": asset.mimeType,
+            "Content-Length": String(blob.body.byteLength),
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+          },
+        });
+      }
+    }
 
     // 最终视频：走 assetId + 上下文校验（禁止 fileName / storagePath）
     if (generationId || projectId || download || clientStoragePath) {
@@ -80,8 +164,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
       // 浏览器 <video> 几乎总会带 Range；Node→Web Stream 在本环境会挂起，
       // 开发态视频文件通常不大，统一读入 Buffer 再返回。
       if (plan.status === 200 || plan.start == null || plan.end == null) {
-        const data = await fs.readFile(file.filePath);
-        return new NextResponse(data, {
+        const data = file.body ?? (await fs.readFile(file.filePath));
+        return new NextResponse(new Uint8Array(data), {
           status: 200,
           headers: buildVideoContentHeaders({
             mimeType: file.mimeType,
@@ -94,6 +178,15 @@ export async function GET(request: NextRequest, context: RouteContext) {
       }
 
       const length = plan.end - plan.start + 1;
+      if (file.body) {
+        return new NextResponse(
+          new Uint8Array(file.body.subarray(plan.start, plan.end + 1)),
+          {
+          status: 206,
+          headers,
+          },
+        );
+      }
       const handle = await fs.open(file.filePath, "r");
       try {
         const data = Buffer.alloc(length);

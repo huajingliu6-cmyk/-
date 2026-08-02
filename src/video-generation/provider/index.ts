@@ -3,6 +3,7 @@ import {
   type VideoProviderRuntimeConfig,
 } from "./config";
 import { AliyunWan27VideoProvider } from "./aliyun-wan27-provider";
+import { HttpVideoProvider } from "./http-video-provider";
 import { MockVideoProvider } from "./mock-provider";
 import type { FetchLike, VideoProvider } from "./types";
 
@@ -17,11 +18,18 @@ export function createVideoProvider(options?: {
       fetchImpl: options?.fetchImpl,
     });
   }
+  if (config.providerId === "http") {
+    return new HttpVideoProvider({
+      config,
+      fetchImpl: options?.fetchImpl,
+    });
+  }
   return new MockVideoProvider();
 }
 
 export type { VideoProvider } from "./types";
 export { MockVideoProvider } from "./mock-provider";
+export { HttpVideoProvider } from "./http-video-provider";
 export { AliyunWan27VideoProvider } from "./aliyun-wan27-provider";
 export { buildWan27ProviderReadinessReport } from "./wan27-readiness";
 export { buildWan27DryRunPreview } from "./wan27-dry-run";

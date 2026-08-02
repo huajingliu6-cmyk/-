@@ -1,5 +1,4 @@
 import { saveAssetFile } from "@/workflow/lib/asset-storage";
-import { getGenerationApiConfig } from "@/auth/api-config";
 import type { AssetRecord, AssetType } from "@/workflow/types";
 
 export type CharacterGenKind = "appearance" | "voice";
@@ -106,6 +105,32 @@ async function generateViaHttp(params: {
   aspectRatio?: string;
   resolution?: string;
 }): Promise<{ buffer: Buffer; mimeType: string; ext: string; fileName: string }> {
+  if (params.kind === "appearance") {
+    const { generateOpenAiCompatibleImage } = await import(
+      "@/ai-config/openai-compatible-image"
+    );
+    const generated = await generateOpenAiCompatibleImage({
+      endpoint: params.endpoint,
+      apiKey: params.apiKey,
+      prompt: params.prompt,
+      model: params.model,
+      aspectRatio: params.aspectRatio,
+      resolution: params.resolution,
+      extra: {
+        characterName: params.characterName,
+        kind: params.kind,
+        ...(params.stylePreset ? { stylePreset: params.stylePreset } : {}),
+      },
+    });
+    const ext = generated.mimeType.includes("jpeg") ? ".jpg" : ".png";
+    return {
+      buffer: generated.buffer,
+      mimeType: generated.mimeType,
+      ext,
+      fileName: `generated-appearance${ext}`,
+    };
+  }
+
   const res = await fetch(params.endpoint, {
     method: "POST",
     headers: {
@@ -140,43 +165,33 @@ async function generateViaHttp(params: {
     };
     if (json.error) throw new Error(json.error);
     if (json.base64) {
-      const mimeType =
-        json.mimeType ||
-        (params.kind === "appearance" ? "image/png" : "audio/wav");
-      const ext = params.kind === "appearance" ? ".png" : ".wav";
+      const mimeType = json.mimeType || "audio/wav";
       return {
         buffer: Buffer.from(json.base64, "base64"),
         mimeType,
-        ext,
-        fileName: `generated-${params.kind}${ext}`,
+        ext: ".wav",
+        fileName: "generated-voice.wav",
       };
     }
     if (json.url) {
       const fileRes = await fetch(json.url);
       if (!fileRes.ok) throw new Error("无法下载模型返回的素材 URL");
-      const mimeType =
-        fileRes.headers.get("content-type") ||
-        (params.kind === "appearance" ? "image/png" : "audio/wav");
-      const ext = params.kind === "appearance" ? ".png" : ".wav";
+      const mimeType = fileRes.headers.get("content-type") || "audio/wav";
       return {
         buffer: Buffer.from(await fileRes.arrayBuffer()),
         mimeType,
-        ext,
-        fileName: `generated-${params.kind}${ext}`,
+        ext: ".wav",
+        fileName: "generated-voice.wav",
       };
     }
     throw new Error("模型服务响应缺少 base64 或 url 字段");
   }
 
-  const mimeType =
-    contentType ||
-    (params.kind === "appearance" ? "image/png" : "audio/wav");
-  const ext = params.kind === "appearance" ? ".png" : ".wav";
   return {
     buffer: Buffer.from(await res.arrayBuffer()),
-    mimeType,
-    ext,
-    fileName: `generated-${params.kind}${ext}`,
+    mimeType: contentType || "audio/wav",
+    ext: ".wav",
+    fileName: "generated-voice.wav",
   };
 }
 
@@ -197,11 +212,29 @@ export async function generateCharacterMedia(
     );
   }
 
-  const configId =
-    request.kind === "appearance" ? "character-image" : "character-voice";
-  const config = await getGenerationApiConfig(configId);
+  const capabilityId =
+    request.kind === "appearance"
+      ? "image.character.generate"
+      : "audio.character-voice.generate";
+  const { resolveAiCapabilityRuntimeConfig } = await import(
+    "@/ai-config/resolve"
+  );
+  const resolved = await resolveAiCapabilityRuntimeConfig(capabilityId);
+  const config = resolved.profile;
   const provider = config.provider;
   const endpoint = config.apiUrl.trim();
+
+  let effectivePrompt = prompt;
+  if (request.kind === "appearance") {
+    const { buildAssembledImagePrompt } = await import(
+      "@/ai-config/prompt-assembly"
+    );
+    const assembled = await buildAssembledImagePrompt({
+      capabilityId: "image.character.generate",
+      userPrompt: prompt,
+    });
+    effectivePrompt = assembled.finalPrompt;
+  }
 
   if (provider === "http") {
     if (!endpoint) {
@@ -215,7 +248,7 @@ export async function generateCharacterMedia(
     const generated = await generateViaHttp({
       endpoint,
       apiKey: config.apiKey,
-      prompt,
+      prompt: effectivePrompt,
       kind: request.kind,
       characterName: request.characterName,
       model: request.model,
@@ -239,7 +272,7 @@ export async function generateCharacterMedia(
           : `${request.characterName || "角色"}·AI声音`,
       metadata: {
         source: "http-model",
-        prompt,
+        prompt: effectivePrompt,
         characterNodeId: request.characterNodeId,
         demo: false,
         ...(request.model ? { model: request.model } : {}),
@@ -270,7 +303,7 @@ export async function generateCharacterMedia(
       name: `${request.characterName || "角色"}·演示外貌`,
       metadata: {
         source: "mock",
-        prompt,
+        prompt: effectivePrompt,
         characterNodeId: request.characterNodeId,
         demo: true,
         model: request.model || "AnyCook",

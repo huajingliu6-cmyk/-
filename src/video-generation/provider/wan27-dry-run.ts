@@ -178,7 +178,12 @@ export function buildWan27DryRunPreview(params: {
   const ratio = body.parameters.ratio ?? null;
   let estimatedWidth: number | null = null;
   let estimatedHeight: number | null = null;
-  if (ratio && (body.parameters.resolution === "720P" || body.parameters.resolution === "1080P")) {
+  if (
+    ratio &&
+    (body.parameters.resolution === "480P" ||
+      body.parameters.resolution === "720P" ||
+      body.parameters.resolution === "1080P")
+  ) {
     const dims = resolveOutputDimensions(
       body.parameters.resolution,
       ratio as VideoAspectRatio,

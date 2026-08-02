@@ -2,16 +2,30 @@ import { promises as fs } from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
 import { hashPassword, verifyPassword } from "@/auth/password";
+import type { AuthUser, StoredUser, UserRole } from "@/auth/types";
+import { getAppDataDir } from "@/persistence/data-root";
+import { isRemoteDataOnly } from "@/persistence/remote-data-client";
 import {
-  DEFAULT_ADMIN_PASSWORD,
-  DEFAULT_ADMIN_USERNAME,
-  type AuthUser,
-  type StoredUser,
-  type UserRole,
-} from "@/auth/types";
+  authenticateUserRemote,
+  countSystemAdminsRemote,
+  createUserRemote,
+  findUserByUsernameRemote,
+  getStoredUserByIdRemote,
+  getUserByIdRemote,
+  grantSystemAdminByUsernameRemote,
+  listUsersRemote,
+  revokeSystemAdminByUsernameRemote,
+  updateUserPasswordRemote,
+  updateUserProfileRemote,
+} from "@/auth/remote-users";
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const USERS_FILE = path.join(DATA_DIR, "users.json");
+function dataDir() {
+  return getAppDataDir();
+}
+
+function usersFilePath() {
+  return path.join(dataDir(), "users.json");
+}
 
 type UsersFile = {
   version: 1;
@@ -19,13 +33,13 @@ type UsersFile = {
 };
 
 async function ensureDir() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.mkdir(dataDir(), { recursive: true });
 }
 
 async function readFile(): Promise<UsersFile> {
   await ensureDir();
   try {
-    const raw = await fs.readFile(USERS_FILE, "utf-8");
+    const raw = await fs.readFile(usersFilePath(), "utf-8");
     const parsed = JSON.parse(raw) as UsersFile;
     if (!parsed || !Array.isArray(parsed.users)) {
       return { version: 1, users: [] };
@@ -38,57 +52,31 @@ async function readFile(): Promise<UsersFile> {
 
 async function writeFile(data: UsersFile) {
   await ensureDir();
-  const tmp = `${USERS_FILE}.${process.pid}.tmp`;
+  const file = usersFilePath();
+  const tmp = `${file}.${process.pid}.tmp`;
   await fs.writeFile(tmp, JSON.stringify(data, null, 2), "utf-8");
-  await fs.rename(tmp, USERS_FILE);
+  await fs.rename(tmp, file);
 }
 
 function toPublic(user: StoredUser): AuthUser {
   return {
     id: user.id,
     username: user.username,
-    role: user.role,
+    role: normalizeStoredRole(user.role),
     displayName: user.displayName,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
 }
 
-function adminPasswordFromEnv(): string {
-  return process.env.ADMIN_PASSWORD?.trim() || DEFAULT_ADMIN_PASSWORD;
-}
-
-/** 确保存在管理员账号；已存在则不覆盖密码。 */
-export async function ensureAdminUser(): Promise<AuthUser> {
-  const file = await readFile();
-  const existing = file.users.find(
-    (u) => u.username === DEFAULT_ADMIN_USERNAME || u.role === "admin",
-  );
-  if (existing) {
-    return toPublic(existing);
-  }
-
-  const now = new Date().toISOString();
-  const { hash, salt } = hashPassword(adminPasswordFromEnv());
-  const admin: StoredUser = {
-    id: randomUUID(),
-    username: DEFAULT_ADMIN_USERNAME,
-    role: "admin",
-    displayName: "管理员",
-    passwordHash: hash,
-    passwordSalt: salt,
-    createdAt: now,
-    updatedAt: now,
-  };
-  file.users.push(admin);
-  await writeFile(file);
-  return toPublic(admin);
+function normalizeStoredRole(role: unknown): UserRole {
+  return role === "admin" ? "admin" : "user";
 }
 
 export async function findUserByUsername(
   username: string,
 ): Promise<StoredUser | null> {
-  await ensureAdminUser();
+  if (isRemoteDataOnly()) return findUserByUsernameRemote(username);
   const file = await readFile();
   return (
     file.users.find(
@@ -101,6 +89,7 @@ export async function authenticateUser(
   username: string,
   password: string,
 ): Promise<AuthUser | null> {
+  if (isRemoteDataOnly()) return authenticateUserRemote(username, password);
   const user = await findUserByUsername(username);
   if (!user) return null;
   if (!verifyPassword(password, user.passwordHash, user.passwordSalt)) {
@@ -110,14 +99,26 @@ export async function authenticateUser(
 }
 
 export async function getUserById(id: string): Promise<AuthUser | null> {
-  await ensureAdminUser();
+  if (isRemoteDataOnly()) return getUserByIdRemote(id);
   const file = await readFile();
   const user = file.users.find((u) => u.id === id);
   return user ? toPublic(user) : null;
 }
 
+/**
+ * Server-only: returns StoredUser including password hash/salt.
+ * For clean-start Postgres identity bootstrap — never send to clients or logs.
+ */
+export async function getStoredUserById(
+  id: string,
+): Promise<StoredUser | null> {
+  if (isRemoteDataOnly()) return getStoredUserByIdRemote(id);
+  const file = await readFile();
+  return file.users.find((u) => u.id === id) ?? null;
+}
+
 export async function listUsers(): Promise<AuthUser[]> {
-  await ensureAdminUser();
+  if (isRemoteDataOnly()) return listUsersRemote();
   const file = await readFile();
   return file.users.map(toPublic);
 }
@@ -128,7 +129,7 @@ export async function createUser(params: {
   role?: UserRole;
   displayName?: string;
 }): Promise<AuthUser> {
-  await ensureAdminUser();
+  if (isRemoteDataOnly()) return createUserRemote(params);
   const username = params.username.trim();
   if (!username || username.length < 2) {
     throw new Error("用户名至少 2 个字符");
@@ -146,10 +147,14 @@ export async function createUser(params: {
 
   const now = new Date().toISOString();
   const { hash, salt } = hashPassword(params.password);
+  // 禁止通过 createUser 直接授予 admin；系统管理员仅能由本机 CLI 授予
+  if (params.role === "admin") {
+    throw new Error("不能通过创建用户接口授予系统管理员");
+  }
   const user: StoredUser = {
     id: randomUUID(),
     username,
-    role: params.role ?? "user",
+    role: "user",
     displayName: params.displayName?.trim() || username,
     passwordHash: hash,
     passwordSalt: salt,
@@ -165,7 +170,7 @@ export async function updateUserProfile(
   userId: string,
   patch: { displayName?: string },
 ): Promise<AuthUser> {
-  await ensureAdminUser();
+  if (isRemoteDataOnly()) return updateUserProfileRemote(userId, patch);
   const file = await readFile();
   const index = file.users.findIndex((u) => u.id === userId);
   if (index < 0) {
@@ -189,4 +194,131 @@ export async function updateUserProfile(
   file.users[index] = next;
   await writeFile(file);
   return toPublic(next);
+}
+
+export async function updateUserPassword(
+  userId: string,
+  params: { currentPassword: string; newPassword: string },
+): Promise<AuthUser> {
+  if (isRemoteDataOnly()) return updateUserPasswordRemote(userId, params);
+  const currentPassword = params.currentPassword;
+  const newPassword = params.newPassword;
+
+  if (!currentPassword) {
+    throw new Error("请输入当前密码");
+  }
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error("新密码至少 6 个字符");
+  }
+  if (newPassword.length > 128) {
+    throw new Error("新密码过长");
+  }
+  if (newPassword === currentPassword) {
+    throw new Error("新密码不能与当前密码相同");
+  }
+
+  const file = await readFile();
+  const index = file.users.findIndex((u) => u.id === userId);
+  if (index < 0) {
+    throw new Error("用户不存在");
+  }
+  const current = file.users[index]!;
+  if (
+    !verifyPassword(
+      currentPassword,
+      current.passwordHash,
+      current.passwordSalt,
+    )
+  ) {
+    throw new Error("当前密码不正确");
+  }
+
+  const { hash, salt } = hashPassword(newPassword);
+  const next: StoredUser = {
+    ...current,
+    passwordHash: hash,
+    passwordSalt: salt,
+    updatedAt: new Date().toISOString(),
+  };
+  file.users[index] = next;
+  await writeFile(file);
+  return toPublic(next);
+}
+
+export async function countSystemAdmins(): Promise<number> {
+  if (isRemoteDataOnly()) return countSystemAdminsRemote();
+  const file = await readFile();
+  return file.users.filter((u) => normalizeStoredRole(u.role) === "admin")
+    .length;
+}
+
+/**
+ * 本机 CLI 用：将已存在用户提升为系统管理员（role=admin → SYSTEM_ADMIN）。
+ * 幂等；不修改其他用户；不输出哈希。
+ */
+export async function grantSystemAdminByUsername(
+  username: string,
+): Promise<{ user: AuthUser; alreadyAdmin: boolean }> {
+  if (isRemoteDataOnly()) return grantSystemAdminByUsernameRemote(username);
+  const trimmed = username.trim();
+  if (!trimmed) {
+    throw new Error("必须指定 --username");
+  }
+  const file = await readFile();
+  const index = file.users.findIndex(
+    (u) => u.username.toLowerCase() === trimmed.toLowerCase(),
+  );
+  if (index < 0) {
+    throw new Error(`用户不存在：${trimmed}`);
+  }
+  const current = file.users[index]!;
+  if (normalizeStoredRole(current.role) === "admin") {
+    return { user: toPublic(current), alreadyAdmin: true };
+  }
+  const next: StoredUser = {
+    ...current,
+    role: "admin",
+    updatedAt: new Date().toISOString(),
+  };
+  file.users[index] = next;
+  await writeFile(file);
+  return { user: toPublic(next), alreadyAdmin: false };
+}
+
+/**
+ * 本机 CLI 用：撤销系统管理员。禁止撤销最后一个系统管理员。
+ */
+export async function revokeSystemAdminByUsername(
+  username: string,
+): Promise<{ user: AuthUser; alreadyUser: boolean }> {
+  if (isRemoteDataOnly()) return revokeSystemAdminByUsernameRemote(username);
+  const trimmed = username.trim();
+  if (!trimmed) {
+    throw new Error("必须指定 --username");
+  }
+  const file = await readFile();
+  const index = file.users.findIndex(
+    (u) => u.username.toLowerCase() === trimmed.toLowerCase(),
+  );
+  if (index < 0) {
+    throw new Error(`用户不存在：${trimmed}`);
+  }
+  const current = file.users[index]!;
+  if (normalizeStoredRole(current.role) !== "admin") {
+    return { user: toPublic(current), alreadyUser: true };
+  }
+  const adminCount = file.users.filter(
+    (u) => normalizeStoredRole(u.role) === "admin",
+  ).length;
+  if (adminCount <= 1) {
+    throw new Error("不能撤销最后一个系统管理员");
+  }
+  const next: StoredUser = {
+    ...current,
+    role: "user",
+    updatedAt: new Date().toISOString(),
+  };
+  file.users[index] = next;
+  await writeFile(file);
+  return { user: toPublic(next), alreadyUser: false };
 }

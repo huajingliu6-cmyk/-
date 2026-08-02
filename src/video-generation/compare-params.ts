@@ -35,6 +35,7 @@ export function mapProviderResolution(
   sr: string | null | undefined,
 ): VideoResolution | null {
   if (!sr) return null;
+  if (sr === "480" || sr === "480P") return "480P";
   if (sr === "720" || sr === "720P") return "720P";
   if (sr === "1080" || sr === "1080P") return "1080P";
   if (isVideoResolution(sr)) return sr;

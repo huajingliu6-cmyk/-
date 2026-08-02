@@ -1,36 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorkflowDocument } from "../types";
 import { migrateWorkflowDocument } from "../migrate";
 import { sanitizeWorkflowForPersist } from "../lib/sanitize-workflow";
 import { useWorkflowStore } from "../store";
 
 const AUTOSAVE_MS = 400;
-const BACKUP_PREFIX = "workflow-backup:";
-
-function backupKey(projectId: string) {
-  return `${BACKUP_PREFIX}${projectId}`;
-}
-
-function writeLocalBackup(doc: WorkflowDocument) {
-  try {
-    localStorage.setItem(backupKey(doc.projectId), JSON.stringify(doc));
-  } catch {
-    // ignore quota / private mode
-  }
-}
-
-function readLocalBackup(projectId: string): WorkflowDocument | null {
-  try {
-    const raw = localStorage.getItem(backupKey(projectId));
-    if (!raw) return null;
-    return migrateWorkflowDocument(JSON.parse(raw));
-  } catch {
-    return null;
-  }
-}
-
 export function useWorkflowAutosave(projectId: string) {
   const saveStatus = useWorkflowStore((s) => s.saveStatus);
   const saveEpoch = useWorkflowStore((s) => s.saveEpoch);
@@ -44,14 +20,14 @@ export function useWorkflowAutosave(projectId: string) {
   const requestIdRef = useRef(0);
   const loadedRef = useRef(false);
   const lastHandledEpochRef = useRef(0);
+  const [backupBanner, setBackupBanner] = useState<string | null>(null);
+  const [loadNonce, setLoadNonce] = useState(0);
 
   const persist = useCallback(
     async (doc: WorkflowDocument) => {
       const requestId = ++requestIdRef.current;
       setSaveStatus("saving");
       const sanitized = sanitizeWorkflowForPersist(doc);
-      writeLocalBackup(sanitized);
-
       const putOnce = async () => {
         const res = await fetch(
           `/api/workflow?projectId=${encodeURIComponent(projectId)}`,
@@ -85,11 +61,6 @@ export function useWorkflowAutosave(projectId: string) {
 
         const saved = migrateWorkflowDocument(payload);
         acknowledgeSave(saved.revision, saved.updatedAt);
-        writeLocalBackup({
-          ...useWorkflowStore.getState().document,
-          revision: saved.revision,
-          updatedAt: saved.updatedAt,
-        });
       } catch (error) {
         if (requestId !== requestIdRef.current) return;
         const message =
@@ -110,19 +81,22 @@ export function useWorkflowAutosave(projectId: string) {
 
   useEffect(() => {
     // 同项目 store 已有数据时跳过：StrictMode/桥接重挂载不得再 set loading 闪屏
-    const snap = useWorkflowStore.getState();
-    if (
-      snap.projectId === projectId &&
-      snap.saveStatus !== "loading" &&
-      (snap.saveStatus === "loaded" ||
-        snap.saveStatus === "saved" ||
-        snap.saveStatus === "dirty" ||
-        snap.saveStatus === "error") &&
-      !snap.loadError
-    ) {
-      loadedRef.current = true;
-      lastHandledEpochRef.current = snap.saveEpoch;
-      return;
+    // loadNonce>0 表示用户主动重试，必须重新请求
+    if (loadNonce === 0) {
+      const snap = useWorkflowStore.getState();
+      if (
+        snap.projectId === projectId &&
+        snap.saveStatus !== "loading" &&
+        (snap.saveStatus === "loaded" ||
+          snap.saveStatus === "saved" ||
+          snap.saveStatus === "dirty" ||
+          snap.saveStatus === "error") &&
+        !snap.loadError
+      ) {
+        loadedRef.current = true;
+        lastHandledEpochRef.current = snap.saveEpoch;
+        return;
+      }
     }
 
     let cancelled = false;
@@ -144,22 +118,12 @@ export function useWorkflowAutosave(projectId: string) {
 
         const doc = migrateWorkflowDocument(payload);
         setDocument(doc, "loaded");
-        writeLocalBackup(doc);
         loadedRef.current = true;
         lastHandledEpochRef.current = useWorkflowStore.getState().saveEpoch;
+        setBackupBanner(null);
       } catch (error) {
         if (cancelled) return;
-        const backup = readLocalBackup(projectId);
-        if (backup) {
-          setDocument(backup, "loaded");
-          loadedRef.current = true;
-          lastHandledEpochRef.current = useWorkflowStore.getState().saveEpoch;
-          setSaveStatus(
-            "error",
-            "服务器加载失败，已使用本地备份（可能不是最新）",
-          );
-          return;
-        }
+        setBackupBanner(null);
         const message =
           error instanceof Error ? error.message : "加载工作流失败";
         setLoadError(message);
@@ -170,7 +134,7 @@ export function useWorkflowAutosave(projectId: string) {
     return () => {
       cancelled = true;
     };
-  }, [projectId, setDocument, setSaveStatus, setLoadError]);
+  }, [projectId, loadNonce, setDocument, setSaveStatus, setLoadError]);
 
   // contentEpoch：内容变更防抖保存；视口平移不递增
   useEffect(() => {
@@ -210,5 +174,29 @@ export function useWorkflowAutosave(projectId: string) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [saveNow]);
 
-  return { saveNow };
+  useEffect(() => {
+    if (saveStatus !== "dirty") return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [saveStatus]);
+
+  const reloadFromServer = useCallback(() => {
+    setBackupBanner(null);
+    setLoadNonce((n) => n + 1);
+  }, []);
+
+  const dismissBackupBanner = useCallback(() => {
+    setBackupBanner(null);
+  }, []);
+
+  return {
+    saveNow,
+    backupBanner,
+    reloadFromServer,
+    dismissBackupBanner,
+  };
 }

@@ -13,7 +13,6 @@ import {
   IDEMPOTENCY_SCOPE,
   ProviderOutcomeUnknownError,
   UNKNOWN_OUTCOME_USER_MESSAGE,
-  FileGenerationIdempotencyStore,
   findActiveGenerationForShot,
   fingerprintInputFromGeneration,
   buildGenerationRequestFingerprint,
@@ -27,10 +26,13 @@ import {
 } from "./model-capabilities";
 import {
   getPublicVideoConfig,
-  getVideoProviderRuntimeConfig,
+  resolvePublicVideoConfig,
+  resolveVideoProviderRuntimeConfig,
   paidGenerationAllowed,
+  type VideoProviderRuntimeConfig,
 } from "./provider/config";
 import { createVideoProvider } from "./provider";
+import type { VideoProviderId } from "./types";
 import {
   buildInputSummary,
   selectWanGenerationMode,
@@ -128,8 +130,16 @@ export async function submitVideoGeneration(params: {
    */
   retryOfGenerationId?: string;
   acknowledgePossibleDuplicateCharge?: boolean;
+  /** Fixed capability for binding resolve — never taken from client body. */
+  capabilityId?:
+    | "video.storyboard-shot.generate"
+    | "video.storyboard-episode.generate"
+    | "video.workflow-node.generate";
 }): Promise<GenerationRecord> {
-  const runtime = getVideoProviderRuntimeConfig();
+  const runtime = await resolveVideoProviderRuntimeConfig(undefined, {
+    capabilityId: params.capabilityId,
+    preferAdminConfig: Boolean(params.capabilityId),
+  });
   const paidGate = paidGenerationAllowed(
     runtime,
     params.confirmPaidGeneration,
@@ -140,7 +150,7 @@ export async function submitVideoGeneration(params: {
     });
   }
 
-  // 普通 API 永远不能提交真实 Provider；仅本机一次性专用入口可以。
+  // 普通 API 不能提交阿里云真实 Provider；HTTP（后台管理 API）与 Mock 可走此入口。
   assertPaidGenerationSubmissionPolicy({
     source: params.retryOfGenerationId
       ? "retryGeneration"
@@ -191,7 +201,7 @@ export async function submitVideoGeneration(params: {
   }
 
   const resolvedMedia = await resolveProviderAssets(params.input, {
-    forRealProvider: runtime.providerId === "aliyun-wan27",
+    forRealProvider: runtime.providerId !== "mock",
   });
 
   const fingerprint = buildGenerationRequestFingerprint(
@@ -251,33 +261,16 @@ export async function submitVideoGeneration(params: {
     });
 
     if (outcome.kind === "safe_retry") {
-      if (store instanceof FileGenerationIdempotencyStore) {
-        const refreshed = await store.reReserveAfterSafeFailure({
-          scope: IDEMPOTENCY_SCOPE,
-          idempotencyKey,
-          requestFingerprint: fingerprint,
-          generationId,
-          projectId: params.input.projectId,
-          shotNodeId: params.input.shotId,
-          providerId: runtime.providerId,
-        });
-        outcome = { kind: "reserved", record: refreshed };
-      } else {
-        await store.releaseIfSafe(
-          IDEMPOTENCY_SCOPE,
-          idempotencyKey,
-          outcome.record.generationId,
-        );
-        outcome = await store.reserve({
-          scope: IDEMPOTENCY_SCOPE,
-          idempotencyKey,
-          requestFingerprint: fingerprint,
-          generationId,
-          projectId: params.input.projectId,
-          shotNodeId: params.input.shotId,
-          providerId: runtime.providerId,
-        });
-      }
+      const refreshed = await store.reReserveAfterSafeFailure({
+        scope: IDEMPOTENCY_SCOPE,
+        idempotencyKey,
+        requestFingerprint: fingerprint,
+        generationId,
+        projectId: params.input.projectId,
+        shotNodeId: params.input.shotId,
+        providerId: runtime.providerId,
+      });
+      outcome = { kind: "reserved", record: refreshed };
     }
 
     if (outcome.kind === "existing") {
@@ -381,6 +374,7 @@ export async function submitVideoGeneration(params: {
         input: params.input,
         capability,
         resolvedMedia,
+        clientIdempotencyKey: idempotencyKey ?? null,
       });
     } catch (err) {
       if (
@@ -492,7 +486,7 @@ export async function retryVideoGeneration(params: {
   title?: string;
   fetchImpl?: FetchLike;
 }): Promise<GenerationRecord> {
-  const runtime = getVideoProviderRuntimeConfig();
+  const runtime = await resolveVideoProviderRuntimeConfig();
   const localCfg = getLocalPaidTestRuntimeConfig();
   if (localCfg.localPaidTestMode) {
     const guard = await getLocalPaidTestGuardStore().get();
@@ -597,7 +591,7 @@ export async function refreshGenerationStatus(
     return afterReconcile;
   }
 
-  const provider = createVideoProvider();
+  const provider = await createProviderForGeneration(afterReconcile);
   const status = await provider.getGenerationStatus(
     afterReconcile.providerTaskId,
   );
@@ -654,7 +648,7 @@ export async function cancelVideoGeneration(
       { code: "CANCEL_NOT_ALLOWED" },
     );
   }
-  const provider = createVideoProvider();
+  const provider = await createProviderForGeneration(current);
   const result = await provider.cancelGeneration(current.providerTaskId);
   if (!result.cancelled) {
     throw Object.assign(new Error(result.message), {
@@ -794,6 +788,28 @@ export async function retryTransferGeneration(
   }
 }
 
+/**
+ * 轮询/取消必须用「该任务提交时的 Provider」，不能用当前 env 默认 mock，
+ * 否则会把方舟 taskId 误当成 Mock 任务并落成 3 秒本地演示片。
+ */
+async function createProviderForGeneration(
+  record: Pick<GenerationRecord, "providerId">,
+  fetchImpl?: FetchLike,
+) {
+  const resolved = await resolveVideoProviderRuntimeConfig();
+  const providerId = record.providerId as VideoProviderId;
+  const config: VideoProviderRuntimeConfig = {
+    ...resolved,
+    providerId,
+  };
+  return createVideoProvider({ config, fetchImpl });
+}
+
+/** 仅环境变量；画布 UI 请用 resolveVideoGenerationPublicConfig */
 export function getVideoGenerationPublicConfig() {
   return getPublicVideoConfig();
+}
+
+export async function resolveVideoGenerationPublicConfig() {
+  return resolvePublicVideoConfig();
 }

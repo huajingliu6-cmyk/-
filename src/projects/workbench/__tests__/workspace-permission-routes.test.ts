@@ -1,0 +1,135 @@
+import { readFileSync } from "fs";
+import path from "path";
+import { describe, expect, it } from "vitest";
+
+const root = process.cwd();
+
+function readSrc(relativePath: string): string {
+  return readFileSync(path.join(root, relativePath), "utf-8");
+}
+
+describe("workspace permission route wiring", () => {
+  it("workspace home cards open workspace project path", () => {
+    const source = readSrc("src/app/app/workspace/page.tsx");
+    expect(source).toContain("workspaceProjectPath");
+    expect(source).toContain("/api/workspace/projects");
+    expect(source).not.toContain("前往项目管理");
+    expect(source).not.toContain("APP_PROJECTS_PATH");
+  });
+
+  it("workspace project page has no script creation or management links", () => {
+    const source = readSrc(
+      path.join("src", "app", "app", "workspace", "projects", "[projectId]", "page.tsx"),
+    );
+    expect(source).not.toContain("返回工作台");
+    expect(source).not.toContain("剧本创作");
+    expect(source).not.toContain("前往项目管理");
+    expect(source).not.toContain("返回项目管理");
+  });
+
+  it("workspace assets entry redirects to design for all asset roles; library and design modules exist", () => {
+    const entry = readSrc(
+      path.join(
+        "src",
+        "app",
+        "app",
+        "workspace",
+        "projects",
+        "[projectId]",
+        "assets",
+        "page.tsx",
+      ),
+    );
+    expect(entry).toContain("workspaceProjectAssetsDesignPath");
+    expect(entry).not.toContain("workspaceProjectAssetsLibraryPath");
+    expect(entry).toContain("router.replace");
+
+    const library = readSrc(
+      path.join(
+        "src",
+        "app",
+        "app",
+        "workspace",
+        "projects",
+        "[projectId]",
+        "assets",
+        "library",
+        "page.tsx",
+      ),
+    );
+    expect(library).toContain("WorkspaceAssetsPage");
+    expect(library).toContain("AssetManagementWorkspace");
+    expect(library).toContain('context="workspace"');
+
+    const design = readSrc(
+      path.join(
+        "src",
+        "app",
+        "app",
+        "workspace",
+        "projects",
+        "[projectId]",
+        "assets",
+        "design",
+        "page.tsx",
+      ),
+    );
+    expect(design).toContain("EpisodeAssetDesignWorkspace");
+    expect(design).toContain("WorkspaceAssetsPage");
+
+    const designLayout = readSrc(
+      path.join(
+        "src",
+        "app",
+        "app",
+        "workspace",
+        "projects",
+        "[projectId]",
+        "assets",
+        "design",
+        "layout.tsx",
+      ),
+    );
+    expect(designLayout).toContain("assertWorkspaceAssetDesignPage");
+
+    const pageGuards = readSrc("src/auth/page-guards.ts");
+    expect(pageGuards).not.toContain("denied=design");
+    expect(pageGuards).toMatch(
+      /assertWorkspaceAssetDesignPage[\s\S]*assertWorkspaceAssetPage/,
+    );
+  });
+
+  it("workspace storyboard page stays under workspace and reuses StoryboardCreationWorkspace", () => {
+    const page = readSrc(
+      path.join(
+        "src",
+        "app",
+        "app",
+        "workspace",
+        "projects",
+        "[projectId]",
+        "storyboard",
+        "page.tsx",
+      ),
+    );
+    const api = readSrc(
+      path.join("src", "app", "api", "workspace", "projects", "[projectId]", "route.ts"),
+    );
+    expect(page).toContain('context="workspace"');
+    expect(page).toContain("StoryboardCreationWorkspace");
+    expect(page).not.toContain("/app/projects/");
+    expect(api).toContain("workspaceProjectStoryboardPath");
+    expect(api).not.toMatch(
+      /storyboard[\s\S]{0,200}\/app\/projects\//,
+    );
+  });
+
+  it("asset workspace hides start creation in workspace context", () => {
+    const source = readSrc(
+      "src/projects/assets/AssetManagementWorkspace.tsx",
+    );
+    expect(source).toContain('context === "workspace"');
+    expect(source).toContain("!isWorkspace");
+    expect(source).toContain("开始创作");
+  });
+});

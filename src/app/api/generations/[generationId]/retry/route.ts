@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { requireVideoCanvasAccessForGeneration } from "@/auth/require-access";
 import {
   assertSafeGenerationId,
   readGenerationRecord,
@@ -11,7 +12,7 @@ import {
   listCapabilitiesForProvider,
   pickCapability,
 } from "@/video-generation/model-capabilities";
-import { getVideoProviderRuntimeConfig } from "@/video-generation/provider/config";
+import { resolveVideoProviderRuntimeConfig } from "@/video-generation/provider/config";
 import { MAX_REFERENCE_SELECTION_IDS_IN_REQUEST } from "@/video-generation/reference-media";
 import { sanitizeGenerationForClient } from "@/video-generation/secure-transfer";
 import { IdempotencyError } from "@/video-generation/idempotency";
@@ -46,6 +47,9 @@ export async function POST(
 ) {
   try {
     const { generationId: rawId } = await context.params;
+    const access = await requireVideoCanvasAccessForGeneration(rawId);
+    if (!access.ok) return access.response;
+
     const oldId = assertSafeGenerationId(rawId);
     const old = await readGenerationRecord(oldId);
     if (!old) {
@@ -69,7 +73,7 @@ export async function POST(
 
     // 始终加载最新 WorkflowDocument；选择以节点数据为准，不复用旧任务快照
     const document = await loadWorkflow(old.projectId);
-    const runtime = getVideoProviderRuntimeConfig();
+    const runtime = await resolveVideoProviderRuntimeConfig();
     const capabilities = listCapabilitiesForProvider(runtime.providerId, {
       t2vModelId: runtime.t2vModelId,
       r2vModelId: runtime.r2vModelId,

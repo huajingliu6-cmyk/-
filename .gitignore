@@ -48,6 +48,12 @@ yarn-error.log*
 !/data/idempotency/.gitkeep
 !/data/idempotency/README.md
 
+# video outbound TXT / future reconciliation logs
+/data/logs/**
+!/data/logs/.gitkeep
+!/data/logs/video-outbound/
+!/data/logs/video-outbound/.gitkeep
+
 # 本机一次性付费测试 Guard（运行时 JSON 不进 Git）
 /data/paid-test-guard/**
 !/data/paid-test-guard/.gitkeep
@@ -74,6 +80,13 @@ next-env.d.ts
 !/data/workflows/.gitkeep
 /data/workflows/*.bak.json
 
+/data/projects/**
+!/data/projects/.gitkeep
+/data/project-create-idempotency/**
+!/data/project-create-idempotency/.gitkeep
+/data/credits.json
+/data/credits.json.*
+
 # local auth users (password hashes)
 /data/users.json
 /data/users.json.*
@@ -81,11 +94,36 @@ next-env.d.ts
 # generation API configs (may contain keys)
 /data/generation-api-configs.json
 /data/generation-api-configs.json.*
+/data/ai-model-connections.json
+/data/ai-model-connections.json.*
+/data/ai-task-rules.json
+/data/ai-task-rules.json.*
+/data/project-members.json
+/data/project-members.json.*
+/data/notifications/**
+!/data/notifications/.gitkeep
 
 # local uploaded assets (dev-only file store; not for Vercel production)
 /data/assets/**
 !/data/assets/.gitkeep
 
+# Batch A local object storage root (LocalDevelopmentStorageProvider)
+/data/object-storage/**
+!/data/object-storage/.gitkeep
+
+# Prisma
+/src/generated/prisma/
+
 # mock / transfer intermediate videos (dev-only; never commit MP4)
 /data/generated-videos/**
 !/data/generated-videos/.gitkeep
+
+# local agent/audit scratch files
+/.audit-*
+/.codex-*.log
+/.9d06-*
+/.extract-*
+/tmp-gen-*
+/_fix_lines.js
+/Microsoft/
+/backend/Microsoft/

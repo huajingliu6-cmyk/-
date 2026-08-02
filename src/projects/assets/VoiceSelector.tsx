@@ -1,0 +1,120 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  GlassSelect,
+  type GlassSelectGroup,
+} from "@/shell/glass-select";
+import {
+  VOICE_CATALOG,
+  findVoiceOption,
+} from "@/projects/assets/voice-catalog";
+import type { VoiceOption } from "@/projects/assets/types";
+
+type Props = {
+  value: string | null;
+  onChange: (voice: VoiceOption | null) => void;
+  disabled?: boolean;
+  label?: string;
+  /** 来自音频管理「音色」分类的项目音色 */
+  projectVoices?: VoiceOption[];
+  /** 外部已加载的本地音频库（可选；未传时组件自行拉取） */
+  localVoices?: VoiceOption[];
+};
+
+function toOption(voice: VoiceOption) {
+  return {
+    id: voice.id,
+    label: voice.label,
+    description: voice.style,
+  };
+}
+
+export function VoiceSelector({
+  value,
+  onChange,
+  disabled = false,
+  label = "音色选择",
+  projectVoices = [],
+  localVoices: localVoicesProp,
+}: Props) {
+  const [fetchedLocal, setFetchedLocal] = useState<VoiceOption[]>([]);
+  const [localError, setLocalError] = useState("");
+
+  useEffect(() => {
+    if (localVoicesProp) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/local-voices", { cache: "no-store" });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as {
+            error?: string;
+          } | null;
+          throw new Error(body?.error || `加载本地音频库失败（${res.status}）`);
+        }
+        const data = (await res.json()) as { voices?: VoiceOption[] };
+        if (!cancelled) {
+          setFetchedLocal(Array.isArray(data.voices) ? data.voices : []);
+          setLocalError("");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setFetchedLocal([]);
+          setLocalError(
+            err instanceof Error ? err.message : "加载本地音频库失败",
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [localVoicesProp]);
+
+  const localVoices = localVoicesProp ?? fetchedLocal;
+
+  const groups: GlassSelectGroup[] = [
+    {
+      id: "local",
+      label: "本地音频库",
+      emptyHint: localError
+        ? localError
+        : "桌面「本地音频库」暂无可用音频。可将 mp3/wav/ogg 放入该文件夹后刷新。",
+      options: localVoices.map(toOption),
+    },
+    {
+      id: "project",
+      label: "项目音色（音频管理）",
+      emptyHint: "暂无项目音色。可在「音频管理」中新建并上传。",
+      options: projectVoices.map(toOption),
+    },
+    {
+      id: "system",
+      label: "系统音色（占位）",
+      options: VOICE_CATALOG.map(toOption),
+    },
+  ];
+
+  return (
+    <GlassSelect
+      label={label}
+      disabled={disabled}
+      value={value ?? ""}
+      placeholder="选择音色"
+      allowClear
+      clearLabel="清除绑定"
+      groups={groups}
+      onChange={(id) => {
+        if (!id) {
+          onChange(null);
+          return;
+        }
+        const hit =
+          findVoiceOption(id, projectVoices, localVoices) ??
+          null;
+        onChange(hit);
+      }}
+    />
+  );
+}

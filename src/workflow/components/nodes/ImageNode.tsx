@@ -11,6 +11,7 @@ import { useAssetsByIds } from "@/workflow/hooks/useAssetById";
 import { uploadAssetFile } from "@/workflow/lib/upload-asset";
 import { useWorkflowNodeData } from "@/workflow/hooks/useWorkflowNodeData";
 import { useWorkflowStore } from "@/workflow/store";
+import { GlassSelect } from "@/shell/glass-select";
 import type { ImageNodeData, ImageReferenceType } from "@/workflow/types";
 
 const REF_LABEL: Record<ImageReferenceType, string> = {
@@ -22,6 +23,13 @@ const REF_LABEL: Record<ImageReferenceType, string> = {
   prop: "道具",
   general: "通用",
 };
+
+const REF_OPTIONS = (Object.keys(REF_LABEL) as ImageReferenceType[]).map(
+  (key) => ({
+    id: key,
+    label: REF_LABEL[key],
+  }),
+);
 
 export function ImageNodeView({ id, selected }: NodeProps) {
   const projectId = useWorkflowStore((s) => s.projectId);
@@ -91,22 +99,18 @@ export function ImageNodeView({ id, selected }: NodeProps) {
         <span className="text-xs font-semibold uppercase tracking-wide text-sky-300">
           图片
         </span>
-        <select
-          className="nodrag nopan max-w-[7rem] rounded border border-zinc-700 bg-zinc-950 px-1.5 py-0.5 text-[10px] text-zinc-200"
+        <GlassSelect
+          variant="compact"
+          label="参考类型"
+          title="参考类型"
           value={nodeData.referenceType}
-          onChange={(e) =>
+          options={REF_OPTIONS}
+          onChange={(next) =>
             updateNodeData(id, {
-              referenceType: e.target.value as ImageReferenceType,
+              referenceType: next as ImageReferenceType,
             })
           }
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          {(Object.keys(REF_LABEL) as ImageReferenceType[]).map((key) => (
-            <option key={key} value={key}>
-              {REF_LABEL[key]}
-            </option>
-          ))}
-        </select>
+        />
       </div>
       <div className="mb-2 truncate text-sm text-zinc-100">
         {nodeData.title || "图片参考"}
@@ -131,7 +135,9 @@ export function ImageNodeView({ id, selected }: NodeProps) {
               key={assetId}
               className="relative aspect-square overflow-hidden rounded-md border border-zinc-700"
               title="双击放大预览"
-              onDoubleClick={() => setPreview({ src: asset.url, alt: asset.name })}
+              onDoubleClick={() =>
+                setPreview({ src: asset.url, alt: asset.name })
+              }
             >
               <AssetThumb src={asset.url} alt={asset.name} />
             </button>
@@ -143,7 +149,11 @@ export function ImageNodeView({ id, selected }: NodeProps) {
           disabled={uploading}
           onClick={() => inputRef.current?.click()}
         >
-          {uploading ? <BrandMark size={20} spin /> : <Plus className="h-4 w-4" />}
+          {uploading ? (
+            <BrandMark size={20} spin />
+          ) : (
+            <Plus className="h-4 w-4" />
+          )}
         </button>
       </div>
 

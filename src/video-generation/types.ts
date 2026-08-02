@@ -1,8 +1,8 @@
 /** 前后端共用的视频生成规范化类型（勿放服务端密钥逻辑） */
 
-export type VideoProviderId = "mock" | "aliyun-wan27";
+export type VideoProviderId = "mock" | "aliyun-wan27" | "http";
 
-export type VideoResolution = "720P" | "1080P";
+export type VideoResolution = "480P" | "720P" | "1080P";
 
 export type VideoAspectRatio =
   | "16:9"
@@ -202,6 +202,12 @@ export type ProviderGenerationInput = {
   capability: ModelCapability;
   /** 已解析的媒体（公网 URL 或 data URL），不含本地路径 */
   resolvedMedia: ResolvedProviderMedia[];
+  /**
+   * 分镜/客户端幂等键（对账用）。
+   * 与上送 SD2 的 Idempotency-Key（当前为 generationId）可能不同；
+   * 同素材反复抽卡时 client key 每次新发，mediaFingerprint 应对齐。
+   */
+  clientIdempotencyKey?: string | null;
 };
 
 export type ResolvedProviderMedia = {
@@ -210,6 +216,13 @@ export type ResolvedProviderMedia = {
   assetId: string;
   label: string;
   referenceVoiceUrl?: string;
+  /** 原始素材类型（角色/场景等），供 SD2 真人认证线路分流 */
+  kind?: GenerationAssetKind;
+  /**
+   * 是否应按「真人/需认证素材」上传（SD2）。
+   * 通常来自 videoRefSafety=likely_real_person 或 character 参考图。
+   */
+  realPersonCandidate?: boolean;
 };
 
 export type ProviderSubmitResult = {
