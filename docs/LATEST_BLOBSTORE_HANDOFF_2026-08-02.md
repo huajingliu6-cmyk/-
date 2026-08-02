@@ -183,6 +183,8 @@ The isolated validation project was `ic-prod-eq-caa0e93` on host port 3180. Its 
 
 Future operations work should turn the validated joint backup/restore procedure into scheduled automation, define production retention and off-host replication, and periodically rehearse recovery. Mismatched PostgreSQL and blobstore recovery points remain operationally invalid and must not be treated as a supported restore mode.
 
+The first automation step is now implemented in `scripts/operations/backup-remote-stack.ps1` and `scripts/operations/restore-remote-stack.ps1`, with instructions in `docs/remote-backup-restore.md`. An isolated automation rehearsal created a manifest-protected joint backup and restored it in 34.7 seconds. The restored Blob payload, ETag, PostgreSQL `body IS NULL`, object-key presence, content length, and SHA-256 all matched. A deliberately corrupted Blobstore archive was rejected before any target containers or volumes were created.
+
 ## Hard prohibitions
 
 - Do not run git reset, git clean, git restore, blind git add, automatic commit, or push.
@@ -196,5 +198,5 @@ Future operations work should turn the validated joint backup/restore procedure 
 ## Next agent opening
 
 ```text
-Read docs/LATEST_BLOBSTORE_HANDOFF_2026-08-02.md first. The production-equivalent Web, Go API, PostgreSQL, and blobstore stack and the joint PostgreSQL/blobstore recovery drill are complete. Recovery health returned in 35.5 seconds. SSDB is optional development/test cache only and must not appear in production deployment. Next work is production backup automation, retention, off-host replication, and periodic recovery rehearsal.
+Read docs/LATEST_BLOBSTORE_HANDOFF_2026-08-02.md first. Production-equivalent readiness, joint recovery, and the first backup/restore automation scripts are complete. The automated isolated restore returned healthy in 34.7 seconds and corrupted archives were rejected before target creation. SSDB is optional development/test cache only and must not appear in production deployment. Next work is scheduler installation, retention, off-host replication, monitoring, and periodic recovery rehearsal.
 ```
