@@ -27,7 +27,6 @@ vi.mock('@/persistence/remote-data-client', () => ({
         const value = {
           ...body.value,
           updatedAt: new Date().toISOString(),
-          ...('episode-designs' === 'approvals' ? { version: 1 } : {}),
         };
         const revision = (snapshot?.revision ?? 0) + 1;
         documents.set(identity, { revision, value: structuredClone(value) });

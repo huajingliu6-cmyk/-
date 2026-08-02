@@ -27,7 +27,7 @@ function redirectToHomeLogin(request: NextRequest, nextPath?: string) {
   return NextResponse.redirect(homeUrl);
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // 旧 /login 入口统一到首页右上角登录

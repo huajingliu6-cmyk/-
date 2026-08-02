@@ -25,7 +25,7 @@ const SD2_CERT_CODES = [
 ] as const;
 
 function extractArkPayload(raw: string): string {
-  const m = raw.match(/方舟创建任务失败（\d+）：\s*(.+)$/s);
+  const m = raw.match(/方舟创建任务失败（\d+）：\s*([\s\S]+)$/);
   if (m?.[1]) return m[1].replace(/\s*Request id:.*$/i, "").trim();
   return raw.replace(/\s*Request id:.*$/i, "").trim();
 }

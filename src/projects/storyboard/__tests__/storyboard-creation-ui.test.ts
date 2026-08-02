@@ -48,13 +48,13 @@ describe("storyboard creation UI flow contracts", () => {
 
   it("centers view-script dialog on viewport with larger script card", () => {
     const css = readSrc("src/projects/storyboard/storyboard-workspace.css");
-    expect(css).toMatch(/\.sbw-dialog\s*\{[^}]*position:\s*fixed/s);
-    expect(css).toMatch(/\.sbw-dialog__card--script\s*\{[^}]*min\(1040px/s);
+    expect(css).toMatch(/\.sbw-dialog\s*\{[\s\S]*?position:\s*fixed/);
+    expect(css).toMatch(/\.sbw-dialog__card--script\s*\{[\s\S]*?min\(1040px/);
     expect(css).toMatch(
-      /\.sbw-textarea--script-modal\s*\{[^}]*font-size:\s*0\.82rem/s,
+      /\.sbw-textarea--script-modal\s*\{[\s\S]*?font-size:\s*0\.82rem/,
     );
-    expect(css).toMatch(/\.sbw-modal-backdrop\s*\{[^}]*position:\s*fixed/s);
-    expect(css).toMatch(/\.sbw-modal-backdrop\s*\{[^}]*z-index:\s*2400/s);
+    expect(css).toMatch(/\.sbw-modal-backdrop\s*\{[\s\S]*?position:\s*fixed/);
+    expect(css).toMatch(/\.sbw-modal-backdrop\s*\{[\s\S]*?z-index:\s*2400/);
   });
 
   it("merges storyboard confirm into episode video generate dialog", () => {

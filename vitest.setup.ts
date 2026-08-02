@@ -27,7 +27,7 @@ process.env.DATA_ROOT = tempDataRoot;
 process.env.LOCAL_STORAGE_ROOT = path.join(tempDataRoot, "object-storage");
 
 const resetIsolatedTestEnvironment = () => {
-  process.env.NODE_ENV = "test";
+  Object.assign(process.env, { NODE_ENV: "test" });
   process.env.APP_DATA_DIR = tempDataRoot;
   process.env.DATA_ROOT = tempDataRoot;
   process.env.LOCAL_STORAGE_ROOT = path.join(tempDataRoot, "object-storage");

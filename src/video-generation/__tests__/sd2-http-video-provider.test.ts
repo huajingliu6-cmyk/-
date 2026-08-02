@@ -3,6 +3,24 @@ import { HttpVideoProvider } from "@/video-generation/provider/http-video-provid
 import type { ProviderGenerationInput } from "@/video-generation/types";
 import type { VideoProviderRuntimeConfig } from "@/video-generation/provider/config";
 
+function httpConfig(
+  overrides: Partial<VideoProviderRuntimeConfig> = {},
+): VideoProviderRuntimeConfig {
+  return {
+    providerId: "http",
+    allowPaidGeneration: false,
+    dashscopeApiKey: "",
+    dashscopeWorkspaceId: "",
+    dashscopeRegion: "cn-beijing",
+    t2vModelId: "mock-t2v",
+    r2vModelId: "mock-r2v",
+    httpApiUrl: "https://api.sd2.example/v1/video/generations",
+    httpApiKey: "sk-test",
+    httpModelId: "doubao-seedance-2.0",
+    ...overrides,
+  };
+}
+
 function baseInput(
   overrides?: Partial<ProviderGenerationInput>,
 ): ProviderGenerationInput {
@@ -10,12 +28,13 @@ function baseInput(
     generationId: "gen-sd2-1",
     input: {
       projectId: "p1",
+      shotId: "shot-1",
       prompt: "人物在街景中行走",
       negativePrompt: "",
       resolution: "720P",
       aspectRatio: "16:9",
       durationSeconds: 5,
-      seed: null,
+      seed: undefined,
       watermark: false,
       promptExtend: false,
       characterReferences: [],
@@ -127,12 +146,7 @@ describe("HttpVideoProvider SD2 dialect", () => {
       return new Response("unexpected", { status: 500 });
     });
 
-    const config: VideoProviderRuntimeConfig = {
-      providerId: "http",
-      httpApiUrl: "https://api.sd2.example/v1/video/generations",
-      httpApiKey: "sk-test",
-      httpModelId: "doubao-seedance-2.0",
-    };
+    const config = httpConfig();
     const provider = new HttpVideoProvider({ config, fetchImpl: fetchImpl as never });
     const result = await provider.submitGeneration(baseInput());
     expect(result.providerTaskId).toBe("http-sd2-task_sd2_1");
@@ -172,12 +186,9 @@ describe("HttpVideoProvider SD2 dialect", () => {
     process.env.VIDEO_SHOT_HTTP_DIALECT = "sd2";
     try {
       const provider = new HttpVideoProvider({
-        config: {
-          providerId: "http",
+        config: httpConfig({
           httpApiUrl: "https://api.sd2.example",
-          httpApiKey: "sk-test",
-          httpModelId: "doubao-seedance-2.0",
-        },
+        }),
         fetchImpl: fetchImpl as never,
       });
 
@@ -238,12 +249,7 @@ describe("HttpVideoProvider SD2 dialect", () => {
     });
 
     const provider = new HttpVideoProvider({
-      config: {
-        providerId: "http",
-        httpApiUrl: "https://api.sd2.example/v1/video/generations",
-        httpApiKey: "sk-test",
-        httpModelId: "doubao-seedance-2.0",
-      },
+      config: httpConfig(),
       fetchImpl: fetchImpl as never,
     });
 
@@ -283,12 +289,7 @@ describe("HttpVideoProvider SD2 dialect", () => {
     });
 
     const provider = new HttpVideoProvider({
-      config: {
-        providerId: "http",
-        httpApiUrl: "https://api.sd2.example/v1/video/generations",
-        httpApiKey: "sk-test",
-        httpModelId: "doubao-seedance-2.0",
-      },
+      config: httpConfig(),
       fetchImpl: fetchImpl as never,
     });
 
@@ -311,12 +312,9 @@ describe("HttpVideoProvider SD2 dialect", () => {
     });
 
     const provider = new HttpVideoProvider({
-      config: {
-        providerId: "http",
-        httpApiUrl: "https://api.sd2.example/v1/video/generations",
+      config: httpConfig({
         httpApiKey: "sk-wrong-key",
-        httpModelId: "doubao-seedance-2.0",
-      },
+      }),
       fetchImpl: fetchImpl as never,
     });
 

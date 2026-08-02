@@ -104,6 +104,17 @@ The following passed on 2026-08-02:
 - split storage compatibility and failure-compensation tests
 - request ID propagation assertion
 - Blob storage driver configuration tests
+- production-equivalent four-service Compose stack: Web, Go API, PostgreSQL, and blobstore
+- production Compose contains no SSDB service or SSDB dependency
+- only Web publishes a host port; Web, Go API, and blobstore use read-only root filesystems
+- end-to-end remotefile Blob PUT/GET with PostgreSQL metadata storing `body IS NULL` and a non-empty `object_key`
+- request ID `prod-eq-caa0e93-blob` correlated across Go API and blobstore logs
+- joint PostgreSQL plus blobstore backup, volume destruction, and restore drill
+- restored stack returned healthy in 35.5 seconds with matching Blob content, metadata, ETag, and SHA-256
+- `npm run typecheck`
+- `npm test`: 184 files and 1084 tests passed
+- `npm run build` on Next.js 16.2.12 with Proxy migration and no middleware deprecation warning
+- `npm run architecture:check`
 
 No repository data directory, user port 3000, commit, or push was touched.
 
@@ -164,15 +175,13 @@ The official 1.9.9 Git tag still contains the source version marker 1.9.8, so st
 
 This installation is approved only for isolated local development and testing. It must not contain real production data and must never be added to the production Compose stack.
 
-## Remaining required work
+## Production readiness result
 
-The application migration and local integration validation are complete. Remaining production operations work is:
+The production-equivalent readiness and joint recovery milestones are complete. The validated production topology is Web -> Go API -> PostgreSQL plus blobstore. SSDB remains an optional development/test cache and is not a production component.
 
-1. Run the production-equivalent Web, Go API, PostgreSQL, and blobstore readiness and request-ID checks.
-2. Validate the operational backup and restore procedure for PostgreSQL plus the blobstore volume as one recovery unit.
-3. Record recovery-point and recovery-time evidence, including behavior when PostgreSQL metadata and blobstore bytes are restored from mismatched points in time.
+The isolated validation project was `ic-prod-eq-caa0e93` on host port 3180. Its containers, networks, and volumes were removed after validation. The retained recovery evidence is stored outside the repository under the task workspace `backups/ic-prod-eq-caa0e93-20260802` directory.
 
-SSDB approval is not a production milestone because SSDB is not a production component. Do not report operational readiness complete until PostgreSQL and blobstore backup/restore evidence exists.
+Future operations work should turn the validated joint backup/restore procedure into scheduled automation, define production retention and off-host replication, and periodically rehearse recovery. Mismatched PostgreSQL and blobstore recovery points remain operationally invalid and must not be treated as a supported restore mode.
 
 ## Hard prohibitions
 
@@ -187,5 +196,5 @@ SSDB approval is not a production milestone because SSDB is not a production com
 ## Next agent opening
 
 ```text
-Read docs/LATEST_BLOBSTORE_HANDOFF_2026-08-02.md first. Independent blobstore behavior and the Go API integration tests are complete. SSDB is optional development/test cache only and must not appear in production deployment. Remaining work is production-equivalent readiness plus PostgreSQL and blobstore backup/restore validation as one recovery unit.
+Read docs/LATEST_BLOBSTORE_HANDOFF_2026-08-02.md first. The production-equivalent Web, Go API, PostgreSQL, and blobstore stack and the joint PostgreSQL/blobstore recovery drill are complete. Recovery health returned in 35.5 seconds. SSDB is optional development/test cache only and must not appear in production deployment. Next work is production backup automation, retention, off-host replication, and periodic recovery rehearsal.
 ```

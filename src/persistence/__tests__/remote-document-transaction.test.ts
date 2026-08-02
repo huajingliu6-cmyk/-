@@ -43,7 +43,10 @@ describe('remote document transaction client', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0]!;
+    const calls = fetchMock.mock.calls as unknown as Array<
+      [string | URL | Request, RequestInit?]
+    >;
+    const [url, init] = calls[0]!;
     expect(url).toBe('http://internal-api.test/v1/document-transactions');
     expect(init?.method).toBe('POST');
     expect(JSON.parse(String(init?.body))).toMatchObject({

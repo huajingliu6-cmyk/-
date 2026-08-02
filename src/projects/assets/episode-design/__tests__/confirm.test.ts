@@ -62,6 +62,7 @@ describe("confirmEpisodeAssetDesign", () => {
             age: "28",
             voiceId: "voice_1",
             voiceName: "测试音色",
+            voiceBound: true,
             usageInEpisode: "出场",
             evidence: "",
           },

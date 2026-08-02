@@ -90,6 +90,7 @@ describe("design-media-voice", () => {
       voiceName: "a2",
       voiceBound: true,
     });
+    if (next.assetType !== "character") throw new Error("expected character");
     expect(next.draft.voiceId).toBe("localvoice_a2");
     expect(next.draft.voiceBound).toBe(true);
     expect(

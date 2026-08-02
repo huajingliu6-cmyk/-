@@ -343,7 +343,7 @@ describe("remote video generation idempotency store", () => {
     await store.markUnknownOutcome("video-generation", "idem_1", "generation_1", "GENERATION_SUBMISSION_UNKNOWN");
     expect((await store.reserve(input("generation_2"))).kind).toBe("blocked_unknown");
     await expect(store.reserve({ ...input("generation_3"), requestFingerprint: "b".repeat(64) }))
-      .rejects.toMatchObject<Partial<IdempotencyError>>({ code: "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST" });
+      .rejects.toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST" } satisfies Partial<IdempotencyError>);
   });
 
   it("safely releases a pre-provider record and reuses its indexed slot", async () => {
@@ -366,8 +366,8 @@ describe("remote video generation idempotency store", () => {
       revision: recordDocument![1].revision + 1,
       value: { version: 1, active: true, record: { prompt: "unsafe" } },
     });
-    await expect(store.reserve(input("generation_2"))).rejects.toMatchObject<Partial<IdempotencyError>>({
+    await expect(store.reserve(input("generation_2"))).rejects.toMatchObject({
       code: "IDEMPOTENCY_RECORD_CORRUPTED",
-    });
+    } satisfies Partial<IdempotencyError>);
   });
 });

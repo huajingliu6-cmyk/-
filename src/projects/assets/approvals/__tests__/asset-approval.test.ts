@@ -700,7 +700,11 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
       projectMode: "full-stack",
       passwordEnabled: false,
     });
-    await addCardEngineer(project.projectId, engineer.id);
+    await addCardEngineer({
+      projectId: project.projectId,
+      userId: engineer.id,
+      createdBy: owner.id,
+    });
     const seeded = await seedEpisodeWithMedia(project.projectId);
 
     const submitted = await submitAssetApproval({

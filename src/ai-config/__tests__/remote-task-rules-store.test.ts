@@ -115,8 +115,8 @@ vi.mock("@/persistence/remote-data-client", () => ({
         published
       ) {
         return json({
-          version: published.version,
-          contentHash: published.contentHash,
+          version: published!.version,
+          contentHash: published!.contentHash,
         });
       }
       if (!current.draft?.content.trim()) {
@@ -179,8 +179,8 @@ vi.mock("@/persistence/remote-data-client", () => ({
         published?.rolledBackFromVersion === body.toVersion
       ) {
         return json({
-          version: published.version,
-          contentHash: published.contentHash,
+          version: published!.version,
+          contentHash: published!.contentHash,
         });
       }
       const target = current.versions.find(

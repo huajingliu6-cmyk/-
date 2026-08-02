@@ -95,26 +95,25 @@ function record(
     providerId: "mock",
     providerModelId: "mock",
     providerTaskId: `task_${id}`,
-    mode: "text_to_video",
-    status: "pending",
+    mode: "textToVideo",
+    status: "queued",
     progress: 0,
     progressLabel: "排队中",
     isMock: true,
     requestSnapshot: {
       prompt: "prompt",
       settings: {
-        resolution: "720p",
+        resolution: "720P",
         aspectRatio: "16:9",
         durationSeconds: 5,
-        promptEnhance: false,
-        shotType: "single",
-        generateAudio: false,
-        seed: null,
+        promptExtend: false,
+        watermark: false,
+        seed: undefined,
       },
       mediaAssetIds: [],
       unsupportedAudioLabels: [],
     },
-    requestedResolution: "720p",
+    requestedResolution: "720P",
     requestedAspectRatio: "16:9",
     requestedDurationSeconds: 5,
     providerResolution: null,
@@ -173,11 +172,11 @@ describe("remote video generation store", () => {
     await saveGenerationRecord(record("generation_1"));
     await saveGenerationRecord({
       ...record("generation_1"),
-      status: "succeeded",
+      status: "completed",
       progress: 100,
     });
 
-    expect((await readGenerationRecord("generation_1"))?.status).toBe("succeeded");
+    expect((await readGenerationRecord("generation_1"))?.status).toBe("completed");
     expect(state.index).toMatchObject({ generationIds: ["generation_1"] });
   });
 

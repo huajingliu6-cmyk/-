@@ -5,11 +5,14 @@ import {
   isApprovedEpisodeDesignItem,
   resolveDesignItemPreviewUrl,
 } from "@/projects/assets/episode-design/approved-item";
-import type { EpisodeAssetDesignItem } from "@/projects/assets/episode-design/types";
+import type {
+  CharacterDesignItem,
+  EpisodeAssetDesignItem,
+} from "@/projects/assets/episode-design/types";
 
 function baseItem(
-  overrides: Partial<EpisodeAssetDesignItem> & { id: string; name: string },
-): EpisodeAssetDesignItem {
+  overrides: Partial<CharacterDesignItem> & { id: string; name: string },
+): CharacterDesignItem {
   return {
     assetType: "character",
     resolution: "create_new",
