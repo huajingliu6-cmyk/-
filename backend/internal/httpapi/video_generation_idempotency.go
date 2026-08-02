@@ -99,7 +99,20 @@ func (handler *VideoGenerationIdempotency) ServeHTTP(writer http.ResponseWriter,
 }
 
 func writeVideoIdempotencyError(writer http.ResponseWriter, status int, code string) {
-	writeJSON(writer, status, map[string]string{"error": code, "code": code})
+	writeJSON(writer, status, map[string]string{"error": code, "code": code, "message": videoIdempotencyErrorMessage(code)})
+}
+
+func videoIdempotencyErrorMessage(code string) string {
+	switch code {
+	case "IDEMPOTENCY_RECORD_CORRUPTED":
+		return "\u5e42\u7b49\u8bb0\u5f55\u635f\u574f\uff0c\u65e0\u6cd5\u5b89\u5168\u7ee7\u7eed\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u6392\u67e5\u3002"
+	case "IDEMPOTENCY_STORE_UNAVAILABLE":
+		return "\u5e42\u7b49\u5b58\u50a8\u6682\u65f6\u4e0d\u53ef\u7528\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002"
+	case "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST":
+		return "\u5e42\u7b49\u952e\u88ab\u590d\u7528\u4e8e\u4e0d\u540c\u7684\u751f\u6210\u8bf7\u6c42\uff0c\u5df2\u62d2\u7edd\u4ee5\u907f\u514d\u9519\u914d\u8ba1\u8d39\u3002"
+	default:
+		return code
+	}
 }
 
 func videoIdempotencyDocumentKey(scope, key string) string {

@@ -164,6 +164,7 @@ export function ShotAssetCard({
         confirmLabel="选择此图"
         onClose={() => setLightboxOpen(false)}
         onSelect={(mediaId) => {
+          if (!mediaId) return;
           setBroken(false);
           onSelectMedia?.(mediaId);
         }}

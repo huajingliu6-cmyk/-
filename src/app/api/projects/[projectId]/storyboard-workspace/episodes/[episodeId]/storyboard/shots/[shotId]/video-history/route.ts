@@ -6,7 +6,6 @@ import {
 } from "@/projects/storyboard/api-helpers";
 import type { ShotGenerationSnapshot } from "@/projects/storyboard/resolve-shot-video";
 import { listPlayableShotVideos } from "@/projects/storyboard/shot-video-history";
-import { collectVideoHistoryGenerationIds } from "@/projects/storyboard/video-history-ids";
 import {
   listGenerationRecords,
   readGenerationRecord,
@@ -42,7 +41,7 @@ function toSnapshot(
 
 /**
  * GET 当前镜头可播放的视频生成历史。
- * 来源：镜头历史 ID + 本集文档归档 ID + 同 shotNodeId 旧记录（兼容）。
+ * 来源：当前镜头历史 ID + 同 shotNodeId 旧记录（兼容）。
  * 不删除任何历史；修改剧本/重生分镜后仍可读。
  */
 export async function GET(_request: Request, context: RouteContext) {
@@ -66,12 +65,15 @@ export async function GET(_request: Request, context: RouteContext) {
     return NextResponse.json({ error: "镜头不存在" }, { status: 404 });
   }
 
-  const historyIds = collectVideoHistoryGenerationIds({ shot, storyboard });
+  const historyIds = Array.from(
+    new Set([...(shot.videoHistoryGenerationIds ?? []), shot.lastGenerationId]),
+  ).filter((id): id is string => Boolean(id));
   const byId = new Map<string, ShotGenerationSnapshot & { sourceShotId?: string }>();
 
   for (const id of historyIds) {
     const record = await readGenerationRecord(id);
     if (!record || record.projectId !== projectId) continue;
+    if (record.shotNodeId && record.shotNodeId !== shotId) continue;
     const snap = toSnapshot(sanitizeGenerationForClient(record));
     byId.set(snap.id, snap);
   }
@@ -80,10 +82,16 @@ export async function GET(_request: Request, context: RouteContext) {
   const all = await listGenerationRecords();
   for (const record of all) {
     if (record.projectId !== projectId) continue;
-    if (record.shotNodeId !== shotId && !historyIds.includes(record.id)) {
+    if (
+      record.shotNodeId !== shotId &&
+      !(record.shotNodeId == null && historyIds.includes(record.id))
+    ) {
       continue;
     }
-    if (record.shotNodeId === shotId || historyIds.includes(record.id)) {
+    if (
+      record.shotNodeId === shotId ||
+      (record.shotNodeId == null && historyIds.includes(record.id))
+    ) {
       const snap = toSnapshot(sanitizeGenerationForClient(record));
       if (!byId.has(snap.id)) byId.set(snap.id, snap);
     }

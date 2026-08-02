@@ -14,7 +14,7 @@ type Props = {
   asset: PickerAsset | null;
   selectedMediaId?: string | null;
   /** 确认选用当前预览的媒体版本 */
-  onSelect: (mediaId: string) => void;
+  onSelect: (mediaId?: string) => void;
   onClose: () => void;
   /** 确认按钮文案 */
   confirmLabel?: string;
@@ -35,8 +35,7 @@ export function AssetMediaSelectLightbox({
   const options: AssetMediaOption[] = (() => {
     if (!asset) return [];
     if (asset.mediaOptions?.length) return asset.mediaOptions;
-    const mediaId =
-      selectedMediaId || defaultMediaIdForAsset(asset) || asset.id;
+    const mediaId = selectedMediaId || defaultMediaIdForAsset(asset) || "";
     const thumbUrl = asset.thumbUrl ?? "";
     if (!thumbUrl && !mediaId) return [];
     return [{ mediaId, thumbUrl, isPrimary: true }];
@@ -82,7 +81,7 @@ export function AssetMediaSelectLightbox({
     options.find((o) => o.mediaId === previewMediaId)?.thumbUrl ||
     asset.thumbUrl ||
     null;
-  const canConfirm = Boolean(previewMediaId && previewUrl);
+  const canConfirm = Boolean(previewUrl);
   const hasHistory = options.length > 1;
 
   return createPortal(
@@ -158,8 +157,7 @@ export function AssetMediaSelectLightbox({
             data-testid="asset-media-lightbox-select"
             disabled={!canConfirm}
             onClick={() => {
-              if (!previewMediaId) return;
-              onSelect(previewMediaId);
+              onSelect(previewMediaId ?? undefined);
               onClose();
             }}
           >

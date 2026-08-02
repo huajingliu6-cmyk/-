@@ -112,7 +112,7 @@ function toSummaryItem(
           revision: asset.revision,
         })
       : null,
-    ...(mediaOptions.length > 1 ? { mediaOptions } : {}),
+    ...(mediaOptions.length > 0 ? { mediaOptions } : {}),
     ...(options?.includeVoiceBound
       ? { voiceBound: Boolean(asset.voiceId?.trim()) }
       : {}),

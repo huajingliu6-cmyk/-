@@ -74,6 +74,6 @@ describe("storyboard asset mediaOptions", () => {
       audios: [],
     };
     const summary = buildAssetsSummary(draft);
-    expect(summary?.characters[0]?.mediaOptions).toBeUndefined();
+    expect(summary?.characters[0]?.mediaOptions?.map((m) => m.mediaId)).toEqual(["gen_only"]);
   });
 });

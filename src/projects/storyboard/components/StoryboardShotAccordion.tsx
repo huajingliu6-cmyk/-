@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -435,6 +435,7 @@ export function StoryboardShotAccordion({
 
   const terminalGenIdsRef = useRef<Set<string>>(new Set());
   const historyFetchedKeyRef = useRef<string | null>(null);
+  const historyRequestSeqRef = useRef(0);
   const setNoteRef = useRef(setNote);
   setNoteRef.current = setNote;
 
@@ -477,16 +478,19 @@ export function StoryboardShotAccordion({
     async (force = false) => {
       const key = `${projectId}|${episodeId}|${shot.id}|${shot.videoHistoryGenerationIds.join("|")}|${shot.lastGenerationId ?? ""}`;
       if (!force && historyFetchedKeyRef.current === key) return;
-      historyFetchedKeyRef.current = key;
+      const requestSeq = ++historyRequestSeqRef.current;
       try {
         const history = await fetchShotVideoHistory(
           projectId,
           episodeId,
           shot.id,
         );
+        if (requestSeq !== historyRequestSeqRef.current) return;
         setHistoryVideos(history.videos);
+        historyFetchedKeyRef.current = key;
       } catch {
-        setHistoryVideos([]);
+        // Keep the last successful history visible. A transient navigation or
+        // session failure must not make persisted videos disappear.
       }
     },
     [
@@ -1139,10 +1143,18 @@ export function StoryboardShotAccordion({
   ]);
 
   const handlePickerConfirm = useCallback(
-    async (ids: string[], mediaByAssetId: Record<string, string> = {}) => {
+    async (ids: string[], selectedMediaByAssetId: Record<string, string> = {}) => {
       const target = picker;
       setPicker(null);
       if (!target) return;
+
+      const mediaByAssetId = Object.fromEntries(
+        Object.entries(selectedMediaByAssetId).filter(([assetId, mediaId]) =>
+          assetById
+            .get(assetId)
+            ?.mediaOptions?.some((option) => option.mediaId === mediaId),
+        ),
+      );
 
       if (target.kind === "character") {
         const characterAssetIds = [...new Set(ids)];

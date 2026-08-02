@@ -82,3 +82,12 @@ HTTP 视频 Provider 对需要 API Key 才能下载的结果，不把密钥或�
 - `npm run architecture:check` ?????????????Web ??????????????????????????????
 - ???????????`VIDEO_PROVIDER=mock`?`ALLOW_PAID_GENERATION=false`?`TEXT_LLM_PROVIDER=mock`???????????????????????????????????
 - ??????? 183 ?????? 1082 ????????? TypeScript?Next.js ?????Go `test`/`vet`??? Compose ?????
+
+
+## Current acceptance boundary
+
+The remote-only architecture is enforced for production Web: Next.js keeps authentication, authorization, request validation, response shaping, and calls to dedicated Go APIs. PostgreSQL is the source of truth, SSDB is cache-only, production Web rejects direct database, cache, local-file, blobstore, OSS, S3, and MinIO configuration, and the remote Compose deployment keeps data services on the internal network.
+
+The browser video metadata write-back command is implemented in Go at POST /v1/video-generations/browser-metadata. It validates generation and asset identity, generated-video MIME, browser metadata, idempotency, revision CAS, and cache invalidation. The generation idempotency reconciliation command is implemented in Go at POST /v1/video-generation-idempotency/reconcile; it never replays a Provider request and atomically repairs the idempotency and generation documents when required. The corresponding Next routes are BFFs only and sanitize remote video URLs before returning data to clients.
+
+The target architecture is not yet fully complete. The main generation submission path, polling/status refresh, cancellation, retry, transfer, storyboard video generation, text generation execution, character/scene generation, and some asset-generation paths still contain Next.js orchestration. Moving those paths requires first implementing the Go equivalent of the existing encrypted model-connection format (enc:v1:, AES-256-GCM) and preserving each Provider request, response, cancellation, transfer, and safe-default behavior. Until that work is complete, this document must not be read as claiming that all business orchestration has moved to Go.

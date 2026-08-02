@@ -1,0 +1,15 @@
+{
+  "composeFile": "compose.remote.yml",
+  "envFile": "C:\\secure\\infinite-canvas.env",
+  "projectName": "infinite-canvas-prod",
+  "localOutputRoot": "D:\\backups\\infinite-canvas",
+  "offHostOutputRoot": "\\\\backup-server\\encrypted-backups\\infinite-canvas",
+  "stateDirectory": "C:\\ProgramData\\InfiniteCanvas\\backup-state",
+  "minimumFreeBytes": 21474836480,
+  "staleAfterHours": 30,
+  "webhookUrlFile": "C:\\secure\\infinite-canvas-backup-webhook.txt",
+  "retention": {
+    "local": {"dailyCopies": 7,"weeklyCopies": 4,"monthlyCopies": 3},
+    "offHost": {"dailyCopies": 14,"weeklyCopies": 8,"monthlyCopies": 12}
+  }
+}

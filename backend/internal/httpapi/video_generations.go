@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"regexp"
 	"strings"
@@ -29,6 +30,20 @@ type VideoGenerations struct {
 	cache *cache.Documents
 }
 
+type browserVideoMetadataInput struct {
+	GenerationID          string  `json:"generationId"`
+	VideoAssetID          string  `json:"videoAssetId"`
+	ActualWidth           float64 `json:"actualWidth"`
+	ActualHeight          float64 `json:"actualHeight"`
+	ActualDurationSeconds float64 `json:"actualDurationSeconds"`
+}
+
+type videoGenerationBusinessError struct {
+	Status  int
+	Code    string
+	Message string
+}
+
 func NewVideoGenerations(store *postgres.Store, documentCache *cache.Documents) *VideoGenerations {
 	return &VideoGenerations{store: store, cache: documentCache}
 }
@@ -44,6 +59,140 @@ func (handler *VideoGenerations) ServeHTTP(writer http.ResponseWriter, request *
 	default:
 		methodNotAllowed(writer, "GET, POST, PATCH")
 	}
+}
+
+func (handler *VideoGenerations) ServeBrowserMetadataHTTP(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		methodNotAllowed(writer, http.MethodPost)
+		return
+	}
+	var input browserVideoMetadataInput
+	if err := decodeJSON(writer, request, &input); err != nil {
+		return
+	}
+	input.GenerationID = strings.TrimSpace(input.GenerationID)
+	input.VideoAssetID = strings.TrimSpace(input.VideoAssetID)
+	if !safeVideoGenerationID.MatchString(input.GenerationID) || input.VideoAssetID == "" {
+		writeVideoGenerationBusinessError(writer, videoGenerationBusinessError{
+			Status: http.StatusBadRequest, Code: "INVALID_BODY", Message: "\u53c2\u6570\u65e0\u6548",
+		})
+		return
+	}
+
+	for attempt := 0; attempt < maxVideoGenerationWriteAttempts; attempt++ {
+		document, current, found, err := handler.readRecord(request, input.GenerationID)
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, "video generation read failed")
+			return
+		}
+		if !found {
+			current = nil
+		}
+		next, idempotent, businessErr := applyBrowserVideoMetadata(current, input)
+		if businessErr != nil {
+			writeVideoGenerationBusinessError(writer, *businessErr)
+			return
+		}
+		if idempotent {
+			writeJSON(writer, http.StatusOK, map[string]any{"record": current, "idempotent": true})
+			return
+		}
+
+		next["updatedAt"] = requestTime()
+		value, _ := json.Marshal(next)
+		written, writeErr := handler.store.PutDocument(request.Context(), videoGenerationNamespace, input.GenerationID, &document.Revision, value)
+		if errors.Is(writeErr, postgres.ErrRevisionConflict) {
+			handler.clearCache(request, input.GenerationID, false)
+			continue
+		}
+		if writeErr != nil {
+			writeError(writer, http.StatusInternalServerError, "video generation write failed")
+			return
+		}
+		handler.cacheDocuments(request, []postgres.Document{written})
+		writeJSON(writer, http.StatusOK, map[string]any{"record": next, "idempotent": false})
+		return
+	}
+	writeError(writer, http.StatusConflict, "video generation write conflict")
+}
+
+func applyBrowserVideoMetadata(current map[string]any, input browserVideoMetadataInput) (map[string]any, bool, *videoGenerationBusinessError) {
+	if current == nil {
+		return nil, false, &videoGenerationBusinessError{Status: http.StatusNotFound, Code: "GENERATION_NOT_FOUND", Message: "\u751f\u6210\u4efb\u52a1\u4e0d\u5b58\u5728"}
+	}
+	if videoGenerationString(current, "localVideoAssetId") != input.VideoAssetID {
+		return nil, false, &videoGenerationBusinessError{Status: http.StatusConflict, Code: "ASSET_MISMATCH", Message: "\u89c6\u9891\u8d44\u4ea7\u4e0e\u5f53\u524d\u4efb\u52a1\u4e0d\u5339\u914d"}
+	}
+
+	assetValue, assetExists := current["resultAsset"]
+	asset, assetOK := assetValue.(map[string]any)
+	if assetExists && assetValue != nil && assetOK && videoGenerationString(asset, "id") != input.VideoAssetID {
+		return nil, false, &videoGenerationBusinessError{Status: http.StatusConflict, Code: "ASSET_MISMATCH", Message: "\u7ed3\u679c\u8d44\u4ea7\u4e0e\u8bf7\u6c42\u4e0d\u4e00\u81f4"}
+	}
+	if !assetExists || assetValue == nil || !assetOK {
+		return nil, false, &videoGenerationBusinessError{Status: http.StatusNotFound, Code: "ASSET_NOT_FOUND", Message: "\u4efb\u52a1\u5c1a\u672a\u767b\u8bb0\u89c6\u9891\u8d44\u4ea7"}
+	}
+	if videoGenerationString(asset, "assetType") != "generatedVideo" {
+		return nil, false, &videoGenerationBusinessError{Status: http.StatusUnsupportedMediaType, Code: "NOT_GENERATED_VIDEO", Message: "\u4ec5\u5141\u8bb8\u4e3a generatedVideo \u5199\u56de\u5143\u6570\u636e"}
+	}
+	if videoGenerationString(asset, "mimeType") != "video/mp4" {
+		return nil, false, &videoGenerationBusinessError{Status: http.StatusUnsupportedMediaType, Code: "UNSUPPORTED_MEDIA_TYPE", Message: "\u4e0d\u652f\u6301\u7684\u89c6\u9891\u7c7b\u578b"}
+	}
+
+	if !validPositiveInteger(input.ActualWidth) {
+		return nil, false, &videoGenerationBusinessError{Status: http.StatusBadRequest, Code: "INVALID_WIDTH", Message: "\u89c6\u9891\u5bbd\u5ea6\u65e0\u6548"}
+	}
+	if !validPositiveInteger(input.ActualHeight) {
+		return nil, false, &videoGenerationBusinessError{Status: http.StatusBadRequest, Code: "INVALID_HEIGHT", Message: "\u89c6\u9891\u9ad8\u5ea6\u65e0\u6548"}
+	}
+	duration := math.Round(input.ActualDurationSeconds*1000) / 1000
+	if !validPositiveNumber(input.ActualDurationSeconds) || !validPositiveNumber(duration) {
+		return nil, false, &videoGenerationBusinessError{Status: http.StatusBadRequest, Code: "INVALID_DURATION", Message: "\u89c6\u9891\u65f6\u957f\u65e0\u6548"}
+	}
+
+	width := int64(input.ActualWidth)
+	height := int64(input.ActualHeight)
+	if numericValueEquals(current["actualWidth"], float64(width)) &&
+		numericValueEquals(current["actualHeight"], float64(height)) &&
+		numericValueEquals(current["actualDurationSeconds"], duration) &&
+		videoGenerationString(current, "metadataSource") == "browser" {
+		return current, true, nil
+	}
+
+	next := make(map[string]any, len(current))
+	for key, value := range current {
+		next[key] = value
+	}
+	next["actualWidth"] = width
+	next["actualHeight"] = height
+	next["actualDurationSeconds"] = duration
+	next["metadataSource"] = "browser"
+	return next, false, nil
+}
+
+func validPositiveInteger(value float64) bool {
+	return validPositiveNumber(value) && math.Trunc(value) == value
+}
+
+func validPositiveNumber(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value > 0
+}
+
+func numericValueEquals(value any, expected float64) bool {
+	switch typed := value.(type) {
+	case float64:
+		return typed == expected
+	case int:
+		return float64(typed) == expected
+	case int64:
+		return float64(typed) == expected
+	default:
+		return false
+	}
+}
+
+func writeVideoGenerationBusinessError(writer http.ResponseWriter, businessErr videoGenerationBusinessError) {
+	writeJSON(writer, businessErr.Status, map[string]string{"code": businessErr.Code, "message": businessErr.Message})
 }
 
 func videoGenerationString(record map[string]any, key string) string {

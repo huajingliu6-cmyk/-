@@ -1,58 +1,73 @@
 import { NextResponse } from "next/server";
 import { requireVideoCanvasAccessForGeneration } from "@/auth/require-access";
+import { isRemoteDataServiceError } from "@/persistence/remote-data-client";
 import { assertSafeGenerationId } from "@/video-generation/generation-store";
-import { reconcileByGenerationId } from "@/video-generation/idempotency";
+import { reconcileGenerationInGo } from "@/video-generation/remote-reconcile";
 import { sanitizeGenerationForClient } from "@/video-generation/secure-transfer";
-import { IdempotencyError } from "@/video-generation/idempotency";
 
 type RouteContext = { params: Promise<{ generationId: string }> };
 
-/**
- * 管理员恢复入口：对账幂等记录与 GenerationRecord。
- * 不调用 Provider，不创建新付费任务。
- */
-export async function POST(
-  _request: Request,
-  context: RouteContext,
-) {
+type ReconcilePayload = {
+  record?: unknown;
+  generation?: Record<string, unknown> | null;
+  mutated?: unknown;
+  note?: unknown;
+  code?: unknown;
+  message?: unknown;
+  error?: unknown;
+  adminHint?: unknown;
+};
+
+export async function POST(_request: Request, context: RouteContext) {
   try {
     const { generationId: rawId } = await context.params;
     const gated = await requireVideoCanvasAccessForGeneration(rawId);
     if (!gated.ok) return gated.response;
     const generationId = assertSafeGenerationId(rawId);
-    const result = await reconcileByGenerationId(generationId);
-    if (!result) {
+    const response = await reconcileGenerationInGo(generationId, gated.user.id);
+    const payload = (await response.json().catch(() => ({}))) as ReconcilePayload;
+    if (!response.ok) {
       return NextResponse.json(
         {
-          code: "NOT_FOUND",
-          message: "未找到可对账的幂等记录",
-          adminHint:
-            "确认 generation 是否带 idempotencyKey；未知结果勿自动重放同一键。",
+          code:
+            typeof payload.code === "string"
+              ? payload.code
+              : typeof payload.error === "string"
+                ? payload.error
+                : "RECONCILE_FAILED",
+          message:
+            typeof payload.message === "string"
+              ? payload.message
+              : "\u5bf9\u8d26\u5931\u8d25",
+          ...(typeof payload.adminHint === "string"
+            ? { adminHint: payload.adminHint }
+            : {}),
         },
-        { status: 404 },
+        { status: response.status },
       );
     }
     return NextResponse.json({
-      record: result.record,
-      generation: result.generation
-        ? sanitizeGenerationForClient(result.generation)
-        : null,
-      mutated: result.mutated,
-      note: result.note,
+      record: payload.record,
+      generation:
+        payload.generation && typeof payload.generation === "object"
+          ? sanitizeGenerationForClient(payload.generation as never)
+          : null,
+      mutated: payload.mutated === true,
+      note: typeof payload.note === "string" ? payload.note : "\u65e0\u53d8\u66f4",
       adminHint:
-        "未知结果须人工核对 Provider 控制台；禁止自动用同一幂等键再次付费提交。",
+        "\u672a\u77e5\u7ed3\u679c\u5fc5\u987b\u4eba\u5de5\u6838\u5bf9 Provider \u63a7\u5236\u53f0\uff1b\u7981\u6b62\u81ea\u52a8\u91cd\u653e\u540c\u4e00\u5e42\u7b49\u952e\u3002",
     });
   } catch (error) {
-    if (error instanceof IdempotencyError) {
+    if (isRemoteDataServiceError(error)) {
       return NextResponse.json(
-        { code: error.code, message: error.message },
-        { status: 400 },
+        { code: "REMOTE_DATA_UNAVAILABLE", message: "\u5185\u7f51\u4e1a\u52a1\u670d\u52a1\u4e0d\u53ef\u7528" },
+        { status: 503 },
       );
     }
     return NextResponse.json(
       {
         code: "RECONCILE_FAILED",
-        message: error instanceof Error ? error.message : "对账失败",
+        message: error instanceof Error ? error.message : "????",
       },
       { status: 400 },
     );

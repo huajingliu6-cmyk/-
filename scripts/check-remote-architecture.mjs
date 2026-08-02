@@ -99,6 +99,14 @@ for (const forbidden of [
   "LOCAL_STORAGE_ROOT:",
   "LOCAL_VOICE_LIBRARY_DIR:",
   "MOCK_VIDEO_FILE:",
+  "BLOB_STORAGE_DRIVER:",
+  "BLOBSTORE_INTERNAL_URL:",
+  "BLOBSTORE_INTERNAL_TOKEN:",
+  "ALIYUN_OSS_ENDPOINT:",
+  "ALIYUN_OSS_REGION:",
+  "ALIYUN_OSS_BUCKET:",
+  "ALIYUN_OSS_ACCESS_KEY_ID:",
+  "ALIYUN_OSS_ACCESS_KEY_SECRET:",
 ]) {
   forbidText(webSection, forbidden, "deploy web service", violations);
 }
@@ -118,6 +126,10 @@ for (const expected of [
   '"APP_DATA_DIR"',
   '"LOCAL_VOICE_LIBRARY_DIR"',
   '"MOCK_VIDEO_FILE"',
+  '"BLOB_STORAGE_DRIVER"',
+  '"BLOBSTORE_INTERNAL_URL"',
+  '"BLOBSTORE_INTERNAL_TOKEN"',
+  '"ALIYUN_OSS_ACCESS_KEY_SECRET"',
   'hostname === "localhost"',
 ]) {
   requireText(runtimeContract, expected, "production Web runtime contract", violations);

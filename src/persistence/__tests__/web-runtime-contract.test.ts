@@ -69,6 +69,30 @@ describe("Web runtime contract", () => {
         APP_DATA_DIR: "/data",
       }),
     ).toThrowError("must not configure direct storage via APP_DATA_DIR");
+
+    expect(() =>
+      validateWebRuntimeContract({
+        NODE_ENV: "production",
+        REMOTE_DATA_ONLY: "true",
+        GO_BACKEND_INTERNAL_URL: "http://api:8080",
+        INTERNAL_API_TOKEN: "test-token",
+        BLOBSTORE_INTERNAL_URL: "http://blobstore:8090",
+      }),
+    ).toThrowError(
+      "must not configure direct storage via BLOBSTORE_INTERNAL_URL",
+    );
+
+    expect(() =>
+      validateWebRuntimeContract({
+        NODE_ENV: "production",
+        REMOTE_DATA_ONLY: "true",
+        GO_BACKEND_INTERNAL_URL: "http://api:8080",
+        INTERNAL_API_TOKEN: "test-token",
+        ALIYUN_OSS_ACCESS_KEY_SECRET: "must-not-reach-web",
+      }),
+    ).toThrowError(
+      "must not configure direct storage via ALIYUN_OSS_ACCESS_KEY_SECRET",
+    );
   });
 
   it("accepts an internal Go service address", () => {
