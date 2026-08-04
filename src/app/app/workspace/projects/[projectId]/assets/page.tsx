@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { workspaceProjectAssetsDesignPath } from "@/shell/nav";
+import { RouteLoadingOverlay } from "@/shell/RouteLoadingOverlay";
 
-/** 工作台 /assets：有资产权限者（含 CE）进入设计确认 */
+/** 工作台 /assets：有资产权限者（含 CE）进入资产设计 */
 export default function WorkspaceProjectAssetsRedirectPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
@@ -55,7 +56,7 @@ export default function WorkspaceProjectAssetsRedirectPage() {
 
   return (
     <div className="amw">
-      <p>正在进入项目资产…</p>
+      <RouteLoadingOverlay title="正在进入项目资产…" description="正在校验权限并准备资产工作区" />
     </div>
   );
 }

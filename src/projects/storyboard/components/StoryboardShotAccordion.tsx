@@ -397,9 +397,12 @@ export function StoryboardShotAccordion({
       return;
     }
     consolidatedShotRef.current = shot.id;
-    void persistShotShape(consolidated).then(() => {
-      setNote("已合并重复的场景需求。");
-    });
+    const timer = window.setTimeout(() => {
+      void persistShotShape(consolidated).then(() => {
+        setNote("已合并重复的场景需求。");
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [
     expanded,
     locked,
@@ -437,7 +440,9 @@ export function StoryboardShotAccordion({
   const historyFetchedKeyRef = useRef<string | null>(null);
   const historyRequestSeqRef = useRef(0);
   const setNoteRef = useRef(setNote);
-  setNoteRef.current = setNote;
+  useEffect(() => {
+    setNoteRef.current = setNote;
+  }, [setNote]);
 
   const applyGenerationSnapshot = useCallback(
     (gen: Awaited<ReturnType<typeof fetchGenerationStatus>>) => {
@@ -547,20 +552,25 @@ export function StoryboardShotAccordion({
     if (pendingIdSet.has(generationId)) return;
 
     let cancelled = false;
+    let inFlight = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     const schedule = () => {
-      if (cancelled) return;
+      if (cancelled || timer) return;
       if (
         typeof document !== "undefined" &&
         document.visibilityState === "hidden"
       ) {
         return;
       }
-      timer = setTimeout(() => void tick(), GENERATION_POLL_MS);
+      timer = setTimeout(() => {
+        timer = null;
+        void tick();
+      }, GENERATION_POLL_MS);
     };
 
     const tick = async () => {
+      if (cancelled || inFlight) return;
       if (
         typeof document !== "undefined" &&
         document.visibilityState === "hidden"
@@ -568,6 +578,7 @@ export function StoryboardShotAccordion({
         return;
       }
       if (terminalGenIdsRef.current.has(generationId)) return;
+      inFlight = true;
       try {
         const gen = await fetchGenerationStatus(generationId);
         if (cancelled) return;
@@ -581,11 +592,17 @@ export function StoryboardShotAccordion({
         }
       } catch {
         if (!cancelled) schedule();
+      } finally {
+        inFlight = false;
       }
     };
 
     const onVisibility = () => {
       if (document.visibilityState === "visible" && !cancelled) {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
         void tick();
       }
     };
@@ -608,82 +625,96 @@ export function StoryboardShotAccordion({
     if (!pendingPollKey) return;
     const ids = pendingPollKey.split("|").filter(Boolean);
     let cancelled = false;
+    let inFlight = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     const schedule = () => {
-      if (cancelled) return;
+      if (cancelled || timer) return;
       if (
         typeof document !== "undefined" &&
         document.visibilityState === "hidden"
       ) {
         return;
       }
-      timer = setTimeout(() => void tick(), GENERATION_POLL_MS);
+      timer = setTimeout(() => {
+        timer = null;
+        void tick();
+      }, GENERATION_POLL_MS);
     };
 
     const tick = async () => {
+      if (cancelled || inFlight) return;
       if (
         typeof document !== "undefined" &&
         document.visibilityState === "hidden"
       ) {
         return;
       }
+      inFlight = true;
       let anyActive = false;
       let needHistory = false;
-      for (const generationId of ids) {
-        if (cancelled) break;
-        if (terminalGenIdsRef.current.has(generationId)) continue;
-        try {
-          const gen = await fetchGenerationStatus(generationId);
-          const ui = mapGenerationToUiStatus(
-            gen.status as GenerationJobStatus,
-            false,
-          );
-          const stillActive =
-            ui === "queued" || ui === "submitting" || ui === "processing";
-          if (stillActive) anyActive = true;
-
-          setPendingSlots((prev) => {
-            const next = prev.map((row) =>
-              row.generationId === generationId
-                ? {
-                    ...row,
-                    status: ui,
-                    progress: gen.progress ?? null,
-                    errorMessage: gen.errorMessage ?? null,
-                  }
-                : row,
+      try {
+        for (const generationId of ids) {
+          if (cancelled) break;
+          if (terminalGenIdsRef.current.has(generationId)) continue;
+          try {
+            const gen = await fetchGenerationStatus(generationId);
+            const ui = mapGenerationToUiStatus(
+              gen.status as GenerationJobStatus,
+              false,
             );
-            return next.filter((row) => {
-              if (row.generationId !== generationId) {
-                return (
-                  row.status === "queued" ||
-                  row.status === "submitting" ||
-                  row.status === "processing" ||
-                  row.generationId === null
-                );
-              }
-              return stillActive;
-            });
-          });
+            const stillActive =
+              ui === "queued" || ui === "submitting" || ui === "processing";
+            if (stillActive) anyActive = true;
 
-          applyGenerationSnapshot(gen);
-          if (ui === "completed") needHistory = true;
-        } catch {
-          /* ignore single slot poll errors */
-          anyActive = true;
+            setPendingSlots((prev) => {
+              const next = prev.map((row) =>
+                row.generationId === generationId
+                  ? {
+                      ...row,
+                      status: ui,
+                      progress: gen.progress ?? null,
+                      errorMessage: gen.errorMessage ?? null,
+                    }
+                  : row,
+              );
+              return next.filter((row) => {
+                if (row.generationId !== generationId) {
+                  return (
+                    row.status === "queued" ||
+                    row.status === "submitting" ||
+                    row.status === "processing" ||
+                    row.generationId === null
+                  );
+                }
+                return stillActive;
+              });
+            });
+
+            applyGenerationSnapshot(gen);
+            if (ui === "completed") needHistory = true;
+          } catch {
+            /* ignore single slot poll errors */
+            anyActive = true;
+          }
         }
-      }
-      if (needHistory && expanded) {
-        await refreshVideoHistory(true);
-      }
-      if (!cancelled && anyActive) {
-        schedule();
+        if (needHistory && expanded) {
+          await refreshVideoHistory(true);
+        }
+        if (!cancelled && anyActive) {
+          schedule();
+        }
+      } finally {
+        inFlight = false;
       }
     };
 
     const onVisibility = () => {
       if (document.visibilityState === "visible" && !cancelled) {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
         void tick();
       }
     };

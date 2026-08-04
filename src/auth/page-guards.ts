@@ -71,7 +71,7 @@ export async function assertWorkspaceAssetPage(projectId: string) {
   return gated;
 }
 
-/** 工作台资产设计确认：与资产库相同，抽卡工程师可进入设计页 */
+/** 工作台资产设计：与资产库相同，抽卡工程师可进入 */
 export async function assertWorkspaceAssetDesignPage(projectId: string) {
   return assertWorkspaceAssetPage(projectId);
 }

@@ -23,13 +23,18 @@ export function ProjectAssetsShell({
   context = "management",
   showDesign = true,
 }: Props) {
+  const isDesign = module === "design";
   return (
-    <div className="amw">
+    <div className={`amw amw--${module}`}>
       <div className="amw-inner">
         <header className="amw-head amw-head--shell">
           <div className="amw-head__titles">
-            <h1>项目资产管理</h1>
-            <p>按剧集完成资产设计确认，并统一沉淀到项目资产库。</p>
+            <h1>{isDesign ? "资产设计工作台" : "项目资产库"}</h1>
+            <p>
+              {isDesign
+                ? "从完整剧本一键提取资产，或选择尚未提取的剧集进行补充设计。"
+                : "统一管理已确认入库的角色、场景、道具与音频资产。"}
+            </p>
           </div>
         </header>
         <AssetModuleNav

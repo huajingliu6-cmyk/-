@@ -22,6 +22,11 @@ import type {
   EpisodeDesignConversationMessage,
   ProjectEpisodeAssetDesignStore,
 } from "@/projects/assets/episode-design/types";
+import { SCRIPT_ASSET_DESIGN_ID } from "@/projects/assets/episode-design/types";
+import {
+  getScriptSourceFingerprint,
+  loadScriptDraft,
+} from "@/projects/script/script-draft-store";
 import type { ProjectAssetBundle } from "@/projects/assets/types";
 import { mergeAssetBundlesPreferLocalKeepUpstream } from "@/projects/assets/approvals/merge-workspace-assets";
 import { ensureWorkspaceInitialized } from "@/projects/workspace-sync/ensure-workspace-initialized";
@@ -156,6 +161,39 @@ export async function getWorkspaceEpisodeAssetDesignDetail(
   | { ok: false; code: "EPISODE_NOT_FOUND"; message: string }
 > {
   await ensureWorkspaceInitialized(projectId);
+  if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
+    const draft = await loadScriptDraft(projectId);
+    const content = draft?.sourceText?.trim() ?? "";
+    if (!content) {
+      return {
+        ok: false,
+        code: "EPISODE_NOT_FOUND",
+        message: "未找到主理人上传的未分集完整剧本",
+      };
+    }
+    const snapshot = await loadWorkspaceSnapshot(projectId);
+    const localDesigns = await loadWorkspaceLocalEpisodeDesigns(projectId);
+    const record = getEffectiveRecord(
+      localDesigns,
+      snapshot?.episodeAssetDesigns ?? null,
+      SCRIPT_ASSET_DESIGN_ID,
+      0,
+      draft?.updatedAt ?? new Date().toISOString(),
+    );
+    const currentFingerprint = getScriptSourceFingerprint(content) ?? "";
+    return {
+      ok: true,
+      episode: {
+        id: SCRIPT_ASSET_DESIGN_ID,
+        episodeNumber: 0,
+        title: "完整原始剧本",
+        content,
+      },
+      record,
+      currentFingerprint,
+      designStatus: computeEffectiveStatus(record, currentFingerprint),
+    };
+  }
   const snapshot = await loadWorkspaceSnapshot(projectId);
   if (!snapshot) {
     return {

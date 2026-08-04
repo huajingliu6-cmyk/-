@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { LoginPortalTransitionProvider } from "@/shell/LoginPortalTransitionProvider";
+import { AppearanceProvider } from "@/shell/AppearanceProvider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -14,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI 视频工作流",
-  description: "基于 Next.js + React Flow 的 AI 视频工作流编辑器",
+  title: { default: "Lumina Story", template: "%s | Lumina Story" },
+  description: "Lumina Story — 从灵感、故事与分镜到成片的一站式 AI 创作平台",
 };
 
 export default function RootLayout({
@@ -31,7 +32,9 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="h-full overflow-hidden" suppressHydrationWarning>
-        <LoginPortalTransitionProvider>{children}</LoginPortalTransitionProvider>
+        <AppearanceProvider>
+          <LoginPortalTransitionProvider>{children}</LoginPortalTransitionProvider>
+        </AppearanceProvider>
       </body>
     </html>
   );

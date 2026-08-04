@@ -1,4 +1,4 @@
-# Infinite Canvas 项目最终交接文档
+# Lumina Story 项目最终交接文档
 
 > 整理日期：2026-08-01  
 > 项目：`C:\Users\江城的助手\Downloads\24\infinite-canvas`  

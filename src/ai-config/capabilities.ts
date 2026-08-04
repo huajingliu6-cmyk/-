@@ -141,13 +141,13 @@ export const AI_CAPABILITIES: readonly AiCapabilityDefinition[] = [
   },
   {
     id: "asset.episode-design.generate",
-    label: "单集资产设计生成",
-    description: "资产管理 · 根据单集正文生成资产设计",
+    label: "剧本资产智能提取（单集/全剧本）",
+    description: "资产库 · 使用大模型从单集或全剧本提取角色、场景、道具与音频需求",
     modality: "text",
     status: "active",
-    surface: "AssetManagementWorkspace / episode-design",
-    route: "/app/workspace/projects/[id]/assets",
-    buttonText: "生成资产设计",
+    surface: "AssetDesignWorkspace / script-asset-extraction",
+    route: "/app/workspace/projects/[id]/assets/design",
+    buttonText: "一键提取全剧本资产",
     allowedRoles: ["PROJECT_OWNER", "CARD_ENGINEER"],
     requiresCredits: true,
     supportsStreaming: true,
@@ -367,6 +367,9 @@ export function outputKindToCapabilityId(
   if (outputKind === "script_outline") return "script.outline.generate";
   if (outputKind === "script_episodes") return "script.episodes.generate";
   if (outputKind === "script_split") return "script.split.generate";
+  if (outputKind === "script_asset_design") {
+    return "asset.episode-design.generate";
+  }
   if (outputKind === "episode_asset_design") {
     return "asset.episode-design.generate";
   }

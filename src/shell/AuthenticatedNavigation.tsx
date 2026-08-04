@@ -62,6 +62,7 @@ export function AuthenticatedNavigation({
           <Link
             key={item.id}
             href={item.href}
+            prefetch={false}
             className={className}
             onClick={() => {
               bounce(item.id);

@@ -52,6 +52,9 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
+  const streamAbort = new AbortController();
+  const abortFromRequest = () => streamAbort.abort();
+  request.signal.addEventListener("abort", abortFromRequest, { once: true });
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const encoder = new TextEncoder();
@@ -67,10 +70,12 @@ export async function POST(request: Request, context: RouteContext) {
           outlineText,
           episodeNumber,
           episodeId,
+          signal: streamAbort.signal,
         })) {
           controller.enqueue(encoder.encode(chunk));
         }
       } catch (error) {
+        if (streamAbort.signal.aborted) return;
         const unavailable = isRemoteDataServiceError(error);
         controller.enqueue(
           encoder.encode(
@@ -81,8 +86,17 @@ export async function POST(request: Request, context: RouteContext) {
           ),
         );
       } finally {
-        controller.close();
+        request.signal.removeEventListener("abort", abortFromRequest);
+        try {
+          controller.close();
+        } catch {
+          /* response consumer already disconnected */
+        }
       }
+    },
+    cancel() {
+      streamAbort.abort();
+      request.signal.removeEventListener("abort", abortFromRequest);
     },
   });
 

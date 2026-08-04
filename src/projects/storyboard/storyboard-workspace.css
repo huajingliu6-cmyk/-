@@ -5,7 +5,7 @@
   --sbw-muted: rgba(255, 255, 255, 0.48);
   --sbw-border: rgba(255, 255, 255, 0.1);
   --sbw-panel: rgba(255, 255, 255, 0.04);
-  --sbw-accent: rgba(138, 63, 252, 0.55);
+  --sbw-accent: rgb(var(--ui-accent-rgb) / 0.55);
   --sbw-radius-card: 14px;
   min-height: calc(100svh - var(--shell-header-h, 68px));
   background:
@@ -19,9 +19,34 @@
       rgba(124, 58, 237, 0.1),
       transparent 55%
     ),
-    #070811;
+    var(--ui-bg);
   color: var(--sbw-fg);
   padding: 28px 28px 40px;
+}
+
+.sbw-btn,
+.sbw-tab {
+  min-height: var(--ui-control-h);
+}
+
+.sbw-btn:hover:not(:disabled),
+.sbw-tab:hover {
+  border-color: rgb(var(--ui-accent-rgb) / 0.48);
+  box-shadow: 0 0 0 3px rgb(var(--ui-accent-rgb) / 0.1);
+  transform: translateY(-1px);
+}
+
+.sbw-btn-primary {
+  border-color: rgb(var(--ui-accent-rgb) / 0.52);
+  background: linear-gradient(135deg, var(--ui-accent), rgb(var(--ui-accent-rgb) / 0.7));
+  box-shadow: 0 10px 24px rgb(var(--ui-accent-rgb) / 0.2);
+}
+
+.sbw-tab.is-active,
+.sbw-step.is-active {
+  border-color: rgb(var(--ui-accent-rgb) / 0.52);
+  background: rgb(var(--ui-accent-rgb) / 0.18);
+  box-shadow: 0 8px 24px rgb(var(--ui-accent-rgb) / 0.12);
 }
 
 .sbw-inner {
@@ -681,6 +706,33 @@
   .sbw {
     padding: 20px 16px 32px;
   }
+}
+
+/* Global UI theme overrides */
+.sbw-btn,
+.sbw-tab {
+  min-height: var(--ui-control-h);
+}
+
+.sbw-btn:hover:not(:disabled),
+.sbw-tab:hover {
+  border-color: rgb(var(--ui-accent-rgb) / 0.48);
+  box-shadow: 0 0 0 3px rgb(var(--ui-accent-rgb) / 0.1);
+  transform: translateY(-1px);
+}
+
+.sbw-btn-primary,
+.sbw-btn-primary:hover:not(:disabled) {
+  border-color: rgb(var(--ui-accent-rgb) / 0.52);
+  background: linear-gradient(135deg, var(--ui-accent), rgb(var(--ui-accent-rgb) / 0.72));
+  box-shadow: 0 10px 24px rgb(var(--ui-accent-rgb) / 0.2);
+}
+
+.sbw-tab.is-active,
+.sbw-step.is-active {
+  border-color: rgb(var(--ui-accent-rgb) / 0.52);
+  background: rgb(var(--ui-accent-rgb) / 0.18);
+  box-shadow: 0 8px 24px rgb(var(--ui-accent-rgb) / 0.12);
 }
 
 
@@ -1639,6 +1691,10 @@
 
 .sbw-actions--wrap {
   flex-wrap: wrap;
+}
+
+.sbw-actions--episode-toolbar {
+  margin: 12px 10px 18px;
 }
 
 .sbw-scene-label {

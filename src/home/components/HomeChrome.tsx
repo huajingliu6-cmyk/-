@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { AuthUser } from "@/auth/types";
 import { AnimatedHeroBackground } from "@/home/components/AnimatedHeroBackground";
 import { HeroSection } from "@/home/components/HeroSection";
 import { ShowcaseStrip } from "@/home/components/ShowcaseStrip";
 import { PublicHeader } from "@/shell/PublicHeader";
-import { useAuthUser } from "@/shell/useAuthUser";
 import { APP_SHELL_ROOT } from "@/shell/nav";
-import type { AuthUser } from "@/auth/types";
+import { useAuthUser } from "@/shell/useAuthUser";
+import { MascotMark } from "@/workflow/components/BrandMark";
 import "@/home/home.css";
 import "@/shell/shell.css";
 
@@ -17,11 +18,8 @@ function NeutralHeader() {
     <header className="shell-header">
       <div className="shell-header__inner">
         <div className="shell-brand">
-          <span
-            className="inline-block h-7 w-7 rounded-md bg-white/10"
-            aria-hidden
-          />
-          <span className="shell-brand__name text-white/40">智能视频工作台</span>
+          <MascotMark size={40} className="shell-brand__mark opacity-60" />
+          <span className="shell-brand__name text-white/40">Lumina Story</span>
         </div>
         <div className="ml-auto h-10 w-28 rounded-xl bg-white/5" aria-hidden />
       </div>
@@ -38,10 +36,9 @@ export function HomeChrome() {
     setSessionUser(user);
   }, []);
 
-  // 已登录访问营销首页 → 进入空白应用壳层（登录穿梭自行导航时除外）
   useEffect(() => {
     if (auth.status !== "authenticated") return;
-    if (sessionUser) return; // 主动登录成功：由穿梭动画导航到 /app
+    if (sessionUser) return;
     router.replace(APP_SHELL_ROOT);
   }, [auth.status, sessionUser, router]);
 

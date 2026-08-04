@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useParams } from "next/navigation";
-import { APP_PROJECTS_PATH, workflowEditorPath } from "@/shell/nav";
 import { ProjectMembersPanel } from "@/projects/members/ProjectMembersPanel";
 import "@/projects/workbench/workbench.css";
 
@@ -65,19 +63,9 @@ export default function ProjectManagementDetailPage() {
     );
   }
 
-  const scriptHref =
-    data?.project.creationSource === "story"
-      ? `/app/projects/${encodeURIComponent(projectId)}/story`
-      : `/app/projects/${encodeURIComponent(projectId)}/script`;
-
   return (
     <div className="wb-page" data-testid="project-management-page">
       <div className="wb-inner">
-        <div className="wb-topnav">
-          <Link className="wb-link" href={APP_PROJECTS_PATH}>
-            返回项目管理
-          </Link>
-        </div>
 
         {loading ? (
           <p className="wb-muted">加载中…</p>
@@ -100,52 +88,9 @@ export default function ProjectManagementDetailPage() {
               </div>
             </header>
 
-            <section className="wb-stages" aria-label="创作流程">
-              <Link className="wb-stage" href={scriptHref} data-testid="stage-script">
-                <div className="wb-stage__head">
-                  <h2>剧本创作</h2>
-                </div>
-                <p>创编故事或上传剧本并完成分集。</p>
-                <span className="wb-stage__action">进入剧本创作</span>
-              </Link>
-              <Link
-                className="wb-stage"
-                href={`/app/projects/${encodeURIComponent(projectId)}/assets/design`}
-                data-testid="stage-assets"
-              >
-                <div className="wb-stage__head">
-                  <h2>项目资产</h2>
-                </div>
-                <p>管理角色、场景、道具与音频。</p>
-                <span className="wb-stage__action">进入项目资产</span>
-              </Link>
-              <Link
-                className="wb-stage"
-                href={`/app/projects/${encodeURIComponent(projectId)}/storyboard`}
-                data-testid="stage-storyboard"
-              >
-                <div className="wb-stage__head">
-                  <h2>分镜创作</h2>
-                </div>
-                <p>确认剧本、匹配资产并生成文字分镜。</p>
-                <span className="wb-stage__action">进入分镜创作</span>
-              </Link>
-              {data.project.projectMode === "canvas" ? (
-                <Link
-                  className="wb-stage is-video"
-                  href={workflowEditorPath(projectId)}
-                  data-testid="stage-video"
-                >
-                  <div className="wb-stage__head">
-                    <h2>视频制作</h2>
-                  </div>
-                  <p>进入视频制作画布。</p>
-                  <span className="wb-stage__action">进入视频制作画布</span>
-                </Link>
-              ) : null}
-            </section>
-
-            <ProjectMembersPanel projectId={projectId} />
+            <div className="wb-workspace-grid wb-workspace-grid--members-only">
+              <ProjectMembersPanel projectId={projectId} />
+            </div>
           </>
         ) : null}
       </div>

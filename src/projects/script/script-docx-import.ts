@@ -12,6 +12,10 @@ import {
   toScriptEpisodes,
 } from "@/projects/script/script-txt-parser";
 import type { ScriptEpisode } from "@/projects/script/types";
+import {
+  scriptUploadCharacterLimitMessage,
+  SCRIPT_UPLOAD_MAX_CHARS,
+} from "@/projects/script/script-upload-limits";
 
 export type ScriptDocxImportPreview = {
   format: "docx";
@@ -105,6 +109,15 @@ export async function buildScriptDocxImportPreview(input: {
 
   const defaultTitle = fileName.replace(/\.docx$/i, "").trim() || "第1集";
   const parsed = parseScriptTxtEpisodes(extracted.text, { defaultTitle });
+  if (parsed.characterCount > SCRIPT_UPLOAD_MAX_CHARS) {
+    return {
+      ok: false,
+      status: 413,
+      code: "CHARACTER_LIMIT_EXCEEDED",
+      message: scriptUploadCharacterLimitMessage(parsed.characterCount),
+    };
+  }
+
   const acceptable = assertParseAcceptable(parsed);
   if (!acceptable.ok) {
     return {

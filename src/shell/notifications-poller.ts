@@ -12,6 +12,7 @@ const POLL_MS = 60_000;
 const MIN_FETCH_GAP_MS = 15_000;
 /** 强制刷新也合并短连点，避免铃铛连点打爆 */
 const FORCE_MIN_GAP_MS = 2_000;
+const INITIAL_FETCH_DELAY_MS = 1_500;
 
 type PollerState = {
   listeners: Set<Listener>;
@@ -100,6 +101,17 @@ function ensureTimer() {
   }, POLL_MS);
 }
 
+function scheduleInitialFetch() {
+  const state = getState();
+  if (state.lastFetchedAt > 0) return;
+  const run = () => void fetchOnce(false);
+  if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+    window.requestIdleCallback(run, { timeout: INITIAL_FETCH_DELAY_MS });
+  } else {
+    globalThis.setTimeout(run, INITIAL_FETCH_DELAY_MS);
+  }
+}
+
 function clearTimer() {
   const state = getState();
   if (state.timer == null) return;
@@ -140,7 +152,7 @@ export function subscribeNotifications(
   listener(state.snapshot);
   ensureVisibilityListener();
   ensureTimer();
-  void fetchOnce(false);
+  scheduleInitialFetch();
 
   return () => {
     state.listeners.delete(listener);

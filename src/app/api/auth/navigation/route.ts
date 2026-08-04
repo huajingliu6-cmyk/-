@@ -31,7 +31,7 @@ async function getNavigation() {
   } else if (ownsAny) {
     navigation = AUTH_NAV_ITEMS;
   } else {
-    navigation = AUTH_NAV_ITEMS.filter((item) => item.id !== "projects");
+    navigation = AUTH_NAV_ITEMS;
   }
 
   return NextResponse.json({
@@ -49,6 +49,7 @@ async function getNavigation() {
       canAccessProjectManagement: canAccessProjectManagementNav(
         systemRole,
         ownsAny,
+        memberships.length,
       ),
       canCreateProject: systemRole === "SYSTEM_ADMIN",
       isCardEngineerOnly,

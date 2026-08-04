@@ -39,10 +39,11 @@ export const AI_ACTION_DESCRIPTORS: readonly AiActionDescriptor[] = [
   },
   {
     capabilityId: "asset.episode-design.generate",
-    surface: "AssetManagementWorkspace / episode-design",
-    component: "EpisodeAssetDesignPanel",
+    surface: "AssetDesignWorkspace / script-asset-extraction",
+    component: "EpisodeAssetDesignWorkspace",
     serverRoute: "POST /api/projects/[projectId]/text-generations",
-    resolverEntry: "resolveCapabilityForOutputKind(episode_asset_design)",
+    resolverEntry:
+      "resolveCapabilityForOutputKind(script_asset_design|episode_asset_design)",
     providerAdapter: "MockTextProvider | HttpCompatibleTextProvider",
     active: true,
     testModule:

@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { Suspense } from "react";
-import { BrandMark } from "@/workflow/components/BrandMark";
+import { MascotMark } from "@/workflow/components/BrandMark";
 import { HeaderLoginPanel } from "@/home/components/HeaderLoginPanel";
 import { scrollToCreationFlow } from "@/home/lib/scroll-to-creation-flow";
+import { AppearanceButton } from "@/shell/AppearanceProvider";
 import { useChipBounce } from "@/shell/useChipBounce";
 import type { AuthUser } from "@/auth/types";
 
@@ -19,11 +20,12 @@ export function PublicHeader({ onLoggedIn }: Props) {
     <header className="shell-header">
       <div className="shell-header__inner">
         <Link href="/" className="shell-brand" aria-label="回到首页">
-          <BrandMark size={28} className="opacity-100" />
-          <span className="shell-brand__name">智能视频工作台</span>
+          <MascotMark size={40} className="shell-brand__mark opacity-100" />
+          <span className="shell-brand__name">Lumina Story</span>
         </Link>
 
         <div className="shell-account shell-account--end">
+          <AppearanceButton compact />
           <button
             type="button"
             className={`shell-chip shell-chip--guide ${guideBounce.bounceClass}`}

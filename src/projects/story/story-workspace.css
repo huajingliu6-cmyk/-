@@ -4,7 +4,7 @@
   --scw-border: rgba(255, 255, 255, 0.1);
   --scw-panel: rgba(255, 255, 255, 0.04);
   --scw-danger: #fb7185;
-  --scw-accent: #a78bfa;
+  --scw-accent: var(--ui-accent);
   min-height: calc(100svh - var(--shell-header-h, 68px));
   background:
     radial-gradient(
@@ -12,9 +12,38 @@
       rgba(124, 58, 237, 0.07),
       transparent 55%
     ),
-    #070811;
+    var(--ui-bg);
   color: var(--scw-fg);
   padding: 28px 28px 40px;
+}
+
+.scw-btn,
+.scw-type-btn {
+  min-height: var(--ui-control-h);
+}
+
+.scw-btn:hover:not(:disabled),
+.scw-type-btn:hover {
+  border-color: rgb(var(--ui-accent-rgb) / 0.48);
+  box-shadow: 0 0 0 3px rgb(var(--ui-accent-rgb) / 0.1);
+  transform: translateY(-1px);
+}
+
+.scw-btn-primary {
+  border-color: rgb(var(--ui-accent-rgb) / 0.52);
+  background: linear-gradient(135deg, var(--ui-accent), rgb(var(--ui-accent-rgb) / 0.7));
+  box-shadow: 0 10px 24px rgb(var(--ui-accent-rgb) / 0.2);
+}
+
+.scw-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--ui-accent), rgb(var(--ui-accent-rgb) / 0.82));
+}
+
+.scw-btn.is-active,
+.scw-type-btn.is-active,
+.scw-chip.is-active {
+  border-color: rgb(var(--ui-accent-rgb) / 0.58);
+  background: rgb(var(--ui-accent-rgb) / 0.18);
 }
 
 .scw-inner {
@@ -524,3 +553,29 @@
   width: 100%;
 }
 
+/* Global UI theme overrides */
+.scw-btn,
+.scw-type-btn {
+  min-height: var(--ui-control-h);
+}
+
+.scw-btn:hover:not(:disabled),
+.scw-type-btn:hover {
+  border-color: rgb(var(--ui-accent-rgb) / 0.48);
+  box-shadow: 0 0 0 3px rgb(var(--ui-accent-rgb) / 0.1);
+  transform: translateY(-1px);
+}
+
+.scw-btn-primary,
+.scw-btn-primary:hover:not(:disabled) {
+  border-color: rgb(var(--ui-accent-rgb) / 0.52);
+  background: linear-gradient(135deg, var(--ui-accent), rgb(var(--ui-accent-rgb) / 0.72));
+  box-shadow: 0 10px 24px rgb(var(--ui-accent-rgb) / 0.2);
+}
+
+.scw-btn.is-active,
+.scw-type-btn.is-active,
+.scw-chip.is-active {
+  border-color: rgb(var(--ui-accent-rgb) / 0.58);
+  background: rgb(var(--ui-accent-rgb) / 0.18);
+}

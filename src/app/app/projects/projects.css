@@ -1,7 +1,7 @@
 /* 项目管理模块样式 */
 
 .pm-page {
-  --pm-ink: #070811;
+  --pm-ink: var(--ui-bg);
   min-height: calc(100svh - var(--shell-header-h, 68px));
   background:
     radial-gradient(
@@ -16,6 +16,37 @@
     ),
     var(--pm-ink);
   color: #f4f1ff;
+}
+
+/* Global UI theme overrides */
+.pm-new-btn {
+  background: linear-gradient(135deg, var(--ui-accent), rgb(var(--ui-accent-rgb) / 0.68));
+  box-shadow: 0 10px 24px rgb(var(--ui-accent-rgb) / 0.24);
+}
+
+.pm-new-btn:hover {
+  box-shadow: 0 12px 30px rgb(var(--ui-accent-rgb) / 0.34);
+}
+
+.pm-filter.is-active {
+  border-color: rgb(var(--ui-accent-rgb) / 0.5);
+  background: rgb(var(--ui-accent-rgb) / 0.18);
+  color: #fff;
+}
+
+.pm-new-btn {
+  background: linear-gradient(135deg, var(--ui-accent), rgb(var(--ui-accent-rgb) / 0.68));
+  box-shadow: 0 10px 24px rgb(var(--ui-accent-rgb) / 0.24);
+}
+
+.pm-new-btn:hover {
+  box-shadow: 0 12px 30px rgb(var(--ui-accent-rgb) / 0.34);
+}
+
+.pm-filter.is-active {
+  border-color: rgb(var(--ui-accent-rgb) / 0.5);
+  background: rgb(var(--ui-accent-rgb) / 0.18);
+  color: #fff;
 }
 
 .pm-inner {

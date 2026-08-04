@@ -61,6 +61,7 @@ type Props = {
   /** Optional leading icon inside the trigger (toolbar) */
   leadingIcon?: ReactNode;
   className?: string;
+  onOpen?: () => void;
 };
 
 const CLOSE_MS = 220;
@@ -92,6 +93,7 @@ export function GlassSelect({
   variant = "default",
   leadingIcon,
   className = "",
+  onOpen,
 }: Props) {
   const autoId = useId();
   const triggerId = id ?? `${autoId}-trigger`;
@@ -148,11 +150,12 @@ export function GlassSelect({
 
   const openMenu = useCallback(() => {
     if (disabled) return;
+    onOpen?.();
     clearCloseTimer();
     setClosing(false);
     setHighlightIndex(selectedIndex >= 0 ? selectedIndex : 0);
     setOpen(true);
-  }, [clearCloseTimer, disabled, selectedIndex]);
+  }, [clearCloseTimer, disabled, onOpen, selectedIndex]);
 
   const toggleMenu = useCallback(() => {
     bounce.trigger();

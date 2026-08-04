@@ -164,29 +164,48 @@ export function ProjectMembersPanel({ projectId }: Props) {
   if (!visible) return null;
 
   return (
-    <section
-      className="wb-members"
-      data-testid="project-members-panel"
-      style={{ marginTop: 28 }}
-    >
-      <h2 style={{ margin: "0 0 12px", fontSize: "1.1rem" }}>成员与权限</h2>
-      <p className="wb-muted">项目主理人：{ownerLabel}</p>
+    <section className="wb-members" data-testid="project-members-panel">
+      <div className="wb-section-heading wb-members__heading">
+        <div>
+          <span>协作设置</span>
+          <h2>成员与权限</h2>
+        </div>
+        <p>管理项目成员与权限。</p>
+      </div>
 
-      <div style={{ marginTop: 16 }}>
-        <h3 style={{ margin: "0 0 8px", fontSize: "0.95rem" }}>
-          抽卡工程师
-        </h3>
+      <div className="wb-owner-card">
+        <span>项目主理人</span>
+        <strong>{ownerLabel}</strong>
+      </div>
+
+      <div className="wb-members__group">
+        <div className="wb-members__group-head">
+          <div>
+            <span>协作成员</span>
+            <h3>抽卡工程师</h3>
+          </div>
+          <span className="wb-members__count">{engineers.length} 人</span>
+        </div>
+
         {engineers.length === 0 ? (
-          <p className="wb-muted">尚未分配抽卡工程师</p>
+          <div className="wb-members__empty">
+            <strong>尚未分配抽卡工程师</strong>
+            <span>搜索用户并添加后，对方即可参与项目资产工作。</span>
+          </div>
         ) : (
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
+          <ul className="wb-members__list">
             {engineers.map((item) => (
-              <li key={item.memberId} style={{ marginBottom: 8 }}>
-                {item.displayName}（{item.username}）
+              <li key={item.memberId} className="wb-member-row">
+                <span className="wb-member-avatar" aria-hidden>
+                  {(item.displayName || item.username).slice(0, 1).toUpperCase()}
+                </span>
+                <span className="wb-member-identity">
+                  <strong>{item.displayName}</strong>
+                  <span>@{item.username}</span>
+                </span>
                 <button
                   type="button"
-                  className="wb-btn"
-                  style={{ marginLeft: 8, height: 32 }}
+                  className="wb-btn wb-btn--danger"
                   disabled={busy}
                   onClick={() => void removeUser(item.userId)}
                 >
@@ -198,52 +217,52 @@ export function ProjectMembersPanel({ projectId }: Props) {
         )}
       </div>
 
-      <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="搜索用户名或显示名"
-          aria-label="搜索用户"
-          style={{
-            minWidth: 220,
-            height: 36,
-            borderRadius: 10,
-            border: "1px solid rgba(167,139,250,0.35)",
-            background: "rgba(15,10,28,0.6)",
-            color: "#fff",
-            padding: "0 10px",
-          }}
-        />
-        <button
-          type="button"
-          className="wb-btn wb-btn-primary"
-          disabled={busy}
-          onClick={() => void search()}
-        >
-          搜索用户
-        </button>
+      <div className="wb-member-search">
+        <label htmlFor="project-member-search">添加抽卡工程师</label>
+        <div className="wb-member-search__controls">
+          <input
+            id="project-member-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜索用户名或显示名"
+            aria-label="搜索用户"
+          />
+          <button
+            type="button"
+            className="wb-btn wb-btn-primary"
+            disabled={busy}
+            onClick={() => void search()}
+          >
+            {busy ? "处理中…" : "搜索用户"}
+          </button>
+        </div>
       </div>
 
       {results.length > 0 ? (
-        <ul style={{ marginTop: 12, paddingLeft: 18 }}>
+        <ul className="wb-members__results">
           {results.map((user) => (
-            <li key={user.userId} style={{ marginBottom: 8 }}>
-              {user.displayName}（{user.username}）
+            <li key={user.userId} className="wb-member-row">
+              <span className="wb-member-avatar" aria-hidden>
+                {(user.displayName || user.username).slice(0, 1).toUpperCase()}
+              </span>
+              <span className="wb-member-identity">
+                <strong>{user.displayName}</strong>
+                <span>@{user.username}</span>
+              </span>
               <button
                 type="button"
                 className="wb-btn wb-btn-primary"
-                style={{ marginLeft: 8, height: 32 }}
                 disabled={busy}
                 onClick={() => void addUser(user.userId)}
               >
-                添加为抽卡工程师
+                添加
               </button>
             </li>
           ))}
         </ul>
       ) : null}
 
-      {note ? <p className="wb-note" style={{ marginTop: 10 }}>{note}</p> : null}
+      {note ? <p className="wb-note">{note}</p> : null}
     </section>
   );
 }

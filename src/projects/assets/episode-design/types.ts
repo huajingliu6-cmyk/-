@@ -199,6 +199,8 @@ export type ProjectEpisodeAssetDesignStore = {
   updatedAt: string;
 };
 
+export const SCRIPT_ASSET_DESIGN_ID = "__full_script__";
+
 /** UI 状态徽章中文标签 */
 export const EPISODE_ASSET_DESIGN_STATUS_LABELS: Record<
   EpisodeAssetDesignStatus,

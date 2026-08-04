@@ -1,4 +1,4 @@
-/* 公共顶部导航 + 登录穿梭转场（挂在 shell 组件） */
+﻿/* 鍏叡椤堕儴瀵艰埅 + 鐧诲綍绌挎杞満锛堟寕鍦?shell 缁勪欢锛?*/
 
 .shell-header {
   --shell-header-h: 68px;
@@ -6,11 +6,12 @@
   top: 0;
   z-index: 40;
   height: var(--shell-header-h);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(7, 8, 16, 0.82);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  color: #f4f1ff;
+  border-bottom: 1px solid var(--ui-border);
+  background: rgba(9, 11, 16, 0.88);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(20px) saturate(125%);
+  -webkit-backdrop-filter: blur(20px) saturate(125%);
+  color: var(--ui-text);
 }
 
 .shell-header__inner {
@@ -19,7 +20,7 @@
   height: 100%;
   max-width: 1400px;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 0 24px;
 }
 
@@ -88,16 +89,21 @@
   display: flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   text-decoration: none;
   color: rgba(255, 255, 255, 0.92);
 }
 
+.shell-brand__mark {
+  transform: scale(1.08);
+  filter: drop-shadow(0 4px 10px rgba(222, 194, 122, 0.24));
+}
+
 .shell-brand__name {
   display: none;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: 0.015em;
 }
 
 @media (min-width: 640px) {
@@ -106,7 +112,7 @@
   }
 }
 
-/* 统一顶部控件回弹 */
+/* 缁熶竴椤堕儴鎺т欢鍥炲脊 */
 @keyframes shell-chip-bounce {
   0% {
     transform: scale(1);
@@ -294,8 +300,8 @@
   bottom: 2px;
   height: 2px;
   border-radius: 999px;
-  background: linear-gradient(90deg, #a78bfa, #ec4899, #38bdf8);
-  box-shadow: 0 0 10px rgba(167, 139, 250, 0.35);
+  background: var(--ui-accent);
+  box-shadow: 0 0 12px rgb(var(--ui-accent-rgb) / 0.38);
 }
 
 .shell-nav__item.is-bounce {
@@ -440,7 +446,7 @@
   opacity: 0.55 !important;
 }
 
-/* 模块内容区：轻量进入（Header 不参与） */
+/* 妯″潡鍐呭鍖猴細杞婚噺杩涘叆锛圚eader 涓嶅弬涓庯級 */
 .shell-outlet--enter {
   animation: shell-outlet-in 0.22s ease-out both;
 }
@@ -474,7 +480,7 @@
   -webkit-backdrop-filter: blur(12px) saturate(125%);
 }
 
-/* 与 chip 回弹一致，避免 is-bounce 无动画导致 class 卡住 */
+/* 涓?chip 鍥炲脊涓€鑷达紝閬垮厤 is-bounce 鏃犲姩鐢诲鑷?class 鍗′綇 */
 .shell-avatar.is-bounce {
   animation: shell-chip-bounce 0.28s cubic-bezier(0.34, 1.3, 0.64, 1);
 }
@@ -486,13 +492,13 @@
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: linear-gradient(135deg, #8b5cf6, #ec4899);
+  background: linear-gradient(135deg, var(--ui-accent), rgb(var(--ui-accent-rgb) / 0.62));
   font-size: 12px;
   font-weight: 700;
   color: #fff;
 }
 
-/* —— 登录穿梭转场 —— */
+/* 鈥斺€?鐧诲綍绌挎杞満 鈥斺€?*/
 .login-portal {
   position: fixed;
   inset: 0;
@@ -646,7 +652,7 @@
   }
 }
 
-/* 页面钻入 / 出现（作用于应用根容器，不影响转场遮罩） */
+/* 椤甸潰閽诲叆 / 鍑虹幇锛堜綔鐢ㄤ簬搴旂敤鏍瑰鍣紝涓嶅奖鍝嶈浆鍦洪伄缃╋級 */
 html.login-portal-exit .shell-app-root {
   animation: login-portal-page-exit 0.56s ease-in forwards;
   transform-origin: 50% 45%;
@@ -723,3 +729,4 @@ html.login-portal-lock body {
     transition: opacity 0.2s ease;
   }
 }
+

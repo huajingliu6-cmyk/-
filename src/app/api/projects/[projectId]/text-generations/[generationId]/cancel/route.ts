@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSessionUser } from "@/auth/require-user";
+import { releaseReservation } from "@/text-generation/credits";
 import { getTextJob, saveTextJob } from "@/text-generation/job-store";
 import { cancelTextGeneration } from "@/text-generation/run-generation";
 
@@ -28,6 +29,13 @@ export async function POST(_request: Request, context: RouteContext) {
       errorCode: "CANCELLED",
       errorMessage: "用户取消",
       updatedAt: new Date().toISOString(),
+    });
+    // Orphan jobs (no in-memory AbortController after restart) never reach the
+    // stream finally path — still release the credit hold here.
+    await releaseReservation({
+      generationId,
+      projectId,
+      reason: "text-generation-cancel",
     });
   }
   return NextResponse.json({ ok: true });

@@ -1,6 +1,6 @@
-# AI 视频创作工作台
+# Lumina Story
 
-基于 **Next.js + React Flow（@xyflow/react）** 的资产驱动式 AI 视频画布。
+**Lumina Story** 是基于 **Next.js + React Flow（@xyflow/react）** 的资产驱动式 AI 故事与视频创作平台。
 
 > 本地 `data/` 文件实现仅用于开发兼容和遗留数据导入。  
 > 生产架构固定为 **Next.js Web/BFF → Go API → PostgreSQL + 独立 Blobstore**；Web 不直连数据库，也不依赖本地业务磁盘。SSDB 仅用于隔离的开发测试缓存，不进入生产部署。

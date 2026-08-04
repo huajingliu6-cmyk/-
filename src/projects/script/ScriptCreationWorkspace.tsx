@@ -678,14 +678,48 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
     [],
   );
 
-  const handleNovelFileSelect = useCallback((file: ScriptSourceFile) => {
+  const handleNovelFileSelect = useCallback(
+    async (file: File) => {
+      setUiNote("正在检查小说字数…");
+      try {
+        const preview = await postScriptImportByFile(projectId, file);
+        const sourceFile: ScriptSourceFile = {
+          id: `novel-${preview.sha256.slice(0, 12)}`,
+          name: preview.fileName,
+          type: scriptSourceFileTypeFromFormat(preview.format),
+          size: preview.byteLength,
+          status: "selected",
+        };
+        setNovelTask((prev) => ({
+          ...prev,
+          sourceFile,
+          status: "uploaded",
+          resultScriptId: null,
+        }));
+        setUiNote(
+          `小说文件已上传，共 ${preview.characterCount.toLocaleString("zh-CN")} 字，请点击「开始转换剧本」。`,
+        );
+      } catch (error) {
+        setNovelTask((prev) => ({
+          ...prev,
+          sourceFile: null,
+          status: "failed",
+          resultScriptId: null,
+        }));
+        setUiNote(error instanceof Error ? error.message : "小说文件检查失败");
+      }
+    },
+    [projectId],
+  );
+
+  const handleCancelNovelUpload = useCallback(() => {
     setNovelTask((prev) => ({
       ...prev,
-      sourceFile: file,
+      sourceFile: null,
       status: "uploaded",
       resultScriptId: null,
     }));
-    setUiNote("小说文件已上传，请点击「开始转换剧本」。");
+    setUiNote("已取消小说上传。");
   }, []);
 
   const handleStartConvert = useCallback(() => {
@@ -859,7 +893,7 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
         </header>
 
         <div className="scs-grid">
-          <section className="scs-panel" aria-label="剧本来源">
+          <section className="scs-panel scs-panel--source" aria-label="剧本来源">
             <h2>剧本输入</h2>
             <ScriptUploadPanel
               file={sourceFile}
@@ -934,6 +968,7 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
               task={novelTask}
               onToggle={() => setNovelOpen((v) => !v)}
               onNovelFileSelect={handleNovelFileSelect}
+              onCancelNovelUpload={handleCancelNovelUpload}
               onStartConvert={handleStartConvert}
               onExportScript={() => {
                 setUiNote("已预留 exportScriptToWord()，本阶段不生成文件。");

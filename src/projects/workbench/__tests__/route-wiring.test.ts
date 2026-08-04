@@ -30,13 +30,22 @@ describe("workbench vs canvas route wiring", () => {
     expect(client).toContain("视频制作画布");
   });
 
-  it("project management page keeps script stage and members", () => {
+  it("project management uses a three-part stage nav and keeps members", () => {
     const source = readSrc(
       path.join("src", "app", "app", "projects", "[projectId]", "page.tsx"),
     );
+    const layout = readSrc(
+      path.join("src", "app", "app", "projects", "[projectId]", "layout.tsx"),
+    );
+    const nav = readSrc("src/projects/workbench/ProjectStageNav.tsx");
     expect(source).toContain("项目工作台");
-    expect(source).toContain("剧本创作");
     expect(source).toContain("ProjectMembersPanel");
+    expect(source).not.toContain("wb-stage");
+    expect(layout).toContain('mode="management"');
+    expect(nav).toContain('label: "剧本创作"');
+    expect(nav).toContain('label: "项目资产"');
+    expect(nav).toContain('label: "分镜创作"');
+    expect(nav).not.toContain('label: "视频制作"');
     expect(source).not.toContain("WorkflowEditor");
   });
 
@@ -56,6 +65,16 @@ describe("workbench vs canvas route wiring", () => {
     expect(source).not.toMatch(
       /开始创作[\s\S]{0,400}\/workflow/,
     );
+  });
+
+  it("storyboard entry uses the shared route loading card", () => {
+    const workspace = readSrc("src/projects/storyboard/StoryboardCreationWorkspace.tsx");
+    const nav = readSrc("src/projects/workbench/ProjectStageNav.tsx");
+    expect(workspace).toContain("RouteLoadingOverlay");
+    expect(workspace).toContain('title="正在进入分镜创作"');
+    expect(workspace).not.toContain("加载分镜创作工作台");
+    expect(nav).toContain('stage.id === "storyboard"');
+    expect(nav).toContain('pendingNavigation?.stageId === "storyboard"');
   });
 
   it("create wizard canvas shortcut opens project management path", () => {

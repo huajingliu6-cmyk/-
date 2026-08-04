@@ -9,6 +9,10 @@ import {
   toScriptEpisodes,
 } from "@/projects/script/script-txt-parser";
 import type { ScriptEpisode } from "@/projects/script/types";
+import {
+  scriptUploadCharacterLimitMessage,
+  SCRIPT_UPLOAD_MAX_CHARS,
+} from "@/projects/script/script-upload-limits";
 
 export type ScriptMarkdownImportPreview = {
   format: "md";
@@ -132,6 +136,15 @@ export function buildScriptMarkdownImportPreview(input: {
     defaultTitle,
     nonTitleLineIndexes: normalized.nonTitleLineIndexes,
   });
+  if (parsed.characterCount > SCRIPT_UPLOAD_MAX_CHARS) {
+    return {
+      ok: false,
+      status: 413,
+      code: "CHARACTER_LIMIT_EXCEEDED",
+      message: scriptUploadCharacterLimitMessage(parsed.characterCount),
+    };
+  }
+
   const acceptable = assertParseAcceptable(parsed);
   if (!acceptable.ok) {
     return {

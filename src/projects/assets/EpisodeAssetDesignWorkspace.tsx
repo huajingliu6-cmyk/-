@@ -1,11 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   AudioLines,
-  ChevronLeft,
-  ChevronRight,
   MapPinned,
   Package,
   UserRound,
@@ -18,7 +17,6 @@ import {
   StoryGenerationClientError,
 } from "@/projects/story/story-generation-client";
 import { STORY_TEXT_MODELS } from "@/projects/story/constants";
-import { EPISODES_PER_PAGE } from "@/projects/script/types";
 import {
   designCardApprovalUi,
   isApprovedEpisodeDesignItem,
@@ -41,15 +39,32 @@ import {
   type EpisodeAssetDesignStatus,
   type PropDesignItem,
   type SceneDesignItem,
+  SCRIPT_ASSET_DESIGN_ID,
 } from "@/projects/assets/episode-design/types";
-import { CharacterCreateDialog } from "@/projects/assets/CharacterCreateDialog";
-import { SceneCreateDialog } from "@/projects/assets/SceneCreateDialog";
-import { PropCreateDialog } from "@/projects/assets/PropCreateDialog";
-import { AudioCreateDialog } from "@/projects/assets/AudioCreateDialog";
-import { SubmitApprovalModal } from "@/projects/assets/approvals/SubmitApprovalModal";
-import { OwnerApproveModal } from "@/projects/assets/approvals/OwnerApproveModal";
-import { DesignAssetModal } from "@/projects/assets/DesignAssetModal";
-import { DesignImageLightbox } from "@/projects/assets/DesignImageLightbox";
+const CharacterCreateDialog = dynamic(
+  () => import("@/projects/assets/CharacterCreateDialog").then((m) => m.CharacterCreateDialog),
+);
+const SceneCreateDialog = dynamic(
+  () => import("@/projects/assets/SceneCreateDialog").then((m) => m.SceneCreateDialog),
+);
+const PropCreateDialog = dynamic(
+  () => import("@/projects/assets/PropCreateDialog").then((m) => m.PropCreateDialog),
+);
+const AudioCreateDialog = dynamic(
+  () => import("@/projects/assets/AudioCreateDialog").then((m) => m.AudioCreateDialog),
+);
+const SubmitApprovalModal = dynamic(
+  () => import("@/projects/assets/approvals/SubmitApprovalModal").then((m) => m.SubmitApprovalModal),
+);
+const OwnerApproveModal = dynamic(
+  () => import("@/projects/assets/approvals/OwnerApproveModal").then((m) => m.OwnerApproveModal),
+);
+const DesignAssetModal = dynamic(
+  () => import("@/projects/assets/DesignAssetModal").then((m) => m.DesignAssetModal),
+);
+const DesignImageLightbox = dynamic(
+  () => import("@/projects/assets/DesignImageLightbox").then((m) => m.DesignImageLightbox),
+);
 import { findVoiceOption, voiceOptionsFromAudios } from "@/projects/assets/voice-catalog";
 import { VoiceSelector } from "@/projects/assets/VoiceSelector";
 import { VoicePreviewButton } from "@/projects/assets/VoicePreviewButton";
@@ -388,7 +403,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       ? `/api/workspace/projects/${encodeURIComponent(projectId)}`
       : `/api/projects/${encodeURIComponent(projectId)}`;
   const [episodes, setEpisodes] = useState<EpisodeListItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string>(SCRIPT_ASSET_DESIGN_ID);
   const [detail, setDetail] = useState<EpisodeDetailPayload | null>(null);
   const [items, setItems] = useState<EpisodeAssetDesignItem[]>([]);
   const [revision, setRevision] = useState(0);
@@ -405,11 +420,13 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   >({ characters: [], scenes: [], props: [], audios: [] });
   const [listLoading, setListLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [fullScriptPending, setFullScriptPending] = useState(false);
+  const [fullScriptAssetCount, setFullScriptAssetCount] = useState(0);
   const [generating, setGenerating] = useState(false);
+  const [batchExtracting, setBatchExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [pageNote, setPageNote] = useState("");
-  const [listPage, setListPage] = useState(1);
   const [confirmSummary, setConfirmSummary] = useState<string | null>(null);
   const [reextractOpen, setReextractOpen] = useState(false);
   const [modelKey, setModelKey] = useState(
@@ -451,6 +468,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   }, [generating]);
 
   useEffect(() => {
+    if (!ownerApprovalSubmissionId) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -472,7 +490,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [projectId, surface]);
+  }, [ownerApprovalSubmissionId, projectId, surface]);
 
   useEffect(() => {
     if (!queryEpisodeId) return;
@@ -495,31 +513,27 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       stale: countByStatus(episodes, "stale"),
     };
   }, [episodes]);
-
-  const listTotalPages = Math.max(
-    1,
-    Math.ceil(episodes.length / EPISODES_PER_PAGE),
+  const pendingExtractionCount = useMemo(
+    () =>
+      episodes.filter(
+        (episode) =>
+          episode.designStatus === "not_started" ||
+          episode.designStatus === "failed" ||
+          episode.designStatus === "stale",
+      ).length,
+    [episodes],
   );
-  const safeListPage = Math.min(Math.max(1, listPage), listTotalPages);
-  if (listPage !== safeListPage) {
-    setListPage(safeListPage);
-  }
-
-  const [pageFollowSelectedId, setPageFollowSelectedId] = useState(selectedId);
-  if (selectedId !== pageFollowSelectedId) {
-    setPageFollowSelectedId(selectedId);
-    if (selectedId) {
-      const idx = episodes.findIndex((ep) => ep.episodeId === selectedId);
-      if (idx >= 0) {
-        setListPage(Math.floor(idx / EPISODES_PER_PAGE) + 1);
-      }
-    }
-  }
-
-  const pagedEpisodes = useMemo(() => {
-    const start = (safeListPage - 1) * EPISODES_PER_PAGE;
-    return episodes.slice(start, start + EPISODES_PER_PAGE);
-  }, [episodes, safeListPage]);
+  const pendingEpisodes = useMemo(
+    () =>
+      episodes.filter(
+        (episode) =>
+          episode.designStatus === "not_started" ||
+          episode.designStatus === "failed" ||
+          episode.designStatus === "stale",
+      ),
+    [episodes],
+  );
+  const isFullScriptDesign = selectedId === SCRIPT_ASSET_DESIGN_ID;
 
   const loadList = useCallback(async () => {
     setListLoading(true);
@@ -531,8 +545,9 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       const data = (await res.json()) as { items: EpisodeListItem[] };
       setEpisodes(data.items ?? []);
       setSelectedId((prev) => {
+        if (prev === SCRIPT_ASSET_DESIGN_ID) return prev;
         if (prev && data.items.some((ep) => ep.episodeId === prev)) return prev;
-        return data.items[0]?.episodeId ?? null;
+        return SCRIPT_ASSET_DESIGN_ID;
       });
     } catch (error) {
       setPageNote(
@@ -623,6 +638,13 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         );
         if (!detailRes.ok) throw new Error("无法加载剧集资产设计");
         const payload = (await detailRes.json()) as EpisodeDetailPayload;
+        if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
+          setFullScriptAssetCount(payload.record.items.length);
+          setFullScriptPending(
+            payload.designStatus === "not_started" &&
+              payload.record.items.length === 0,
+          );
+        }
         setDetail(payload);
         setItems((prevItems) =>
           payload.record.items.map((incoming) => {
@@ -699,7 +721,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         }
         setEpisodeContent(content);
         setContentLength(content.trim().length);
-        await loadApprovalMediaFlags(episodeId);
+        void loadApprovalMediaFlags(episodeId);
       } catch (error) {
         setPageNote(
           error instanceof Error ? error.message : "无法加载剧集资产设计",
@@ -716,10 +738,8 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     void (async () => {
       setListLoading(true);
       try {
-        const [listRes, bundleRes, modelsRes] = await Promise.all([
+        const [listRes] = await Promise.all([
           fetch(`${apiRoot}/asset-designs`),
-          fetch(`${apiRoot}/assets-draft`),
-          fetch("/api/text-models"),
         ]);
         if (cancelled) return;
 
@@ -729,34 +749,14 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
           const listItems = data.items ?? [];
           setEpisodes(listItems);
           setSelectedId((prev) => {
+            if (prev === SCRIPT_ASSET_DESIGN_ID) return prev;
             if (prev && listItems.some((ep) => ep.episodeId === prev)) return prev;
-            return listItems[0]?.episodeId ?? null;
+            return SCRIPT_ASSET_DESIGN_ID;
           });
         } else {
           setPageNote("无法加载剧集列表");
         }
 
-        if (bundleRes.ok) {
-          const data = (await bundleRes.json()) as {
-            draft?: ProjectAssetBundle | null;
-          };
-          if (cancelled) return;
-          if (data.draft) {
-            setBundle({
-              characters: data.draft.characters ?? [],
-              scenes: data.draft.scenes ?? [],
-              props: data.draft.props ?? [],
-              audios: data.draft.audios ?? [],
-            });
-          }
-        }
-
-        if (modelsRes.ok) {
-          const data = (await modelsRes.json()) as { recommendedKey?: string };
-          if (!cancelled && data.recommendedKey) {
-            setModelKey(data.recommendedKey);
-          }
-        }
       } catch {
         if (!cancelled) setPageNote("无法加载剧集列表");
       } finally {
@@ -769,10 +769,46 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   }, [apiRoot]);
 
   useEffect(() => {
-    if (!selectedId) {
-      const timer = window.setTimeout(() => setDetail(null), 0);
-      return () => window.clearTimeout(timer);
-    }
+    let cancelled = false;
+    const loadDeferred = async () => {
+      const [bundleRes, modelsRes] = await Promise.all([
+        fetch(`${apiRoot}/assets-draft`),
+        fetch("/api/text-models"),
+      ]);
+      if (cancelled) return;
+      if (bundleRes.ok) {
+        const data = (await bundleRes.json()) as {
+          draft?: ProjectAssetBundle | null;
+        };
+        if (data.draft) {
+          setBundle({
+            characters: data.draft.characters ?? [],
+            scenes: data.draft.scenes ?? [],
+            props: data.draft.props ?? [],
+            audios: data.draft.audios ?? [],
+          });
+        }
+      }
+      if (modelsRes.ok) {
+        const data = (await modelsRes.json()) as { recommendedKey?: string };
+        if (!cancelled && data.recommendedKey) setModelKey(data.recommendedKey);
+      }
+    };
+    const schedule =
+      "requestIdleCallback" in window
+        ? window.requestIdleCallback(loadDeferred, { timeout: 1200 })
+        : globalThis.setTimeout(loadDeferred, 0);
+    return () => {
+      cancelled = true;
+      if (typeof schedule === "number" && "cancelIdleCallback" in window) {
+        window.cancelIdleCallback(schedule);
+      } else {
+        globalThis.clearTimeout(schedule as number);
+      }
+    };
+  }, [apiRoot]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadDetail(selectedId);
     }, 0);
@@ -979,6 +1015,92 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     void runExtract();
   }, [designStatus, generating, items.length, runExtract, saving, selectedId]);
 
+  const handleExtractAll = useCallback(async () => {
+    if (generating || batchExtracting || saving || confirming) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    generationIdRef.current = null;
+    setBatchExtracting(true);
+    setGenerating(true);
+    setPageNote("");
+    setConfirmSummary(null);
+
+    try {
+      const detailRes = await fetch(
+        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}`,
+        { signal: controller.signal },
+      );
+      if (!detailRes.ok) {
+        const payload = (await detailRes.json()) as { error?: string };
+        throw new Error(payload.error ?? "无法加载完整原始剧本");
+      }
+      const scriptDetail = (await detailRes.json()) as EpisodeDetailPayload;
+      const result = await streamStoryGeneration({
+        projectId,
+        brief: "",
+        modelKey,
+        targetChars: 20_000,
+        idempotencyKey: createEpisodeAssetDesignIdempotencyKey(),
+        outputKind: "script_asset_design",
+        signal: controller.signal,
+        onMeta: (meta) => {
+          generationIdRef.current = meta.generationId;
+        },
+      });
+      const applyRes = await fetch(
+        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}/apply-generation`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            generationId: result.generationId,
+            rawText: result.text,
+            expectedRevision: scriptDetail.record.revision,
+            fingerprint: scriptDetail.currentFingerprint,
+          }),
+          signal: controller.signal,
+        },
+      );
+      const applyPayload = (await applyRes.json()) as {
+        record?: EpisodeAssetDesignRecord;
+        error?: string;
+      };
+      if (!applyRes.ok || !applyPayload.record) {
+        throw new Error(applyPayload.error ?? "应用全剧本资产结果失败");
+      }
+
+      setSelectedId(SCRIPT_ASSET_DESIGN_ID);
+      setFullScriptAssetCount(applyPayload.record.items.length);
+      setFullScriptPending(false);
+      applyRecord(applyPayload.record);
+      notifyCreditsRefresh();
+      setPageNote("完整剧本资产已一次性提取完成，请在下方核对。");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setPageNote("已取消全剧本资产提取。");
+      } else {
+        setPageNote(error instanceof Error ? error.message : "全剧本提取失败");
+      }
+    } finally {
+      setBatchExtracting(false);
+      setGenerating(false);
+      setSaving(false);
+      abortRef.current = null;
+      generationIdRef.current = null;
+      await loadDetail(SCRIPT_ASSET_DESIGN_ID);
+    }
+  }, [
+    apiRoot,
+    applyRecord,
+    batchExtracting,
+    confirming,
+    generating,
+    loadDetail,
+    modelKey,
+    projectId,
+    saving,
+  ]);
+
   const handleCancelGenerate = useCallback(async () => {
     abortRef.current?.abort();
     const genId = generationIdRef.current;
@@ -987,10 +1109,10 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     }
     setGenerating(false);
     setSaving(false);
-    setPageNote("已取消生成。");
-    await markExtractStatus("failed");
+    setPageNote(batchExtracting ? "正在取消全剧本提取…" : "已取消生成。");
+    if (!batchExtracting) await markExtractStatus("failed");
     await loadList();
-  }, [loadList, markExtractStatus, projectId]);
+  }, [batchExtracting, loadList, markExtractStatus, projectId]);
 
   const handleConfirm = useCallback(async () => {
     if (!selectedId || !fingerprint) return;
@@ -1024,7 +1146,11 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       if (!res.ok) throw new Error(payload.error ?? "确认失败");
       if (payload.record) applyRecord(payload.record);
       const counts = payload.counts ?? { created: 0, linked: 0, ignored: 0 };
-      setConfirmSummary("本集资产已确认并自动加入资产库。");
+      setConfirmSummary(
+        isFullScriptDesign
+          ? "全剧本资产已确认并自动加入资产库。"
+          : "本集资产已确认并自动加入资产库。",
+      );
       let note =
         counts.created || counts.linked || counts.ignored
           ? `新增 ${counts.created} 项，关联已有 ${counts.linked} 项，忽略 ${counts.ignored} 项。`
@@ -1084,6 +1210,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     apiRoot,
     applyRecord,
     fingerprint,
+    isFullScriptDesign,
     items,
     loadBundle,
     loadList,
@@ -1361,6 +1488,10 @@ const updateItem = useCallback(
         detail.episode.title,
       )
     : null;
+  const isAwaitingFullScriptExtraction =
+    isFullScriptDesign &&
+    designStatus === "not_started" &&
+    items.length === 0;
   const canConfirm =
     !generating &&
     !saving &&
@@ -1392,102 +1523,135 @@ const updateItem = useCallback(
 
   return (
     <div className="ead" data-testid="episode-asset-design-workspace">
-      <div className="ead-layout">
-        <aside className="ead-list amw-panel">
-          <div className="amw-panel__head">
-            <h2>剧集列表</h2>
+      <div className={`ead-layout${isAwaitingFullScriptExtraction ? " is-pending" : ""}`}>
+        <section className="ead-overview amw-panel" aria-labelledby="ead-overview-title">
+          <div className="ead-overview__main">
+            <div className="ead-overview__copy">
+              <span className="ead-overview__eyebrow">AI 全剧本资产提取</span>
+              <h2 id="ead-overview-title">一次识别完整剧本中的全部资产</h2>
+              <p>
+                大模型将自动扫描所有剧集，提取角色、场景、道具与音频需求。
+                单集入口仅用于遗漏补提取或后续复核审批。
+              </p>
+            </div>
+            <button
+              type="button"
+              className="amw-btn amw-btn-primary ead-extract-all-btn"
+              disabled={
+                generating ||
+                batchExtracting ||
+                saving ||
+                confirming
+              }
+              onClick={() => void handleExtractAll()}
+              data-testid="ead-extract-all"
+            >
+              {batchExtracting
+                ? "正在一次性提取完整剧本资产…"
+                : items.length > 0 && isFullScriptDesign
+                  ? "重新提取全剧本资产"
+                  : "一键提取全剧本资产"}
+            </button>
           </div>
-          <div className="ead-progress" aria-label="资产设计进度">
-            <span>已确认 {progress.confirmed}/{progress.total || 0}</span>
-            <span>待提取 {progress.notStarted}</span>
-            <span>待确认 {progress.review}</span>
-            <span>已过期 {progress.stale}</span>
+          <div className="ead-progress" aria-label="全剧本资产状态">
+            <span><strong>{isFullScriptDesign ? items.length : fullScriptAssetCount}</strong> 全剧本资产</span>
+            <span><strong>{progress.review}</strong> 单集待复核</span>
+            <span><strong>{pendingExtractionCount}</strong> 单集可补提取</span>
           </div>
-          <div className="amw-panel__body">
-            {listLoading ? (
-              <p className="ead-muted">加载剧集…</p>
-            ) : episodes.length === 0 ? (
-              <p className="ead-muted">暂无剧集，请先在剧本处理中完成分集。</p>
-            ) : (
-              <>
-                <div className="ead-ep-list">
-                  {pagedEpisodes.map((ep) => {
-                    const title = meaningfulEpisodeTitle(
-                      ep.episodeNumber,
-                      ep.title,
-                    );
-                    return (
-                    <button
-                      key={ep.episodeId}
-                      type="button"
-                      className={`ead-ep${selectedId === ep.episodeId ? " is-selected" : ""}`}
-                      onClick={() => setSelectedId(ep.episodeId)}
-                      data-testid={`ead-episode-${ep.episodeId}`}
-                    >
-                      <div className="ead-ep__top">
-                        <span className="ead-ep__num">第{ep.episodeNumber}集</span>
-                        <span className={statusBadgeClass(ep.designStatus)}>
-                          {EPISODE_ASSET_DESIGN_STATUS_LABELS[ep.designStatus]}
-                        </span>
-                      </div>
-                      {title ? <p className="ead-ep__title">{title}</p> : null}
-                      <p className="ead-ep__meta">{ep.itemCount} 项资产</p>
-                    </button>
-                    );
-                  })}
-                </div>
-                {listTotalPages > 1 ? (
-                  <div className="ead-pager" role="navigation" aria-label="剧集翻页">
-                    <button
-                      type="button"
-                      className="ead-pager__arrow"
-                      disabled={safeListPage <= 1}
-                      aria-label="上一页"
-                      title="上一页"
-                      onClick={() => setListPage((p) => Math.max(1, p - 1))}
-                    >
-                      <ChevronLeft size={14} strokeWidth={2.25} aria-hidden />
-                    </button>
-                    <span className="ead-pager__label">
-                      {safeListPage}/{listTotalPages}
-                    </span>
-                    <button
-                      type="button"
-                      className="ead-pager__arrow"
-                      disabled={safeListPage >= listTotalPages}
-                      aria-label="下一页"
-                      title="下一页"
-                      onClick={() =>
-                        setListPage((p) => Math.min(listTotalPages, p + 1))
-                      }
-                    >
-                      <ChevronRight size={14} strokeWidth={2.25} aria-hidden />
-                    </button>
-                  </div>
+          {fullScriptPending && !isFullScriptDesign ? (
+            <div className="ead-full-script-pending" data-testid="ead-full-script-pending">
+              <div>
+                <strong>{"\u5168\u5267\u672c\u8d44\u4ea7\u5c1a\u672a\u63d0\u53d6"}</strong>
+                <p>{"\u5efa\u8bae\u5148\u4e00\u6b21\u8bc6\u522b\u5b8c\u6574\u5267\u672c\uff1b\u6309\u96c6\u8865\u63d0\u53d6\u4ec5\u7528\u4e8e\u9057\u6f0f\u4fee\u590d\u548c\u590d\u6838\u3002"}</p>
+              </div>
+              <button
+                  type="button"
+                  className="amw-btn ead-full-script-pending__button"
+                  onClick={() => setSelectedId(SCRIPT_ASSET_DESIGN_ID)}
+                  disabled={batchExtracting || generating}
+                >
+                  {"\u8fd4\u56de\u5168\u5267\u672c\u5165\u53e3"}
+              </button>
+            </div>
+          ) : null}
+          <div className="ead-episode-tool">
+            <div>
+              <span className="ead-episode-tool__eyebrow">{"\u8f85\u52a9\u5165\u53e3"}</span>
+              <strong>按集补提取 / 复核</strong>
+              <p>仅在发现遗漏资产或需要提交、复核审批时选择单集。</p>
+            </div>
+            <label className="ead-episode-select-wrap">
+              <span className="sr-only">选择剧集</span>
+              <select
+                className="ead-episode-select"
+                value={isFullScriptDesign ? "" : selectedId}
+                disabled={listLoading || episodes.length === 0 || batchExtracting}
+                onChange={(event) =>
+                  setSelectedId(event.target.value || SCRIPT_ASSET_DESIGN_ID)
+                }
+                data-testid="ead-episode-select"
+              >
+                <option value="">
+                  {listLoading
+                    ? "正在加载剧集…"
+                    : pendingEpisodes.length > 0
+                      ? `选择待补提取剧集（${pendingEpisodes.length}）`
+                      : "选择剧集进行复核"}
+                </option>
+                {pendingEpisodes.length > 0 ? (
+                  <optgroup label="待补提取 / 已过期">
+                    {pendingEpisodes.map((episode) => (
+                      <option key={episode.episodeId} value={episode.episodeId}>
+                        第{episode.episodeNumber}集 · {EPISODE_ASSET_DESIGN_STATUS_LABELS[episode.designStatus]}
+                      </option>
+                    ))}
+                  </optgroup>
                 ) : null}
-              </>
-            )}
+                <optgroup label="已提取，可复核或审批">
+                  {episodes
+                    .filter((episode) => !pendingEpisodes.includes(episode))
+                    .map((episode) => (
+                      <option key={episode.episodeId} value={episode.episodeId}>
+                        第{episode.episodeNumber}集 · {EPISODE_ASSET_DESIGN_STATUS_LABELS[episode.designStatus]}
+                      </option>
+                    ))}
+                </optgroup>
+              </select>
+            </label>
           </div>
-        </aside>
+          {episodes.length === 0 && !listLoading ? (
+            <p className="ead-error">暂无剧集，请先在剧本阶段完成分集。</p>
+          ) : null}
+        </section>
 
-        <section className="ead-detail amw-panel">
-          {!selectedId ? (
-            <div className="amw-empty">请选择一集查看资产设计</div>
-          ) : detailLoading || !detail ? (
-            <div className="amw-empty">加载本集详情…</div>
+        <section className={`ead-detail amw-panel${isAwaitingFullScriptExtraction ? " ead-detail--pending" : ""}`}>
+          {detailLoading || !detail ? (
+            <div className="amw-empty">加载资产设计…</div>
+          ) : isAwaitingFullScriptExtraction ? (
+            <div className="ead-pending-assets" data-testid="ead-pending-assets">
+              <span className="ead-overview__eyebrow">待提取资产</span>
+              <h2>尚未提取完整剧本资产</h2>
+              <p>
+                点击上方“一键提取全部资产”，系统会把主理人最初上传的未分集完整剧本
+                一次性提交给大模型，统一识别角色、场景、道具与音频需求。
+              </p>
+            </div>
           ) : (
             <div className="ead-detail__inner amw-detail">
               <div className="ead-detail__head">
                 <div className="ead-detail__titles">
                   <div className="ead-detail__title-row">
-                    <h2>本集资产设计</h2>
+                    <h2>{isFullScriptDesign ? "全剧本资产设计" : "本集资产设计"}</h2>
                     <span className={statusBadgeClass(designStatus)}>
                       {EPISODE_ASSET_DESIGN_STATUS_LABELS[designStatus]}
                     </span>
                   </div>
                   <p className="ead-detail__subtitle">
-                    第{detail.episode.episodeNumber}集
-                    {selectedEpisodeTitle ? ` · ${selectedEpisodeTitle}` : ""}
+                    {isFullScriptDesign
+                      ? "主理人上传的未分集完整剧本"
+                      : `第${detail.episode.episodeNumber}集${
+                          selectedEpisodeTitle ? ` · ${selectedEpisodeTitle}` : ""
+                        }`}
                   </p>
                   <p className="ead-muted ead-detail__meta-line">
                     正文 {contentLength ?? "—"} 字
@@ -1507,20 +1671,22 @@ const updateItem = useCallback(
                   onClick={() => setScriptViewerOpen(true)}
                   data-testid="ead-view-script"
                 >
-                  查看本集剧本
+                  {isFullScriptDesign ? "查看完整原始剧本" : "查看本集剧本"}
                 </button>
               </div>
 
               <div className="ead-actions amw-actions">
-                <button
-                  type="button"
-                  className="amw-btn amw-btn-primary"
-                  disabled={!selectedId || generating || saving || confirming}
-                  onClick={() => void handleExtract()}
-                  data-testid="ead-extract"
-                >
-                  {generating ? "提取中…" : extractLabel}
-                </button>
+                {!isFullScriptDesign ? (
+                  <button
+                    type="button"
+                    className="amw-btn amw-btn-primary"
+                    disabled={generating || saving || confirming}
+                    onClick={() => void handleExtract()}
+                    data-testid="ead-extract"
+                  >
+                    {generating ? "提取中…" : extractLabel}
+                  </button>
+                ) : null}
                 {generating ? (
                   <button
                     type="button"
@@ -1538,7 +1704,11 @@ const updateItem = useCallback(
                   onClick={() => void saveItems(items)}
                   data-testid="ead-save"
                 >
-                  {saving ? "保存中…" : "保存本集资产"}
+                  {saving
+                    ? "保存中…"
+                    : isFullScriptDesign
+                      ? "保存全剧本资产"
+                      : "保存本集资产"}
                 </button>
                 {surface === "workspace" ? (
                   <button
@@ -1558,7 +1728,11 @@ const updateItem = useCallback(
                     onClick={() => void handleConfirm()}
                     data-testid="ead-confirm"
                   >
-                    {confirming ? "确认中…" : "确认本集资产"}
+                    {confirming
+                      ? "确认中…"
+                      : isFullScriptDesign
+                        ? "确认全剧本资产"
+                        : "确认本集资产"}
                   </button>
                 )}
               </div>
@@ -1738,7 +1912,9 @@ const updateItem = useCallback(
             <div className="ead-script-dialog__head">
               <div className="ead-script-dialog__titles">
                 <h3 id="ead-script-dialog-title">
-                  第{detail.episode.episodeNumber}集剧本
+                  {isFullScriptDesign
+                    ? "主理人上传的完整原始剧本"
+                    : `第${detail.episode.episodeNumber}集剧本`}
                 </h3>
                 <p className="ead-muted ead-script-dialog__meta">
                   {selectedEpisodeTitle ?? "只读预览"}

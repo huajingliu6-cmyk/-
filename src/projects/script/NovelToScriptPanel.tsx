@@ -2,6 +2,7 @@
 
 import { useId, useRef } from "react";
 import { useChipBounce } from "@/shell/useChipBounce";
+import { SCRIPT_UPLOAD_MAX_CHARS_LABEL } from "@/projects/script/script-upload-limits";
 import type {
   NovelConversionTask,
   ScriptSourceFile,
@@ -11,26 +12,21 @@ type Props = {
   open: boolean;
   task: NovelConversionTask;
   onToggle: () => void;
-  onNovelFileSelect: (file: ScriptSourceFile) => void;
+  onNovelFileSelect: (file: File) => void;
+  onCancelNovelUpload: () => void;
   onStartConvert: () => void;
   onExportScript: () => void;
   onSplitScript: () => void;
   onEnterReading: () => void;
 };
 
-function detectType(name: string): ScriptSourceFile["type"] {
-  const lower = name.toLowerCase();
-  if (lower.endsWith(".docx")) return "docx";
-  if (lower.endsWith(".txt")) return "txt";
-  if (lower.endsWith(".md")) return "md";
-  return "unknown";
-}
 
 export function NovelToScriptPanel({
   open,
   task,
   onToggle,
   onNovelFileSelect,
+  onCancelNovelUpload,
   onStartConvert,
   onExportScript,
   onSplitScript,
@@ -68,7 +64,7 @@ export function NovelToScriptPanel({
       </div>
 
       {open ? (
-        <div className="scs-file-card">
+        <div className="scs-file-card scs-novel-card">
           <p className="scs-section-title" style={{ marginTop: 0 }}>
             上传小说
           </p>
@@ -81,13 +77,8 @@ export function NovelToScriptPanel({
             onChange={(e) => {
               const picked = e.target.files?.[0];
               if (!picked) return;
-              onNovelFileSelect({
-                id: `novel-${Date.now()}`,
-                name: picked.name,
-                type: detectType(picked.name),
-                size: picked.size,
-                status: "selected",
-              });
+              onNovelFileSelect(picked);
+
               e.target.value = "";
             }}
           />
@@ -104,21 +95,40 @@ export function NovelToScriptPanel({
               上传小说文件
             </button>
           </div>
+          <p className="scs-hint scs-upload-limit-note">
+            小说内容最多 {SCRIPT_UPLOAD_MAX_CHARS_LABEL}，超过后将无法上传。
+          </p>
           <p className="scs-hint">
             支持浏览器上传：.docx / .txt / .md。不会直接生成，需点击开始转换。
           </p>
 
           {task.sourceFile ? (
-            <div className="scs-meta-row" style={{ marginTop: 10 }}>
+            <div className="scs-meta-row scs-novel-file-row" style={{ marginTop: 10 }}>
               <span className="scs-file-name">{task.sourceFile.name}</span>
-              <span>
-                {task.status === "processing"
-                  ? "转换中"
-                  : task.status === "completed"
-                    ? "转换完成"
-                    : task.status === "failed"
-                      ? "失败"
-                      : "已上传"}
+              <span className="scs-novel-file-row__actions">
+                <span>
+                  {task.status === "processing"
+                    ? "转换中"
+                    : task.status === "completed"
+                      ? "转换完成"
+                      : task.status === "failed"
+                        ? "失败"
+                        : "已上传"}
+                </span>
+                <button
+                  type="button"
+                  className="scs-file-remove"
+                  disabled={task.status === "processing"}
+                  aria-label="取消小说上传"
+                  title={
+                    task.status === "processing"
+                      ? "转换过程中不能取消上传"
+                      : "取消小说上传"
+                  }
+                  onClick={onCancelNovelUpload}
+                >
+                  ×
+                </button>
               </span>
             </div>
           ) : null}
@@ -139,7 +149,7 @@ export function NovelToScriptPanel({
           </div>
 
           {completed ? (
-            <div className="scs-file-card" style={{ marginTop: 12 }}>
+            <div className="scs-file-card scs-novel-completed-card" style={{ marginTop: 14 }}>
               <p className="scs-status-value" style={{ fontSize: "0.95rem" }}>
                 转换完成
               </p>

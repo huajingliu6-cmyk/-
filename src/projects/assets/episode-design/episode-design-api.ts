@@ -1,7 +1,10 @@
 import { loadAssetBundleDraft } from "@/projects/assets/asset-bundle-store";
 import { applyParsedDesignToEpisodeRecord } from "@/projects/assets/episode-design/apply-generation";
 import { parseEpisodeAssetDesignOutput } from "@/projects/assets/episode-design/schema";
-import { loadScriptDraft } from "@/projects/script/script-draft-store";
+import {
+  getScriptSourceFingerprint,
+  loadScriptDraft,
+} from "@/projects/script/script-draft-store";
 import type { ScriptEpisode } from "@/projects/script/types";
 import { getScriptEpisodeContentFingerprint } from "@/projects/assets/episode-design/fingerprint";
 import {
@@ -17,6 +20,7 @@ import type {
   EpisodeAssetDesignStatus,
   EpisodeDesignConversationMessage,
 } from "@/projects/assets/episode-design/types";
+import { SCRIPT_ASSET_DESIGN_ID } from "@/projects/assets/episode-design/types";
 import { buildEpisodeDesignConversationFromExtract } from "@/projects/assets/episode-design/design-conversation";
 import {
   mergeGeneratedMediaState,
@@ -122,6 +126,41 @@ export async function getEpisodeAssetDesignDetail(
   | { ok: false; code: "EPISODE_NOT_FOUND"; message: string }
 > {
   const scriptDraft = await loadScriptDraft(projectId);
+  if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
+    const content = scriptDraft?.sourceText?.trim() ?? "";
+    if (!content) {
+      return {
+        ok: false,
+        code: "EPISODE_NOT_FOUND",
+        message: "未找到主理人上传的未分集完整剧本",
+      };
+    }
+    const store = await loadEpisodeAssetDesignStore(projectId);
+    const { record } = getOrCreateEpisodeRecord(
+      store,
+      SCRIPT_ASSET_DESIGN_ID,
+      0,
+    );
+    const currentFingerprint = getScriptSourceFingerprint(content) ?? "";
+    const now = scriptDraft?.updatedAt ?? new Date().toISOString();
+    return {
+      ok: true,
+      episode: {
+        id: SCRIPT_ASSET_DESIGN_ID,
+        projectId,
+        episodeNumber: 0,
+        title: "完整原始剧本",
+        content,
+        wordCount: content.length,
+        status: "saved",
+        createdAt: now,
+        updatedAt: now,
+      },
+      record,
+      currentFingerprint,
+      designStatus: computeEffectiveStatus(record, currentFingerprint),
+    };
+  }
   const episode = scriptDraft?.episodes.find((ep) => ep.id === episodeId);
   if (!episode) {
     return {

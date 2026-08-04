@@ -1,6 +1,6 @@
 {
-  "name": "infinite-canvas",
-  "version": "0.1.0",
+  "name": "lumina-story",
+  "version": "0.2.0-bete",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack -H 0.0.0.0 -p 3000",

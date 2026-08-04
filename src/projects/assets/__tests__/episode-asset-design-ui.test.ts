@@ -52,13 +52,19 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain("<pre");
   });
 
-  it("uses narrow-left wide-right layout contract", () => {
-    expect(css).toContain("clamp(230px, 21vw, 280px)");
+  it("uses full-width extraction-first layout contract", () => {
+    expect(workspace).toContain("AI 全剧本资产提取");
+    expect(workspace).toContain("ead-overview");
+    expect(workspace).toContain("ead-episode-select");
+    expect(css).not.toContain("clamp(230px, 21vw, 280px)");
     expect(css).toContain("minmax(0, 1fr)");
     expect(css).toMatch(/\.ead-layout[\s\S]*grid-template-columns/);
     expect(css).toMatch(/\.ead-layout[\s\S]*align-items:\s*stretch/);
     expect(css).toContain(".ead-detail");
     expect(css).toContain("min-width: 0");
+    expect(css).toMatch(/\.amw--design \{[\s\S]*overflow-y:\s*auto/);
+    expect(css).toMatch(/\.amw--design \.ead \{[\s\S]*overflow:\s*visible/);
+    expect(css).toMatch(/\.amw--design \.ead-detail__inner \{[\s\S]*overflow:\s*visible/);
     const idx1100 = css.indexOf("@media (max-width: 1100px)");
     const idx960 = css.lastIndexOf("@media (max-width: 960px)");
     expect(idx1100).toBeGreaterThan(-1);
@@ -66,10 +72,37 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(css.slice(idx960, idx960 + 180)).toContain("grid-template-columns: 1fr");
   });
 
-  it("pages episode list at 8 per page", () => {
-    expect(workspace).toContain("EPISODES_PER_PAGE");
-    expect(workspace).toContain("pagedEpisodes");
-    expect(workspace).toContain("ead-pager");
+  it("uses a responsive two-column asset card grid", () => {
+    expect(css).toMatch(
+      /\.ead-cards\s*\{[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 1100px\)[\s\S]*\.ead-cards\s*\{[\s\S]*grid-template-columns:\s*1fr/,
+    );
+  });
+
+  it("keeps episode selection as a secondary omission-recovery tool", () => {
+    expect(workspace).toContain("按集补提取 / 复核");
+    expect(workspace).toContain("pendingEpisodes");
+    expect(workspace).toContain('data-testid="ead-episode-select"');
+    expect(workspace).toContain("ead-episode-tool__eyebrow");
+    expect(css).toContain("grid-template-columns: minmax(0, 1fr) minmax(220px, 320px)");
+    expect(workspace).not.toContain("ead-ep-list");
+    expect(workspace).not.toContain("EPISODES_PER_PAGE");
+  });
+
+  it("uses the original unsplit script as the default one-call extraction flow", () => {
+    expect(workspace).toContain('outputKind: "script_asset_design"');
+    expect(workspace).toContain("SCRIPT_ASSET_DESIGN_ID");
+    expect(workspace).toContain("一键提取全剧本资产");
+    expect(workspace).toContain("fullScriptAssetCount");
+    expect(workspace).toContain("ead-layout${isAwaitingFullScriptExtraction");
+    expect(workspace).toContain("待提取资产");
+    expect(workspace).toContain('data-testid="ead-pending-assets"');
+    expect(workspace).toContain('data-testid="ead-full-script-pending"');
+    expect(workspace).toContain("setFullScriptPending");
+    expect(workspace).toContain("ead-full-script-pending__button");
+    expect(workspace).not.toContain("for (let index = 0; index < targets.length");
   });
 
   it("confirm success copy no longer links to library", () => {

@@ -20,7 +20,7 @@ type Props = {
 };
 
 const MODULES: Array<{ id: AssetModuleId; label: string; segment: string }> = [
-  { id: "design", label: "资产设计确认", segment: "design" },
+  { id: "design", label: "资产设计", segment: "design" },
   { id: "library", label: "资产库", segment: "library" },
 ];
 
@@ -47,6 +47,7 @@ export function AssetModuleNav({
           <Link
             key={mod.id}
             href={href}
+            prefetch={false}
             className={`amn-link${isActive ? " is-active" : ""}`}
             aria-current={isActive ? "page" : undefined}
           >

@@ -24,6 +24,7 @@ import {
   workspaceProjectAssetsPath,
   workspaceProjectPath,
 } from "@/shell/nav";
+import { RouteLoadingOverlay } from "@/shell/RouteLoadingOverlay";
 import "@/projects/storyboard/storyboard-workspace.css";
 
 type Props = {
@@ -229,9 +230,14 @@ export function StoryboardCreationWorkspace({
   if (loading) {
     return (
       <div className="sbw">
-        <div className="sbw-inner">
-          <p className="sbw-hint">加载分镜创作工作台…</p>
-        </div>
+        <RouteLoadingOverlay
+          title="正在进入分镜创作"
+          description={
+            isWorkspace
+              ? "正在准备工作台分镜创作区域，请稍候"
+              : "正在准备分镜创作工作区，请稍候"
+          }
+        />
       </div>
     );
   }

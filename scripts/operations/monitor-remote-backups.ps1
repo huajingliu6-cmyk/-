@@ -40,8 +40,8 @@ Write-AtomicJson $monitor $monitorPath
 
 if ($problems.Count) {
   $message=$problems -join '; '
-  if ($changed) { Send-BackupAlert $config 'error' 'Infinite Canvas backup monitoring alert' $message }
+  if ($changed) { Send-BackupAlert $config 'error' 'Lumina Story backup monitoring alert' $message }
   throw $message
 }
-if ($changed -and $previous -and -not $previous.healthy) { Send-BackupAlert $config 'info' 'Infinite Canvas backup monitoring recovered' 'Backup monitoring is healthy again' }
+if ($changed -and $previous -and -not $previous.healthy) { Send-BackupAlert $config 'info' 'Lumina Story backup monitoring recovered' 'Backup monitoring is healthy again' }
 Write-Output 'Backup monitoring is healthy'

@@ -105,6 +105,42 @@ describe("parseEpisodeAssetDesignOutput", () => {
     }
   });
 
+  it("accepts model design objects with concept and prompt", () => {
+    const r = parseEpisodeAssetDesignOutput(
+      JSON.stringify({
+        version: 1,
+        assets: [
+          {
+            type: "character",
+            name: "Serena",
+            design: {
+              concept: "人物视觉设计提示词",
+              prompt: "26岁女总裁，黑发盘起，身穿深灰色西装。",
+            },
+          },
+          {
+            type: "prop",
+            name: "狐尾戒指",
+            design: {
+              concept: "道具视觉设计提示词",
+              prompt: "银色指环托着一颗发光的半透明白色晶石。",
+            },
+          },
+        ],
+      }),
+    );
+
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(
+        (r.value.assets[0]!.design as { appearance?: string }).appearance,
+      ).toContain("女总裁");
+      expect(
+        (r.value.assets[1]!.design as { usage?: string }).usage,
+      ).toContain("银色指环");
+    }
+  });
+
   it("rejects empty name", () => {
     const r = parseEpisodeAssetDesignOutput(
       JSON.stringify({

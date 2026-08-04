@@ -118,10 +118,12 @@
   overscroll-behavior: contain;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(15, 16, 30, 0.96);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), transparent 42%),
+    rgba(15, 16, 30, 0.72);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: var(--ui-glass-shadow), 0 20px 50px rgba(0, 0, 0, 0.38);
   padding: 6px;
   transform-origin: top center;
   animation: gs-menu-in 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;

@@ -53,7 +53,7 @@ export function workspaceProjectAssetsPath(projectId: string): string {
   return `${workspaceProjectPath(projectId)}/assets`;
 }
 
-/** 工作台资产设计确认 */
+/** 工作台资产设计 */
 export function workspaceProjectAssetsDesignPath(projectId: string): string {
   return `${workspaceProjectAssetsPath(projectId)}/design`;
 }

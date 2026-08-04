@@ -638,7 +638,7 @@ export function StoryboardProductionPanel({
           </div>
         ) : null}
 
-        <div className="sbw-actions sbw-actions--wrap">
+        <div className="sbw-actions sbw-actions--wrap sbw-actions--episode-toolbar">
           {canGeneratePrompts ? (
             <button
               type="button"

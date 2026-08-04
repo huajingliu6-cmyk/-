@@ -46,6 +46,10 @@ describe("H2 runtime single-call composition", () => {
       provider: "mock",
       model: "mock-split",
     });
+    await updateGenerationApiConfig("episode-asset-design-text", {
+      provider: "mock",
+      model: "mock-assets",
+    });
   });
 
   afterEach(() => {
@@ -104,6 +108,45 @@ describe("H2 runtime single-call composition", () => {
     expect(last!.systemPrompt).toContain("[IMMUTABLE_OUTPUT_CONTRACT]");
     expect(last!.userPrompt).toContain("[UNTRUSTED_PROJECT_DATA]");
     expect(last!.userPrompt).toContain("【剧本块列表】");
+    expect(getMockTextCallCount()).toBe(1);
+  });
+
+  it("script_asset_design sends the unsplit source script in one provider call", async () => {
+    const owner = auth("h2-assets-owner");
+    const project = await createProjectRecord(owner.id, {
+      name: "H2 Full Script Assets",
+      creationSource: "script-upload",
+      projectMode: "full-stack",
+      passwordEnabled: false,
+    });
+    const sourceText = [
+      "雨夜，林清带着铜匣进入茶馆。",
+      "阿棠递给她一把旧伞，远处传来码头汽笛。",
+      "两人穿过后巷，最终把铜匣沉入江中。",
+    ].join("\n");
+    await saveScriptDraft({
+      projectId: project.projectId,
+      sourceText,
+      episodes: [],
+    });
+
+    await drainSse(
+      runTextGenerationStream({
+        projectId: project.projectId,
+        user: owner,
+        outputKind: "script_asset_design",
+        brief: "",
+        modelKey: "balanced-default",
+        targetChars: 2000,
+        idempotencyKey: "h2_script_assets_once",
+      }),
+    );
+
+    const last = getLastMockTextRequest();
+    expect(last).not.toBeNull();
+    expect(last!.userPrompt).toContain(sourceText);
+    expect(last!.userPrompt).toContain("未分集完整剧本");
+    expect(last!.systemPrompt).toContain("不得拆成逐集对话");
     expect(getMockTextCallCount()).toBe(1);
   });
 });

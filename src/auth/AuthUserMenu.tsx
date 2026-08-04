@@ -8,6 +8,7 @@ import {
   LogOut,
   Shield,
   UserRound,
+  X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ApiManagePanel } from "@/auth/ApiManagePanel";
@@ -151,143 +152,185 @@ export function AuthUserMenu() {
     accountOpen && typeof document !== "undefined"
       ? createPortal(
           <div
-            className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 p-4"
+            className="account-dialog__backdrop"
             onMouseDown={() => setAccountOpen(false)}
           >
             <div
-              className="max-h-[min(90vh,calc(100vh-100px))] w-full max-w-md overflow-x-hidden overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-950 p-4 shadow-2xl"
-              onMouseDown={(e) => e.stopPropagation()}
+              className="account-dialog__panel"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="account-dialog-title"
+              onMouseDown={(event) => event.stopPropagation()}
             >
-              <div className="mb-3 flex items-center justify-between">
-                <div className="text-sm font-semibold text-zinc-100">账户</div>
+              <div className="account-dialog__glow" aria-hidden />
+              <header className="account-dialog__header">
+                <div className="account-dialog__heading">
+                  <span className="account-dialog__eyebrow">ACCOUNT SETTINGS</span>
+                  <h2 id="account-dialog-title" className="account-dialog__title">
+                    {"账户与安全"}
+                  </h2>
+                  <p className="account-dialog__subtitle">
+                    {"管理个人资料、登录凭证与账户安全"}
+                  </p>
+                </div>
                 <button
                   type="button"
-                  className="text-xs text-zinc-500 hover:text-zinc-300"
+                  className="account-dialog__close"
+                  aria-label={"关闭账户设置"}
                   onClick={() => setAccountOpen(false)}
                 >
-                  关闭
+                  <X aria-hidden />
                 </button>
-              </div>
+              </header>
 
-              <div className="mb-3 space-y-2 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 text-xs text-zinc-300">
-                <div className="flex justify-between gap-3">
-                  <span className="text-zinc-500">用户名</span>
-                  <span className="font-medium text-zinc-100">
-                    {user.username}
-                  </span>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <span className="text-zinc-500">角色</span>
-                  <span>
+              <div className="account-dialog__body">
+                <aside className="account-dialog__identity">
+                  <div className="account-dialog__avatar" aria-hidden>
+                    {(user.displayName || user.username).slice(0, 1).toUpperCase()}
+                  </div>
+                  <div className="account-dialog__identity-copy">
+                    <div className="account-dialog__display-name">
+                      {user.displayName || user.username}
+                    </div>
+                    <div className="account-dialog__username">@{user.username}</div>
+                  </div>
+                  <span
+                    className={
+                      user.role === "admin"
+                        ? "account-dialog__role account-dialog__role--admin"
+                        : "account-dialog__role"
+                    }
+                  >
                     {user.role === "admin" ? "管理员" : "普通用户"}
                   </span>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <span className="text-zinc-500">创建时间</span>
-                  <span className="tabular-nums text-zinc-400">
-                    {new Date(user.createdAt).toLocaleString()}
-                  </span>
-                </div>
-              </div>
+                  <dl className="account-dialog__meta">
+                    <div>
+                      <dt>{"用户名"}</dt>
+                      <dd>{user.username}</dd>
+                    </div>
+                    <div>
+                      <dt>{"创建时间"}</dt>
+                      <dd>{new Date(user.createdAt).toLocaleString()}</dd>
+                    </div>
+                  </dl>
+                  {user.role === "admin" && (
+                    <button
+                      type="button"
+                      className="account-dialog__button account-dialog__button--secondary account-dialog__api-button"
+                      onClick={() => {
+                        setAccountOpen(false);
+                        setApiOpen(true);
+                      }}
+                    >
+                      <Shield aria-hidden />
+                      {"管理 API"}
+                    </button>
+                  )}
+                </aside>
 
-              <label className="mb-3 block text-[11px] text-zinc-400">
-                显示名称
-                <input
-                  className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                />
-              </label>
+                <main className="account-dialog__settings">
+                  <section className="account-dialog__section">
+                    <div className="account-dialog__section-head">
+                      <span className="account-dialog__section-icon">
+                        <UserRound aria-hidden />
+                      </span>
+                      <div>
+                        <h3>{"个人资料"}</h3>
+                        <p>{"设置在项目中展示的名称"}</p>
+                      </div>
+                    </div>
+                    <label className="account-dialog__field">
+                      <span>{"显示名称"}</span>
+                      <input
+                        value={displayName}
+                        onChange={(event) => setDisplayName(event.target.value)}
+                        placeholder={"输入显示名称"}
+                      />
+                    </label>
+                    {profileError && (
+                      <div className="account-dialog__notice account-dialog__notice--error">
+                        {profileError}
+                      </div>
+                    )}
+                    {profileNotice && (
+                      <div className="account-dialog__notice account-dialog__notice--success">
+                        {profileNotice}
+                      </div>
+                    )}
+                    <div className="account-dialog__actions">
+                      <button
+                        type="button"
+                        disabled={savingProfile}
+                        className="account-dialog__button account-dialog__button--primary"
+                        onClick={() => void onSaveProfile()}
+                      >
+                        {savingProfile ? "保存中…" : "保存资料"}
+                      </button>
+                    </div>
+                  </section>
 
-              {profileError && (
-                <div className="mb-2 rounded-lg border border-rose-500/30 bg-rose-950/40 px-3 py-2 text-xs text-rose-200">
-                  {profileError}
-                </div>
-              )}
-              {profileNotice && (
-                <div className="mb-2 rounded-lg border border-emerald-500/30 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
-                  {profileNotice}
-                </div>
-              )}
-
-              <div className="mb-4 flex items-center gap-2">
-                <button
-                  type="button"
-                  disabled={savingProfile}
-                  className="rounded-lg bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-900 hover:bg-white disabled:opacity-40"
-                  onClick={() => void onSaveProfile()}
-                >
-                  {savingProfile ? "保存中…" : "保存资料"}
-                </button>
-                {user.role === "admin" && (
-                  <button
-                    type="button"
-                    className="rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-xs text-amber-100 hover:bg-amber-950/50"
-                    onClick={() => {
-                      setAccountOpen(false);
-                      setApiOpen(true);
-                    }}
-                  >
-                    管理 API
-                  </button>
-                )}
-              </div>
-
-              <div className="border-t border-zinc-800 pt-4">
-                <div className="mb-3 text-sm font-semibold text-zinc-100">
-                  修改密码
-                </div>
-                <label className="mb-2 block text-[11px] text-zinc-400">
-                  当前密码
-                  <input
-                    type="password"
-                    autoComplete="current-password"
-                    className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
-                    value={currentPassword}
-                    onChange={(e) => setCurrentPassword(e.target.value)}
-                  />
-                </label>
-                <label className="mb-2 block text-[11px] text-zinc-400">
-                  新密码
-                  <input
-                    type="password"
-                    autoComplete="new-password"
-                    className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="至少 6 个字符"
-                  />
-                </label>
-                <label className="mb-3 block text-[11px] text-zinc-400">
-                  确认新密码
-                  <input
-                    type="password"
-                    autoComplete="new-password"
-                    className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                  />
-                </label>
-
-                {passwordError && (
-                  <div className="mb-2 rounded-lg border border-rose-500/30 bg-rose-950/40 px-3 py-2 text-xs text-rose-200">
-                    {passwordError}
-                  </div>
-                )}
-                {passwordNotice && (
-                  <div className="mb-2 rounded-lg border border-emerald-500/30 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
-                    {passwordNotice}
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  disabled={savingPassword}
-                  className="rounded-lg bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-900 hover:bg-white disabled:opacity-40"
-                  onClick={() => void onChangePassword()}
-                >
-                  {savingPassword ? "更新中…" : "更新密码"}
-                </button>
+                  <section className="account-dialog__section">
+                    <div className="account-dialog__section-head">
+                      <span className="account-dialog__section-icon">
+                        <KeyRound aria-hidden />
+                      </span>
+                      <div>
+                        <h3>{"修改密码"}</h3>
+                        <p>{"建议定期更换密码以保护账户"}</p>
+                      </div>
+                    </div>
+                    <div className="account-dialog__password-grid">
+                      <label className="account-dialog__field account-dialog__field--wide">
+                        <span>{"当前密码"}</span>
+                        <input
+                          type="password"
+                          autoComplete="current-password"
+                          value={currentPassword}
+                          onChange={(event) => setCurrentPassword(event.target.value)}
+                        />
+                      </label>
+                      <label className="account-dialog__field">
+                        <span>{"新密码"}</span>
+                        <input
+                          type="password"
+                          autoComplete="new-password"
+                          value={newPassword}
+                          onChange={(event) => setNewPassword(event.target.value)}
+                          placeholder={"至少 6 个字符"}
+                        />
+                      </label>
+                      <label className="account-dialog__field">
+                        <span>{"确认新密码"}</span>
+                        <input
+                          type="password"
+                          autoComplete="new-password"
+                          value={confirmPassword}
+                          onChange={(event) => setConfirmPassword(event.target.value)}
+                        />
+                      </label>
+                    </div>
+                    {passwordError && (
+                      <div className="account-dialog__notice account-dialog__notice--error">
+                        {passwordError}
+                      </div>
+                    )}
+                    {passwordNotice && (
+                      <div className="account-dialog__notice account-dialog__notice--success">
+                        {passwordNotice}
+                      </div>
+                    )}
+                    <div className="account-dialog__actions">
+                      <button
+                        type="button"
+                        disabled={savingPassword}
+                        className="account-dialog__button account-dialog__button--primary"
+                        onClick={() => void onChangePassword()}
+                      >
+                        {savingPassword ? "更新中…" : "更新密码"}
+                      </button>
+                    </div>
+                  </section>
+                </main>
               </div>
             </div>
           </div>,

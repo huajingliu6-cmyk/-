@@ -16,7 +16,7 @@ function ShellHeaderPlaceholder() {
             className="inline-block h-7 w-7 rounded-md bg-white/10"
             aria-hidden
           />
-          <span className="shell-brand__name text-white/40">智能视频工作台</span>
+          <span className="shell-brand__name text-white/40">Lumina Story</span>
         </div>
         <div className="ml-auto h-10 w-48 rounded-xl bg-white/5" aria-hidden />
       </div>

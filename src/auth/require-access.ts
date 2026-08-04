@@ -8,12 +8,14 @@ import {
   type ResolvedProjectAccess,
   userOwnsAnyProject,
 } from "@/auth/effective-role";
+import { listMembershipsForUser } from "@/auth/project-members";
 import { getProjectRecord } from "@/projects/project-access";
 import {
   assertSafeGenerationId,
   readGenerationRecord,
 } from "@/video-generation/generation-store";
 import type { GenerationRecord } from "@/video-generation/types";
+import type { ProjectRecord } from "@/projects/types";
 
 export type AccessOk<T extends object = object> = {
   ok: true;
@@ -48,6 +50,8 @@ export async function requireProjectManagementAccess(): Promise<
   if (!session.ok) return session;
   if (getSystemRole(session.user) === "SYSTEM_ADMIN") return session;
   if (await userOwnsAnyProject(session.user.id)) return session;
+  const memberships = await listMembershipsForUser(session.user.id);
+  if (memberships.length === 0) return session;
   return {
     ok: false,
     response: NextResponse.json(
@@ -60,7 +64,7 @@ export async function requireProjectManagementAccess(): Promise<
 /** 仅项目记录上的 ownerId 与当前用户一致时放行（系统管理员非主理人亦拒绝） */
 export async function requireActualProjectOwner(
   projectId: string,
-): Promise<AccessOk<{ access: ResolvedProjectAccess }> | AccessDenied> {
+): Promise<AccessOk<{ access: ResolvedProjectAccess; project: ProjectRecord }> | AccessDenied> {
   const session = await requireSessionUser();
   if (!session.ok) return session;
 
@@ -85,12 +89,12 @@ export async function requireActualProjectOwner(
       response: NextResponse.json({ error: "项目不存在" }, { status: 404 }),
     };
   }
-  return { ok: true, user: session.user, access };
+  return { ok: true, user: session.user, access, project };
 }
 
 export async function requireProjectOwnerOrSystemAdmin(
   projectId: string,
-): Promise<AccessOk<{ access: ResolvedProjectAccess }> | AccessDenied> {
+): Promise<AccessOk<{ access: ResolvedProjectAccess; project: ProjectRecord }> | AccessDenied> {
   return requireActualProjectOwner(projectId);
 }
 
@@ -163,7 +167,7 @@ export async function requireVideoCanvasAccess(
  */
 export async function requireProjectManagementProjectAccess(
   projectId: string,
-): Promise<AccessOk<{ access: ResolvedProjectAccess }> | AccessDenied> {
+): Promise<AccessOk<{ access: ResolvedProjectAccess; project: ProjectRecord }> | AccessDenied> {
   return requireActualProjectOwner(projectId);
 }
 

@@ -21,8 +21,17 @@ describe("workspace permission route wiring", () => {
     const source = readSrc(
       path.join("src", "app", "app", "workspace", "projects", "[projectId]", "page.tsx"),
     );
+    const layout = readSrc(
+      path.join("src", "app", "app", "workspace", "projects", "[projectId]", "layout.tsx"),
+    );
+    const nav = readSrc("src/projects/workbench/ProjectStageNav.tsx");
     expect(source).not.toContain("返回工作台");
     expect(source).not.toContain("剧本创作");
+    expect(source).not.toContain("wb-stage");
+    expect(layout).toContain('mode="workspace"');
+    expect(nav).toContain('project-stage-nav--${mode}');
+    expect(nav).toContain('label: "项目资产"');
+    expect(nav).toContain('label: "分镜创作"');
     expect(source).not.toContain("前往项目管理");
     expect(source).not.toContain("返回项目管理");
   });
@@ -59,6 +68,7 @@ describe("workspace permission route wiring", () => {
     );
     expect(library).toContain("WorkspaceAssetsPage");
     expect(library).toContain("AssetManagementWorkspace");
+    expect(library).not.toContain("EpisodeAssetDesignWorkspace");
     expect(library).toContain('context="workspace"');
 
     const design = readSrc(

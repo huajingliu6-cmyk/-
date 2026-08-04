@@ -78,7 +78,7 @@ export function WorkflowToolbar({
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold">{projectName}</div>
           <div className="text-[11px] text-zinc-500">
-            智能视频工作台 · 素材驱动编排
+            Lumina Story · 素材驱动编排
           </div>
         </div>
       </div>

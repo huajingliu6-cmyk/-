@@ -184,8 +184,8 @@ export const GENERATION_API_DEFS: Array<{
   },
   {
     id: "episode-asset-design-text",
-    label: "单集资产设计文本模型",
-    description: "单集资产设计 · text-generations（episode_asset_design）",
+    label: "剧本资产提取文本模型",
+    description: "资产库单集/全剧本资产提取 · text-generations（episode_asset_design）",
     envProvider: ["TEXT_LLM_PROVIDER", "EPISODE_ASSET_DESIGN_TEXT_PROVIDER"],
     envUrl: [
       "DASHSCOPE_COMPATIBLE_BASE_URL",

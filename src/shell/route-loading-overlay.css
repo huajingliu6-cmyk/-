@@ -1,0 +1,178 @@
+.route-loading {
+  position: fixed;
+  inset: var(--shell-header-h, 68px) 0 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  isolation: isolate;
+}
+
+.route-loading__backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 50% 42%, rgb(var(--ui-accent-rgb) / 0.13), transparent 35%),
+    rgba(2, 4, 10, 0.78);
+  backdrop-filter: blur(10px) saturate(115%);
+  -webkit-backdrop-filter: blur(10px) saturate(115%);
+  animation: route-loading-backdrop-in 0.2s ease both;
+}
+
+.route-loading__card {
+  position: relative;
+  display: grid;
+  width: min(430px, calc(100vw - 40px));
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  overflow: hidden;
+  padding: 22px 24px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 22px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.12), transparent 42%),
+    rgba(18, 21, 32, 0.72);
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.48),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(26px) saturate(155%);
+  -webkit-backdrop-filter: blur(26px) saturate(155%);
+  animation: route-loading-card-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.route-loading__card::before {
+  position: absolute;
+  inset: -90px auto auto -60px;
+  width: 190px;
+  height: 160px;
+  border-radius: 999px;
+  background: rgb(var(--ui-accent-rgb) / 0.2);
+  filter: blur(54px);
+  content: "";
+  pointer-events: none;
+}
+
+.route-loading__icon {
+  position: relative;
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.17);
+  border-radius: 17px;
+  background: linear-gradient(145deg, rgb(var(--ui-accent-rgb) / 0.3), rgba(255, 255, 255, 0.06));
+  color: #f4efff;
+  box-shadow: 0 12px 30px rgb(var(--ui-accent-rgb) / 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.route-loading__icon svg {
+  width: 23px;
+  height: 23px;
+  animation: route-loading-sparkle 1.7s ease-in-out infinite;
+}
+
+.route-loading__orbit {
+  position: absolute;
+  inset: -5px;
+  border: 1px solid transparent;
+  border-top-color: rgba(196, 181, 253, 0.86);
+  border-right-color: rgba(56, 189, 248, 0.52);
+  border-radius: 19px;
+  animation: route-loading-spin 1.25s linear infinite;
+}
+
+.route-loading__copy {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.route-loading__copy strong {
+  color: rgba(255, 255, 255, 0.96);
+  font-size: 17px;
+  font-weight: 680;
+  letter-spacing: -0.015em;
+}
+
+.route-loading__copy span {
+  color: rgba(235, 239, 248, 0.58);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.route-loading__progress {
+  grid-column: 1 / -1;
+  height: 4px;
+  margin-top: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.route-loading__progress span {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, rgb(var(--ui-accent-rgb) / 0.94), #38bdf8, transparent);
+  animation: route-loading-progress 1.35s ease-in-out infinite;
+}
+
+@keyframes route-loading-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes route-loading-card-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes route-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes route-loading-sparkle {
+  0%, 100% { opacity: 0.7; transform: scale(0.9) rotate(-5deg); }
+  50% { opacity: 1; transform: scale(1.08) rotate(5deg); }
+}
+
+@keyframes route-loading-progress {
+  0% { transform: translateX(-130%); }
+  100% { transform: translateX(340%); }
+}
+
+@media (max-width: 640px) {
+  .route-loading {
+    inset: var(--shell-header-h, 68px) 0 0;
+    padding: 16px;
+  }
+
+  .route-loading__card {
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 13px;
+    padding: 18px;
+    border-radius: 19px;
+  }
+
+  .route-loading__icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-loading__card,
+  .route-loading__backdrop,
+  .route-loading__icon svg,
+  .route-loading__orbit,
+  .route-loading__progress span {
+    animation: none !important;
+  }
+}

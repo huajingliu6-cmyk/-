@@ -1,11 +1,789 @@
 @import "tailwindcss";
 
+:root {
+  --ui-accent: #8b5cf6;
+  --ui-accent-rgb: 139 92 246;
+  --ui-bg: #090b10;
+  --ui-bg-elevated: #0f1219;
+  --ui-surface: rgba(255, 255, 255, 0.055);
+  --ui-surface-hover: rgba(255, 255, 255, 0.09);
+  --ui-border: rgba(255, 255, 255, 0.1);
+  --ui-border-strong: rgba(255, 255, 255, 0.16);
+  --ui-text: #f5f7fb;
+  --ui-text-muted: rgba(235, 239, 248, 0.58);
+  --ui-radius-sm: 10px;
+  --ui-radius-md: 14px;
+  --ui-radius-lg: 18px;
+  --ui-control-h: 40px;
+  --ui-shadow-panel: 0 18px 50px rgba(0, 0, 0, 0.34);
+  --ui-focus-ring: 0 0 0 3px rgb(var(--ui-accent-rgb) / 0.28);
+  --ui-glass-bg: rgba(19, 22, 32, 0.58);
+  --ui-glass-bg-hover: rgba(255, 255, 255, 0.12);
+  --ui-glass-border: rgba(255, 255, 255, 0.16);
+  --ui-glass-shadow: 0 12px 34px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --ui-glass-blur: blur(18px) saturate(145%);
+}
+
 html,
 body {
   height: 100%;
   margin: 0;
   padding: 0;
   overflow: hidden;
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  font-family: var(--font-geist-sans), "Microsoft YaHei UI", sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+[role="button"],
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+:where(button, [role="button"]) {
+  backdrop-filter: var(--ui-glass-blur);
+  -webkit-backdrop-filter: var(--ui-glass-blur);
+  box-shadow: var(--ui-glass-shadow);
+}
+
+:where(
+  [role="menu"],
+  [role="listbox"],
+  [role="dialog"],
+  [class*="__menu"],
+  [class*="-menu"],
+  [class*="__panel"],
+  [class*="-panel"]
+) {
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+}
+
+:where(button, a, input, select, textarea, [role="button"]):focus-visible {
+  outline: 2px solid rgb(var(--ui-accent-rgb) / 0.92);
+  outline-offset: 2px;
+}
+
+:where(button, [role="button"]):active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+::selection {
+  background: rgb(var(--ui-accent-rgb) / 0.35);
+  color: #fff;
+}
+
+* {
+  scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.34);
+  background-clip: padding-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.account-dialog__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 15%, rgb(var(--ui-accent-rgb) / 0.13), transparent 34%),
+    rgba(3, 5, 10, 0.76);
+  backdrop-filter: blur(18px) saturate(120%);
+  -webkit-backdrop-filter: blur(18px) saturate(120%);
+}
+
+.account-dialog__panel {
+  position: relative;
+  width: min(880px, 100%);
+  max-height: min(820px, calc(100vh - 48px));
+  overflow: hidden auto;
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 24px;
+  background:
+    linear-gradient(145deg, rgb(var(--ui-accent-rgb) / 0.065), transparent 34%),
+    color-mix(in srgb, var(--ui-bg-elevated) 94%, transparent);
+  box-shadow:
+    0 32px 90px rgba(0, 0, 0, 0.58),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  animation: account-dialog-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.account-dialog__glow {
+  position: absolute;
+  top: -120px;
+  right: -80px;
+  width: 330px;
+  height: 270px;
+  border-radius: 999px;
+  background: rgb(var(--ui-accent-rgb) / 0.16);
+  filter: blur(80px);
+  pointer-events: none;
+}
+
+.account-dialog__header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 28px 30px 24px;
+  border-bottom: 1px solid var(--ui-border);
+}
+
+.account-dialog__heading {
+  min-width: 0;
+}
+
+.account-dialog__eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  color: rgb(var(--ui-accent-rgb) / 0.88);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.account-dialog__title {
+  margin: 0;
+  color: var(--ui-text);
+  font-size: 22px;
+  font-weight: 680;
+  letter-spacing: -0.025em;
+}
+
+.account-dialog__subtitle {
+  margin: 7px 0 0;
+  color: var(--ui-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.account-dialog__close {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--ui-border);
+  border-radius: 11px;
+  background: var(--ui-surface);
+  color: var(--ui-text-muted);
+  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.account-dialog__close:hover {
+  border-color: var(--ui-border-strong);
+  background: var(--ui-surface-hover);
+  color: var(--ui-text);
+}
+
+.account-dialog__close svg {
+  width: 16px;
+  height: 16px;
+}
+
+.account-dialog__body {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(210px, 0.72fr) minmax(0, 1.75fr);
+  gap: 18px;
+  padding: 20px;
+}
+
+.account-dialog__identity,
+.account-dialog__section {
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-surface);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.account-dialog__identity {
+  align-self: start;
+  padding: 22px;
+  text-align: center;
+}
+
+.account-dialog__avatar {
+  display: grid;
+  width: 72px;
+  height: 72px;
+  margin: 2px auto 14px;
+  place-items: center;
+  border: 1px solid rgb(var(--ui-accent-rgb) / 0.42);
+  border-radius: 22px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.18), transparent),
+    linear-gradient(135deg, var(--ui-accent), rgb(var(--ui-accent-rgb) / 0.55));
+  box-shadow: 0 14px 34px rgb(var(--ui-accent-rgb) / 0.22);
+  color: #fff;
+  font-size: 27px;
+  font-weight: 720;
+}
+
+.account-dialog__identity-copy {
+  min-width: 0;
+}
+
+.account-dialog__display-name {
+  overflow: hidden;
+  color: var(--ui-text);
+  font-size: 16px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-dialog__username {
+  overflow: hidden;
+  margin-top: 4px;
+  color: var(--ui-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-dialog__role {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 13px;
+  padding: 5px 9px;
+  border: 1px solid var(--ui-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--ui-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.account-dialog__role--admin {
+  border-color: rgba(251, 191, 36, 0.25);
+  background: rgba(245, 158, 11, 0.08);
+  color: #fcd34d;
+}
+
+.account-dialog__meta {
+  display: grid;
+  gap: 11px;
+  margin: 22px 0 0;
+  padding-top: 18px;
+  border-top: 1px solid var(--ui-border);
+  text-align: left;
+}
+
+.account-dialog__meta div {
+  display: grid;
+  gap: 4px;
+}
+
+.account-dialog__meta dt {
+  color: var(--ui-text-muted);
+  font-size: 10px;
+}
+
+.account-dialog__meta dd {
+  overflow-wrap: anywhere;
+  color: color-mix(in srgb, var(--ui-text) 82%, transparent);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.account-dialog__settings {
+  display: grid;
+  gap: 14px;
+}
+
+.account-dialog__section {
+  padding: 20px;
+}
+
+.account-dialog__section-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.account-dialog__section-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgb(var(--ui-accent-rgb) / 0.22);
+  border-radius: 11px;
+  background: rgb(var(--ui-accent-rgb) / 0.1);
+  color: rgb(var(--ui-accent-rgb) / 0.95);
+}
+
+.account-dialog__section-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.account-dialog__section-head h3 {
+  margin: 0;
+  color: var(--ui-text);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.account-dialog__section-head p {
+  margin: 4px 0 0;
+  color: var(--ui-text-muted);
+  font-size: 11px;
+}
+
+.account-dialog__field {
+  display: grid;
+  gap: 7px;
+  color: color-mix(in srgb, var(--ui-text) 72%, transparent);
+  font-size: 11px;
+}
+
+.account-dialog__field input {
+  width: 100%;
+  height: var(--ui-control-h);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  background: rgba(0, 0, 0, 0.2);
+  padding: 0 12px;
+  color: var(--ui-text);
+  outline: none;
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.account-dialog__field input::placeholder {
+  color: color-mix(in srgb, var(--ui-text-muted) 60%, transparent);
+}
+
+.account-dialog__field input:hover {
+  border-color: var(--ui-border-strong);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.account-dialog__field input:focus {
+  border-color: rgb(var(--ui-accent-rgb) / 0.68);
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: var(--ui-focus-ring);
+}
+
+.account-dialog__password-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 13px;
+}
+
+.account-dialog__field--wide {
+  grid-column: 1 / -1;
+}
+
+.account-dialog__notice {
+  margin-top: 12px;
+  padding: 9px 11px;
+  border: 1px solid;
+  border-radius: var(--ui-radius-sm);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.account-dialog__notice--error {
+  border-color: rgba(244, 63, 94, 0.25);
+  background: rgba(159, 18, 57, 0.16);
+  color: #fecdd3;
+}
+
+.account-dialog__notice--success {
+  border-color: rgba(52, 211, 153, 0.22);
+  background: rgba(6, 95, 70, 0.16);
+  color: #a7f3d0;
+}
+
+.account-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.account-dialog__button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 11px;
+  padding: 0 15px;
+  font-size: 12px;
+  font-weight: 620;
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+}
+
+.account-dialog__button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.account-dialog__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.account-dialog__button--primary {
+  border: 1px solid rgb(var(--ui-accent-rgb) / 0.72);
+  background: linear-gradient(135deg, var(--ui-accent), rgb(var(--ui-accent-rgb) / 0.72));
+  box-shadow: 0 9px 24px rgb(var(--ui-accent-rgb) / 0.18);
+  color: #fff;
+}
+
+.account-dialog__button--primary:hover:not(:disabled) {
+  box-shadow: 0 12px 28px rgb(var(--ui-accent-rgb) / 0.28);
+  filter: brightness(1.08);
+}
+
+.account-dialog__button--secondary {
+  border: 1px solid var(--ui-border);
+  background: var(--ui-surface);
+  color: color-mix(in srgb, var(--ui-text) 82%, transparent);
+}
+
+.account-dialog__button--secondary:hover:not(:disabled) {
+  border-color: var(--ui-border-strong);
+  background: var(--ui-surface-hover);
+}
+
+.account-dialog__api-button {
+  width: 100%;
+  margin-top: 18px;
+}
+
+@keyframes account-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 720px) {
+  .account-dialog__backdrop {
+    align-items: end;
+    padding: 12px;
+  }
+
+  .account-dialog__panel {
+    max-height: calc(100vh - 24px);
+    border-radius: 22px;
+  }
+
+  .account-dialog__header {
+    padding: 22px 20px 18px;
+  }
+
+  .account-dialog__body {
+    grid-template-columns: 1fr;
+    padding: 14px;
+  }
+
+  .account-dialog__identity {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    text-align: left;
+  }
+
+  .account-dialog__avatar {
+    width: 50px;
+    height: 50px;
+    margin: 0;
+    border-radius: 15px;
+    font-size: 19px;
+  }
+
+  .account-dialog__role {
+    margin: 0;
+  }
+
+  .account-dialog__meta,
+  .account-dialog__api-button {
+    grid-column: 1 / -1;
+  }
+
+  .account-dialog__meta {
+    grid-template-columns: 1fr 1fr;
+    margin-top: 4px;
+    padding-top: 14px;
+  }
+}
+
+@media (max-width: 480px) {
+  .account-dialog__subtitle {
+    display: none;
+  }
+
+  .account-dialog__password-grid,
+  .account-dialog__meta {
+    grid-template-columns: 1fr;
+  }
+
+  .account-dialog__section {
+    padding: 17px;
+  }
+}
+
+.appearance {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.appearance__trigger,
+.appearance__icon-btn,
+.appearance__reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+
+.appearance__trigger {
+  height: var(--ui-control-h);
+  gap: 8px;
+  border-radius: 12px;
+  padding: 0 12px;
+  background: var(--ui-surface);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.appearance__trigger.is-compact {
+  width: var(--ui-control-h);
+  padding: 0;
+}
+
+.appearance__trigger:hover,
+.appearance__icon-btn:hover,
+.appearance__reset:hover {
+  border-color: rgb(var(--ui-accent-rgb) / 0.5);
+  background: var(--ui-surface-hover);
+  box-shadow: var(--ui-focus-ring);
+  transform: translateY(-1px);
+}
+
+.appearance__swatch {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(255, 255, 255, 0.72);
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px rgb(var(--ui-accent-rgb) / 0.22);
+}
+
+.appearance__trigger.is-compact .appearance__swatch {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  width: 8px;
+  height: 8px;
+  border-width: 1px;
+}
+
+.appearance__panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 120;
+  width: min(320px, calc(100vw - 24px));
+  padding: 16px;
+  border: 1px solid var(--ui-border-strong);
+  border-radius: var(--ui-radius-lg);
+  background: rgba(15, 18, 25, 0.97);
+  box-shadow: var(--ui-shadow-panel);
+  backdrop-filter: blur(24px) saturate(130%);
+  -webkit-backdrop-filter: blur(24px) saturate(130%);
+  animation: appearance-panel-in 0.16s ease-out both;
+}
+
+.appearance__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.appearance__head > div {
+  display: grid;
+  gap: 4px;
+}
+
+.appearance__head strong {
+  font-size: 14px;
+}
+
+.appearance__head span,
+.appearance__custom > span:first-child {
+  color: var(--ui-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.appearance__icon-btn {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  background: transparent;
+}
+
+.appearance__presets {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 9px;
+  margin-top: 18px;
+}
+
+.appearance__preset {
+  display: inline-flex;
+  width: 100%;
+  aspect-ratio: 1;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.appearance__preset:hover {
+  transform: translateY(-2px) scale(1.03);
+  border-color: rgba(255, 255, 255, 0.65);
+}
+
+.appearance__preset[aria-pressed="true"] {
+  border-color: #fff;
+  box-shadow: 0 0 0 3px rgb(var(--ui-accent-rgb) / 0.25);
+}
+
+.appearance__custom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.appearance__custom-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.appearance__custom input[type="color"] {
+  width: 34px;
+  height: 34px;
+  padding: 3px;
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 10px;
+  background: transparent;
+}
+
+.appearance__custom code {
+  min-width: 72px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+  text-align: right;
+}
+
+.appearance__reset {
+  width: 100%;
+  height: 38px;
+  gap: 8px;
+  margin-top: 12px;
+  border-radius: 11px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.workflow-topbar {
+  background: rgba(9, 11, 16, 0.92);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(18px);
+}
+
+@keyframes appearance-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* 画布节点内媒体：禁止按原始像素短暂撑开（选中/平移重绘闪一下） */
@@ -21,4 +799,18 @@ body {
 .react-flow__edge-path,
 .react-flow__connection-path {
   transition: none !important;
+}
+
+/* Keep vertical scrollbar caps away from rounded card corners. */
+*::-webkit-scrollbar-button:vertical,
+*::-webkit-scrollbar-button:vertical:single-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+*::-webkit-scrollbar-track:vertical {
+  margin-block: 16px;
+  border-radius: 999px;
+  background: transparent;
 }

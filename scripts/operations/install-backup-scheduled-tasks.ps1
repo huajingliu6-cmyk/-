@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory=$true)][string]$ConfigFile,
-  [string]$TaskNamePrefix='Infinite Canvas Production',
+  [string]$TaskNamePrefix='Lumina Story Production',
   [string]$DailyAt='02:00',
   [ValidateRange(5,1440)][int]$MonitorIntervalMinutes=30,
   [string]$UserId='SYSTEM'

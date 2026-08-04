@@ -11,7 +11,7 @@
 
 | 项 | 值 |
 |----|-----|
-| 产品 | Infinite Canvas（分镜创作工作台） |
+| 产品 | Lumina Story（分镜创作工作台） |
 | 路径 | `c:\Users\江城的助手\Downloads\24\infinite-canvas` |
 | 分支 | `feat/react-flow-migration` |
 | HEAD | `a8149a0a6e791d9fc2f2ac431a3773ace821870a` |

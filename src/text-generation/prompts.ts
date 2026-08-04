@@ -6,6 +6,22 @@ export function buildSystemPrompt(
   kind: TextOutputKind,
   targetChars: number,
 ): string {
+  if (kind === "script_asset_design") {
+    return [
+      "你是专业影视资产策划师。",
+      "请通读用户最初上传的未分集完整剧本，一次性识别全剧本所需的全部资产。",
+      "不要按剧集拆分回答，不要逐集重复同一资产；同名同类资产应合并为一个全剧本资产项。",
+      "必须只返回一个 JSON 对象，字段严格为：",
+      '{"version":1,"assets":[{"type":"character|scene|prop|audio","name":"非空名称","description":"可选","design":{...},"evidence":"可选"}]}',
+      "assets 可为空数组；每项 type 与 name 必填。",
+      "design 字段按 type 填写：character 含 description/appearance/clothing/role/usageInEpisode；scene 含 description/timeOfDay/location/style/usageInEpisode；prop 含 description/propType/usage/usageInEpisode；audio 含 description/audioKind/usageInEpisode。",
+      "usageInEpisode 可概括该资产在完整剧本中的使用范围或关键情节，不要求列出每一集。",
+      "不要输出解释、前言、分析或多余文字。",
+      "允许使用单个 json 代码围栏包裹该 JSON 对象；除此之外不要输出其他内容。",
+      "不要返回内部 ID、projectId、existingAssetId、libraryAssetId、时间戳、路径或 base64。",
+    ].join("\n");
+  }
+
   if (kind === "episode_asset_design") {
     return [
       "你是专业影视资产策划师。",

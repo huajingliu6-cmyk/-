@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Menu, X } from "lucide-react";
-import { BrandMark } from "@/workflow/components/BrandMark";
+import { MascotMark } from "@/workflow/components/BrandMark";
 import { AccountActions } from "@/shell/AccountActions";
+import { AppearanceButton } from "@/shell/AppearanceProvider";
 import { AuthenticatedNavigation } from "@/shell/AuthenticatedNavigation";
 import { GlobalBackButton } from "@/shell/GlobalBackButton";
 import { NotificationBell } from "@/shell/NotificationBell";
@@ -27,13 +28,14 @@ export function AuthenticatedHeader({ user }: Props) {
           className="shell-brand"
           aria-label="回到应用门户"
         >
-          <BrandMark size={28} className="opacity-100" />
-          <span className="shell-brand__name">智能视频工作台</span>
+          <MascotMark size={40} className="shell-brand__mark opacity-100" />
+          <span className="shell-brand__name">Lumina Story</span>
         </Link>
 
         <AuthenticatedNavigation onNavigate={() => setMenuOpen(false)} />
 
         <div className="shell-account shell-account--end">
+          <AppearanceButton compact />
           <NotificationBell />
           <AccountActions user={user} />
           <button

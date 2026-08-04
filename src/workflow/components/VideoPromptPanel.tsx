@@ -96,7 +96,7 @@ export function VideoPromptPanel({
   const [generation, setGeneration] = useState<GenerationRecord | null>(null);
   const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId);
   const manageRefBtn = useRef<HTMLButtonElement>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 同步防连点：React setState 异步，仅靠 submitting state 挡不住双击 */
   const submittingRef = useRef(false);
   /** 同一次确认会话复用；成功后清空，避免 Date.now() 破坏服务端幂等 */
@@ -230,21 +230,40 @@ export function VideoPromptPanel({
   useEffect(() => {
     const activeId = data?.activeGenerationId;
     if (!activeId) return;
+    let cancelled = false;
+    let inFlight = false;
+    const pollMs = config?.recommendedPollIntervalMs ?? 3_500;
 
     const stop = () => {
       if (pollRef.current) {
-        clearInterval(pollRef.current);
+        clearTimeout(pollRef.current);
         pollRef.current = null;
       }
     };
 
-    const tick = async () => {
+    const schedule = () => {
+      if (cancelled || pollRef.current) return;
       if (
         typeof document !== "undefined" &&
         document.visibilityState === "hidden"
       ) {
         return;
       }
+      pollRef.current = setTimeout(() => {
+        pollRef.current = null;
+        void tick();
+      }, pollMs);
+    };
+
+    const tick = async () => {
+      if (cancelled || inFlight) return;
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+      inFlight = true;
       try {
         const res = await fetch(`/api/generations/${activeId}`);
         const payload = (await res.json()) as {
@@ -264,6 +283,7 @@ export function VideoPromptPanel({
         // 已有成片时忽略后续失败/重复轮询，避免把成功刷成「任务不存在」
         if (current?.resultAssetId && current.status === "completed") {
           stop();
+          cancelled = true;
           return;
         }
 
@@ -285,6 +305,7 @@ export function VideoPromptPanel({
             setNotice(g.progressLabel);
           }
           stop();
+          cancelled = true;
           return;
         }
 
@@ -323,22 +344,26 @@ export function VideoPromptPanel({
               : g.errorMessage || g.progressLabel,
           );
           stop();
+          cancelled = true;
         }
       } catch {
         // ignore transient
+      } finally {
+        inFlight = false;
+        if (!cancelled) schedule();
       }
     };
 
     void tick();
-    const pollMs = config?.recommendedPollIntervalMs ?? 3_500;
-    pollRef.current = setInterval(() => void tick(), pollMs);
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
+        stop();
         void tick();
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
+      cancelled = true;
       stop();
       document.removeEventListener("visibilitychange", onVisibility);
     };

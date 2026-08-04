@@ -51,6 +51,6 @@ try {
   $state.outcome='failure'
   $state.message=$_.Exception.Message
   Write-AtomicJson $state $statePath
-  try { Send-BackupAlert $config 'error' 'Infinite Canvas backup failed' $state.message } catch { Write-Error ('Alert delivery failed: {0}' -f $_.Exception.Message) }
+  try { Send-BackupAlert $config 'error' 'Lumina Story backup failed' $state.message } catch { Write-Error ('Alert delivery failed: {0}' -f $_.Exception.Message) }
   throw
 }

@@ -6,7 +6,7 @@
 
 | 项 | 值 |
 |----|-----|
-| 产品名称 | Infinite Canvas（无限画布 / 分镜创作工作台） |
+| 产品名称 | Lumina Story（Lumina Story / 分镜创作工作台） |
 | 代码目录 | `c:\Users\江城的助手\Downloads\24\infinite-canvas` |
 | 当前分支 | `feat/react-flow-migration` |
 | 当前 HEAD | `a8149a0a6e791d9fc2f2ac431a3773ace821870a` |

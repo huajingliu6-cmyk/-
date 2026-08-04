@@ -152,6 +152,65 @@ describe("episode asset design text generation route", () => {
     expect(raw).not.toContain("全文不应进入 brief");
   });
 
+  it("generates script_asset_design from a full script over the normal brief limit", async () => {
+    const owner = auth("user", "owner_script_asset_gen");
+    vi.mocked(requireSessionUser).mockResolvedValue({ ok: true, user: owner });
+    const project = await createProjectRecord(owner.id, {
+      name: `script-assets-${Date.now()}`,
+      creationSource: "script-upload",
+      projectMode: "full-stack",
+      passwordEnabled: false,
+    });
+    const now = new Date().toISOString();
+    await saveScriptDraft({
+      projectId: project.projectId,
+      sourceFile: null,
+      sourceText: `完整剧本正文。${"角色进入场景并使用道具。".repeat(400)}`,
+      preambleNotes: null,
+      sourceImport: null,
+      novelTask: {
+        id: "nt",
+        projectId: project.projectId,
+        sourceFile: null,
+        status: "uploaded",
+        resultScriptId: null,
+        createdAt: now,
+      },
+      episodes: [],
+      selectedId: null,
+      listPage: 1,
+      splitConfig: {
+        mode: "by-episode-count",
+        totalEpisodes: 1,
+        charsPerEpisode: 1500,
+      },
+      novelOpen: false,
+    });
+
+    const res = await postTextGenerations(
+      new Request(
+        `http://localhost/api/projects/${project.projectId}/text-generations`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            outputKind: "script_asset_design",
+            brief: "",
+            modelKey: "balanced-default",
+            targetChars: 20_000,
+            idempotencyKey: `script_assets_${Date.now()}`,
+          }),
+        },
+      ),
+      { params: Promise.resolve({ projectId: project.projectId }) },
+    );
+
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    expect(raw).toContain("event: meta");
+    expect(raw).not.toContain('"code":"BRIEF_TOO_LONG"');
+  });
+
   it("rejects when episode content empty", async () => {
     const owner = auth("user", "owner_ead_empty");
     vi.mocked(requireSessionUser).mockResolvedValue({ ok: true, user: owner });

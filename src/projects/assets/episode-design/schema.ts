@@ -307,6 +307,51 @@ function normalizeEpisodeAssetDesignPayload(parsed: object): object {
         } else {
           item.design = { description: text };
         }
+      } else if (
+        item.design &&
+        typeof item.design === "object" &&
+        !Array.isArray(item.design)
+      ) {
+        const source = item.design as Record<string, unknown>;
+        const prompt = typeof source.prompt === "string" ? source.prompt.trim() : "";
+        const description =
+          typeof source.description === "string"
+            ? source.description.trim()
+            : prompt;
+        const type = item.type;
+        const normalized: Record<string, string> = {};
+        if (description) normalized.description = description;
+        if (typeof source.usageInEpisode === "string") {
+          normalized.usageInEpisode = source.usageInEpisode;
+        }
+        if (typeof source.evidence === "string") {
+          normalized.evidence = source.evidence;
+        }
+        if (type === "character") {
+          normalized.appearance =
+            typeof source.appearance === "string" ? source.appearance : prompt;
+          if (typeof source.clothing === "string") normalized.clothing = source.clothing;
+          if (typeof source.role === "string") normalized.role = source.role;
+        } else if (type === "scene") {
+          normalized.location =
+            typeof source.location === "string" ? source.location : prompt;
+          if (typeof source.timeOfDay === "string") normalized.timeOfDay = source.timeOfDay;
+          if (typeof source.style === "string") normalized.style = source.style;
+        } else if (type === "prop") {
+          normalized.usage =
+            typeof source.usage === "string" ? source.usage : prompt;
+          if (typeof source.propType === "string") normalized.propType = source.propType;
+        } else if (type === "audio") {
+          if (
+            source.audioKind === "music" ||
+            source.audioKind === "sfx" ||
+            source.audioKind === "narration" ||
+            source.audioKind === "voice"
+          ) {
+            normalized.audioKind = source.audioKind;
+          }
+        }
+        item.design = normalized;
       }
       return item;
     }),

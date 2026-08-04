@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { projectManagementPath } from "@/shell/nav";
+import { RouteLoadingOverlay } from "@/shell/RouteLoadingOverlay";
 
 export default function ProjectAssetsRedirectPage() {
   const params = useParams<{ projectId: string }>();
@@ -57,7 +58,7 @@ export default function ProjectAssetsRedirectPage() {
 
   return (
     <div className="amw">
-      <p>正在进入资产设计确认…</p>
+      <RouteLoadingOverlay title="正在进入资产设计…" description="正在准备资产设计工作区，请稍候" />
     </div>
   );
 }

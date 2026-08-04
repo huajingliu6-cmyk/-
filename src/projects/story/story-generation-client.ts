@@ -49,6 +49,7 @@ export type StartStoryGenerationInput = {
     | "script_outline"
     | "script_episodes"
     | "script_split"
+    | "script_asset_design"
     | "episode_asset_design"
     | "asset_design_prompt";
   /** Required for script_episodes — must match saved draft.outlineText. */

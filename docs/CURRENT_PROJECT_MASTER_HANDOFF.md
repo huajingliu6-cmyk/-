@@ -18,7 +18,7 @@
 | 文档生成时间 | 2026-07-29（H2-FINAL-STATUS-PATCH）Asia/Shanghai (+08:00) |
 | H2 功能验收 | **COMPLETE** |
 | H2 批次总状态 | **COMPLETE**（AI 控制面 + 门禁 + 浏览器 Smoke；不以 data 哈希 PARTIAL） |
-| 产品名称 | Infinite Canvas（无限画布 / 分镜创作工作台） |
+| 产品名称 | Lumina Story（Lumina Story / 分镜创作工作台） |
 | 代码路径 | `c:\Users\江城的助手\Downloads\24\infinite-canvas` |
 | Git 分支 | `feat/react-flow-migration` |
 | Git HEAD | `a8149a0a6e791d9fc2f2ac431a3773ace821870a`（工作区 Dirty，含 H1/H1-CLOSE 未提交改动） |

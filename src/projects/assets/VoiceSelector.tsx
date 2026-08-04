@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   GlassSelect,
   type GlassSelectGroup,
@@ -22,6 +22,26 @@ type Props = {
   localVoices?: VoiceOption[];
 };
 
+let localVoicesCache: VoiceOption[] | null = null;
+let localVoicesRequest: Promise<VoiceOption[]> | null = null;
+
+function loadLocalVoices(): Promise<VoiceOption[]> {
+  if (localVoicesCache) return Promise.resolve(localVoicesCache);
+  if (localVoicesRequest) return localVoicesRequest;
+  localVoicesRequest = fetch("/api/local-voices", { cache: "force-cache" })
+    .then(async (res) => {
+      if (!res.ok) throw new Error(`加载本地音频库失败（${res.status}）`);
+      const data = (await res.json()) as { voices?: VoiceOption[] };
+      localVoicesCache = Array.isArray(data.voices) ? data.voices : [];
+      return localVoicesCache;
+    })
+    .catch((error) => {
+      localVoicesRequest = null;
+      throw error;
+    });
+  return localVoicesRequest;
+}
+
 function toOption(voice: VoiceOption) {
   return {
     id: voice.id,
@@ -41,35 +61,19 @@ export function VoiceSelector({
   const [fetchedLocal, setFetchedLocal] = useState<VoiceOption[]>([]);
   const [localError, setLocalError] = useState("");
 
-  useEffect(() => {
+  const ensureLocalVoices = useCallback(() => {
     if (localVoicesProp) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch("/api/local-voices", { cache: "no-store" });
-        if (!res.ok) {
-          const body = (await res.json().catch(() => null)) as {
-            error?: string;
-          } | null;
-          throw new Error(body?.error || `加载本地音频库失败（${res.status}）`);
-        }
-        const data = (await res.json()) as { voices?: VoiceOption[] };
-        if (!cancelled) {
-          setFetchedLocal(Array.isArray(data.voices) ? data.voices : []);
-          setLocalError("");
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setFetchedLocal([]);
-          setLocalError(
-            err instanceof Error ? err.message : "加载本地音频库失败",
-          );
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    void loadLocalVoices()
+      .then((voices) => {
+        setFetchedLocal(voices);
+        setLocalError("");
+      })
+      .catch((err) => {
+        setFetchedLocal([]);
+        setLocalError(
+          err instanceof Error ? err.message : "加载本地音频库失败",
+        );
+      });
   }, [localVoicesProp]);
 
   const localVoices = localVoicesProp ?? fetchedLocal;
@@ -105,6 +109,7 @@ export function VoiceSelector({
       allowClear
       clearLabel="清除绑定"
       groups={groups}
+      onOpen={ensureLocalVoices}
       onChange={(id) => {
         if (!id) {
           onChange(null);

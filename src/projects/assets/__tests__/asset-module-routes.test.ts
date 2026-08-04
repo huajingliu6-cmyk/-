@@ -18,7 +18,7 @@ describe("asset module management routes", () => {
     expect(source).not.toContain("AssetManagementWorkspace");
   });
 
-  it("design page mounts shell nav and EpisodeAssetDesignWorkspace", () => {
+  it("design page mounts the extraction and approval workspace", () => {
     const source = readSrc(
       "src/app/app/projects/[projectId]/assets/design/page.tsx",
     );
@@ -27,13 +27,15 @@ describe("asset module management routes", () => {
     expect(source).toContain("EpisodeAssetDesignWorkspace");
   });
 
-  it("library page mounts shell nav and embedded AssetManagementWorkspace", () => {
+  it("library page only mounts stored asset management", () => {
     const source = readSrc(
       "src/app/app/projects/[projectId]/assets/library/page.tsx",
     );
     expect(source).toContain("ProjectAssetsManagementPage");
     expect(source).toContain('module="library"');
     expect(source).toContain("AssetManagementWorkspace");
+    expect(source).not.toContain("EpisodeAssetDesignWorkspace");
+    expect(source).not.toContain("剧集列表");
     expect(source).toContain("embedded");
   });
 
@@ -50,13 +52,14 @@ describe("asset module management routes", () => {
     );
     expect(library).toContain("WorkspaceAssetsPage");
     expect(library).toContain("AssetManagementWorkspace");
+    expect(library).not.toContain("EpisodeAssetDesignWorkspace");
     expect(library).toContain('context="workspace"');
 
     const design = readSrc(
       "src/app/app/workspace/projects/[projectId]/assets/design/page.tsx",
     );
     expect(design).toContain("EpisodeAssetDesignWorkspace");
-    expect(design).not.toContain("查看资产库");
+    expect(design).toContain('module="design"');
 
     const designLayout = readSrc(
       "src/app/app/workspace/projects/[projectId]/assets/design/layout.tsx",
@@ -67,11 +70,11 @@ describe("asset module management routes", () => {
     expect(pageGuards).not.toContain("denied=design");
   });
 
-  it("AssetModuleNav supports workspace basePath and showDesign", () => {
+  it("AssetModuleNav exposes asset design and asset library", () => {
     const source = readSrc("src/projects/assets/AssetModuleNav.tsx");
     expect(source).toContain("workspaceProjectAssetsPath");
     expect(source).toContain("showDesign");
-    expect(source).toContain("资产设计确认");
+    expect(source).toContain('label: "资产设计"');
     expect(source).toContain("资产库");
   });
 
@@ -79,8 +82,11 @@ describe("asset module management routes", () => {
     const source = readSrc(
       path.join("src", "app", "app", "projects", "[projectId]", "page.tsx"),
     );
-    expect(source).toContain("/assets/design");
-    expect(source).toContain('data-testid="stage-assets"');
+    const nav = readSrc("src/projects/workbench/ProjectStageNav.tsx");
+    expect(source).not.toContain("wb-stage");
+    expect(nav).toContain("/assets/design");
+    expect(nav).toContain('id: "assets"');
+    expect(nav).toContain('data-testid={`${mode}-nav-${stage.id}`}');
   });
 
   it("design workspace no longer embeds 查看资产库 shortcut", () => {
@@ -96,6 +102,12 @@ describe("asset module management routes", () => {
     expect(source).toContain("AudioCreateDialog");
     expect(source).toContain("pendingMedia");
     expect(source).toContain("createdAssets");
+    expect(source).toContain("ead-extract-all");
+    expect(source).toContain("一键提取全剧本资产");
+    expect(source).toContain("按集补提取 / 复核");
+    expect(source).toContain("ead-episode-select");
+    expect(source).not.toContain("ead-ep-list");
+    expect(source).toContain("SubmitApprovalModal");
   });
 
   it("story-generation-client supports episode_asset_design outputKind", () => {

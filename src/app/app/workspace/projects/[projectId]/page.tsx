@@ -1,18 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import "@/projects/workbench/workbench.css";
-
-type StageItem = {
-  id: string;
-  title: string;
-  description: string;
-  href: string;
-  enabled: boolean;
-  actionLabel: string;
-};
 
 type WorkspaceProjectPayload = {
   project: {
@@ -24,7 +14,6 @@ type WorkspaceProjectPayload = {
     updatedAt: string;
   };
   effectiveRole: string;
-  stages: StageItem[];
 };
 
 export default function WorkspaceProjectPage() {
@@ -98,22 +87,6 @@ export default function WorkspaceProjectPage() {
               </div>
             </header>
 
-            <section className="wb-stages" aria-label="工作台功能">
-              {data.stages.map((stage) => (
-                <Link
-                  key={stage.id}
-                  className="wb-stage"
-                  href={stage.href}
-                  data-testid={`workspace-stage-${stage.id}`}
-                >
-                  <div className="wb-stage__head">
-                    <h2>{stage.title}</h2>
-                  </div>
-                  <p>{stage.description}</p>
-                  <span className="wb-stage__action">{stage.actionLabel}</span>
-                </Link>
-              ))}
-            </section>
           </>
         ) : null}
       </div>

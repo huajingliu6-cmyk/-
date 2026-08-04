@@ -58,6 +58,11 @@ export function workspaceFeaturesForRole(
 export function canAccessProjectManagementNav(
   systemRole: SystemRole,
   ownsAnyProject: boolean,
+  assignedProjectCount = 0,
 ): boolean {
-  return systemRole === "SYSTEM_ADMIN" || ownsAnyProject;
+  return (
+    systemRole === "SYSTEM_ADMIN" ||
+    ownsAnyProject ||
+    assignedProjectCount === 0
+  );
 }

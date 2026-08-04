@@ -6,6 +6,7 @@ import type { ScriptSourceFile } from "@/projects/script/types";
 import { SCRIPT_TXT_MAX_BYTES } from "@/projects/script/script-txt-constants";
 import { SCRIPT_DOCX_MAX_BYTES } from "@/projects/script/script-docx-constants";
 import { SCRIPT_MARKDOWN_MAX_BYTES } from "@/projects/script/script-markdown-constants";
+import { SCRIPT_UPLOAD_MAX_CHARS_LABEL } from "@/projects/script/script-upload-limits";
 
 type Props = {
   file: ScriptSourceFile | null;
@@ -121,15 +122,14 @@ export function ScriptUploadPanel({
           分集
         </button>
       </div>
+      <p className="scs-hint scs-upload-limit-note">
+        剧本内容最多 {SCRIPT_UPLOAD_MAX_CHARS_LABEL}，超过后将无法导入。
+      </p>
       <p className="scs-hint scs-hint--req">
         <span className="scs-req-star" aria-hidden>
           *
         </span>
         选择 TXT / DOCX / Markdown 后先预览解析结果，确认后才写入剧本草稿。
-      </p>
-      <p className="scs-hint">
-        支持：.txt、.docx、.md / .markdown。PDF
-        为产品不支持格式。Markdown 仅作纯文本导入，不渲染 HTML。
       </p>
 
       {file ? (

@@ -19,6 +19,7 @@ import {
 } from "@/projects/assets/episode-design/prompts";
 import {
   BRIEF_MAX_CHARS,
+  SCRIPT_ASSET_DESIGN_BRIEF_MAX_CHARS,
   SCRIPT_SPLIT_BRIEF_MAX_CHARS,
   countVisibleChars,
   isValidTargetChars,
@@ -51,6 +52,11 @@ import { MockTextProvider } from "@/text-generation/provider/mock-provider";
 import { buildSystemPrompt, buildUserPrompt } from "@/text-generation/prompts";
 import { checkTextGenRateLimit } from "@/text-generation/rate-limit";
 import { truncateToVisibleCharLimit } from "@/text-generation/truncate";
+import { createTextGenerationAbortScope } from "@/text-generation/generation-abort";
+import {
+  isStaleTextJob,
+  reclaimStaleTextJob,
+} from "@/text-generation/stale-job";
 import type {
   TextGenerationJob,
   TextOutputKind,
@@ -71,6 +77,7 @@ export type StartTextGenerationInput = {
   episodeNumber?: number;
   /** Required when outputKind=episode_asset_design — script episode id. */
   episodeId?: string;
+  signal?: AbortSignal;
 };
 
 export type SseEvent =
@@ -106,6 +113,7 @@ export async function* runTextGenerationStream(
   }
   if (project.ownerId !== input.user.id) {
     const workspaceAssetKinds =
+      input.outputKind === "script_asset_design" ||
       input.outputKind === "episode_asset_design" ||
       input.outputKind === "asset_design_prompt";
     if (workspaceAssetKinds) {
@@ -192,6 +200,26 @@ export async function* runTextGenerationStream(
       targetChars: input.targetChars,
       idempotencyKey: input.idempotencyKey,
     });
+  } else if (input.outputKind === "script_asset_design") {
+    const draft = await loadScriptDraft(input.projectId);
+    const sourceText = draft?.sourceText?.replace(/\r\n/g, "\n").trim() ?? "";
+    if (!sourceText) {
+      yield sseEncode({
+        event: "error",
+        data: {
+          code: "SOURCE_TEXT_REQUIRED",
+          message: "请先上传并保存未分集完整剧本后再提取资产。",
+        },
+      });
+      return;
+    }
+    brief = [
+      "任务：从以下未分集完整剧本中一次性提取全剧本资产。",
+      "不要按集分批处理，不要与模型进行逐集对话。",
+      "<完整剧本>",
+      sourceText,
+      "</完整剧本>",
+    ].join("\n");
   } else if (input.outputKind === "episode_asset_design") {
     const episodeId = input.episodeId?.trim() ?? "";
     if (!episodeId) {
@@ -262,6 +290,7 @@ export async function* runTextGenerationStream(
 
   if (
     input.outputKind !== "script_episodes" &&
+    input.outputKind !== "script_asset_design" &&
     input.outputKind !== "episode_asset_design" &&
     input.outputKind !== "script_split" &&
     countVisibleChars(brief) > BRIEF_MAX_CHARS
@@ -271,6 +300,19 @@ export async function* runTextGenerationStream(
       data: {
         code: "BRIEF_TOO_LONG",
         message: `灵感与大纲不能超过 ${BRIEF_MAX_CHARS} 字`,
+      },
+    });
+    return;
+  }
+  if (
+    input.outputKind === "script_asset_design" &&
+    countVisibleChars(brief) > SCRIPT_ASSET_DESIGN_BRIEF_MAX_CHARS
+  ) {
+    yield sseEncode({
+      event: "error",
+      data: {
+        code: "BRIEF_TOO_LONG",
+        message: `完整剧本过长（当前 ${countVisibleChars(brief)} 字，上限 ${SCRIPT_ASSET_DESIGN_BRIEF_MAX_CHARS} 字）`,
       },
     });
     return;
@@ -320,6 +362,7 @@ export async function* runTextGenerationStream(
     input.outputKind !== "script_outline" &&
     input.outputKind !== "script_episodes" &&
     input.outputKind !== "script_split" &&
+    input.outputKind !== "script_asset_design" &&
     input.outputKind !== "episode_asset_design"
   ) {
     yield sseEncode({
@@ -328,12 +371,21 @@ export async function* runTextGenerationStream(
     });
     return;
   }
-  if (!isValidTargetChars(input.targetChars)) {
+  const validTargetChars =
+    input.outputKind === "script_asset_design"
+      ? Number.isInteger(input.targetChars) &&
+        input.targetChars >= 1000 &&
+        input.targetChars <= 20_000
+      : isValidTargetChars(input.targetChars);
+  if (!validTargetChars) {
     yield sseEncode({
       event: "error",
       data: {
         code: "INVALID_TARGET",
-        message: "输出字数须为 100—1000 的整数",
+        message:
+          input.outputKind === "script_asset_design"
+            ? "全剧本资产输出字数须为 1000—20000 的整数"
+            : "输出字数须为 100—1000 的整数",
       },
     });
     return;
@@ -496,14 +548,20 @@ export async function* runTextGenerationStream(
 
   const running = await findRunningTextJob(input.projectId, input.user.id);
   if (running) {
-    yield sseEncode({
-      event: "error",
-      data: {
-        code: "JOB_RUNNING",
-        message: "当前项目已有生成任务进行中",
-      },
-    });
-    return;
+    if (isStaleTextJob(running)) {
+      // Process restart / hung provider can leave queued|running forever and
+      // block every later extract with JOB_RUNNING. Reclaim then continue.
+      await reclaimStaleTextJob(running);
+    } else {
+      yield sseEncode({
+        event: "error",
+        data: {
+          code: "JOB_RUNNING",
+          message: "当前项目已有生成任务进行中",
+        },
+      });
+      return;
+    }
   }
 
   const rate = checkTextGenRateLimit(input.user.id);
@@ -606,7 +664,8 @@ export async function* runTextGenerationStream(
     },
   });
 
-  const controller = new AbortController();
+  const abortScope = createTextGenerationAbortScope(input.signal);
+  const { controller } = abortScope;
   abortControllers.set(generationId, controller);
   job = { ...job, status: "running", updatedAt: new Date().toISOString() };
   await saveTextJob(job);
@@ -653,6 +712,31 @@ export async function* runTextGenerationStream(
         outputTokens = ev.outputTokens;
       } else if (ev.type === "error") {
         if (ev.code === "CANCELLED") {
+          if (abortScope.didTimeout()) {
+            job = {
+              ...job,
+              status: "failed",
+              content,
+              actualChars: countVisibleChars(content),
+              errorCode: "MODEL_TIMEOUT",
+              errorMessage: "模型服务响应超时",
+              updatedAt: new Date().toISOString(),
+            };
+            await saveTextJob(job);
+            await releaseReservation({
+              generationId,
+              projectId: input.projectId,
+              reason: "text-generation-timeout",
+            });
+            yield sseEncode({
+              event: "error",
+              data: {
+                code: "MODEL_TIMEOUT",
+                message: "模型服务响应超时，请稍后重试或更换模型。",
+              },
+            });
+            return;
+          }
           job = {
             ...job,
             status: "cancelled",
@@ -708,6 +792,7 @@ export async function* runTextGenerationStream(
       content = cut.text;
     } else if (
       input.outputKind !== "script_episodes" &&
+      input.outputKind !== "script_asset_design" &&
       input.outputKind !== "episode_asset_design" &&
       input.outputKind !== "script_split" &&
       countVisibleChars(content) > input.targetChars
@@ -719,6 +804,7 @@ export async function* runTextGenerationStream(
     if (
       (input.outputKind === "script_split" ||
         input.outputKind === "script_episodes" ||
+        input.outputKind === "script_asset_design" ||
         input.outputKind === "episode_asset_design") &&
       !content.trim()
     ) {
@@ -766,6 +852,8 @@ export async function* runTextGenerationStream(
               ? `${project.name} · 剧集`
               : input.outputKind === "script_split"
                 ? `${project.name} · 智能分集`
+                : input.outputKind === "script_asset_design"
+                  ? `${project.name} · 全剧本资产设计`
                 : input.outputKind === "episode_asset_design"
                 ? `${project.name} · 单集资产设计`
                 : `${project.name} · 小故事`,
@@ -813,6 +901,48 @@ export async function* runTextGenerationStream(
       data: { documentId: doc.documentId, generationId },
     });
   } catch (error) {
+    if (controller.signal.aborted) {
+      const timedOut = abortScope.didTimeout();
+      const latest = (await getTextJob(input.projectId, generationId)) ?? job;
+      await saveTextJob({
+        ...latest,
+        status: timedOut ? "failed" : "cancelled",
+        content,
+        actualChars: countVisibleChars(content),
+        errorCode: timedOut ? "MODEL_TIMEOUT" : "CANCELLED",
+        errorMessage: timedOut ? "模型服务响应超时" : "用户取消",
+        updatedAt: new Date().toISOString(),
+      });
+      if (timedOut) {
+        await releaseReservation({
+          generationId,
+          projectId: input.projectId,
+          reason: "text-generation-timeout",
+        });
+      } else {
+        await settleReservation({
+          generationId,
+          actualPoints: estimatePointsCost({
+            inputTokens: inputTokens ?? estIn,
+            outputTokens: outputTokens ?? Math.ceil(content.length / 2),
+            pointsPer1kInput: model.pointsPer1kInput,
+            pointsPer1kOutput: model.pointsPer1kOutput,
+          }),
+          projectId: input.projectId,
+          reason: "text-generation-cancel",
+        });
+      }
+      yield sseEncode({
+        event: "error",
+        data: timedOut
+          ? {
+              code: "MODEL_TIMEOUT",
+              message: "模型服务响应超时，请稍后重试或更换模型。",
+            }
+          : { code: "CANCELLED", message: "已停止生成" },
+      });
+      return;
+    }
     const latest = (await getTextJob(input.projectId, generationId)) ?? job;
     await saveTextJob({
       ...latest,
@@ -834,6 +964,7 @@ export async function* runTextGenerationStream(
     });
     void error;
   } finally {
+    abortScope.dispose();
     abortControllers.delete(generationId);
   }
 }
