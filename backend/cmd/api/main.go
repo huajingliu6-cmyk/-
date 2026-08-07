@@ -39,17 +39,32 @@ func main() {
 	}
 	defer application.Close()
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	pprofServer, err := app.StartPprof(ctx, cfg.PprofListenAddress, cfg.InternalToken, logger)
+	if err != nil {
+		slog.Error(`pprof startup failed`, `error`, err.Error())
+		os.Exit(1)
+	}
+	if pprofServer != nil {
+		defer func() {
+			shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = pprofServer.Shutdown(shutdown)
+		}()
+	}
+
+	// WriteTimeout is 5m to accommodate large blob uploads/downloads via /v1/blobs/.
+	// ReadHeaderTimeout guards slowloris; ReadTimeout bounds full request bodies.
 	server := &http.Server{
 		Addr:              cfg.ListenAddress,
 		Handler:           application.Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       90 * time.Second,
+		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
+		ReadTimeout:       cfg.ReadTimeout,
+		WriteTimeout:      cfg.WriteTimeout,
+		IdleTimeout:       cfg.IdleTimeout,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	go func() {
 		slog.Info(`api listening`, `address`, cfg.ListenAddress)

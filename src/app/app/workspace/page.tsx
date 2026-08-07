@@ -1,8 +1,8 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { workspaceProjectPath } from "@/shell/nav";
+import { workspaceProjectAssetsPath } from "@/shell/nav";
 import "@/projects/workbench/workbench.css";
 
 type WorkspaceProjectItem = {
@@ -36,40 +36,49 @@ function PlatformWorkbenchBody() {
   const [error, setError] = useState("");
   const [emptyMessage, setEmptyMessage] = useState<string | null>(null);
 
+  const reloadProjects = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/workspace/projects");
+      const payload = (await res.json()) as {
+        projects?: WorkspaceProjectItem[];
+        emptyMessage?: string | null;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(payload.error ?? "加载失败");
+      setProjects(payload.projects ?? []);
+      setEmptyMessage(payload.emptyMessage ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "加载失败");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!legacyProjectId) return;
-    router.replace(workspaceProjectPath(legacyProjectId));
+    router.replace(workspaceProjectAssetsPath(legacyProjectId));
   }, [legacyProjectId, router]);
 
   useEffect(() => {
     if (legacyProjectId) return;
     let cancelled = false;
     void (async () => {
-      setLoading(true);
-      setError("");
-      try {
-        const res = await fetch("/api/workspace/projects");
-        const payload = (await res.json()) as {
-          projects?: WorkspaceProjectItem[];
-          emptyMessage?: string | null;
-          error?: string;
-        };
-        if (!res.ok) throw new Error(payload.error ?? "加载失败");
-        if (cancelled) return;
-        setProjects(payload.projects ?? []);
-        setEmptyMessage(payload.emptyMessage ?? null);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "加载失败");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      if (cancelled) return;
+      await reloadProjects();
     })();
     return () => {
       cancelled = true;
     };
-  }, [legacyProjectId]);
+  }, [legacyProjectId, reloadProjects]);
+
+  const openProject = useCallback(
+    (projectId: string) => {
+      router.push(workspaceProjectAssetsPath(projectId));
+    },
+    [router],
+  );
 
   if (legacyProjectId) {
     return (
@@ -87,9 +96,7 @@ function PlatformWorkbenchBody() {
         <header className="wb-hero">
           <div>
             <h1>工作台</h1>
-            <p>
-              查看已分配或主理的项目，进入资产、分镜或视频制作。
-            </p>
+            <p>查看已分配或主理的项目，进入资产、分镜或视频制作。</p>
           </div>
         </header>
 
@@ -116,17 +123,13 @@ function PlatformWorkbenchBody() {
                 type="button"
                 className="wb-card"
                 data-testid="workspace-project-card"
-                onClick={() =>
-                  router.push(workspaceProjectPath(project.projectId))
-                }
+                onClick={() => openProject(project.projectId)}
               >
                 <h2>{project.projectName}</h2>
                 <div className="wb-card__meta">
                   <span>{project.projectStatus}</span>
                   <span>角色 {project.effectiveRole}</span>
-                  <span>
-                    资产 {project.assetSummary?.total ?? 0}
-                  </span>
+                  <span>资产 {project.assetSummary?.total ?? 0}</span>
                   <span>更新 {formatTime(project.updatedAt)}</span>
                 </div>
                 <span className="wb-card__cta">打开项目</span>

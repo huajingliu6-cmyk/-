@@ -117,7 +117,7 @@ export function AccountActions({ user }: Props) {
           className="min-w-0"
           onPointerDown={() => profileBounce.trigger()}
         >
-          <AuthUserMenu />
+          <AuthUserMenu user={user} />
         </div>
       </div>
 

@@ -2,43 +2,55 @@
 
 import { useEffect, useState } from "react";
 import type { AuthUser } from "@/auth/types";
+import {
+  fetchAuthMeOnce,
+  useAuthSession,
+} from "@/shell/AuthSessionProvider";
 
 export type AuthUserState =
   | { status: "loading"; user: null }
   | { status: "guest"; user: null }
   | { status: "authenticated"; user: AuthUser };
 
-/** 读取 `/api/auth/me`；loading 期间不渲染登录/业务身份控件，避免闪烁 */
+/**
+ * Shared session when AuthSessionProvider is mounted; otherwise a single
+ * in-flight /api/auth/me. Never persists to Web Storage.
+ */
 export function useAuthUser(): AuthUserState {
-  const [state, setState] = useState<AuthUserState>({
+  const session = useAuthSession();
+  const [fallback, setFallback] = useState<AuthUserState>({
     status: "loading",
     user: null,
   });
 
   useEffect(() => {
+    if (session) return;
     let cancelled = false;
+    const controller = new AbortController();
     void (async () => {
       try {
-        const res = await fetch("/api/auth/me");
-        if (!res.ok) {
-          if (!cancelled) setState({ status: "guest", user: null });
-          return;
-        }
-        const payload = (await res.json()) as { user?: AuthUser | null };
+        const user = await fetchAuthMeOnce(controller.signal);
         if (cancelled) return;
-        if (payload.user) {
-          setState({ status: "authenticated", user: payload.user });
-        } else {
-          setState({ status: "guest", user: null });
-        }
+        setFallback(
+          user
+            ? { status: "authenticated", user }
+            : { status: "guest", user: null },
+        );
       } catch {
-        if (!cancelled) setState({ status: "guest", user: null });
+        if (!cancelled) setFallback({ status: "guest", user: null });
       }
     })();
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, []);
+  }, [session]);
 
-  return state;
+  if (session) {
+    return {
+      status: session.status,
+      user: session.user,
+    } as AuthUserState;
+  }
+  return fallback;
 }

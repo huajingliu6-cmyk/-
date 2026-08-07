@@ -6,7 +6,6 @@ import {
   fetchShotVideoHistory,
   generateShotVideo,
   patchStoryboardShot,
-  regenerateShotPrompt,
 } from "@/projects/storyboard/api-client";
 import {
   ProjectAssetPickerDialog,
@@ -158,7 +157,6 @@ export function StoryboardShotAccordion({
   const prompt = draftPrompt ?? serverPrompt;
   const savedPrompt = serverPrompt;
   const [saving, setSaving] = useState(false);
-  const [regenerating, setRegenerating] = useState(false);
   const [promptSaveFailed, setPromptSaveFailed] = useState(false);
   const [note, setNoteState] = useState("");
   const [noteIsError, setNoteIsError] = useState(false);
@@ -195,13 +193,12 @@ export function StoryboardShotAccordion({
   const [historyVideos, setHistoryVideos] = useState<ShotVideoHistoryItem[]>(
     [],
   );
-  const regenKeyRef = useRef<string>(crypto.randomUUID());
   const videoKeyRef = useRef<string>(crypto.randomUUID());
   const sceneSectionRef = useRef<HTMLDivElement | null>(null);
   const lastSceneTokenRef = useRef(0);
 
   const status = getShotCompletenessStatus(shot, {
-    promptGenerating: regenerating,
+    promptGenerating: false,
     promptSaveFailed,
   });
   const locked = shot.promptLocked || shot.locked;
@@ -389,7 +386,7 @@ export function StoryboardShotAccordion({
   /** 展开时合并重复场景需求（每镜头最多自动合并一次，避免 persist 环） */
   const consolidatedShotRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!expanded || locked || saving || regenerating) return;
+    if (!expanded || locked || saving) return;
     if (consolidatedShotRef.current === shot.id) return;
     const consolidated = consolidateShotSceneRequirements(shot);
     if (consolidated === shot) {
@@ -406,7 +403,6 @@ export function StoryboardShotAccordion({
   }, [
     expanded,
     locked,
-    regenerating,
     saving,
     persistShotShape,
     setNote,
@@ -584,7 +580,9 @@ export function StoryboardShotAccordion({
         if (cancelled) return;
         applyGenerationSnapshot(gen);
         if (!isTerminalGenerationStatus(gen.status)) {
-          schedule();
+          // Collapsed cards: one status check is enough; keep polling only when open
+          // or when this shot already has parallel pending slots.
+          if (expanded || pendingIdSet.size > 0) schedule();
           return;
         }
         if (gen.status === "completed" && expanded) {
@@ -770,7 +768,6 @@ export function StoryboardShotAccordion({
     canGenerateVideo &&
     Boolean(savedPrompt.trim()) &&
     !saving &&
-    !regenerating &&
     !videoBusy;
 
   const shotConfirmPayload: VideoGenerationConfirmPayload | null = useMemo(() => {
@@ -1051,51 +1048,6 @@ export function StoryboardShotAccordion({
     }
   }, [prompt, savedPrompt, savePatch]);
 
-  const handleRegeneratePrompt = useCallback(async () => {
-    if (locked) {
-      setNote("请先解除提示词锁定");
-      return;
-    }
-    if (shot.manuallyEdited) {
-      const ok = window.confirm(
-        "当前提示词已经人工修改，重新生成后将替换现有提示词。",
-      );
-      if (!ok) return;
-    }
-    setRegenerating(true);
-    setNote("");
-    try {
-      const updated = await regenerateShotPrompt(
-        projectId,
-        episodeId,
-        shot.id,
-        {
-          revision: shot.revision,
-          idempotencyKey: regenKeyRef.current,
-        },
-      );
-      onProductionChange(updated);
-      setDraftPrompt(null);
-      setPromptSaveFailed(false);
-      setNote("当前镜头提示词已重新生成。");
-      regenKeyRef.current = crypto.randomUUID();
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "提示词重新生成失败";
-      setNote(message);
-    } finally {
-      setRegenerating(false);
-    }
-  }, [
-    episodeId,
-    locked,
-    onProductionChange,
-    projectId,
-    shot.id,
-    shot.manuallyEdited,
-    shot.revision,
-  ]);
-
   const handleMarkNotRequired = useCallback(
     async (req: ShotAssetRequirement) => {
       if (req.selectedAssetId || req.resolution === "LINKED") {
@@ -1127,7 +1079,7 @@ export function StoryboardShotAccordion({
   );
 
   const handleMatchAssets = useCallback(async () => {
-    if (locked || saving || regenerating || matchingAssets) return;
+    if (locked || saving || matchingAssets) return;
     setMatchingAssets(true);
     setNote("");
     try {
@@ -1168,7 +1120,6 @@ export function StoryboardShotAccordion({
     locked,
     matchingAssets,
     persistShotShape,
-    regenerating,
     saving,
     shot,
   ]);
@@ -1335,7 +1286,7 @@ export function StoryboardShotAccordion({
             <button
               type="button"
               className="sbw-link"
-              disabled={saving || regenerating}
+              disabled={saving}
               onClick={() => void handleRestoreRequired(req)}
             >
               恢复为待添加
@@ -1346,7 +1297,7 @@ export function StoryboardShotAccordion({
                 <button
                   type="button"
                   className="sbw-link"
-                  disabled={saving || regenerating || locked}
+                  disabled={saving || locked}
                   onClick={() => void handleUnlink(req)}
                 >
                   移除绑定
@@ -1355,7 +1306,7 @@ export function StoryboardShotAccordion({
               <button
                 type="button"
                 className="sbw-link"
-                disabled={saving || regenerating || locked}
+                disabled={saving || locked}
                 onClick={() => void handleMarkNotRequired(req)}
               >
                 此镜头无需独立资产
@@ -1416,7 +1367,7 @@ export function StoryboardShotAccordion({
             <h4>视频提示词</h4>
             <ShotPromptEditor
               value={prompt}
-              disabled={locked || saving || regenerating}
+              disabled={locked || saving}
               imageUrlById={promptImageUrlById}
               mentionAssets={mentionAssets}
               onChange={setDraftPrompt}
@@ -1427,7 +1378,7 @@ export function StoryboardShotAccordion({
                   type="button"
                   className="sbw-btn sbw-btn-primary"
                   disabled={
-                    saving || regenerating || locked || prompt === savedPrompt
+                    saving || locked || prompt === savedPrompt
                   }
                   onClick={() => void handleSavePrompt()}
                 >
@@ -1437,7 +1388,7 @@ export function StoryboardShotAccordion({
                   type="button"
                   className="sbw-btn"
                   disabled={
-                    saving || regenerating || locked || prompt === savedPrompt
+                    saving || locked || prompt === savedPrompt
                   }
                   onClick={handleRestorePrompt}
                 >
@@ -1446,19 +1397,9 @@ export function StoryboardShotAccordion({
                 <button
                   type="button"
                   className="sbw-btn"
-                  disabled={saving || regenerating || locked}
-                  title={locked ? "请先解除提示词锁定" : undefined}
-                  onClick={() => void handleRegeneratePrompt()}
-                >
-                  {regenerating ? "生成中…" : "重新生成当前镜头提示词"}
-                </button>
-                <button
-                  type="button"
-                  className="sbw-btn"
                   data-testid="replace-prompt-assets"
                   disabled={
                     saving ||
-                    regenerating ||
                     locked ||
                     (characterAssets.length === 0 &&
                       propAssets.length === 0 &&
@@ -1480,7 +1421,7 @@ export function StoryboardShotAccordion({
                 <button
                   type="button"
                   className="sbw-btn"
-                  disabled={saving || regenerating || locked}
+                  disabled={saving || locked}
                   onClick={() => void handleLockPrompt()}
                 >
                   锁定
@@ -1489,7 +1430,7 @@ export function StoryboardShotAccordion({
                   <button
                     type="button"
                     className="sbw-btn"
-                    disabled={saving || regenerating}
+                    disabled={saving}
                     onClick={() =>
                       void savePatch({
                         unlock: true,
@@ -1542,7 +1483,7 @@ export function StoryboardShotAccordion({
                 className="sbw-btn"
                 data-testid="match-shot-assets"
                 disabled={
-                  saving || regenerating || locked || matchingAssets || assets.length === 0
+                  saving || locked || matchingAssets || assets.length === 0
                 }
                 title={
                   locked
@@ -1561,7 +1502,7 @@ export function StoryboardShotAccordion({
               title="人物"
               assets={characterAssets}
               mediaByAssetId={shot.assetMediaIds}
-              disabled={saving || regenerating || locked || matchingAssets}
+              disabled={saving || locked || matchingAssets}
               onAdd={() => setPicker({ kind: "character" })}
               onSelectMedia={handleSelectAssetMedia}
               onRemove={(id) => {
@@ -1596,7 +1537,7 @@ export function StoryboardShotAccordion({
               title="道具"
               assets={propAssets}
               mediaByAssetId={shot.assetMediaIds}
-              disabled={saving || regenerating || locked || matchingAssets}
+              disabled={saving || locked || matchingAssets}
               onAdd={() => setPicker({ kind: "prop" })}
               onSelectMedia={handleSelectAssetMedia}
               onRemove={(id) => {
@@ -1637,7 +1578,7 @@ export function StoryboardShotAccordion({
                 title="场景"
                 assets={sceneAssets}
                 mediaByAssetId={shot.assetMediaIds}
-                disabled={saving || regenerating || locked || matchingAssets}
+                disabled={saving || locked || matchingAssets}
                 onAdd={() => setPicker({ kind: "scene" })}
                 onSelectMedia={handleSelectAssetMedia}
                 onRemove={() => {

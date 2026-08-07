@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { assertSameOriginMutation } from "@/auth/csrf";
 import { SESSION_COOKIE, verifySessionToken } from "@/auth/session";
 
 /** 欢迎首页公开；登录入口在首页右上角 */
@@ -27,6 +28,11 @@ function redirectToHomeLogin(request: NextRequest, nextPath?: string) {
   return NextResponse.redirect(homeUrl);
 }
 
+function withNoStore(response: NextResponse): NextResponse {
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -36,6 +42,11 @@ export async function proxy(request: NextRequest) {
     return redirectToHomeLogin(request, next);
   }
 
+  if (pathname.startsWith("/api/")) {
+    const csrf = assertSameOriginMutation(request);
+    if (csrf) return csrf;
+  }
+
   if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
@@ -43,7 +54,9 @@ export async function proxy(request: NextRequest) {
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   if (!token) {
     if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ error: "未登录" }, { status: 401 });
+      return withNoStore(
+        NextResponse.json({ error: "未登录" }, { status: 401 }),
+      );
     }
     return redirectToHomeLogin(request, pathname);
   }
@@ -51,9 +64,11 @@ export async function proxy(request: NextRequest) {
   const session = await verifySessionToken(token);
   if (!session) {
     if (pathname.startsWith("/api/")) {
-      const response = NextResponse.json(
-        { error: "登录已失效，请重新登录" },
-        { status: 401 },
+      const response = withNoStore(
+        NextResponse.json(
+          { error: "登录已失效，请重新登录" },
+          { status: 401 },
+        ),
       );
       response.cookies.set(SESSION_COOKIE, "", {
         httpOnly: true,
@@ -71,7 +86,11 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
-  return NextResponse.next();
+  const next = NextResponse.next();
+  if (pathname.startsWith("/api/")) {
+    next.headers.set("Cache-Control", "no-store");
+  }
+  return next;
 }
 
 export const config = {

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { requireWorkspaceAssetAccess } from "@/auth/require-access";
 import { getProjectRecord } from "@/projects/project-access";
 import { AiConfigError } from "@/ai-config/errors";
-import { isEpisodeAssetExtractReady } from "@/projects/assets/episode-design/design-conversation";
+import { isEpisodeAssetExtractReady, normalizeUserRequirement } from "@/projects/assets/episode-design/design-conversation";
 import { streamRedesignPromptInConversation } from "@/projects/assets/episode-design/generate-design-prompt";
 import { ensureWorkspaceInitialized } from "@/projects/workspace-sync/ensure-workspace-initialized";
 import {
@@ -18,7 +18,7 @@ type RouteContext = {
   params: Promise<{ projectId: string; episodeId: string; itemId: string }>;
 };
 
-async function post(_request: Request, context: RouteContext) {
+async function post(request: Request, context: RouteContext) {
   const { projectId, episodeId, itemId } = await context.params;
   const gated = await requireWorkspaceAssetAccess(projectId);
   if (!gated.ok) return gated.response;
@@ -26,6 +26,18 @@ async function post(_request: Request, context: RouteContext) {
   const project = await getProjectRecord(projectId);
   if (!project) {
     return NextResponse.json({ error: "项目不存在" }, { status: 404 });
+  }
+
+  let userRequirement = "";
+  try {
+    const body = (await request.json()) as { userRequirement?: unknown };
+    const normalized = normalizeUserRequirement(body?.userRequirement);
+    if (!normalized.ok) {
+      return NextResponse.json({ error: normalized.error }, { status: 400 });
+    }
+    userRequirement = normalized.value;
+  } catch {
+    // empty body is fine — regenerate without extra requirement
   }
 
   await ensureWorkspaceInitialized(projectId);
@@ -78,6 +90,7 @@ async function post(_request: Request, context: RouteContext) {
       userId: gated.user.id,
       item,
       conversation,
+      userRequirement,
     });
     text = result.text;
     nextConversation = result.nextConversation;

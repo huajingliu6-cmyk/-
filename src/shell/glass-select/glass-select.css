@@ -53,7 +53,7 @@
 
 .gs__trigger:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(167, 139, 250, 0.4);
+  border-color: rgb(var(--ui-accent-rgb) / 0.45);
 }
 
 .gs__trigger:hover:not(:disabled) .gs__chevron {
@@ -65,8 +65,8 @@
 }
 
 .gs__trigger.is-open {
-  border-color: rgba(138, 63, 252, 0.5);
-  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.16);
+  border-color: rgb(var(--ui-accent-rgb) / 0.58);
+  box-shadow: 0 0 0 3px rgb(var(--ui-accent-rgb) / 0.18);
 }
 
 .gs__trigger.is-open .gs__chevron {
@@ -83,7 +83,7 @@
 }
 
 .gs__trigger:focus-visible {
-  outline: 2px solid rgba(167, 139, 250, 0.85);
+  outline: 2px solid rgb(var(--ui-accent-rgb) / 0.85);
   outline-offset: 2px;
 }
 
@@ -138,7 +138,7 @@
   font-size: 11px;
   font-weight: 650;
   letter-spacing: 0.04em;
-  color: rgba(196, 181, 253, 0.88);
+  color: rgb(var(--ui-accent-rgb) / 0.88);
 }
 
 .gs__group + .gs__group {
@@ -183,13 +183,13 @@
 }
 
 .gs__option.is-selected {
-  background: rgba(138, 63, 252, 0.15);
-  border-color: rgba(138, 63, 252, 0.5);
+  background: rgb(var(--ui-accent-rgb) / 0.16);
+  border-color: rgb(var(--ui-accent-rgb) / 0.5);
 }
 
 .gs__option.is-selected:hover,
 .gs__option.is-selected.is-active {
-  background: rgba(138, 63, 252, 0.22);
+  background: rgb(var(--ui-accent-rgb) / 0.24);
 }
 
 .gs__option-body {
@@ -223,8 +223,8 @@
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: rgba(138, 63, 252, 0.28);
-  color: #d8b4fe;
+  background: rgb(var(--ui-accent-rgb) / 0.28);
+  color: #fff;
 }
 
 .gs__mark {

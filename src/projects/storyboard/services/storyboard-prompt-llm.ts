@@ -4,6 +4,11 @@ import { AiConfigError } from "@/ai-config/errors";
 import { buildImmutableOutputContract } from "@/ai-config/output-contracts";
 import { getEffectivePublishedRule } from "@/ai-config/task-rules-store";
 import { regenerateVideoPromptForShot } from "@/projects/storyboard/services/storyboard-generate";
+import {
+  parseDurationSecondsFromVideoPrompt,
+  STORYBOARD_PROMPT_DURATION_MAX,
+  STORYBOARD_PROMPT_DURATION_MIN,
+} from "@/projects/storyboard/storyboard-video-params";
 import type {
   StoryboardDocument,
   StoryboardShot,
@@ -105,11 +110,15 @@ function applyPromptMap(
               sceneTitle,
               `${saltPrefix}:${shot.id}`,
             );
+          const durationFromPrompt = parseDurationSecondsFromVideoPrompt(next);
           return {
             ...shot,
             videoPrompt: next,
             promptDraft: next,
             manuallyEdited: false,
+            ...(durationFromPrompt != null
+              ? { durationSeconds: durationFromPrompt }
+              : {}),
           };
         }),
       };
@@ -162,13 +171,13 @@ function buildBatchUserPrompt(
       `台词（须逐字保留）: ${shot.dialogue || "无"}`,
       `人物需求: ${shot.requiredCharacters.join("、") || "无"}`,
       `道具需求: ${shot.requiredProps.join("、") || "无"}`,
-      `指定时长秒: ${shot.durationSeconds}`,
     ].join("\n");
   });
 
   return [
     "请严格遵守系统中的任务规则，为下列每个 shotId 生成完整 videoPrompt。",
     `画幅：${aspect}`,
+    `时长：每个分镜总时长须在 ${STORYBOARD_PROMPT_DURATION_MIN}—${STORYBOARD_PROMPT_DURATION_MAX} 秒；按剧情合理安排，禁止注水硬拉长；标题头总时长必须与时间轴一致。`,
     "",
     "本集完整剧本：",
     script || "（未提供剧本正文，仅根据镜头摘录编写）",
@@ -374,6 +383,7 @@ async function buildSystemPrompt(): Promise<{
     systemPrompt: [
       contract,
       "重要约束：JSON 只是把结果挂到 shotId 的外壳。prompts[].videoPrompt 的正文必须严格遵守下方任务规则（分镜标题头、挂载、场景基调、人物站位、分秒时间轴、景别/焦距/角度/运镜、台词逐字、声音、连续性，以及相邻分镜交接卡）。禁止把 videoPrompt 压成「景别/运镜/人物」一行摘要。",
+      `时长硬约束：每个分镜总时长 ${STORYBOARD_PROMPT_DURATION_MIN}—${STORYBOARD_PROMPT_DURATION_MAX} 秒且不得超过 ${STORYBOARD_PROMPT_DURATION_MAX} 秒；按剧情需要安排，禁止把短情节强制拉长凑满；标题头「总时长：N秒」须与时间轴一致。`,
       "[TASK_RULES]",
       rule.content,
     ].join("\n\n"),

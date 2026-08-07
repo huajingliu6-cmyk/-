@@ -28,6 +28,7 @@ import {
   saveStoryboardWorkspaceRemote,
   storyboardRemoteRevision,
 } from "@/projects/storyboard/remote-production-store";
+import { parseDurationSecondsFromVideoPrompt } from "@/projects/storyboard/storyboard-video-params";
 
 function draftsDir(projectId: string): string {
   return path.join(projectRootDir(projectId), "drafts");
@@ -201,10 +202,13 @@ function parseStoryboardShot(raw: unknown): StoryboardShot | null {
         .map((item) => parseShotRequirement(item))
         .filter((item): item is ShotAssetRequirement => item !== null)
     : [];
+  const promptText = videoPrompt || promptDraft;
+  const durationFromPrompt = parseDurationSecondsFromVideoPrompt(promptText);
   return {
     id: raw.id,
     shotNumber: Math.max(1, Math.round(asNumber(raw.shotNumber, 1))),
-    durationSeconds: Math.max(0, asNumber(raw.durationSeconds, 3)),
+    durationSeconds:
+      durationFromPrompt ?? Math.max(0, asNumber(raw.durationSeconds, 5)),
     shotSize: asString(raw.shotSize, "中景"),
     cameraAngle: asString(raw.cameraAngle, "平视"),
     cameraMovement: asString(raw.cameraMovement, "固定"),
@@ -406,8 +410,17 @@ function parseEpisodeProduction(
     raw.activeStoryboard === null
       ? null
       : parseStoryboardDocument(raw.activeStoryboard);
-  if (raw.activeStoryboard !== null && raw.activeStoryboard !== undefined && !activeStoryboard) {
-    return null;
+  // 解析失败时保留整集制作记录，仅清空分镜文档，避免整集被丢弃后 ensure 成空行。
+  if (
+    raw.activeStoryboard !== null &&
+    raw.activeStoryboard !== undefined &&
+    !activeStoryboard
+  ) {
+    console.error("[storyboard] activeStoryboard parse failed; keeping production", {
+      projectId,
+      episodeId: raw.episodeId,
+      productionId: raw.id,
+    });
   }
   const now = new Date().toISOString();
   return {

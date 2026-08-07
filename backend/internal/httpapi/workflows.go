@@ -112,12 +112,13 @@ func (h *Workflows) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items := []map[string]any{}
+	documents, err := loadDocumentsBatch(r.Context(), h.store, h.cache, workflowDocumentNamespace, i.ProjectIDs)
+	if err != nil {
+		writeError(w, 500, "workflow read failed")
+		return
+	}
 	for _, pid := range i.ProjectIDs {
-		d, ok, re := h.read(r, workflowDocumentNamespace, pid)
-		if re != nil {
-			writeError(w, 500, "workflow read failed")
-			return
-		}
+		d, ok := documents[pid]
 		if !ok {
 			continue
 		}

@@ -253,6 +253,62 @@ export async function updateProjectHighlights(
   return toPublic(next);
 }
 
+export async function updateProjectName(
+  projectId: string,
+  name: string,
+): Promise<ProjectPublic> {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    throw new Error("INVALID_PROJECT_NAME");
+  }
+  if (trimmed.length > 80) {
+    throw new Error("INVALID_PROJECT_NAME");
+  }
+  const record = await getProjectRecord(projectId);
+  if (!record) {
+    throw new ProjectNotFoundError();
+  }
+  if (record.name === trimmed) {
+    return toPublic(record);
+  }
+  const conflict = await findProjectByName(trimmed);
+  if (conflict && conflict.projectId !== projectId) {
+    throw new ProjectNameConflictError();
+  }
+  const next: ProjectRecord = {
+    ...record,
+    name: trimmed,
+    updatedAt: new Date().toISOString(),
+  };
+  const target = metaFilePath(projectId);
+  const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(temp, JSON.stringify(next, null, 2), "utf-8");
+  await fs.rename(temp, target);
+  return toPublic(next);
+}
+
+/** Soft-destructive: remove project meta + on-disk project root tree. */
+export async function deleteProjectRecord(projectId: string): Promise<void> {
+  const record = await getProjectRecord(projectId);
+  if (!record) {
+    throw new ProjectNotFoundError();
+  }
+  try {
+    await fs.rm(projectRootDir(projectId), { recursive: true, force: true });
+  } catch {
+    // continue — still remove meta
+  }
+  try {
+    await fs.unlink(metaFilePath(projectId));
+  } catch (error) {
+    const code =
+      error && typeof error === "object" && "code" in error
+        ? (error as { code?: unknown }).code
+        : null;
+    if (code !== "ENOENT") throw error;
+  }
+}
+
 export async function getProjectNameMap(): Promise<Map<string, string>> {
   const records = await listProjectRecords();
   return new Map(records.map((r) => [r.projectId, r.name]));

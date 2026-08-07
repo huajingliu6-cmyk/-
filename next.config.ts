@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // next dev 默认拦截跨域访问 /_next；临时外测隧道需要显式放行
+  allowedDevOrigins: ["*.trycloudflare.com"],
   outputFileTracingExcludes: {
     "/*": ["./data/**/*"],
   },

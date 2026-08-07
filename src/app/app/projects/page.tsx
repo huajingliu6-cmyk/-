@@ -4,9 +4,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Search, X } from "lucide-react";
 import { canCreateProject } from "@/auth/capabilities";
+import { getSystemRole } from "@/auth/roles";
 import { useAuthUser } from "@/shell/useAuthUser";
 import { projectWorkbenchPath } from "@/shell/nav";
 import { CreateProjectWizardDialog } from "@/projects/components/CreateProjectWizardDialog";
+import {
+  WorkbenchProjectContextMenu,
+  type WorkbenchProjectContextAction,
+  type WorkbenchProjectContextMenuState,
+} from "@/projects/workbench/WorkbenchProjectContextMenu";
 import type { WorkflowProjectSummary } from "@/workflow/lib/workflow-storage";
 import "./projects.css";
 
@@ -53,21 +59,43 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<WorkflowProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [note, setNote] = useState("");
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [wizardOpen, setWizardOpen] = useState(false);
   const [apiCanCreate, setApiCanCreate] = useState<boolean | null>(null);
+  const [contextMenu, setContextMenu] =
+    useState<WorkbenchProjectContextMenuState | null>(null);
+  const [renaming, setRenaming] = useState<{
+    projectId: string;
+    name: string;
+  } | null>(null);
+  const [renameBusy, setRenameBusy] = useState(false);
 
   const allowedBySession =
     auth.status === "authenticated" && canCreateProject(auth.user);
   const canCreate = apiCanCreate ?? allowedBySession;
+  const canEditRules =
+    auth.status === "authenticated" &&
+    getSystemRole(auth.user) === "SYSTEM_ADMIN";
 
   const reloadProjects = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/projects");
+      const params = new URLSearchParams({
+        page: "1",
+        pageSize: "50",
+      });
+      if (debouncedQuery.trim()) {
+        params.set("q", debouncedQuery.trim());
+        params.set("pageSize", "100");
+      }
+      const res = await fetch(`/api/projects?${params.toString()}`, {
+        cache: "no-store",
+        credentials: "include",
+      });
       const payload = (await res.json()) as {
         projects?: WorkflowProjectSummary[];
         canCreateProject?: boolean;
@@ -80,13 +108,14 @@ export default function ProjectsPage() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
+      setProjects([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [debouncedQuery]);
 
   useEffect(() => {
-    const t = window.setTimeout(() => setDebouncedQuery(query.trim()), 220);
+    const t = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
     return () => window.clearTimeout(t);
   }, [query]);
 
@@ -114,9 +143,94 @@ export default function ProjectsPage() {
     });
   }, [projects, filter, debouncedQuery]);
 
-  const openProject = (projectId: string) => {
-    router.push(projectWorkbenchPath(projectId));
-  };
+  const openProject = useCallback(
+    (projectId: string) => {
+      router.push(projectWorkbenchPath(projectId));
+    },
+    [router],
+  );
+
+  const handleContextAction = useCallback(
+    async (action: WorkbenchProjectContextAction, projectId: string) => {
+      const project = projects.find((item) => item.projectId === projectId);
+      if (!project) return;
+      setNote("");
+      if (action === "open") {
+        openProject(projectId);
+        return;
+      }
+      if (action === "rules") {
+        window.dispatchEvent(new CustomEvent("lumina:open-api-manage"));
+        return;
+      }
+      if (action === "rename") {
+        setRenaming({ projectId, name: project.name });
+        return;
+      }
+      if (action === "delete") {
+        const confirmed = window.confirm(
+          `确认删除项目「${project.name}」？此操作不可恢复。`,
+        );
+        if (!confirmed) return;
+        try {
+          const res = await fetch(
+            `/api/projects/${encodeURIComponent(projectId)}`,
+            { method: "DELETE", credentials: "include" },
+          );
+          const payload = (await res.json()) as { error?: string };
+          if (!res.ok) throw new Error(payload.error ?? "删除失败");
+          setProjects((prev) =>
+            prev.filter((item) => item.projectId !== projectId),
+          );
+          setNote(`已删除项目「${project.name}」`);
+        } catch (err) {
+          setNote(err instanceof Error ? err.message : "删除失败");
+        }
+      }
+    },
+    [openProject, projects],
+  );
+
+  const submitRename = useCallback(async () => {
+    if (!renaming) return;
+    const nextName = renaming.name.trim();
+    if (!nextName) {
+      setNote("请输入项目名称");
+      return;
+    }
+    setRenameBusy(true);
+    setNote("");
+    try {
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(renaming.projectId)}`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: nextName }),
+        },
+      );
+      const payload = (await res.json()) as {
+        project?: { name: string };
+        error?: string;
+      };
+      if (!res.ok) throw new Error(payload.error ?? "重命名失败");
+      const savedName = payload.project?.name ?? nextName;
+      setProjects((prev) =>
+        prev.map((item) =>
+          item.projectId === renaming.projectId
+            ? { ...item, name: savedName }
+            : item,
+        ),
+      );
+      setRenaming(null);
+      setNote(`已重命名为「${savedName}」`);
+    } catch (err) {
+      setNote(err instanceof Error ? err.message : "重命名失败");
+    } finally {
+      setRenameBusy(false);
+    }
+  }, [renaming]);
 
   const onNewClick = () => {
     if (!canCreate) return;
@@ -193,6 +307,7 @@ export default function ProjectsPage() {
             {error}
           </div>
         ) : null}
+        {note ? <p className="pm-note">{note}</p> : null}
 
         {loading ? (
           <div className="pm-grid" aria-busy aria-label="加载项目列表">
@@ -223,7 +338,19 @@ export default function ProjectsPage() {
                 key={project.projectId}
                 type="button"
                 className="pm-card"
+                data-testid="project-management-card"
                 onClick={() => openProject(project.projectId)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setContextMenu({
+                    projectId: project.projectId,
+                    projectName: project.name,
+                    canManage: true,
+                    canEditRules,
+                    x: event.clientX,
+                    y: event.clientY,
+                  });
+                }}
               >
                 <div className="pm-card__cover">
                   <div
@@ -264,6 +391,61 @@ export default function ProjectsPage() {
           </div>
         )}
       </div>
+
+      <WorkbenchProjectContextMenu
+        menu={contextMenu}
+        onClose={() => setContextMenu(null)}
+        onAction={(action, projectId) => {
+          void handleContextAction(action, projectId);
+        }}
+      />
+
+      {renaming ? (
+        <div
+          className="wb-rename-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="重命名项目"
+          data-testid="project-rename-dialog"
+        >
+          <div className="wb-rename-card">
+            <h3>重命名项目</h3>
+            <input
+              autoFocus
+              value={renaming.name}
+              maxLength={80}
+              disabled={renameBusy}
+              onChange={(event) =>
+                setRenaming((prev) =>
+                  prev ? { ...prev, name: event.target.value } : prev,
+                )
+              }
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void submitRename();
+                if (event.key === "Escape") setRenaming(null);
+              }}
+            />
+            <div className="wb-rename-actions">
+              <button
+                type="button"
+                className="wb-btn"
+                disabled={renameBusy}
+                onClick={() => setRenaming(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="wb-btn wb-btn-primary"
+                disabled={renameBusy}
+                onClick={() => void submitRename()}
+              >
+                {renameBusy ? "保存中…" : "保存"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <CreateProjectWizardDialog
         open={wizardOpen}

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useChipBounce } from "@/shell/useChipBounce";
 import type { ScriptEpisode } from "@/projects/script/types";
 import {
@@ -11,6 +11,7 @@ import {
   patchWorkspaceActiveEpisode,
   patchWorkingScript,
 } from "@/projects/storyboard/api-client";
+import { storyboardNeedsLibraryRematch } from "@/projects/storyboard/services/shot-library-match";
 import type { PickerAsset } from "@/projects/storyboard/components/ProjectAssetPickerDialog";
 import { EpisodeSidebar } from "@/projects/storyboard/components/EpisodeSidebar";
 import { StoryboardProductionPanel } from "@/projects/storyboard/components/StoryboardProductionPanel";
@@ -20,11 +21,15 @@ import type {
   ProjectStoryboardWorkspace,
 } from "@/projects/storyboard/types";
 import {
+  APP_WORKBENCH_PATH,
   projectManagementPath,
   workspaceProjectAssetsPath,
-  workspaceProjectPath,
 } from "@/shell/nav";
 import { RouteLoadingOverlay } from "@/shell/RouteLoadingOverlay";
+import {
+  isGenerationBusy,
+  subscribeGenerationBusy,
+} from "@/shell/generation-busy";
 import "@/projects/storyboard/storyboard-workspace.css";
 
 type Props = {
@@ -70,6 +75,11 @@ export function StoryboardCreationWorkspace({
 }: Props) {
   const saveBounce = useChipBounce();
   const isWorkspace = context === "workspace";
+  const generationBusy = useSyncExternalStore(
+    subscribeGenerationBusy,
+    isGenerationBusy,
+    () => false,
+  );
 
   const [projectName, setProjectName] = useState("");
   const [episodes, setEpisodes] = useState<ScriptEpisode[]>([]);
@@ -93,14 +103,41 @@ export function StoryboardCreationWorkspace({
   );
 
   const loadProduction = useCallback(
-    async (episodeId: string) => {
-      let prod = await fetchEpisodeProduction(projectId, episodeId);
+    async (episodeId: string, opts?: { prefer?: EpisodeProduction | null }) => {
+      let prod =
+        opts?.prefer && opts.prefer.episodeId === episodeId
+          ? opts.prefer
+          : await fetchEpisodeProduction(projectId, episodeId);
+
       // Existing storyboards: fill unresolved 人物/场景/道具 from the library.
-      if (prod.activeStoryboard) {
+      // Skip while prompts are generating — rematch would race the LLM write
+      // and refresh the generating lock timestamp.
+      // Skip when everything is already linked — avoids an extra POST on every open.
+      if (
+        prod.activeStoryboard &&
+        prod.status !== "storyboard_generating" &&
+        storyboardNeedsLibraryRematch(prod.activeStoryboard)
+      ) {
         try {
-          prod = await autoMatchStoryboardAssets(projectId, episodeId);
+          // Prefer a fresh server copy before rematch when we painted from workspace cache.
+          if (opts?.prefer && opts.prefer.episodeId === episodeId) {
+            prod = await fetchEpisodeProduction(projectId, episodeId);
+          }
+          if (
+            prod.activeStoryboard &&
+            prod.status !== "storyboard_generating" &&
+            storyboardNeedsLibraryRematch(prod.activeStoryboard)
+          ) {
+            prod = await autoMatchStoryboardAssets(projectId, episodeId);
+          }
         } catch {
           // Non-blocking: keep loaded production if rematch fails.
+        }
+      } else if (opts?.prefer && opts.prefer.episodeId === episodeId) {
+        try {
+          prod = await fetchEpisodeProduction(projectId, episodeId);
+        } catch {
+          // Keep workspace-cached production if refresh fails.
         }
       }
       setProduction(prod);
@@ -127,7 +164,15 @@ export function StoryboardCreationWorkspace({
           const saved = await patchWorkspaceActiveEpisode(projectId, activeId);
           setWorkspace(saved);
         }
-        await loadProduction(activeId);
+        const fromWorkspace =
+          data.workspace?.productions.find((p) => p.episodeId === activeId) ??
+          null;
+        // Paint from workspace payload first so the overlay can clear sooner.
+        if (fromWorkspace) {
+          setProduction(fromWorkspace);
+          setLoading(false);
+        }
+        await loadProduction(activeId, { prefer: fromWorkspace });
       } else {
         setProduction(null);
       }
@@ -169,6 +214,8 @@ export function StoryboardCreationWorkspace({
   const handleSelectEpisode = useCallback(
     async (episodeId: string) => {
       if (episodeId === activeEpisodeId) return;
+      if (isGenerationBusy()) return;
+      if (production?.status === "storyboard_generating") return;
       setSwitchingEpisode(true);
       setSaveNote("");
       try {
@@ -181,7 +228,7 @@ export function StoryboardCreationWorkspace({
         setSwitchingEpisode(false);
       }
     },
-    [activeEpisodeId, loadProduction, projectId],
+    [activeEpisodeId, loadProduction, production?.status, projectId],
   );
 
   const handleSaveDraft = useCallback(async () => {
@@ -223,9 +270,9 @@ export function StoryboardCreationWorkspace({
     ? workspaceProjectAssetsPath(projectId)
     : `${projectManagementPath(projectId)}/assets`;
   const emptyBackHref = isWorkspace
-    ? workspaceProjectPath(projectId)
+    ? APP_WORKBENCH_PATH
     : `${projectManagementPath(projectId)}/script`;
-  const emptyBackLabel = isWorkspace ? "返回工作台项目" : "返回剧本处理";
+  const emptyBackLabel = isWorkspace ? "返回工作台" : "返回剧本处理";
 
   if (loading) {
     return (
@@ -318,7 +365,11 @@ export function StoryboardCreationWorkspace({
             episodes={episodes}
             productions={productions}
             activeEpisodeId={activeEpisodeId}
-            switching={switchingEpisode}
+            switching={
+              switchingEpisode ||
+              production?.status === "storyboard_generating" ||
+              generationBusy
+            }
             onSelect={(id) => void handleSelectEpisode(id)}
           />
 

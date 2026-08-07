@@ -63,6 +63,7 @@ export async function GET(_request: Request, context: RouteContext) {
       id: detail.episode.id,
       episodeNumber: detail.episode.episodeNumber,
       title: detail.episode.title,
+      content: detail.episode.content,
     },
     record: detail.record,
     currentFingerprint: detail.currentFingerprint,

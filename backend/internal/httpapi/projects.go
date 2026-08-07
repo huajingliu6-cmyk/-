@@ -101,8 +101,10 @@ func (handler *Projects) ServeHTTP(writer http.ResponseWriter, request *http.Req
 		handler.get(writer, request, path)
 	case http.MethodPatch:
 		handler.patch(writer, request, path)
+	case http.MethodDelete:
+		handler.delete(writer, request, path)
 	default:
-		writer.Header().Set("Allow", "GET, PATCH")
+		writer.Header().Set("Allow", "GET, PATCH, DELETE")
 		writeError(writer, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
@@ -327,31 +329,64 @@ func (handler *Projects) create(writer http.ResponseWriter, request *http.Reques
 func (handler *Projects) patch(writer http.ResponseWriter, request *http.Request, projectID string) {
 	var input struct {
 		Highlights *string `json:"highlights"`
+		Name       *string `json:"name"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
-	if err := decoder.Decode(&input); err != nil || input.Highlights == nil {
+	if err := decoder.Decode(&input); err != nil || (input.Highlights == nil && input.Name == nil) {
 		writeError(writer, http.StatusBadRequest, "invalid project payload")
 		return
 	}
-	highlights := strings.TrimSpace(*input.Highlights)
-	if utf8.RuneCountInString(highlights) > projectHighlightsMaxLength {
-		writeError(writer, http.StatusBadRequest, "project highlights too long")
-		return
+	var highlights *string
+	if input.Highlights != nil {
+		value := strings.TrimSpace(*input.Highlights)
+		if utf8.RuneCountInString(value) > projectHighlightsMaxLength {
+			writeError(writer, http.StatusBadRequest, "project highlights too long")
+			return
+		}
+		highlights = &value
+	}
+	var name *string
+	if input.Name != nil {
+		value := strings.TrimSpace(*input.Name)
+		if value == "" || utf8.RuneCountInString(value) > projectNameMaxLength {
+			writeError(writer, http.StatusBadRequest, "invalid project name")
+			return
+		}
+		name = &value
 	}
 	result, err := handler.mutateCatalog(request, func(catalog *projectCatalog) (any, bool, error) {
-		for index, project := range catalog.Projects {
-			if project.ProjectID != projectID {
-				continue
+		index := -1
+		for i, project := range catalog.Projects {
+			if project.ProjectID == projectID {
+				index = i
+				break
 			}
-			project.Highlights = highlights
-			project.UpdatedAt = requestTime()
-			catalog.Projects[index] = project
-			return map[string]any{"project": publicProject(project)}, true, nil
 		}
-		return nil, false, postgres.ErrNotFound
+		if index < 0 {
+			return nil, false, postgres.ErrNotFound
+		}
+		project := catalog.Projects[index]
+		if name != nil && project.Name != *name {
+			for _, existing := range catalog.Projects {
+				if existing.ProjectID != projectID && existing.Name == *name {
+					return nil, false, errProjectNameConflict
+				}
+			}
+			project.Name = *name
+		}
+		if highlights != nil {
+			project.Highlights = *highlights
+		}
+		project.UpdatedAt = requestTime()
+		catalog.Projects[index] = project
+		return map[string]any{"project": publicProject(project)}, true, nil
 	})
 	if errors.Is(err, postgres.ErrNotFound) {
 		writeError(writer, http.StatusNotFound, "project not found")
+		return
+	}
+	if errors.Is(err, errProjectNameConflict) {
+		writeJSON(writer, http.StatusConflict, map[string]any{"error": "project name already exists", "code": "PROJECT_NAME_CONFLICT"})
 		return
 	}
 	if err != nil {
@@ -359,6 +394,39 @@ func (handler *Projects) patch(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	writeJSON(writer, http.StatusOK, result)
+}
+
+func (handler *Projects) delete(writer http.ResponseWriter, request *http.Request, projectID string) {
+	_, err := handler.mutateCatalog(request, func(catalog *projectCatalog) (any, bool, error) {
+		next := make([]ProjectRecord, 0, len(catalog.Projects))
+		found := false
+		for _, project := range catalog.Projects {
+			if project.ProjectID == projectID {
+				found = true
+				continue
+			}
+			next = append(next, project)
+		}
+		if !found {
+			return nil, false, postgres.ErrNotFound
+		}
+		catalog.Projects = next
+		for key, value := range catalog.Idempotency {
+			if value == projectID {
+				delete(catalog.Idempotency, key)
+			}
+		}
+		return map[string]any{"ok": true, "projectId": projectID}, true, nil
+	})
+	if errors.Is(err, postgres.ErrNotFound) {
+		writeError(writer, http.StatusNotFound, "project not found")
+		return
+	}
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "project delete failed")
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"ok": true, "projectId": projectID})
 }
 
 var errProjectNameConflict = errors.New("project name conflict")

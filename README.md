@@ -35,7 +35,7 @@ npm run dev
 | 右侧属性面板 | 节点/镜头参数 |
 | 底部分镜栏 | VideoShot 镜头列表与排序 |
 
-布局偏好（布局模式 / 快速创建栏位置 / 密度）保存在 **localStorage**，不写入 WorkflowDocument。
+布局偏好（布局模式 / 快速创建栏位置 / 密度）保存在 **内存会话态**（刷新后恢复默认），不写入 WorkflowDocument，也不使用 localStorage 保存业务数据。
 
 ## 素材存储
 

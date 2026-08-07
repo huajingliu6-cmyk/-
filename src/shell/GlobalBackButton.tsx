@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { resolveBackTarget } from "@/shell/resolve-back-target";
+import { confirmGenerationLeaveIfNeeded } from "@/shell/generation-busy";
 import { confirmUnsavedLeaveIfNeeded } from "@/shell/unsaved-leave";
 import { useChipBounce } from "@/shell/useChipBounce";
 
@@ -21,6 +22,8 @@ export function GlobalBackButton() {
 
   const onClick = async () => {
     bounce.trigger();
+    const genOk = await confirmGenerationLeaveIfNeeded();
+    if (!genOk) return;
     const ok = await confirmUnsavedLeaveIfNeeded();
     if (ok) navigate();
   };

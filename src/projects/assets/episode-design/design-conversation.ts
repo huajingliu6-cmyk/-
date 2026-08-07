@@ -17,9 +17,43 @@ export function isEpisodeAssetExtractReady(
   );
 }
 
-export function buildRedesignUserMessage(assetName: string): string {
+const MAX_USER_REQUIREMENT_CHARS = 800;
+
+/**
+ * Build the redesign cue for continuing the extract conversation.
+ * Optional userRequirement is appended so the model redesigns the asset
+ * with the owner's extra material requirements.
+ */
+export function buildRedesignUserMessage(
+  assetName: string,
+  userRequirement?: string | null,
+): string {
   const name = assetName.trim() || "该资产";
-  return `${name}重新设计`;
+  const base = `${name}重新设计`;
+  const requirement = (userRequirement ?? "").trim();
+  if (!requirement) return base;
+  const clipped =
+    requirement.length > MAX_USER_REQUIREMENT_CHARS
+      ? requirement.slice(0, MAX_USER_REQUIREMENT_CHARS)
+      : requirement;
+  return `${base}\n用户素材要求：${clipped}`;
+}
+
+export function normalizeUserRequirement(
+  raw: unknown,
+): { ok: true; value: string } | { ok: false; error: string } {
+  if (raw == null) return { ok: true, value: "" };
+  if (typeof raw !== "string") {
+    return { ok: false, error: "素材要求须为文本" };
+  }
+  const value = raw.trim();
+  if (value.length > MAX_USER_REQUIREMENT_CHARS) {
+    return {
+      ok: false,
+      error: `素材要求最多 ${MAX_USER_REQUIREMENT_CHARS} 字`,
+    };
+  }
+  return { ok: true, value };
 }
 
 export function appendConversationMessage(
@@ -57,7 +91,7 @@ export async function buildEpisodeDesignConversationFromExtract(input: {
   const systemPrompt = [
     systemBase,
     "",
-    "本集后续对话规则：若用户发送「{资产名称}重新设计」，请基于本集已提取的资产设计，为该资产再输出一版完整文生图提示词正文（可含构图与光影）；只输出提示词，不要 JSON、不要解释、不要 Markdown 图片。",
+    "本集后续对话规则：若用户发送「{资产名称}重新设计」或附带「用户素材要求：…」，请基于本集已提取的资产设计，为该资产再输出一版完整文生图提示词正文（可含构图与光影），并优先满足用户素材要求；只输出提示词，不要 JSON、不要解释、不要 Markdown 图片。",
   ].join("\n");
 
   const userBrief =

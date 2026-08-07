@@ -73,9 +73,10 @@ export function AssetManagementWorkspace({
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(
-          `/api/projects/${encodeURIComponent(projectId)}/assets-draft`,
-        );
+        const draftUrl = isWorkspace
+          ? `/api/workspace/projects/${encodeURIComponent(projectId)}/assets-draft`
+          : `/api/projects/${encodeURIComponent(projectId)}/assets-draft`;
+        const res = await fetch(draftUrl, { credentials: "include" });
         if (!res.ok) {
           if (!cancelled) {
             setLoadError("无法加载资产草稿");
@@ -83,7 +84,7 @@ export function AssetManagementWorkspace({
             const metaUrl = isWorkspace
               ? `/api/workspace/projects/${encodeURIComponent(projectId)}`
               : `/api/projects/${encodeURIComponent(projectId)}`;
-            const meta = await fetch(metaUrl);
+            const meta = await fetch(metaUrl, { credentials: "include" });
             if (meta.ok) {
               const data = (await meta.json()) as {
                 project?: { name?: string };
@@ -144,11 +145,15 @@ export function AssetManagementWorkspace({
         props: patch?.props ?? props,
         audios: patch?.audios ?? audios,
       };
-      const draft = await persistAssetBundle(projectId, bundle);
+      const draft = await persistAssetBundle(
+        projectId,
+        bundle,
+        isWorkspace ? "workspace" : "management",
+      );
       applyDraft(draft);
       return draft;
     },
-    [applyDraft, audios, characters, editAllowed, projectId, props, scenes],
+    [applyDraft, audios, characters, editAllowed, isWorkspace, projectId, props, scenes],
   );
 
   const handleSavePage = useCallback(async () => {

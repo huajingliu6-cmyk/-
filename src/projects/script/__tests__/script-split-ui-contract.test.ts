@@ -23,9 +23,13 @@ describe("local script split UI contract", () => {
     expect(workspace).not.toContain("streamStoryGeneration");
   });
 
-  it("upload panel labels local split", () => {
+  it("upload panel lights split after import and shows 已分集 when done", () => {
     expect(upload).toContain("分集");
+    expect(upload).toContain("已分集");
     expect(upload).toContain("本地分集");
     expect(upload).toContain("onOpenSplit");
+    expect(upload).toContain("splitDone");
+    expect(upload).toContain('data-testid="script-split-start"');
+    expect(workspace).not.toContain('data-testid="script-split-start"');
   });
 });

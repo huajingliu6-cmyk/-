@@ -9,6 +9,19 @@ import {
 } from "@/shell/nav";
 import { listMembershipsForUser } from "@/auth/project-members";
 import { isRemoteDataServiceError } from "@/persistence/remote-data-client";
+import type { AuthUser } from "@/auth/types";
+
+function navigationUserPayload(user: AuthUser, systemRole: ReturnType<typeof getSystemRole>) {
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    role: user.role,
+    systemRole,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+}
 
 async function getNavigation() {
   const session = await requireSessionUser();
@@ -16,34 +29,35 @@ async function getNavigation() {
 
   const user = session.user;
   const systemRole = getSystemRole(user);
+
+  // Admins do not need membership lookups to decide nav — avoid 503 wiping the shell.
+  if (systemRole === "SYSTEM_ADMIN") {
+    return NextResponse.json({
+      user: navigationUserPayload(user, systemRole),
+      navigation: AUTH_NAV_ITEMS,
+      flags: {
+        canAccessProjectManagement: true,
+        canCreateProject: true,
+        isCardEngineerOnly: false,
+        ownsAnyProject: true,
+        assignedProjectCount: 0,
+      },
+    });
+  }
+
   const ownsAny = await userOwnsAnyProject(user.id);
   const memberships = await listMembershipsForUser(user.id);
   const isCardEngineerOnly =
     systemRole === "USER" && !ownsAny && memberships.length > 0;
 
-  let navigation: ShellNavItem[];
-  if (systemRole === "SYSTEM_ADMIN") {
-    navigation = AUTH_NAV_ITEMS;
-  } else if (isCardEngineerOnly) {
-    navigation = AUTH_NAV_ITEMS.filter((item) =>
-      (CARD_ENGINEER_NAV_IDS as readonly string[]).includes(item.id),
-    );
-  } else if (ownsAny) {
-    navigation = AUTH_NAV_ITEMS;
-  } else {
-    navigation = AUTH_NAV_ITEMS;
-  }
+  const navigation: ShellNavItem[] = isCardEngineerOnly
+    ? AUTH_NAV_ITEMS.filter((item) =>
+        (CARD_ENGINEER_NAV_IDS as readonly string[]).includes(item.id),
+      )
+    : AUTH_NAV_ITEMS;
 
   return NextResponse.json({
-    user: {
-      id: user.id,
-      username: user.username,
-      displayName: user.displayName,
-      role: user.role,
-      systemRole,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
-    },
+    user: navigationUserPayload(user, systemRole),
     navigation,
     flags: {
       canAccessProjectManagement: canAccessProjectManagementNav(
@@ -51,7 +65,7 @@ async function getNavigation() {
         ownsAny,
         memberships.length,
       ),
-      canCreateProject: systemRole === "SYSTEM_ADMIN",
+      canCreateProject: false,
       isCardEngineerOnly,
       ownsAnyProject: ownsAny,
       assignedProjectCount: memberships.length,

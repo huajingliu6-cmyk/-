@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -41,6 +42,9 @@ func Middleware(next http.Handler, token string, store *postgres.Store, logger *
 			requestID = newRequestID()
 		}
 		writer.Header().Set(`X-Request-Id`, requestID)
+		if !strings.HasPrefix(request.URL.Path, `/health/`) {
+			writer.Header().Set(`Cache-Control`, `no-store`)
+		}
 		request = request.WithContext(requestcontext.WithRequestID(request.Context(), requestID))
 		if request.URL.Path != `/health/live` && !validToken(request.Header.Get(`X-Internal-Token`), token) {
 			writeError(writer, http.StatusUnauthorized, `invalid internal token`)
@@ -53,31 +57,43 @@ func Middleware(next http.Handler, token string, store *postgres.Store, logger *
 		if wrapped.status == 0 {
 			wrapped.status = http.StatusOK
 		}
+		duration := time.Since(started)
 		logger.Info(`request`,
 			`request_id`, requestID,
 			`method`, request.Method,
 			`path`, request.URL.Path,
 			`status`, wrapped.status,
 			`bytes`, wrapped.bytes,
-			`duration_ms`, time.Since(started).Milliseconds(),
+			`duration_ms`, duration.Milliseconds(),
 		)
 		if request.Method != http.MethodGet && request.Method != http.MethodHead {
-			metadata, _ := json.Marshal(map[string]any{
-				`method`:     request.Method,
-				`durationMs`: time.Since(started).Milliseconds(),
-			})
-			if err := store.WriteAuditEvent(request.Context(), postgres.AuditEvent{
-				RequestID:  requestID,
-				ActorID:    request.Header.Get(`X-Actor-Id`),
-				Action:     request.Method,
-				Resource:   request.URL.Path,
-				StatusCode: wrapped.status,
-				Metadata:   metadata,
-			}); err != nil {
-				logger.Error(`audit write failed`, `request_id`, requestID, `error`, err.Error())
-			}
+			writeAuditAsync(store, logger, requestID, request, wrapped.status, duration)
 		}
 	})
+}
+
+// writeAuditAsync records mutating requests without blocking the response.
+// At most one short-lived goroutine is spawned per mutating request.
+func writeAuditAsync(store *postgres.Store, logger *slog.Logger, requestID string, request *http.Request, status int, duration time.Duration) {
+	metadata, _ := json.Marshal(map[string]any{
+		`method`:     request.Method,
+		`durationMs`: duration.Milliseconds(),
+	})
+	event := postgres.AuditEvent{
+		RequestID:  requestID,
+		ActorID:    request.Header.Get(`X-Actor-Id`),
+		Action:     request.Method,
+		Resource:   request.URL.Path,
+		StatusCode: status,
+		Metadata:   metadata,
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := store.WriteAuditEvent(ctx, event); err != nil {
+			logger.Error(`audit write failed`, `request_id`, requestID, `error`, err.Error())
+		}
+	}()
 }
 
 func newRequestID() string {

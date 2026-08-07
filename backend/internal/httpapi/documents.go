@@ -39,11 +39,9 @@ func (h *Documents) ServeHTTP(writer http.ResponseWriter, request *http.Request)
 }
 
 func (h *Documents) get(writer http.ResponseWriter, request *http.Request, namespace string, key string) {
-	if document, ok := h.cache.Get(request.Context(), namespace, key); ok {
-		writeJSON(writer, http.StatusOK, document)
-		return
-	}
-	document, err := h.store.GetDocument(request.Context(), namespace, key)
+	document, _, err := h.cache.GetOrFetch(request.Context(), namespace, key, func() (postgres.Document, error) {
+		return h.store.GetDocument(request.Context(), namespace, key)
+	})
 	if errors.Is(err, postgres.ErrNotFound) {
 		writeError(writer, http.StatusNotFound, `document not found`)
 		return
@@ -52,7 +50,6 @@ func (h *Documents) get(writer http.ResponseWriter, request *http.Request, names
 		writeError(writer, http.StatusInternalServerError, `database read failed`)
 		return
 	}
-	_ = h.cache.Set(request.Context(), document)
 	writeJSON(writer, http.StatusOK, document)
 }
 

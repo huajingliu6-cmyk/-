@@ -9,6 +9,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,10 +19,19 @@ type Client struct {
 	address  string
 	password string
 	timeout  time.Duration
+
+	mu            sync.Mutex
+	conn          net.Conn
+	reader        *bufio.Reader
+	authenticated bool
 }
 
 func New(address string, password string) *Client {
-	return &Client{address: address, password: password, timeout: 3 * time.Second}
+	return NewWithTimeout(address, password, 500*time.Millisecond)
+}
+
+func NewWithTimeout(address string, password string, timeout time.Duration) *Client {
+	return &Client{address: address, password: password, timeout: timeout}
 }
 
 func (c *Client) Ping(ctx context.Context) error {
@@ -86,32 +96,92 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-func (c *Client) command(ctx context.Context, args ...string) ([]string, error) {
+func (c *Client) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closeConnLocked()
+	return nil
+}
+
+func (c *Client) closeConnLocked() {
+	if c.conn != nil {
+		_ = c.conn.Close()
+	}
+	c.conn = nil
+	c.reader = nil
+	c.authenticated = false
+}
+
+func (c *Client) ensureConn(ctx context.Context) error {
+	if c.conn != nil {
+		return nil
+	}
 	dialer := net.Dialer{Timeout: c.timeout}
 	connection, err := dialer.DialContext(ctx, `tcp`, c.address)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer connection.Close()
+	c.conn = connection
+	c.reader = bufio.NewReader(connection)
+	c.authenticated = false
+	return nil
+}
+
+func (c *Client) authenticateLocked(ctx context.Context) error {
+	if c.password == `` || c.authenticated {
+		return nil
+	}
 	deadline := time.Now().Add(c.timeout)
-	_ = connection.SetDeadline(deadline)
-	reader := bufio.NewReader(connection)
-	if c.password != `` {
-		if err := writeRequest(connection, []string{`auth`, c.password}); err != nil {
-			return nil, err
+	_ = c.conn.SetDeadline(deadline)
+	if err := writeRequest(c.conn, []string{`auth`, c.password}); err != nil {
+		return err
+	}
+	auth, err := readResponse(c.reader)
+	if err != nil {
+		return err
+	}
+	if len(auth) == 0 || auth[0] != `ok` {
+		return errors.New(`ssdb authentication failed`)
+	}
+	c.authenticated = true
+	return nil
+}
+
+func (c *Client) command(ctx context.Context, args ...string) ([]string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := c.ensureConn(ctx); err != nil {
+			lastErr = err
+			c.closeConnLocked()
+			continue
 		}
-		auth, err := readResponse(reader)
+		deadline := time.Now().Add(c.timeout)
+		_ = c.conn.SetDeadline(deadline)
+		if err := c.authenticateLocked(ctx); err != nil {
+			lastErr = err
+			c.closeConnLocked()
+			continue
+		}
+		if err := writeRequest(c.conn, args); err != nil {
+			lastErr = err
+			c.closeConnLocked()
+			continue
+		}
+		response, err := readResponse(c.reader)
 		if err != nil {
-			return nil, err
+			lastErr = err
+			c.closeConnLocked()
+			continue
 		}
-		if len(auth) == 0 || auth[0] != `ok` {
-			return nil, errors.New(`ssdb authentication failed`)
-		}
+		return response, nil
 	}
-	if err := writeRequest(connection, args); err != nil {
-		return nil, err
+	if lastErr == nil {
+		lastErr = errors.New(`ssdb command failed`)
 	}
-	return readResponse(reader)
+	return nil, lastErr
 }
 
 func writeRequest(writer io.Writer, args []string) error {

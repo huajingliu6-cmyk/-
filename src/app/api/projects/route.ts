@@ -13,7 +13,7 @@ import {
 import { parseCreateProjectBody } from "@/projects/validate-create-project";
 
 /** Next.js 仅负责会话、权限和请求边界；项目数据统一由内网 Go 服务处理。 */
-export async function GET() {
+export async function GET(request: Request) {
   const session = await requireSessionUser();
   if (!session.ok) return session.response;
 
@@ -28,17 +28,40 @@ export async function GET() {
   }
   if (!management.ok) return management.response;
 
+  const url = new URL(request.url);
+  const page = Math.max(1, Math.trunc(Number(url.searchParams.get("page") ?? "1")) || 1);
+  const rawSize = Math.trunc(Number(url.searchParams.get("pageSize") ?? "50")) || 50;
+  const pageSize = Math.min(100, Math.max(1, rawSize));
+  const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+
   try {
     const { projects } = await listProjectListItems();
     const managed = await listManagedProjectIdsForUser(session.user);
-    const filtered =
+    let filtered =
       managed === "all"
         ? projects
         : projects.filter((p) => managed.includes(p.projectId));
-    return NextResponse.json({
-      projects: filtered,
-      canCreateProject: canCreateProject(session.user),
-    });
+    if (q) {
+      filtered = filtered.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.projectId.toLowerCase().includes(q),
+      );
+    }
+    const total = filtered.length;
+    const start = (page - 1) * pageSize;
+    const slice = filtered.slice(start, start + pageSize);
+    return NextResponse.json(
+      {
+        projects: slice,
+        total,
+        page,
+        pageSize,
+        hasMore: start + slice.length < total,
+        canCreateProject: canCreateProject(session.user),
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     if (isRemoteDataServiceError(error)) {
       return NextResponse.json({ error: "内网数据服务不可用" }, { status: 503 });

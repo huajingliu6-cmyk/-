@@ -8,11 +8,13 @@ import {
   loadAuthorizedWorkspace,
   parseJsonBody,
   persistProduction,
+  replaceProduction,
 } from "@/projects/storyboard/api-helpers";
 import {
   generateStructuredStoryboard,
   mergePreserveLockedShots,
 } from "@/projects/storyboard/services/storyboard-generate";
+import { isStoryboardGeneratingLockActive } from "@/projects/storyboard/services/storyboard-generating-lock";
 import { fillShotVideoPromptsWithLlm } from "@/projects/storyboard/services/storyboard-prompt-llm";
 import { buildStoryboardPromptContext } from "@/projects/storyboard/services/storyboard-prompt-context";
 import { autoLinkStoryboardToLibrary } from "@/projects/storyboard/services/shot-library-match";
@@ -20,6 +22,9 @@ import { autoLinkStoryboardToLibrary } from "@/projects/storyboard/services/shot
 type RouteContext = {
   params: Promise<{ projectId: string; episodeId: string }>;
 };
+
+/** Whole-episode LLM prompt fill often exceeds 60s. */
+export const maxDuration = 600;
 
 export async function POST(request: Request, context: RouteContext) {
   const session = await requireSessionUser();
@@ -38,8 +43,11 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json({ error: "请先确认本集剧本" }, { status: 400 });
   }
 
-  if (production.status === "storyboard_generating") {
-    return NextResponse.json({ error: "分镜正在生成中" }, { status: 409 });
+  if (isStoryboardGeneratingLockActive(production)) {
+    return NextResponse.json(
+      { error: "分镜正在生成中，请稍候。整集提示词通常需要 1–3 分钟。", production },
+      { status: 409 },
+    );
   }
 
   const body = await parseJsonBody(request);
@@ -85,12 +93,8 @@ export async function POST(request: Request, context: RouteContext) {
     lastEditedAt: now,
     updatedAt: now,
   });
-  currentWorkspace = {
-    ...currentWorkspace,
-    productions: currentWorkspace.productions.map((item) =>
-      item.episodeId === episodeId ? currentProduction : item,
-    ),
-  };
+  // 仅刷新本集内存态；最终落盘由 persistProduction 重新加载合并，不覆盖其它集分镜
+  currentWorkspace = replaceProduction(currentWorkspace, currentProduction);
 
   try {
     const generated = generateStructuredStoryboard({

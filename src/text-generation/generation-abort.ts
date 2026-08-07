@@ -3,7 +3,7 @@ const MIN_TEXT_GENERATION_TIMEOUT_MS = 30_000;
 const MAX_TEXT_GENERATION_TIMEOUT_MS = 600_000;
 
 export function resolveTextGenerationTimeoutMs(
-  env: Pick<NodeJS.ProcessEnv, "TEXT_GENERATION_TIMEOUT_MS"> = process.env,
+  env: Record<string, string | undefined> = process.env,
 ): number {
   const parsed = Number(env.TEXT_GENERATION_TIMEOUT_MS);
   if (!Number.isFinite(parsed)) return DEFAULT_TEXT_GENERATION_TIMEOUT_MS;

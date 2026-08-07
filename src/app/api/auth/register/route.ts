@@ -39,7 +39,7 @@ export async function POST(request: Request) {
       displayName: user.displayName,
     });
     const response = NextResponse.json({ user }, { status: 201 });
-    response.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+    response.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(undefined, request));
     return response;
   } catch (error) {
     if (isRemoteDataServiceError(error)) {

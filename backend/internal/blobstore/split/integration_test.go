@@ -26,7 +26,7 @@ func TestRealPostgresAndBlobstore(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(requestcontext.WithRequestID(context.Background(), "integration-real-request"), 45*time.Second)
 	defer cancel()
-	metadata, err := postgres.Open(ctx, databaseURL)
+	metadata, err := postgres.Open(ctx, databaseURL, postgres.DefaultPoolConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestRealRestartPersistencePhase(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(requestcontext.WithRequestID(context.Background(), "integration-restart-request"), 30*time.Second)
 	defer cancel()
-	metadata, err := postgres.Open(ctx, databaseURL)
+	metadata, err := postgres.Open(ctx, databaseURL, postgres.DefaultPoolConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

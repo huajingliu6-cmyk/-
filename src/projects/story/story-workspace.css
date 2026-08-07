@@ -340,6 +340,9 @@
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
 .scw-result-head h2 {

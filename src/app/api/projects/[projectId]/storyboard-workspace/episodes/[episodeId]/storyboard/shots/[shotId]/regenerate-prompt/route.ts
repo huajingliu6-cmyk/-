@@ -11,6 +11,7 @@ import {
 } from "@/projects/storyboard/api-helpers";
 import { buildStoryboardPromptContext } from "@/projects/storyboard/services/storyboard-prompt-context";
 import { regenerateShotVideoPromptWithLlm } from "@/projects/storyboard/services/storyboard-prompt-llm";
+import { parseDurationSecondsFromVideoPrompt } from "@/projects/storyboard/storyboard-video-params";
 import {
   getShotVideoPrompt,
   isShotConfirmReady,
@@ -150,6 +151,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const now = new Date().toISOString();
+  const durationFromPrompt = parseDurationSecondsFromVideoPrompt(nextPrompt);
   const nextScenes = storyboard.scenes.map((scene) => ({
     ...scene,
     shots: scene.shots.map((shot) => {
@@ -169,7 +171,7 @@ export async function POST(request: Request, context: RouteContext) {
         requiredProps: shot.requiredProps,
         requiredScene: shot.requiredScene,
         requirements: shot.requirements,
-        durationSeconds: shot.durationSeconds,
+        durationSeconds: durationFromPrompt ?? shot.durationSeconds,
         shotSize: shot.shotSize,
         shotNumber: shot.shotNumber,
         order: shot.order,

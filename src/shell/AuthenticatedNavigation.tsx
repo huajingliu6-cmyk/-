@@ -3,37 +3,54 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import type { AuthUser } from "@/auth/types";
 import { AUTH_NAV_ITEMS, type ShellNavItem } from "@/shell/nav";
 import { prefersReducedMotion } from "@/shell/login-portal";
+import { memoryFetch } from "@/shell/memory-fetch";
+import {
+  confirmGenerationLeaveIfNeeded,
+  isGenerationBusy,
+} from "@/shell/generation-busy";
+
+function initialNavItems(user?: AuthUser): ShellNavItem[] {
+  // Admins already know full nav; avoid flash / stuck workspace-only on API lag.
+  if (user?.role === "admin") return AUTH_NAV_ITEMS;
+  return AUTH_NAV_ITEMS.filter((item) => item.id === "workspace");
+}
 
 export function AuthenticatedNavigation({
   onNavigate,
+  user,
 }: {
   onNavigate?: () => void;
+  user?: AuthUser;
 }) {
   const pathname = usePathname();
   const [bounceId, setBounceId] = useState<string | null>(null);
-  // 导航必须来自服务端；加载前仅显示工作台，避免越权菜单闪现
-  const [items, setItems] = useState<ShellNavItem[]>(() =>
-    AUTH_NAV_ITEMS.filter((item) => item.id === "workspace"),
-  );
+  const [items, setItems] = useState<ShellNavItem[]>(() => initialNavItems(user));
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     void (async () => {
       try {
-        const res = await fetch("/api/auth/navigation");
-        if (!res.ok) return;
+        const res = await memoryFetch("/api/auth/navigation", {
+          signal: controller.signal,
+        });
+        if (!res.ok || cancelled) return;
         const payload = (await res.json()) as { navigation?: ShellNavItem[] };
         if (!cancelled && Array.isArray(payload.navigation)) {
           setItems(payload.navigation);
         }
-      } catch {
-        /* keep workspace-only until server responds */
+      } catch (error) {
+        // Remount after Strict Mode abort should still receive nav from the
+        // shared memoryFetch; ignore abort noise and keep current fallback.
+        if (error instanceof DOMException && error.name === "AbortError") return;
       }
     })();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, []);
 
@@ -64,7 +81,12 @@ export function AuthenticatedNavigation({
             href={item.href}
             prefetch={false}
             className={className}
-            onClick={() => {
+            onClick={(event) => {
+              if (isGenerationBusy()) {
+                event.preventDefault();
+                void confirmGenerationLeaveIfNeeded();
+                return;
+              }
               bounce(item.id);
               onNavigate?.();
             }}

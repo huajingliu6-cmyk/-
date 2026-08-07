@@ -50,7 +50,7 @@ export function workspaceFeaturesForRole(
     return ["assets", "storyboard", "video"] as const;
   }
   if (role === "CARD_ENGINEER") {
-    return ["assets"] as const;
+    return ["assets", "storyboard"] as const;
   }
   return [] as const;
 }

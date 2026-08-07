@@ -9,15 +9,15 @@ function readSrc(relativePath: string): string {
 }
 
 describe("workspace permission route wiring", () => {
-  it("workspace home cards open workspace project path", () => {
+  it("workspace home cards open workspace assets path", () => {
     const source = readSrc("src/app/app/workspace/page.tsx");
-    expect(source).toContain("workspaceProjectPath");
+    expect(source).toContain("workspaceProjectAssetsPath");
     expect(source).toContain("/api/workspace/projects");
     expect(source).not.toContain("前往项目管理");
     expect(source).not.toContain("APP_PROJECTS_PATH");
   });
 
-  it("workspace project page has no script creation or management links", () => {
+  it("workspace project root redirects to assets and has no overview shell", () => {
     const source = readSrc(
       path.join("src", "app", "app", "workspace", "projects", "[projectId]", "page.tsx"),
     );
@@ -25,7 +25,10 @@ describe("workspace permission route wiring", () => {
       path.join("src", "app", "app", "workspace", "projects", "[projectId]", "layout.tsx"),
     );
     const nav = readSrc("src/projects/workbench/ProjectStageNav.tsx");
-    expect(source).not.toContain("返回工作台");
+    expect(source).toContain("workspaceProjectAssetsPath");
+    expect(source).toContain("redirect(");
+    expect(source).not.toContain("工作台项目");
+    expect(source).not.toContain("workspace-project-page");
     expect(source).not.toContain("剧本创作");
     expect(source).not.toContain("wb-stage");
     expect(layout).toContain('mode="workspace"');

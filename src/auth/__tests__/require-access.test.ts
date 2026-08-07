@@ -72,7 +72,7 @@ describe("require-access and workspace API gates", () => {
     vi.clearAllMocks();
   });
 
-  it("card engineer can access assigned workspace assets but not management or video", async () => {
+  it("card engineer can access assigned workspace assets and storyboard but not management or video", async () => {
     const owner = auth("user", "owner-a");
     const engineer = auth("user", "eng-a");
     const project = await createProjectRecord(owner.id, {
@@ -98,7 +98,7 @@ describe("require-access and workspace API gates", () => {
     expect((await requireWorkspaceAssetAccess(project.projectId)).ok).toBe(
       true,
     );
-    expect((await requireStoryboardAccess(project.projectId)).ok).toBe(false);
+    expect((await requireStoryboardAccess(project.projectId)).ok).toBe(true);
     expect((await requireVideoCanvasAccess(project.projectId)).ok).toBe(false);
     expect(
       (await requireProjectManagementProjectAccess(project.projectId)).ok,
@@ -112,7 +112,9 @@ describe("require-access and workspace API gates", () => {
     };
     expect(body.projects.map((p) => p.projectId)).toEqual([project.projectId]);
 
-    const managementList = await getProjects();
+    const managementList = await getProjects(
+      new Request("http://localhost/api/projects"),
+    );
     expect(managementList.status).toBe(403);
   });
 

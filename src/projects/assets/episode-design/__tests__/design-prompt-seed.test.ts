@@ -71,6 +71,9 @@ describe("DesignAssetModal seeds extraction text", () => {
     expect(modal).toContain("formatDesignDraftSeedText");
     expect(modal).toContain("initialPromptForItem");
     expect(modal).toContain("重新生成提示词");
+    expect(modal).toContain("输入素材要求");
+    expect(modal).toContain("userRequirement");
+    expect(modal).toContain("design-regenerate-requirement-input");
     expect(modal).not.toContain("近景头像＋三视图");
     expect(modal).not.toMatch(/needsAuto/);
     expect(modal).not.toContain("generate-design-prompt");

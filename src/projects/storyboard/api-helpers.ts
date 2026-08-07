@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { AuthUser } from "@/auth/types";
-import { requireActualProjectOwner } from "@/auth/require-access";
+import { requireStoryboardAccess } from "@/auth/require-access";
 import { getProjectRecord } from "@/projects/project-access";
 import { loadAssetBundleDraft } from "@/projects/assets/asset-bundle-store";
 import type { AssetBundleDraft } from "@/projects/assets/asset-bundle-store";
@@ -30,6 +30,7 @@ import type {
   EpisodeProduction,
   ProjectStoryboardWorkspace,
 } from "@/projects/storyboard/types";
+import { carryStoryboardRemoteRevision } from "@/projects/storyboard/remote-production-store";
 
 export type { AssetsSummary, AssetSummaryItem } from "@/projects/storyboard/types";
 
@@ -168,12 +169,38 @@ export function replaceProduction(
   };
 }
 
+/**
+ * 按集合并保存：先重新加载磁盘/远端最新 workspace，再只替换目标集，
+ * 避免长耗时生成用过期快照覆盖其它已生成分镜。
+ */
 export async function persistProduction(
   workspace: ProjectStoryboardWorkspace,
   updated: EpisodeProduction,
 ): Promise<EpisodeProduction> {
-  const nextWorkspace = replaceProduction(workspace, updated);
-  const saved = await saveWorkspace(nextWorkspace);
+  const projectId = updated.projectId || workspace.projectId;
+  const latest = (await loadWorkspace(projectId)) ?? workspace;
+
+  const byEpisode = new Map<string, EpisodeProduction>();
+  for (const production of latest.productions) {
+    byEpisode.set(production.episodeId, production);
+  }
+  // 调用方 workspace 里尚未落盘的新集也要保留
+  for (const production of workspace.productions) {
+    if (!byEpisode.has(production.episodeId)) {
+      byEpisode.set(production.episodeId, production);
+    }
+  }
+  byEpisode.set(updated.episodeId, updated);
+
+  const merged: ProjectStoryboardWorkspace = {
+    projectId,
+    activeEpisodeId: latest.activeEpisodeId ?? workspace.activeEpisodeId,
+    productions: Array.from(byEpisode.values()),
+    updatedAt: new Date().toISOString(),
+  };
+  carryStoryboardRemoteRevision(latest, merged);
+
+  const saved = await saveWorkspace(merged);
   const savedProduction = findProduction(saved, updated.episodeId);
   if (!savedProduction) {
     throw new Error("分集制作状态保存失败");
@@ -186,8 +213,8 @@ export async function loadAuthorizedWorkspace(
   user: AuthUser,
 ): Promise<AuthorizedWorkspaceResult> {
   void user;
-  // Management storyboard-workspace APIs: actual owner only (non-owner admin denied).
-  const gated = await requireActualProjectOwner(projectId);
+  // 工作台分镜：主理人 / 系统管理员 / 已分配抽卡工程师（含 storyboard 能力）
+  const gated = await requireStoryboardAccess(projectId);
   if (!gated.ok) {
     return { ok: false, response: gated.response };
   }

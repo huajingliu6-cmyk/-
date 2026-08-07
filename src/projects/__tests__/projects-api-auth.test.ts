@@ -70,7 +70,7 @@ describe("GET/POST /api/projects auth gates", () => {
       ok: false,
       response: NextResponse.json({ error: "未登录" }, { status: 401 }),
     });
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/projects"));
     expect(res.status).toBe(401);
   });
 
@@ -179,13 +179,18 @@ describe("GET/POST /api/projects auth gates", () => {
       user: adminUser,
     });
     vi.mocked(listProjectListItems).mockResolvedValue({ projects: [] });
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/projects?page=1&pageSize=50"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       projects: unknown[];
       canCreateProject: boolean;
+      total?: number;
+      page?: number;
+      pageSize?: number;
     };
     expect(body.projects).toEqual([]);
     expect(body.canCreateProject).toBe(true);
+    expect(body.page).toBe(1);
+    expect(body.pageSize).toBe(50);
   });
 });

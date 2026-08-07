@@ -9,6 +9,8 @@ type Props = {
   description: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** 仅一个按钮（硬拦截：不允许确认离开） */
+  acknowledgeOnly?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -20,6 +22,7 @@ export function ConfirmLeaveDialog({
   description,
   confirmLabel = "确认离开",
   cancelLabel = "继续编辑",
+  acknowledgeOnly = false,
   onConfirm,
   onCancel,
 }: Props) {
@@ -53,20 +56,33 @@ export function ConfirmLeaveDialog({
           {description}
         </p>
         <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            className="shell-chip shell-chip--glass h-10"
-            onClick={onCancel}
-          >
-            {cancelLabel}
-          </button>
-          <button
-            type="button"
-            className="shell-chip shell-chip--login h-10"
-            onClick={onConfirm}
-          >
-            {confirmLabel}
-          </button>
+          {acknowledgeOnly ? (
+            <button
+              type="button"
+              className="shell-chip shell-chip--login h-10"
+              data-testid="generation-busy-ack"
+              onClick={onCancel}
+            >
+              {cancelLabel || "留在此页"}
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="shell-chip shell-chip--glass h-10"
+                onClick={onCancel}
+              >
+                {cancelLabel}
+              </button>
+              <button
+                type="button"
+                className="shell-chip shell-chip--login h-10"
+                onClick={onConfirm}
+              >
+                {confirmLabel}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>,

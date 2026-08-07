@@ -15,7 +15,7 @@ describe("workbench vs canvas route wiring", () => {
     expect(source).toContain("platform-workbench");
     expect(source).not.toContain("WorkflowEditor");
     expect(source).not.toContain("ReactFlow");
-    expect(source).toContain("workspaceProjectPath");
+    expect(source).toContain("workspaceProjectAssetsPath");
     expect(source).not.toContain("前往项目管理");
   });
 

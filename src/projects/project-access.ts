@@ -8,6 +8,16 @@ import type {
 } from "@/projects/types";
 import type { WorkflowProjectSummary } from "@/workflow/lib/workflow-storage";
 import {
+  createProjectRecord as createProjectRecordLocal,
+  getProjectNameMap as getProjectNameMapLocal,
+  getProjectPublic as getProjectPublicLocal,
+  getProjectRecord as getProjectRecordLocal,
+  listProjectRecords as listProjectRecordsLocal,
+  updateProjectHighlights as updateProjectHighlightsLocal,
+  updateProjectName as updateProjectNameLocal,
+  deleteProjectRecord as deleteProjectRecordLocal,
+} from "@/projects/project-storage";
+import {
   createProjectRecordRemote,
   findProjectByIdempotencyRemote,
   getProjectPublicRemote,
@@ -15,15 +25,9 @@ import {
   listProjectRecordsRemote,
   listProjectSummariesRemote,
   updateProjectHighlightsRemote,
+  updateProjectNameRemote,
+  deleteProjectRecordRemote,
 } from "@/projects/remote-project-store";
-import {
-  createProjectRecord as createProjectRecordLocal,
-  getProjectNameMap as getProjectNameMapLocal,
-  getProjectPublic as getProjectPublicLocal,
-  getProjectRecord as getProjectRecordLocal,
-  listProjectRecords as listProjectRecordsLocal,
-  updateProjectHighlights as updateProjectHighlightsLocal,
-} from "@/projects/project-storage";
 
 export {
   ProjectNameConflictError,
@@ -77,6 +81,21 @@ export function updateProjectHighlights(
   return isRemoteDataOnly()
     ? updateProjectHighlightsRemote(projectId, highlights)
     : updateProjectHighlightsLocal(projectId, highlights);
+}
+
+export function updateProjectName(
+  projectId: string,
+  name: string,
+): Promise<ProjectPublic> {
+  return isRemoteDataOnly()
+    ? updateProjectNameRemote(projectId, name)
+    : updateProjectNameLocal(projectId, name);
+}
+
+export function deleteProjectRecord(projectId: string): Promise<void> {
+  return isRemoteDataOnly()
+    ? deleteProjectRecordRemote(projectId)
+    : deleteProjectRecordLocal(projectId);
 }
 
 export async function getProjectNameMap(): Promise<Map<string, string>> {

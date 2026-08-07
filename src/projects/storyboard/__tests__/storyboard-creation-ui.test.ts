@@ -36,7 +36,10 @@ describe("storyboard creation UI flow contracts", () => {
     expect(panel).toContain("storyboard-script-preview");
     expect(panel).toContain("canGeneratePrompts");
     expect(panel).toContain("script-changed-reminder");
-    expect(panel).toContain("重新生成分镜提示词");
+    expect(panel).toContain("重新生成本集分镜提示词");
+    expect(panel).toContain("regenerate-episode-storyboard-prompts");
+    expect(panel).not.toContain("重新生成当前镜头提示词");
+    expect(panel).not.toContain("regenerate-shot-prompt");
     expect(panel).toContain("createPortal");
     expect(panel).toContain("document.body");
     expect(panel).not.toContain("全部展开");
@@ -62,7 +65,7 @@ describe("storyboard creation UI flow contracts", () => {
       "src/projects/storyboard/components/EpisodeVideoGenerationButton.tsx",
     );
     expect(panel).toContain("EpisodeVideoGenerationButton");
-    expect(videoBtn).toContain("一键生成本集视频");
+    expect(videoBtn).toContain("生成视频");
     expect(panel).not.toContain(">确认本集分镜<");
     expect(panel).not.toContain(">已确认本集分镜<");
     expect(panel).toContain("confirmStoryboard");
@@ -88,6 +91,8 @@ describe("storyboard creation UI flow contracts", () => {
     expect(accordion).toContain("applyShotPromptAssetMount");
     expect(accordion).toContain("ShotPromptEditor");
     expect(accordion).toContain("mentionAssets");
+    expect(accordion).not.toContain("重新生成当前镜头提示词");
+    expect(accordion).not.toContain("regenerateShotPrompt");
     expect(accordion).not.toContain("编辑原文");
     const editor = readSrc(
       "src/projects/storyboard/components/ShotPromptEditor.tsx",

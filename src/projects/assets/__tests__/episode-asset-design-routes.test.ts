@@ -28,6 +28,7 @@ import {
 } from "@/app/api/projects/[projectId]/asset-designs/episodes/[episodeId]/route";
 import { POST as postConfirm } from "@/app/api/projects/[projectId]/asset-designs/episodes/[episodeId]/confirm/route";
 import { listEpisodeAssetDesigns } from "@/projects/assets/episode-design/episode-design-api";
+import { SCRIPT_ASSET_DESIGN_ID } from "@/projects/assets/episode-design/types";
 
 function auth(role: AuthUser["role"], id: string): AuthUser {
   return {
@@ -284,6 +285,10 @@ describe("episode asset design routes", () => {
       }),
     });
     expect(getRes.status).toBe(200);
+    const getJson = (await getRes.json()) as {
+      episode: { content?: string };
+    };
+    expect(getJson.episode.content).toBe("第一集正文");
 
     const put = await putEpisodeDesign(
       new Request("http://localhost", {
@@ -308,5 +313,35 @@ describe("episode asset design routes", () => {
 
     const draft = await loadScriptDraft(project.projectId);
     expect(draft?.episodes[0]?.content).toBe("第一集正文");
+  });
+
+  it("returns sourceText as content for full-script design viewer", async () => {
+    const owner = auth("user", "owner_full_script_view");
+    vi.mocked(requireSessionUser).mockResolvedValue({ ok: true, user: owner });
+    const project = await createProjectRecord(owner.id, {
+      name: `full-script-view-${Date.now()}`,
+      creationSource: "script-upload",
+      projectMode: "full-stack",
+      passwordEnabled: false,
+    });
+    const now = new Date().toISOString();
+    await saveScriptDraft({
+      ...baseDraft(project.projectId, now),
+      sourceText: "完整原始上传剧本正文用于查看",
+    });
+
+    const getRes = await getEpisodeDesign(new Request("http://localhost"), {
+      params: Promise.resolve({
+        projectId: project.projectId,
+        episodeId: SCRIPT_ASSET_DESIGN_ID,
+      }),
+    });
+    expect(getRes.status).toBe(200);
+    const json = (await getRes.json()) as {
+      episode: { id: string; title: string; content?: string };
+    };
+    expect(json.episode.id).toBe(SCRIPT_ASSET_DESIGN_ID);
+    expect(json.episode.title).toBe("完整原始剧本");
+    expect(json.episode.content).toBe("完整原始上传剧本正文用于查看");
   });
 });

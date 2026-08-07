@@ -139,3 +139,32 @@ export async function updateProjectHighlightsRemote(
   if (!result) throw new ProjectNotFoundError();
   return result.project;
 }
+
+export async function updateProjectNameRemote(
+  projectId: string,
+  name: string,
+): Promise<ProjectPublic> {
+  const result = await projectRequest<ProjectResponse<ProjectPublic>>(
+    `/v1/projects/${encodeURIComponent(projectId)}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    },
+  );
+  if (!result) throw new ProjectNotFoundError();
+  return result.project;
+}
+
+export async function deleteProjectRecordRemote(
+  projectId: string,
+): Promise<void> {
+  const response = await requestRemoteData(
+    `/v1/projects/${encodeURIComponent(projectId)}`,
+    { method: "DELETE" },
+  );
+  if (response.status === 404) throw new ProjectNotFoundError();
+  if (!response.ok) {
+    throw new Error(`REMOTE_PROJECT_REQUEST_FAILED:${response.status}`);
+  }
+}

@@ -15,9 +15,15 @@ export const STORYBOARD_VIDEO_ASPECT_RATIOS: Array<"16:9" | "9:16"> = [
   "9:16",
 ];
 
-/** UI 可选时长范围（秒）；提交时仍会按模型 capability 再钳制 */
+/** 本项目视频生成出参可选时长（秒）；滑条/提交钳制范围 */
 export const STORYBOARD_VIDEO_DURATION_MIN = 5;
 export const STORYBOARD_VIDEO_DURATION_MAX = 15;
+
+/**
+ * 仅用于反馈给大模型的分镜提示词时长要求（任务规则），与视频滑条无关。
+ */
+export const STORYBOARD_PROMPT_DURATION_MIN = 9;
+export const STORYBOARD_PROMPT_DURATION_MAX = 15;
 
 export type StoryboardVideoOutputParams = {
   resolution: VideoResolution;
@@ -36,12 +42,26 @@ export function defaultStoryboardVideoOutputParams(
   };
 }
 
+/** 视频出参钳制到 5–15 秒 */
 export function clampStoryboardVideoDuration(seconds: number): number {
   if (!Number.isFinite(seconds)) return STORYBOARD_VIDEO_DURATION_MIN;
   return Math.min(
     STORYBOARD_VIDEO_DURATION_MAX,
     Math.max(STORYBOARD_VIDEO_DURATION_MIN, Math.round(seconds)),
   );
+}
+
+/**
+ * 大模型分镜反馈时长：只做上限封顶（≤15），禁止向上拉长。
+ * 非法或非正数返回 null。
+ */
+export function adoptModelStoryboardDurationSeconds(
+  seconds: number,
+): number | null {
+  if (!Number.isFinite(seconds)) return null;
+  const n = Math.round(seconds);
+  if (n <= 0) return null;
+  return Math.min(STORYBOARD_PROMPT_DURATION_MAX, n);
 }
 
 export function parseStoryboardVideoResolution(
@@ -79,6 +99,28 @@ export function parseStoryboardVideoDurationSeconds(
         : NaN;
   if (!Number.isFinite(n)) return null;
   return clampStoryboardVideoDuration(n);
+}
+
+/**
+ * 从大模型分镜正文头解析时长，例如 `[分镜01｜总时长：12秒｜画幅：9:16]`。
+ * 严格采用模型反馈：不估算、不向上拉长；仅将超过 15 秒的值封顶。
+ */
+export function parseDurationSecondsFromVideoPrompt(
+  prompt: string,
+): number | null {
+  const text = prompt?.trim();
+  if (!text) return null;
+  const header = text.match(
+    /\[分镜[^\]]*总时长\s*[：:]\s*(\d+(?:\.\d+)?)\s*秒[^\]]*\]/,
+  );
+  if (header?.[1]) {
+    return adoptModelStoryboardDurationSeconds(Number(header[1]));
+  }
+  const any = text.match(/总时长\s*[：:]\s*(\d+(?:\.\d+)?)\s*秒/);
+  if (any?.[1]) {
+    return adoptModelStoryboardDurationSeconds(Number(any[1]));
+  }
+  return null;
 }
 
 /** 从请求 body 解析出站参数；缺省项用默认值 */

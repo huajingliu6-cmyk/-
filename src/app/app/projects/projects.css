@@ -382,6 +382,144 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
+.pm-note {
+  margin: 0 0 14px;
+  color: rgba(196, 181, 253, 0.92);
+  font-size: 0.88rem;
+}
+
+/* 与工作台共用同一套右键菜单 / 重命名弹层视觉 */
+.wb-context-menu {
+  position: fixed;
+  z-index: 2400;
+  width: 200px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(14, 16, 26, 0.98);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  animation: wb-context-in 0.16s cubic-bezier(0.22, 1.2, 0.36, 1) both;
+}
+
+.wb-context-menu__title {
+  padding: 8px 10px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.45);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-context-menu__item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+
+.wb-context-menu__item:hover {
+  background: rgb(var(--ui-accent-rgb) / 0.18);
+}
+
+.wb-context-menu__item.is-danger {
+  color: #f0a0a0;
+}
+
+.wb-context-menu__item.is-danger:hover {
+  background: rgba(196, 92, 92, 0.22);
+}
+
+.wb-rename-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(6, 8, 14, 0.72);
+}
+
+.wb-rename-card {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #12161f;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45);
+}
+
+.wb-rename-card h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.wb-rename-card input {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  padding: 10px 12px;
+  outline: none;
+}
+
+.wb-rename-card input:focus {
+  border-color: rgb(var(--ui-accent-rgb) / 0.55);
+}
+
+.wb-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.wb-btn {
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  padding: 8px 14px;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.wb-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.wb-btn-primary {
+  border-color: transparent;
+  background: linear-gradient(135deg, #7c3aed, #a855f7);
+  color: #fff;
+}
+
+.wb-btn-primary:hover {
+  filter: brightness(1.06);
+}
+
+@keyframes wb-context-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pm-card:hover,
   .pm-new-btn:hover {
@@ -390,5 +528,9 @@
 
   .pm-card:hover .pm-card__cover-inner {
     transform: none;
+  }
+
+  .wb-context-menu {
+    animation: none;
   }
 }

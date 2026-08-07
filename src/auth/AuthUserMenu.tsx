@@ -11,18 +11,39 @@ import {
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { ApiManagePanel } from "@/auth/ApiManagePanel";
+import dynamic from "next/dynamic";
 import type { AuthUser } from "@/auth/types";
+import {
+  confirmGenerationLeaveIfNeeded,
+  isGenerationBusy,
+} from "@/shell/generation-busy";
+import { useAuthSession } from "@/shell/AuthSessionProvider";
 
-export function AuthUserMenu() {
+const ApiManagePanelLazy = dynamic(
+  () =>
+    import("@/auth/ApiManagePanel").then((mod) => ({
+      default: mod.ApiManagePanel,
+    })),
+  { ssr: false },
+);
+
+type AuthUserMenuProps = {
+  /** Prefer shell-provided user to avoid a duplicate /api/auth/me. */
+  user: AuthUser;
+};
+
+export function AuthUserMenu({ user: initialUser }: AuthUserMenuProps) {
   const router = useRouter();
+  const session = useAuthSession();
   const rootRef = useRef<HTMLDivElement>(null);
-  const [user, setUser] = useState<AuthUser | null>(null);
+  const [user, setUser] = useState(initialUser);
   const [menuOpen, setMenuOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [apiOpen, setApiOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [displayName, setDisplayName] = useState("");
+  const [displayName, setDisplayName] = useState(
+    () => initialUser.displayName || initialUser.username,
+  );
   const [profileNotice, setProfileNotice] = useState("");
   const [profileError, setProfileError] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
@@ -34,24 +55,9 @@ export function AuthUserMenu() {
   const [savingPassword, setSavingPassword] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch("/api/auth/me");
-        if (!res.ok) return;
-        const payload = (await res.json()) as { user?: AuthUser | null };
-        if (!cancelled && payload.user) {
-          setUser(payload.user);
-          setDisplayName(payload.user.displayName || payload.user.username);
-        }
-      } catch {
-        // ignore
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    setUser(initialUser);
+    setDisplayName(initialUser.displayName || initialUser.username);
+  }, [initialUser]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -64,10 +70,30 @@ export function AuthUserMenu() {
     return () => window.removeEventListener("pointerdown", onPointerDown, true);
   }, [menuOpen]);
 
+  useEffect(() => {
+    const onOpenApiManage = () => {
+      setMenuOpen(false);
+      setAccountOpen(false);
+      setApiOpen(true);
+    };
+    window.addEventListener("lumina:open-api-manage", onOpenApiManage);
+    return () =>
+      window.removeEventListener("lumina:open-api-manage", onOpenApiManage);
+  }, []);
+
   const onLogout = async () => {
+    if (isGenerationBusy()) {
+      await confirmGenerationLeaveIfNeeded();
+      return;
+    }
     setBusy(true);
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+      // 立刻清空客户端会话，避免首页仍按 authenticated 显示骨架/自动跳回 /app
+      session?.applyUser(null);
       router.replace("/?login=1");
       router.refresh();
     } finally {
@@ -410,7 +436,7 @@ export function AuthUserMenu() {
 
       {accountDialog}
 
-      <ApiManagePanel open={apiOpen} onClose={() => setApiOpen(false)} />
+      <ApiManagePanelLazy open={apiOpen} onClose={() => setApiOpen(false)} />
     </>
   );
 }

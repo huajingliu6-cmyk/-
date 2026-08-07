@@ -132,7 +132,6 @@
   border-radius: 16px;
   border: 1px solid var(--sbw-border);
   background: rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(10px);
 }
 
 .sbw-step {
@@ -191,13 +190,19 @@
 .sbw-panel__head-actions {
   display: flex;
   flex-wrap: wrap;
+  flex: 0 0 auto;
   gap: 8px;
   align-items: center;
   justify-content: flex-end;
 }
 
 .sbw-script-stage {
-  min-height: 280px;
+  min-height: 0;
+  margin-top: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
 }
 
 .sbw-episode-sidebar {
@@ -743,8 +748,8 @@
   border-radius: 18px;
   border: 1px solid var(--sbw-border);
   background: var(--sbw-panel);
-  padding: 16px;
-  backdrop-filter: blur(12px);
+  padding: 16px 18px 18px;
+  overflow: visible;
   animation: sbw-fade-in 0.28s ease both;
 }
 
@@ -753,7 +758,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
 .sbw-panel__head h2 {
@@ -766,6 +774,10 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
 }
 
 .sbw-empty {
@@ -1598,17 +1610,17 @@
 
 .sbw-pre {
   margin: 0;
-  padding: 12px 14px;
-  max-height: 220px;
+  padding: 0;
+  max-height: min(480px, 56vh);
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  border-radius: 12px;
-  border: 1px solid rgba(167, 139, 250, 0.22);
-  background: rgba(15, 10, 28, 0.55);
+  border-radius: 0;
+  border: none;
+  background: transparent;
   color: rgba(237, 233, 254, 0.92);
-  font-size: 0.82rem;
-  line-height: 1.55;
+  font-size: 0.875rem;
+  line-height: 1.65;
 }
 
 .sbw-dialog {
@@ -1684,9 +1696,15 @@
 
 .sbw-panel__head--row {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.sbw-panel__head--row > div:first-child {
+  min-width: 0;
+  flex: 1 1 220px;
 }
 
 .sbw-actions--wrap {
@@ -1694,7 +1712,7 @@
 }
 
 .sbw-actions--episode-toolbar {
-  margin: 12px 10px 18px;
+  margin: 0 0 14px;
 }
 
 .sbw-scene-label {
@@ -1709,6 +1727,15 @@
   flex-direction: column;
   gap: 10px;
   margin-top: 8px;
+}
+
+.sbw-shot-list__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  margin: 4px 0 10px;
 }
 
 .sbw-shot-card {

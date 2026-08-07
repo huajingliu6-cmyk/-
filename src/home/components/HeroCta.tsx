@@ -2,6 +2,7 @@
 
 import { type AnimationEvent, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAuthUser } from "@/shell/useAuthUser";
 import { openHomeLoginPanel } from "@/home/lib/open-login-panel";
 
 function prefersReducedMotion(): boolean {
@@ -16,6 +17,7 @@ function prefersReducedMotion(): boolean {
  */
 export function HeroCta() {
   const router = useRouter();
+  const auth = useAuthUser();
   const pendingActionRef = useRef<null | (() => void)>(null);
   const [isBouncing, setIsBouncing] = useState(false);
 
@@ -31,17 +33,11 @@ export function HeroCta() {
 
   const onStartClick = () => {
     playBounceThen(() => {
+      if (auth.status === "authenticated") {
+        router.push("/app");
+        return;
+      }
       openHomeLoginPanel({ next: "/app" });
-      // 已登录时 Header 无登录面板：直接进应用壳层
-      void fetch("/api/auth/me")
-        .then(async (res) => {
-          if (!res.ok) return;
-          const payload = (await res.json()) as { user?: unknown };
-          if (payload.user) router.push("/app");
-        })
-        .catch(() => {
-          // ignore
-        });
     });
   };
 

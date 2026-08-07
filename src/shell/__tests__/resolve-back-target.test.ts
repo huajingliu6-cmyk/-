@@ -40,26 +40,26 @@ describe("resolveBackTarget", () => {
     });
   });
 
-  it("工作台资产设计 / 库 / 入口一次返回工作台项目", () => {
+  it("工作台资产设计 / 库 / 入口 / 分镜一次返回工作台列表", () => {
     expect(resolveBackTarget("/app/workspace/projects/p_abc/assets")).toEqual({
       kind: "href",
-      href: "/app/workspace/projects/p_abc",
+      href: "/app/workspace",
     });
     expect(
       resolveBackTarget("/app/workspace/projects/p_abc/assets/design"),
     ).toEqual({
       kind: "href",
-      href: "/app/workspace/projects/p_abc",
+      href: "/app/workspace",
     });
     expect(
       resolveBackTarget("/app/workspace/projects/p_abc/assets/library"),
     ).toEqual({
       kind: "href",
-      href: "/app/workspace/projects/p_abc",
+      href: "/app/workspace",
     });
     expect(resolveBackTarget("/app/workspace/projects/p_abc/storyboard")).toEqual({
       kind: "href",
-      href: "/app/workspace/projects/p_abc",
+      href: "/app/workspace",
     });
     expect(resolveBackTarget("/app/workspace/projects/p_abc")).toEqual({
       kind: "href",

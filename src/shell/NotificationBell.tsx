@@ -1,20 +1,36 @@
 "use client";
 
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type AnimationEvent,
+  type MouseEvent,
+} from "react";
 import { useRouter } from "next/navigation";
 import { Bell, X } from "lucide-react";
 import type { AppNotification } from "@/notifications/types";
+import { prefersReducedMotion } from "@/shell/login-portal";
 import {
   refreshNotifications,
   subscribeNotifications,
 } from "@/shell/notifications-poller";
+import { useChipBounce } from "@/shell/useChipBounce";
+
+const PANEL_CLOSE_MS = 220;
+const ROW_EXIT_MS = 380;
 
 export function NotificationBell() {
   const router = useRouter();
   const rootRef = useRef<HTMLDivElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const bounce = useChipBounce();
   const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [exitingIds, setExitingIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     return subscribeNotifications((snapshot) => {
@@ -23,17 +39,63 @@ export function NotificationBell() {
     });
   }, []);
 
-  useEffect(() => {
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimerRef.current == null) return;
+    window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
+  }, []);
+
+  const finishClose = useCallback(() => {
+    setClosing(false);
+    setOpen(false);
+  }, []);
+
+  const requestClose = useCallback(() => {
     if (!open) return;
+    if (prefersReducedMotion()) {
+      finishClose();
+      return;
+    }
+    if (closing) return;
+    setClosing(true);
+    clearCloseTimer();
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      finishClose();
+    }, PANEL_CLOSE_MS);
+  }, [clearCloseTimer, closing, finishClose, open]);
+
+  const openPanel = useCallback(() => {
+    clearCloseTimer();
+    setClosing(false);
+    setOpen(true);
+    void refreshNotifications();
+  }, [clearCloseTimer]);
+
+  const togglePanel = useCallback(() => {
+    bounce.trigger();
+    if (open && !closing) {
+      requestClose();
+      return;
+    }
+    if (!open) openPanel();
+  }, [bounce, closing, open, openPanel, requestClose]);
+
+  useEffect(() => {
+    return () => clearCloseTimer();
+  }, [clearCloseTimer]);
+
+  useEffect(() => {
+    if (!open || closing) return;
     const onPointerDown = (event: PointerEvent) => {
       const root = rootRef.current;
       if (!root) return;
       if (event.target instanceof Node && root.contains(event.target)) return;
-      setOpen(false);
+      requestClose();
     };
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [open]);
+  }, [closing, open, requestClose]);
 
   const handleClick = async (note: AppNotification) => {
     // Owner submit notices stay unread (and keep the badge) while items remain
@@ -46,7 +108,7 @@ export function NotificationBell() {
       );
       await refreshNotifications();
     }
-    setOpen(false);
+    requestClose();
     if (note.type === "asset_approval_submitted") {
       router.push(
         `/app/projects/${encodeURIComponent(note.projectId)}/assets/design?approvalSubmissionId=${encodeURIComponent(note.submissionId)}&episodeId=${encodeURIComponent(note.episodeId)}`,
@@ -63,16 +125,63 @@ export function NotificationBell() {
     }
   };
 
-  const handleDelete = async (note: AppNotification, event: MouseEvent) => {
+  const removeLocally = useCallback((noteId: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== noteId));
+    setExitingIds((prev) => {
+      if (!prev.has(noteId)) return prev;
+      const next = new Set(prev);
+      next.delete(noteId);
+      return next;
+    });
+  }, []);
+
+  const handleDelete = (note: AppNotification, event: MouseEvent) => {
     event.stopPropagation();
     if (!note.readAt) return;
-    const res = await fetch(
+    if (exitingIds.has(note.id)) return;
+
+    const deleteRequest = fetch(
       `/api/notifications/${encodeURIComponent(note.id)}`,
       { method: "DELETE" },
-    );
-    if (!res.ok) return;
-    await refreshNotifications();
+    ).then(async (res) => {
+      if (!res.ok) throw new Error("delete failed");
+      await refreshNotifications();
+    });
+
+    if (prefersReducedMotion()) {
+      void deleteRequest.catch(() => {
+        void refreshNotifications();
+      });
+      removeLocally(note.id);
+      return;
+    }
+
+    setExitingIds((prev) => new Set(prev).add(note.id));
+    window.setTimeout(() => {
+      removeLocally(note.id);
+    }, ROW_EXIT_MS);
+
+    void deleteRequest.catch(() => {
+      // Roll back optimistic hide if the server reject.
+      setExitingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(note.id);
+        return next;
+      });
+      void refreshNotifications();
+    });
   };
+
+  const onRowAnimationEnd = (
+    noteId: string,
+    event: AnimationEvent<HTMLLIElement>,
+  ) => {
+    if (event.target !== event.currentTarget) return;
+    if (!exitingIds.has(noteId)) return;
+    removeLocally(noteId);
+  };
+
+  const panelVisible = open || closing;
 
   return (
     <div
@@ -82,17 +191,12 @@ export function NotificationBell() {
     >
       <button
         type="button"
-        className="shell-notification__btn"
+        className={`shell-notification__btn ${bounce.bounceClass}`}
         aria-label="通知"
+        aria-expanded={open && !closing}
         data-testid="notification-bell"
-        onClick={() => {
-          setOpen((v) => {
-            const next = !v;
-            // 仅打开时刷新；关闭不打网
-            if (next) void refreshNotifications();
-            return next;
-          });
-        }}
+        onClick={togglePanel}
+        onAnimationEnd={bounce.onAnimationEnd}
       >
         <Bell className="h-4 w-4" aria-hidden />
         {unreadCount > 0 ? (
@@ -104,9 +208,9 @@ export function NotificationBell() {
           </span>
         ) : null}
       </button>
-      {open ? (
+      {panelVisible ? (
         <div
-          className="shell-notification__panel"
+          className={`shell-notification__panel${closing ? " is-closing" : ""}`}
           data-testid="notification-panel"
         >
           <div className="shell-notification__panel-head">通知</div>
@@ -114,36 +218,51 @@ export function NotificationBell() {
             <p className="shell-notification__empty">暂无通知</p>
           ) : (
             <ul className="shell-notification__list">
-              {notifications.map((note) => (
-                <li key={note.id} className="shell-notification__row">
-                  <button
-                    type="button"
-                    className={`shell-notification__item${
-                      note.readAt ? "" : " is-unread"
+              {notifications.map((note) => {
+                const exiting = exitingIds.has(note.id);
+                return (
+                  <li
+                    key={note.id}
+                    className={`shell-notification__row${
+                      exiting ? " is-exiting" : ""
                     }`}
-                    onClick={() => void handleClick(note)}
-                    data-testid={`notification-item-${note.id}`}
+                    onAnimationEnd={(event) =>
+                      onRowAnimationEnd(note.id, event)
+                    }
                   >
-                    <strong>{note.title}</strong>
-                    <span>{note.summary}</span>
-                    <span className="shell-notification__time">
-                      {new Date(note.createdAt).toLocaleString()}
-                    </span>
-                  </button>
-                  {note.readAt ? (
                     <button
                       type="button"
-                      className="shell-notification__delete"
-                      title="删除已完成通知"
-                      aria-label="删除通知"
-                      data-testid={`notification-delete-${note.id}`}
-                      onClick={(e) => void handleDelete(note, e)}
+                      className={`shell-notification__item${
+                        note.readAt ? "" : " is-unread"
+                      }`}
+                      onClick={() => void handleClick(note)}
+                      data-testid={`notification-item-${note.id}`}
+                      disabled={exiting}
                     >
-                      <X className="h-3.5 w-3.5" aria-hidden />
+                      <strong>{note.title}</strong>
+                      <span>{note.summary}</span>
+                      <span className="shell-notification__time">
+                        {new Date(note.createdAt).toLocaleString()}
+                      </span>
                     </button>
-                  ) : null}
-                </li>
-              ))}
+                    {note.readAt ? (
+                      <button
+                        type="button"
+                        className={`shell-notification__delete${
+                          exiting ? " is-pop" : ""
+                        }`}
+                        title="删除已完成通知"
+                        aria-label="删除通知"
+                        data-testid={`notification-delete-${note.id}`}
+                        disabled={exiting}
+                        onClick={(e) => handleDelete(note, e)}
+                      >
+                        <X className="h-3.5 w-3.5" aria-hidden />
+                      </button>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

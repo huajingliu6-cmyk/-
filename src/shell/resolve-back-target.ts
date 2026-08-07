@@ -17,14 +17,14 @@ export function resolveBackTarget(pathname: string): BackTarget {
     return { kind: "hide" };
   }
 
-  // 工作台：资产设计 / 资产库 / 资产入口 → 工作台项目页
+  // 工作台：资产设计 / 资产库 / 资产入口 / 分镜 → 工作台列表（不再经过空壳项目概览）
   const workspaceAssetsDeep = pathname.match(
     /^\/app\/workspace\/projects\/([^/]+)\/assets(?:\/(?:design|library))?\/?$/,
   );
   if (workspaceAssetsDeep) {
     return {
       kind: "href",
-      href: `${APP_WORKBENCH_PATH}/projects/${workspaceAssetsDeep[1]}`,
+      href: APP_WORKBENCH_PATH,
     };
   }
 
@@ -34,7 +34,7 @@ export function resolveBackTarget(pathname: string): BackTarget {
   if (workspaceStoryboard) {
     return {
       kind: "href",
-      href: `${APP_WORKBENCH_PATH}/projects/${workspaceStoryboard[1]}`,
+      href: APP_WORKBENCH_PATH,
     };
   }
 

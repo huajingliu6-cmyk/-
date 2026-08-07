@@ -7,6 +7,7 @@ import { AnimatedHeroBackground } from "@/home/components/AnimatedHeroBackground
 import { HeroSection } from "@/home/components/HeroSection";
 import { ShowcaseStrip } from "@/home/components/ShowcaseStrip";
 import { PublicHeader } from "@/shell/PublicHeader";
+import { useAuthSession } from "@/shell/AuthSessionProvider";
 import { APP_SHELL_ROOT } from "@/shell/nav";
 import { useAuthUser } from "@/shell/useAuthUser";
 import { MascotMark } from "@/workflow/components/BrandMark";
@@ -29,12 +30,19 @@ function NeutralHeader() {
 
 export function HomeChrome() {
   const auth = useAuthUser();
+  const session = useAuthSession();
   const router = useRouter();
   const [sessionUser, setSessionUser] = useState<AuthUser | null>(null);
 
-  const onLoggedIn = useCallback((user: AuthUser) => {
-    setSessionUser(user);
-  }, []);
+  const onLoggedIn = useCallback(
+    (user: AuthUser) => {
+      // 必须先写入全局会话，否则 /app 壳层仍读到 guest 会立刻踢回登录页
+      session?.applyUser(user);
+      setSessionUser(user);
+      void session?.refresh();
+    },
+    [session],
+  );
 
   useEffect(() => {
     if (auth.status !== "authenticated") return;

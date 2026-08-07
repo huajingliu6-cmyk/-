@@ -96,8 +96,12 @@ describe("effective project roles and workspace routing helpers", () => {
     expect(
       await resolveEffectiveProjectRole(engineer.id, project.projectId, engineer),
     ).toBe("CARD_ENGINEER");
-    expect(workspaceFeaturesForRole("CARD_ENGINEER")).toEqual(["assets"]);
+    expect(workspaceFeaturesForRole("CARD_ENGINEER")).toEqual([
+      "assets",
+      "storyboard",
+    ]);
     expect(workspaceFeaturesForRole("PROJECT_OWNER")).toContain("storyboard");
+    expect(workspaceFeaturesForRole("CARD_ENGINEER")).not.toContain("video");
   });
 
   it("workspace list only includes assigned projects for card engineers", async () => {

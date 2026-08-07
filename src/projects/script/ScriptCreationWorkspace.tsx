@@ -40,6 +40,7 @@ import type {
 import { EPISODE_CHARS_DEFAULT } from "@/projects/script/types";
 import { countVisibleChars } from "@/text-generation/char-count";
 import { useChipBounce } from "@/shell/useChipBounce";
+import { useGenerationBusy } from "@/shell/GenerationBusyGuard";
 import "@/projects/script/script-workspace.css";
 
 type Props = {
@@ -120,6 +121,11 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
   });
   const [episodeSplit, setEpisodeSplit] = useState<ScriptEpisodeSplitState>(
     () => emptyEpisodeSplitState(),
+  );
+  useGenerationBusy(
+    episodeSplit.status === "generating",
+    `script-split-${projectId}`,
+    "剧本分集生成",
   );
   const [proposedEpisodes, setProposedEpisodes] = useState<ProposedEpisode[]>(
     [],
@@ -844,6 +850,9 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
     !splitGenerating &&
     !importing &&
     !confirmingImport;
+  const splitDone =
+    (episodeSplit.status === "review" && proposedEpisodes.length > 0) ||
+    (episodeSplit.status === "confirmed" && hasFormalEpisodes);
   const replacing = hasFormalEpisodes || Boolean(sourceText?.trim());
   const showSplitReview =
     splitInReview ||
@@ -898,6 +907,7 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
             <ScriptUploadPanel
               file={sourceFile}
               canSplit={canSplit}
+              splitDone={splitDone}
               importing={importing || confirmingImport || splitGenerating}
               onScriptFile={(file) => {
                 void handleScriptFile(file);
@@ -943,23 +953,6 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
                   onAnimationEnd={splitBounce.onAnimationEnd}
                 >
                   重新分集
-                </button>
-              </div>
-            ) : null}
-            {!splitGenerating && sourceText?.trim() && !showSplitReview ? (
-              <div className="scs-split-actions">
-                <button
-                  type="button"
-                  className={`scs-btn scs-btn-primary ${splitBounce.bounceClass}`}
-                  disabled={!canSplit}
-                  data-testid="script-split-start"
-                  onClick={() => {
-                    splitBounce.trigger();
-                    void handleStartSplit();
-                  }}
-                  onAnimationEnd={splitBounce.onAnimationEnd}
-                >
-                  分集
                 </button>
               </div>
             ) : null}

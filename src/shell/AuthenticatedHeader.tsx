@@ -32,7 +32,10 @@ export function AuthenticatedHeader({ user }: Props) {
           <span className="shell-brand__name">Lumina Story</span>
         </Link>
 
-        <AuthenticatedNavigation onNavigate={() => setMenuOpen(false)} />
+        <AuthenticatedNavigation
+          user={user}
+          onNavigate={() => setMenuOpen(false)}
+        />
 
         <div className="shell-account shell-account--end">
           <AppearanceButton compact />
@@ -56,7 +59,10 @@ export function AuthenticatedHeader({ user }: Props) {
 
       {menuOpen ? (
         <div className="border-t border-white/10 bg-[rgba(7,8,16,0.96)] px-4 py-3 lg:hidden">
-          <AuthenticatedNavigation onNavigate={() => setMenuOpen(false)} />
+          <AuthenticatedNavigation
+            user={user}
+            onNavigate={() => setMenuOpen(false)}
+          />
         </div>
       ) : null}
     </header>

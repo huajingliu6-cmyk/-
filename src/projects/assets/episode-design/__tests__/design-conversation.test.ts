@@ -3,6 +3,7 @@ import {
   appendConversationMessage,
   buildRedesignUserMessage,
   isEpisodeAssetExtractReady,
+  normalizeUserRequirement,
   parseDesignConversation,
 } from "@/projects/assets/episode-design/design-conversation";
 
@@ -16,9 +17,22 @@ describe("episode design conversation helpers", () => {
     expect(isEpisodeAssetExtractReady("stale")).toBe(true);
   });
 
-  it("builds redesign cue as {name}重新设计", () => {
+  it("builds redesign cue as {name}重新设计 with optional requirement", () => {
     expect(buildRedesignUserMessage("江宸")).toBe("江宸重新设计");
     expect(buildRedesignUserMessage(" 旧伞 ")).toBe("旧伞重新设计");
+    expect(buildRedesignUserMessage("Serena", "侧光半身")).toBe(
+      "Serena重新设计\n用户素材要求：侧光半身",
+    );
+  });
+
+  it("normalizes user requirement text", () => {
+    expect(normalizeUserRequirement(null)).toEqual({ ok: true, value: "" });
+    expect(normalizeUserRequirement("  正式西装  ")).toEqual({
+      ok: true,
+      value: "正式西装",
+    });
+    expect(normalizeUserRequirement(12).ok).toBe(false);
+    expect(normalizeUserRequirement("x".repeat(801)).ok).toBe(false);
   });
 
   it("appends messages and keeps extract head when trimming", () => {

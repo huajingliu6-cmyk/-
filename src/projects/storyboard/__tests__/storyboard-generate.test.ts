@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { generateStructuredStoryboard, mergePreserveLockedShots } from "@/projects/storyboard/services/storyboard-generate";
+import {
+  generateStructuredStoryboard,
+  mergePreserveLockedShots,
+} from "@/projects/storyboard/services/storyboard-generate";
 import type { AssetMatchItem } from "@/projects/storyboard/types";
+import {
+  STORYBOARD_VIDEO_DURATION_MAX,
+  STORYBOARD_VIDEO_DURATION_MIN,
+} from "@/projects/storyboard/storyboard-video-params";
 
 describe("storyboard-generate", () => {
   const assetMatches: AssetMatchItem[] = [
@@ -58,6 +65,17 @@ describe("storyboard-generate", () => {
     expect(doc.scenes[0]?.shots[0]?.videoPrompt.length).toBeGreaterThan(20);
     // 新分镜不再强制生成 shotSummary；字段可为空以兼容旧数据
     expect(typeof doc.scenes[0]?.shots[0]?.shotSummary).toBe("string");
+
+    for (const scene of doc.scenes) {
+      for (const shot of scene.shots) {
+        expect(shot.durationSeconds).toBeGreaterThanOrEqual(
+          STORYBOARD_VIDEO_DURATION_MIN,
+        );
+        expect(shot.durationSeconds).toBeLessThanOrEqual(
+          STORYBOARD_VIDEO_DURATION_MAX,
+        );
+      }
+    }
 
     expect(Array.isArray(doc.scenes[0]?.shots[0]?.requiredCharacters)).toBe(
       true,

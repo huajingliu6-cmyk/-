@@ -182,7 +182,7 @@ export type EpisodeAssetDesignRecord = {
   items: EpisodeAssetDesignItem[];
   /**
    * Episode-scoped text chat seeded by「提取本集资产」.
-   * 「重新生成提示词」appends `{name}重新设计` in the same conversation.
+   * 「重新生成提示词」appends `{name}重新设计` (+ optional 用户素材要求) in the same conversation.
    */
   designConversation?: EpisodeDesignConversationMessage[];
   confirmedAt: string | null;

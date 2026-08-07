@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { LoginPortalTransitionProvider } from "@/shell/LoginPortalTransitionProvider";
 import { AppearanceProvider } from "@/shell/AppearanceProvider";
+import { AuthSessionProvider } from "@/shell/AuthSessionProvider";
+import { LoginPortalTransitionProvider } from "@/shell/LoginPortalTransitionProvider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -33,7 +34,11 @@ export default function RootLayout({
     >
       <body className="h-full overflow-hidden" suppressHydrationWarning>
         <AppearanceProvider>
-          <LoginPortalTransitionProvider>{children}</LoginPortalTransitionProvider>
+          <AuthSessionProvider>
+            <LoginPortalTransitionProvider>
+              {children}
+            </LoginPortalTransitionProvider>
+          </AuthSessionProvider>
         </AppearanceProvider>
       </body>
     </html>

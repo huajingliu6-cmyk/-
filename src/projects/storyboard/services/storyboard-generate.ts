@@ -24,6 +24,7 @@ import {
   collectPreviousVideoHistoryIds,
   uniqueGenerationIds,
 } from "@/projects/storyboard/video-history-ids";
+import { STORYBOARD_VIDEO_DURATION_MIN } from "@/projects/storyboard/storyboard-video-params";
 
 export type GenerateStructuredStoryboardInput = {
   scriptText: string;
@@ -358,6 +359,10 @@ function linkRequirementsToMatches(
   };
 }
 
+/**
+ * 结构化分镜占位时长。真实时长以大模型 videoPrompt 头「总时长：N秒」为准，
+ * 在 fillShotVideoPromptsWithLlm / 单镜重生成时回写到 shot.durationSeconds。
+ */
 function buildShot(
   snippet: string,
   shotNumber: number,
@@ -374,7 +379,7 @@ function buildShot(
   const cameraAngle = "平视";
   const cameraMovement = shotNumber === 1 ? "缓慢推进" : "固定";
   const composition = "主体居中，留出环境信息";
-  const durationSeconds = 5;
+  const durationSeconds = STORYBOARD_VIDEO_DURATION_MIN;
   const names = extractNamesFromSnippet(
     snippet,
     sceneMeta.location,

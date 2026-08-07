@@ -3,6 +3,7 @@ import {
   autoLinkShotToLibrary,
   collectLibraryNamesInText,
   findBestAssetIdForRequirementName,
+  storyboardNeedsLibraryRematch,
 } from "@/projects/storyboard/services/shot-library-match";
 import { generateStructuredStoryboard } from "@/projects/storyboard/services/storyboard-generate";
 import { buildRequirementsFromNames } from "@/projects/storyboard/shot-completeness";
@@ -222,5 +223,35 @@ describe("shot-library-match", () => {
     expect(withProp?.propAssetIds.includes("p1") || withProp?.requirements.some(
       (r) => r.type === "prop" && r.selectedAssetId === "p1",
     )).toBe(true);
+  });
+
+  it("storyboardNeedsLibraryRematch detects unresolved vs fully linked boards", () => {
+    const unresolved = baseShot();
+    const linked = autoLinkShotToLibrary(unresolved, assets);
+    const wrap = (shot: StoryboardShot) =>
+      ({
+        id: "sb1",
+        projectId: "p1",
+        episodeId: "e1",
+        status: "draft",
+        revision: 1,
+        sourceScriptHash: "",
+        sourceAssetSnapshotHash: "",
+        generationJobId: null,
+        createdAt: "",
+        updatedAt: "",
+        scenes: [
+          {
+            id: "sc1",
+            title: "茶馆",
+            location: "茶馆",
+            order: 0,
+            shots: [shot],
+          },
+        ],
+      }) as const;
+
+    expect(storyboardNeedsLibraryRematch(wrap(unresolved))).toBe(true);
+    expect(storyboardNeedsLibraryRematch(wrap(linked))).toBe(false);
   });
 });

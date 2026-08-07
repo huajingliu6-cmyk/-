@@ -55,6 +55,12 @@ describe("asset module management routes", () => {
     expect(library).not.toContain("EpisodeAssetDesignWorkspace");
     expect(library).toContain('context="workspace"');
 
+    const workspace = readSrc("src/projects/assets/AssetManagementWorkspace.tsx");
+    expect(workspace).toContain(
+      "`/api/workspace/projects/${encodeURIComponent(projectId)}/assets-draft`",
+    );
+    expect(workspace).toContain('isWorkspace ? "workspace" : "management"');
+
     const design = readSrc(
       "src/app/app/workspace/projects/[projectId]/assets/design/page.tsx",
     );
@@ -103,8 +109,8 @@ describe("asset module management routes", () => {
     expect(source).toContain("pendingMedia");
     expect(source).toContain("createdAssets");
     expect(source).toContain("ead-extract-all");
-    expect(source).toContain("一键提取全剧本资产");
-    expect(source).toContain("按集补提取 / 复核");
+    expect(source).toContain("一键提取");
+    expect(source).toContain("按集补提取");
     expect(source).toContain("ead-episode-select");
     expect(source).not.toContain("ead-ep-list");
     expect(source).toContain("SubmitApprovalModal");

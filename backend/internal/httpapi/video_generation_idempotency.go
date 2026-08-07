@@ -261,8 +261,17 @@ func (handler *VideoGenerationIdempotency) list(writer http.ResponseWriter, requ
 		return
 	}
 	records := make([]videoIdempotencyRecord, 0, len(index.RecordKeys))
+	documents, err := loadDocumentsBatch(request.Context(), handler.store, handler.cache, videoIdempotencyRecordNamespace, index.RecordKeys)
+	if err != nil {
+		writeVideoIdempotencyError(writer, http.StatusServiceUnavailable, "IDEMPOTENCY_STORE_UNAVAILABLE")
+		return
+	}
 	for _, key := range index.RecordKeys {
-		_, record, readErr := handler.readRecord(request, key)
+		document, found := documents[key]
+		if !found {
+			continue
+		}
+		record, readErr := parseVideoIdempotencyEnvelope(document.Value)
 		if readErr == nil && record != nil {
 			records = append(records, *record)
 		}

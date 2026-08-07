@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -23,30 +24,58 @@ type App struct {
 	handler http.Handler
 }
 
+func remoteFileHTTPClient() *http.Client {
+	transport := &http.Transport{
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   20,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+	}
+	return &http.Client{
+		Timeout:   5 * time.Minute,
+		Transport: transport,
+	}
+}
+
 func New(ctx context.Context, cfg config.Config) (*App, error) {
-	store, err := postgres.Open(ctx, cfg.DatabaseURL)
+	poolCfg := postgres.PoolConfig{
+		MaxConns:        cfg.PostgresMaxConns,
+		MinConns:        cfg.PostgresMinConns,
+		MaxConnLifetime: cfg.PostgresMaxConnLifetime,
+		MaxConnIdleTime: cfg.PostgresMaxConnIdleTime,
+		ConnectTimeout:  cfg.PostgresConnectTimeout,
+	}
+	if poolCfg.MaxConns == 0 {
+		poolCfg = postgres.DefaultPoolConfig()
+	}
+	store, err := postgres.Open(ctx, cfg.DatabaseURL, poolCfg)
 	if err != nil {
 		return nil, err
 	}
-	if err := store.Migrate(ctx, migrations.Initial); err != nil {
+	if err := migrations.Apply(ctx, store); err != nil {
 		store.Close()
 		return nil, err
 	}
 	var cacheClient *ssdb.Client
 	if cfg.SSDBAddress != "" {
-		cacheClient = ssdb.New(cfg.SSDBAddress, cfg.SSDBPassword)
+		ssdbTimeout := cfg.SSDBTimeout
+		if ssdbTimeout == 0 {
+			ssdbTimeout = 500 * time.Millisecond
+		}
+		cacheClient = ssdb.NewWithTimeout(cfg.SSDBAddress, cfg.SSDBPassword, ssdbTimeout)
 		if err := cacheClient.Ping(ctx); err != nil {
 			store.Close()
 			return nil, err
 		}
 	}
 
-	documentCache := cache.NewDocuments(cacheClient, cfg.CacheTTL)
+	documentCache := cache.NewDocuments(cacheClient, cfg.CacheTTL, cfg.CacheEnv)
 	documents := httpapi.NewDocuments(store, documentCache)
 	var blobStorage blobstore.Store = store
 	var remoteFileClient *remotefile.Client
 	if cfg.BlobStorageDriver == "remotefile" {
-		remoteFileClient, err = remotefile.NewClient(cfg.BlobstoreInternalURL, cfg.BlobstoreToken, &http.Client{Timeout: 5 * time.Minute})
+		remoteFileClient, err = remotefile.NewClient(cfg.BlobstoreInternalURL, cfg.BlobstoreToken, remoteFileHTTPClient())
 		if err != nil {
 			store.Close()
 			return nil, err
@@ -143,4 +172,35 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 }
 
 func (app *App) Handler() http.Handler { return app.handler }
-func (app *App) Close()                { app.store.Close() }
+func (app *App) Close() {
+	if app.cache != nil {
+		_ = app.cache.Close()
+	}
+	app.store.Close()
+}
+
+// StartPprof starts an optional pprof HTTP server when address is non-empty.
+func StartPprof(ctx context.Context, address string, internalToken string, logger *slog.Logger) (*http.Server, error) {
+	if address == "" {
+		return nil, nil
+	}
+	mux := http.NewServeMux()
+	if config.PprofRequiresAuth(address) {
+		mux.Handle("/", httpapi.PprofHandler(internalToken))
+	} else {
+		mux.Handle("/", httpapi.PprofHandler(""))
+	}
+	server := &http.Server{
+		Addr:              address,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+	}
+	go func() {
+		logger.Info("pprof listening", "address", address, "auth_required", config.PprofRequiresAuth(address))
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("pprof server failed", "error", err.Error())
+		}
+	}()
+	return server, nil
+}

@@ -128,6 +128,34 @@ export function collectLibraryNamesInText(
  * Auto-link unresolved shot requirements to project library assets by name.
  * Does not override NOT_REQUIRED or already LINKED bindings (when onlyUnresolved).
  */
+export function storyboardNeedsLibraryRematch(
+  storyboard: StoryboardDocument,
+): boolean {
+  for (const scene of storyboard.scenes) {
+    for (const shot of scene.shots) {
+      if (shot.locked) continue;
+      const requirements = shot.requirements ?? [];
+      if (requirements.length === 0) {
+        if (
+          (shot.requiredCharacters.length > 0 &&
+            shot.characterAssetIds.length === 0) ||
+          (shot.requiredProps.length > 0 && shot.propAssetIds.length === 0) ||
+          (Boolean(shot.requiredScene?.trim()) && !shot.sceneAssetId)
+        ) {
+          return true;
+        }
+        continue;
+      }
+      for (const req of requirements) {
+        if (req.resolution === "NOT_REQUIRED") continue;
+        if (req.resolution === "LINKED" && req.selectedAssetId) continue;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function autoLinkShotToLibrary(
   shot: StoryboardShot,
   assets: MatchableAssets,

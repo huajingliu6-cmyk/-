@@ -66,7 +66,7 @@ func TestRealGoAPIBlobFlowWithProtocolSSDB(t *testing.T) {
 	if putResponse.Code != http.StatusOK {
 		t.Fatalf("unexpected put status: %d %s", putResponse.Code, putResponse.Body.String())
 	}
-	metadata, err := postgres.Open(ctx, databaseURL)
+	metadata, err := postgres.Open(ctx, databaseURL, postgres.DefaultPoolConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

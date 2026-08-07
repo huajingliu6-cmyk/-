@@ -11,6 +11,11 @@ import {
   X,
 } from "lucide-react";
 import {
+  GlassSelect,
+  type GlassSelectGroup,
+} from "@/shell/glass-select";
+import { useGenerationBusy } from "@/shell/GenerationBusyGuard";
+import {
   cancelStoryGeneration,
   notifyCreditsRefresh,
   streamStoryGeneration,
@@ -402,8 +407,11 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     surface === "workspace"
       ? `/api/workspace/projects/${encodeURIComponent(projectId)}`
       : `/api/projects/${encodeURIComponent(projectId)}`;
+  const queryEpisodeId = searchParams.get("episodeId")?.trim() || null;
   const [episodes, setEpisodes] = useState<EpisodeListItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string>(SCRIPT_ASSET_DESIGN_ID);
+  const [selectedId, setSelectedId] = useState<string>(
+    () => queryEpisodeId || SCRIPT_ASSET_DESIGN_ID,
+  );
   const [detail, setDetail] = useState<EpisodeDetailPayload | null>(null);
   const [items, setItems] = useState<EpisodeAssetDesignItem[]>([]);
   const [revision, setRevision] = useState(0);
@@ -462,10 +470,19 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       ? searchParams.get("approvalSubmissionId")?.trim() || null
       : null;
   const ownerApprovalOpen = Boolean(ownerApprovalSubmissionId);
-  const queryEpisodeId = searchParams.get("episodeId")?.trim() || null;
   useEffect(() => {
     generatingRef.current = generating;
   }, [generating]);
+
+  useGenerationBusy(
+    generating || batchExtracting || generatingAssetIds.size > 0,
+    `asset-design-${projectId}`,
+    generatingAssetIds.size > 0
+      ? "资产图生成"
+      : batchExtracting
+        ? "全剧本资产提取"
+        : "资产提取",
+  );
 
   useEffect(() => {
     if (!ownerApprovalSubmissionId) return;
@@ -496,6 +513,31 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     if (!queryEpisodeId) return;
     queueMicrotask(() => setSelectedId(queryEpisodeId));
   }, [queryEpisodeId]);
+
+  /** Keep the overview counter accurate even when viewing a single episode. */
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}`,
+        );
+        if (!res.ok || cancelled) return;
+        const payload = (await res.json()) as EpisodeDetailPayload;
+        if (cancelled) return;
+        setFullScriptAssetCount(payload.record.items.length);
+        setFullScriptPending(
+          payload.designStatus === "not_started" &&
+            payload.record.items.length === 0,
+        );
+      } catch {
+        /* ignore — detail load will refresh when opening full script */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiRoot]);
 
   const projectVoices = useMemo(
     () => voiceOptionsFromAudios(bundle.audios),
@@ -533,6 +575,48 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       ),
     [episodes],
   );
+  const extractedEpisodes = useMemo(
+    () =>
+      episodes.filter(
+        (episode) =>
+          episode.itemCount > 0 &&
+          (episode.designStatus === "review" ||
+            episode.designStatus === "confirmed" ||
+            episode.designStatus === "stale"),
+      ),
+    [episodes],
+  );
+  const episodeSelectGroups = useMemo((): GlassSelectGroup[] => {
+    const groups: GlassSelectGroup[] = [];
+    if (pendingEpisodes.length > 0) {
+      groups.push({
+        id: "pending",
+        label: "待补提取 / 已过期",
+        options: pendingEpisodes.map((episode) => ({
+          id: episode.episodeId,
+          label: `第${episode.episodeNumber}集 · ${EPISODE_ASSET_DESIGN_STATUS_LABELS[episode.designStatus]}`,
+        })),
+      });
+    }
+    const readyEpisodes = episodes.filter(
+      (episode) => !pendingEpisodes.includes(episode),
+    );
+    groups.push({
+      id: "ready",
+      label: "已提取，可复核或审批",
+      emptyHint: "暂无可复核剧集",
+      options: readyEpisodes.map((episode) => ({
+        id: episode.episodeId,
+        label: `第${episode.episodeNumber}集 · ${EPISODE_ASSET_DESIGN_STATUS_LABELS[episode.designStatus]}`,
+      })),
+    });
+    return groups;
+  }, [episodes, pendingEpisodes]);
+  const episodeSelectPlaceholder = listLoading
+    ? "加载剧集…"
+    : pendingEpisodes.length > 0
+      ? `待补提取（${pendingEpisodes.length}）`
+      : "选择剧集复核";
   const isFullScriptDesign = selectedId === SCRIPT_ASSET_DESIGN_ID;
 
   const loadList = useCallback(async () => {
@@ -713,10 +797,17 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
           const scriptRes = await fetch(scriptUrl);
           if (scriptRes.ok) {
             const script = (await scriptRes.json()) as {
-              draft?: { episodes?: Array<{ id: string; content?: string }> };
+              draft?: {
+                sourceText?: string | null;
+                episodes?: Array<{ id: string; content?: string }>;
+              };
             };
-            const ep = script.draft?.episodes?.find((e) => e.id === episodeId);
-            content = ep?.content?.replace(/\r\n/g, "\n") ?? "";
+            if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
+              content = script.draft?.sourceText?.replace(/\r\n/g, "\n") ?? "";
+            } else {
+              const ep = script.draft?.episodes?.find((e) => e.id === episodeId);
+              content = ep?.content?.replace(/\r\n/g, "\n") ?? "";
+            }
           }
         }
         setEpisodeContent(content);
@@ -1528,96 +1619,98 @@ const updateItem = useCallback(
           <div className="ead-overview__main">
             <div className="ead-overview__copy">
               <span className="ead-overview__eyebrow">AI 全剧本资产提取</span>
-              <h2 id="ead-overview-title">一次识别完整剧本中的全部资产</h2>
-              <p>
-                大模型将自动扫描所有剧集，提取角色、场景、道具与音频需求。
-                单集入口仅用于遗漏补提取或后续复核审批。
-              </p>
+              <div className="ead-overview__title-row">
+                <h2 id="ead-overview-title">全剧本资产提取</h2>
+                <button
+                  type="button"
+                  className="amw-btn amw-btn-primary ead-extract-all-btn"
+                  disabled={
+                    generating ||
+                    batchExtracting ||
+                    saving ||
+                    confirming
+                  }
+                  onClick={() => void handleExtractAll()}
+                  data-testid="ead-extract-all"
+                >
+                  {batchExtracting
+                    ? "提取中…"
+                    : items.length > 0 && isFullScriptDesign
+                      ? "重新提取"
+                      : "一键提取"}
+                </button>
+              </div>
+              <p>系统将扫描完整剧本，提取角色、场景、道具与音频。</p>
             </div>
-            <button
-              type="button"
-              className="amw-btn amw-btn-primary ead-extract-all-btn"
-              disabled={
-                generating ||
-                batchExtracting ||
-                saving ||
-                confirming
-              }
-              onClick={() => void handleExtractAll()}
-              data-testid="ead-extract-all"
-            >
-              {batchExtracting
-                ? "正在一次性提取完整剧本资产…"
-                : items.length > 0 && isFullScriptDesign
-                  ? "重新提取全剧本资产"
-                  : "一键提取全剧本资产"}
-            </button>
           </div>
           <div className="ead-progress" aria-label="全剧本资产状态">
-            <span><strong>{isFullScriptDesign ? items.length : fullScriptAssetCount}</strong> 全剧本资产</span>
-            <span><strong>{progress.review}</strong> 单集待复核</span>
-            <span><strong>{pendingExtractionCount}</strong> 单集可补提取</span>
+            <span>
+              <strong>{isFullScriptDesign ? items.length : fullScriptAssetCount}</strong>
+              全剧本资产
+            </span>
+            <span>
+              <strong>{progress.review}</strong>
+              待复核
+            </span>
+            <span>
+              <strong>{pendingExtractionCount}</strong>
+              可补提取
+            </span>
           </div>
           {fullScriptPending && !isFullScriptDesign ? (
             <div className="ead-full-script-pending" data-testid="ead-full-script-pending">
               <div>
-                <strong>{"\u5168\u5267\u672c\u8d44\u4ea7\u5c1a\u672a\u63d0\u53d6"}</strong>
-                <p>{"\u5efa\u8bae\u5148\u4e00\u6b21\u8bc6\u522b\u5b8c\u6574\u5267\u672c\uff1b\u6309\u96c6\u8865\u63d0\u53d6\u4ec5\u7528\u4e8e\u9057\u6f0f\u4fee\u590d\u548c\u590d\u6838\u3002"}</p>
+                <strong>全剧本资产尚未提取</strong>
+                <p>建议先完成全剧本提取；按集补提取仅用于遗漏修复与复核。</p>
               </div>
               <button
-                  type="button"
-                  className="amw-btn ead-full-script-pending__button"
-                  onClick={() => setSelectedId(SCRIPT_ASSET_DESIGN_ID)}
-                  disabled={batchExtracting || generating}
-                >
-                  {"\u8fd4\u56de\u5168\u5267\u672c\u5165\u53e3"}
+                type="button"
+                className="amw-btn ead-full-script-pending__button"
+                onClick={() => setSelectedId(SCRIPT_ASSET_DESIGN_ID)}
+                disabled={batchExtracting || generating}
+              >
+                返回全剧本
               </button>
             </div>
           ) : null}
           <div className="ead-episode-tool">
-            <div>
-              <span className="ead-episode-tool__eyebrow">{"\u8f85\u52a9\u5165\u53e3"}</span>
-              <strong>按集补提取 / 复核</strong>
-              <p>仅在发现遗漏资产或需要提交、复核审批时选择单集。</p>
+            <div className="ead-episode-tool__copy">
+              <strong>
+                <span className="ead-episode-tool__eyebrow">辅助</span>
+                按集补提取
+              </strong>
             </div>
-            <label className="ead-episode-select-wrap">
-              <span className="sr-only">选择剧集</span>
-              <select
-                className="ead-episode-select"
-                value={isFullScriptDesign ? "" : selectedId}
-                disabled={listLoading || episodes.length === 0 || batchExtracting}
-                onChange={(event) =>
-                  setSelectedId(event.target.value || SCRIPT_ASSET_DESIGN_ID)
-                }
-                data-testid="ead-episode-select"
-              >
-                <option value="">
-                  {listLoading
-                    ? "正在加载剧集…"
-                    : pendingEpisodes.length > 0
-                      ? `选择待补提取剧集（${pendingEpisodes.length}）`
-                      : "选择剧集进行复核"}
-                </option>
-                {pendingEpisodes.length > 0 ? (
-                  <optgroup label="待补提取 / 已过期">
-                    {pendingEpisodes.map((episode) => (
-                      <option key={episode.episodeId} value={episode.episodeId}>
-                        第{episode.episodeNumber}集 · {EPISODE_ASSET_DESIGN_STATUS_LABELS[episode.designStatus]}
-                      </option>
-                    ))}
-                  </optgroup>
-                ) : null}
-                <optgroup label="已提取，可复核或审批">
-                  {episodes
-                    .filter((episode) => !pendingEpisodes.includes(episode))
-                    .map((episode) => (
-                      <option key={episode.episodeId} value={episode.episodeId}>
-                        第{episode.episodeNumber}集 · {EPISODE_ASSET_DESIGN_STATUS_LABELS[episode.designStatus]}
-                      </option>
-                    ))}
-                </optgroup>
-              </select>
-            </label>
+            <div className="ead-episode-tool__controls">
+              {!isFullScriptDesign ? (
+                <button
+                  type="button"
+                  className="amw-btn ead-back-full-script"
+                  data-testid="ead-back-full-script"
+                  disabled={batchExtracting || generating}
+                  onClick={() => setSelectedId(SCRIPT_ASSET_DESIGN_ID)}
+                >
+                  返回全剧本资产
+                </button>
+              ) : null}
+              <div className="ead-episode-select-wrap" data-testid="ead-episode-select">
+                <GlassSelect
+                  className="ead-episode-glass-select"
+                  label="选择剧集"
+                  hideLabel
+                  value={isFullScriptDesign ? "" : selectedId}
+                  disabled={
+                    listLoading ||
+                    episodes.length === 0 ||
+                    batchExtracting ||
+                    generating ||
+                    generatingAssetIds.size > 0
+                  }
+                  placeholder={episodeSelectPlaceholder}
+                  groups={episodeSelectGroups}
+                  onChange={(id) => setSelectedId(id || SCRIPT_ASSET_DESIGN_ID)}
+                />
+              </div>
+            </div>
           </div>
           {episodes.length === 0 && !listLoading ? (
             <p className="ead-error">暂无剧集，请先在剧本阶段完成分集。</p>
@@ -1630,11 +1723,36 @@ const updateItem = useCallback(
           ) : isAwaitingFullScriptExtraction ? (
             <div className="ead-pending-assets" data-testid="ead-pending-assets">
               <span className="ead-overview__eyebrow">待提取资产</span>
-              <h2>尚未提取完整剧本资产</h2>
+              <h2>尚未完成全剧本一键提取</h2>
               <p>
-                点击上方“一键提取全部资产”，系统会把主理人最初上传的未分集完整剧本
-                一次性提交给大模型，统一识别角色、场景、道具与音频需求。
+                「全剧本资产」只统计上方一键提取的结果。按集提取或已进资产库的条目不会出现在这里，并不代表资产丢失。
               </p>
+              {extractedEpisodes.length > 0 ? (
+                <div className="ead-pending-assets__recover">
+                  <p>
+                    当前已有 {extractedEpisodes.length}{" "}
+                    集完成按集提取（合计{" "}
+                    {extractedEpisodes.reduce(
+                      (sum, episode) => sum + episode.itemCount,
+                      0,
+                    )}{" "}
+                    项），可从下方「按集补提取」打开查看。
+                  </p>
+                  <button
+                    type="button"
+                    className="amw-btn amw-btn-primary"
+                    data-testid="ead-open-extracted-episode"
+                    onClick={() => {
+                      const first = extractedEpisodes[0];
+                      if (first) setSelectedId(first.episodeId);
+                    }}
+                  >
+                    查看第{extractedEpisodes[0]?.episodeNumber}集提取结果
+                  </button>
+                </div>
+              ) : (
+                <p>点击上方「一键提取」，系统将识别角色、场景、道具与音频需求。</p>
+              )}
             </div>
           ) : (
             <div className="ead-detail__inner amw-detail">
@@ -1664,15 +1782,28 @@ const updateItem = useCallback(
                     </p>
                   ) : null}
                 </div>
-                <button
-                  type="button"
-                  className="amw-btn ead-script-btn"
-                  disabled={!selectedId || !detail}
-                  onClick={() => setScriptViewerOpen(true)}
-                  data-testid="ead-view-script"
-                >
-                  {isFullScriptDesign ? "查看完整原始剧本" : "查看本集剧本"}
-                </button>
+                <div className="ead-detail__head-actions">
+                  {!isFullScriptDesign ? (
+                    <button
+                      type="button"
+                      className="amw-btn ead-back-full-script"
+                      data-testid="ead-back-full-script-detail"
+                      disabled={batchExtracting || generating}
+                      onClick={() => setSelectedId(SCRIPT_ASSET_DESIGN_ID)}
+                    >
+                      返回全剧本资产
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="amw-btn ead-script-btn"
+                    disabled={!selectedId || !detail}
+                    onClick={() => setScriptViewerOpen(true)}
+                    data-testid="ead-view-script"
+                  >
+                    {isFullScriptDesign ? "查看完整原始剧本" : "查看本集剧本"}
+                  </button>
+                </div>
               </div>
 
               <div className="ead-actions amw-actions">
@@ -1936,7 +2067,11 @@ const updateItem = useCallback(
               className={`ead-script-body${episodeContent.trim() ? "" : " is-empty"}`}
               data-testid="ead-script-body"
             >
-              {episodeContent.trim() ? episodeContent : "本集暂无正文"}
+              {episodeContent.trim()
+                ? episodeContent
+                : isFullScriptDesign
+                  ? "暂无完整原始剧本正文"
+                  : "本集暂无正文"}
             </pre>
           </div>
         </div>

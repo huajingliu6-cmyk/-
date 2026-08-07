@@ -57,7 +57,7 @@ function assertTextModality(resolved: {
 }
 
 /**
- * Continue the episode extract conversation with「{name}重新设计」.
+ * Continue the episode extract conversation with「{name}重新设计」(+ optional requirement).
  * Uses the same text model as「提取本集资产」(episode_asset_design).
  */
 export async function streamRedesignPromptInConversation(input: {
@@ -65,6 +65,8 @@ export async function streamRedesignPromptInConversation(input: {
   userId: string;
   item: EpisodeAssetDesignItem;
   conversation: EpisodeDesignConversationMessage[];
+  /** Owner-provided material requirements appended to the redesign cue. */
+  userRequirement?: string | null;
 }): Promise<{
   text: string;
   nextConversation: EpisodeDesignConversationMessage[];
@@ -74,7 +76,10 @@ export async function streamRedesignPromptInConversation(input: {
     throw new Error("本集尚无提取对话，请先点击「提取本集资产」。");
   }
 
-  const redesignCue = buildRedesignUserMessage(input.item.name);
+  const redesignCue = buildRedesignUserMessage(
+    input.item.name,
+    input.userRequirement,
+  );
   const withUser = appendConversationMessage(input.conversation, {
     role: "user",
     content: redesignCue,

@@ -48,12 +48,18 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain("episodeContent");
     expect(workspace).toContain("meaningfulEpisodeTitle");
     expect(workspace).toContain("ead-script-dialog__close");
+    expect(workspace).toContain("sourceText");
+    expect(workspace).toContain("SCRIPT_ASSET_DESIGN_ID");
     expect(workspace).not.toContain("dangerouslySetInnerHTML");
     expect(workspace).toContain("<pre");
   });
 
   it("uses full-width extraction-first layout contract", () => {
     expect(workspace).toContain("AI 全剧本资产提取");
+    expect(workspace).toContain("全剧本资产提取");
+    expect(workspace).toContain("系统将扫描完整剧本");
+    expect(workspace).not.toContain("一次识别完整剧本中的全部资产");
+    expect(workspace).not.toContain("大模型将自动");
     expect(workspace).toContain("ead-overview");
     expect(workspace).toContain("ead-episode-select");
     expect(css).not.toContain("clamp(230px, 21vw, 280px)");
@@ -82,11 +88,15 @@ describe("Batch G1-UI episode asset design chrome", () => {
   });
 
   it("keeps episode selection as a secondary omission-recovery tool", () => {
-    expect(workspace).toContain("按集补提取 / 复核");
+    expect(workspace).toContain("按集补提取");
     expect(workspace).toContain("pendingEpisodes");
     expect(workspace).toContain('data-testid="ead-episode-select"');
+    expect(workspace).toContain("GlassSelect");
+    expect(workspace).toContain("episodeSelectGroups");
     expect(workspace).toContain("ead-episode-tool__eyebrow");
-    expect(css).toContain("grid-template-columns: minmax(0, 1fr) minmax(220px, 320px)");
+    expect(css).toContain("grid-template-columns: auto minmax(240px, 1fr)");
+    expect(workspace).toContain("ead-back-full-script");
+    expect(workspace).toContain("返回全剧本资产");
     expect(workspace).not.toContain("ead-ep-list");
     expect(workspace).not.toContain("EPISODES_PER_PAGE");
   });
@@ -94,11 +104,15 @@ describe("Batch G1-UI episode asset design chrome", () => {
   it("uses the original unsplit script as the default one-call extraction flow", () => {
     expect(workspace).toContain('outputKind: "script_asset_design"');
     expect(workspace).toContain("SCRIPT_ASSET_DESIGN_ID");
-    expect(workspace).toContain("一键提取全剧本资产");
+    expect(workspace).toContain("一键提取");
     expect(workspace).toContain("fullScriptAssetCount");
     expect(workspace).toContain("ead-layout${isAwaitingFullScriptExtraction");
     expect(workspace).toContain("待提取资产");
+    expect(workspace).toContain("尚未完成全剧本一键提取");
+    expect(workspace).toContain("并不代表资产丢失");
     expect(workspace).toContain('data-testid="ead-pending-assets"');
+    expect(workspace).toContain('data-testid="ead-open-extracted-episode"');
+    expect(workspace).toContain("extractedEpisodes");
     expect(workspace).toContain('data-testid="ead-full-script-pending"');
     expect(workspace).toContain("setFullScriptPending");
     expect(workspace).toContain("ead-full-script-pending__button");

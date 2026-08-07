@@ -1,0 +1,24 @@
+Lumina Story / infinite-canvas 换机交接包
+========================================
+
+本包包含：
+- 当前分支全部源码（含未提交改动）
+- .git 历史
+- .env.local（密钥与本地配置）
+- data/（本地业务数据：用户、项目、积分、AI 配置等）
+- node_modules（Windows 下可直接使用，免 npm install）
+
+已排除（可自动重建）：
+- .next/ 构建缓存
+- test-results/
+
+在新机器上：
+1. 解压整个文件夹
+2. 安装 Node.js（建议与原机同大版本，18/20/22 LTS）
+3. 进入目录后执行：npm run dev
+4. 浏览器打开 http://localhost:3000
+
+注意：
+- 本压缩包含密钥与用户数据，勿上传网盘公开分享、勿提交到公开仓库
+- LOCAL_VOICE_LIBRARY_DIR 若指向原机绝对路径且新机无该目录，本地音色库需自行调整路径
+- 若 node_modules 在新机报错，再执行一次：npm ci 或 npm install

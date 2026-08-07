@@ -55,7 +55,7 @@ export function ScriptDocumentEditor({
           />
           <p className="scs-hint">
             {reviewMode
-              ? "核对并修改后，点击右下角「确认剧本」写入正式剧集。"
+              ? "核对并修改后，点击下方「确认剧本」写入正式剧集。"
               : "修改后点击页头「保存页面」保存当前集文本。"}
           </p>
         </div>

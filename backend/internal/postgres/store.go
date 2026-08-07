@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -25,6 +26,11 @@ type Document struct {
 	UpdatedAt time.Time       `json:"updatedAt"`
 }
 
+type DocumentKey struct {
+	Namespace string
+	Key       string
+}
+
 type DocumentWrite struct {
 	Namespace        string
 	Key              string
@@ -35,6 +41,24 @@ type DocumentWrite struct {
 type BlobCopy struct {
 	SourceStorageKey string
 	TargetStorageKey string
+}
+
+type PoolConfig struct {
+	MaxConns        int32
+	MinConns        int32
+	MaxConnLifetime time.Duration
+	MaxConnIdleTime time.Duration
+	ConnectTimeout  time.Duration
+}
+
+func DefaultPoolConfig() PoolConfig {
+	return PoolConfig{
+		MaxConns:        20,
+		MinConns:        2,
+		MaxConnLifetime: 30 * time.Minute,
+		MaxConnIdleTime: 5 * time.Minute,
+		ConnectTimeout:  5 * time.Second,
+	}
 }
 
 type Store struct{ pool *pgxpool.Pool }
@@ -55,8 +79,17 @@ type BlobRecord struct {
 	ObjectKey string
 }
 
-func Open(ctx context.Context, databaseURL string) (*Store, error) {
-	pool, err := pgxpool.New(ctx, databaseURL)
+func Open(ctx context.Context, databaseURL string, poolCfg PoolConfig) (*Store, error) {
+	pgCfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	pgCfg.MaxConns = poolCfg.MaxConns
+	pgCfg.MinConns = poolCfg.MinConns
+	pgCfg.MaxConnLifetime = poolCfg.MaxConnLifetime
+	pgCfg.MaxConnIdleTime = poolCfg.MaxConnIdleTime
+	pgCfg.ConnConfig.ConnectTimeout = poolCfg.ConnectTimeout
+	pool, err := pgxpool.NewWithConfig(ctx, pgCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -69,9 +102,14 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 
 func (s *Store) Close()                         { s.pool.Close() }
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
+func (s *Store) PoolStats() *pgxpool.Stat       { return s.pool.Stat() }
 func (s *Store) Migrate(ctx context.Context, schema string) error {
 	_, err := s.pool.Exec(ctx, schema)
 	return err
+}
+
+func DocumentMapKey(namespace, key string) string {
+	return namespace + "\x00" + key
 }
 
 func (s *Store) GetDocument(ctx context.Context, namespace string, key string) (Document, error) {
@@ -84,6 +122,39 @@ func (s *Store) GetDocument(ctx context.Context, namespace string, key string) (
 		return Document{}, ErrNotFound
 	}
 	return document, err
+}
+
+func (s *Store) GetDocuments(ctx context.Context, pairs []DocumentKey) (map[string]Document, error) {
+	result := make(map[string]Document, len(pairs))
+	if len(pairs) == 0 {
+		return result, nil
+	}
+	placeholders := make([]string, 0, len(pairs))
+	args := make([]any, 0, len(pairs)*2)
+	for index, pair := range pairs {
+		base := index * 2
+		placeholders = append(placeholders, fmt.Sprintf("($%d::text, $%d::text)", base+1, base+2))
+		args = append(args, pair.Namespace, pair.Key)
+	}
+	query := fmt.Sprintf(`
+		select d.namespace, d.document_key, d.revision, d.value, d.updated_at
+		from app_documents d
+		inner join (values %s) as v(namespace, document_key)
+			on d.namespace = v.namespace and d.document_key = v.document_key
+	`, strings.Join(placeholders, ", "))
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var document Document
+		if err := rows.Scan(&document.Namespace, &document.Key, &document.Revision, &document.Value, &document.UpdatedAt); err != nil {
+			return nil, err
+		}
+		result[DocumentMapKey(document.Namespace, document.Key)] = document
+	}
+	return result, rows.Err()
 }
 
 func (s *Store) PutDocument(ctx context.Context, namespace string, key string, expectedRevision *int64, value json.RawMessage) (Document, error) {

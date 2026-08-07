@@ -31,6 +31,8 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(workspace).toContain('"/workspace/"');
     expect(modal).toContain("一键复制");
     expect(modal).toContain("生成资产");
+    expect(modal).toContain("输入素材要求");
+    expect(modal).toContain("ead-requirement-dialog");
     expect(modal).toContain("ead-modal");
     expect(modal).toContain("design-image-preview");
     expect(modal).toContain("design-download");

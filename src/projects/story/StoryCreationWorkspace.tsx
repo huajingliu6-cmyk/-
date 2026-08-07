@@ -60,6 +60,7 @@ import type {
 } from "@/projects/story/types";
 import { ConfirmLeaveDialog } from "@/shell/ConfirmLeaveDialog";
 import { useChipBounce } from "@/shell/useChipBounce";
+import { useGenerationBusy } from "@/shell/GenerationBusyGuard";
 import { registerUnsavedLeaveHandler } from "@/shell/unsaved-leave";
 import "@/projects/story/story-workspace.css";
 
@@ -158,6 +159,7 @@ export function StoryCreationWorkspace({ projectId }: Props) {
   const [leaveOpen, setLeaveOpen] = useState(false);
   const leaveResolveRef = useRef<((ok: boolean) => void) | null>(null);
   const saveBounce = useChipBounce();
+  useGenerationBusy(generating, `story-gen-${projectId}`, "故事/大纲/分集生成");
   const generatingLockRef = useRef(false);
   const applyLockRef = useRef(false);
   const activeIdempotencyRef = useRef<string | null>(null);
@@ -331,13 +333,14 @@ export function StoryCreationWorkspace({ projectId }: Props) {
 
   useEffect(() => {
     return registerUnsavedLeaveHandler(async () => {
+      if (generating) return false;
       if (!dirty) return true;
       setLeaveOpen(true);
       return await new Promise<boolean>((resolve) => {
         leaveResolveRef.current = resolve;
       });
     });
-  }, [dirty]);
+  }, [dirty, generating]);
 
   const handleSave = useCallback(async () => {
     const visible = countVisibleChars(brief);

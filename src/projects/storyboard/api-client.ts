@@ -150,6 +150,16 @@ export async function confirmScript(
   return data.production;
 }
 
+export class StoryboardGenerateInProgressError extends Error {
+  readonly production: EpisodeProduction;
+
+  constructor(message: string, production: EpisodeProduction) {
+    super(message);
+    this.name = "StoryboardGenerateInProgressError";
+    this.production = production;
+  }
+}
+
 export async function generateStoryboard(
   projectId: string,
   episodeId: string,
@@ -169,6 +179,13 @@ export async function generateStoryboard(
     error?: string;
   };
   if (!res.ok) {
+    if (res.status === 409 && data.production) {
+      throw new StoryboardGenerateInProgressError(
+        data.error ?? "分镜正在生成中",
+        data.production,
+      );
+    }
+    // Failed generate persists generation_failed on the production — sync it.
     if (data.production) return data.production;
     throw new Error(data.error ?? `请求失败 (${res.status})`);
   }

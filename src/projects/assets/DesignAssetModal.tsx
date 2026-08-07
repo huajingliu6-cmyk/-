@@ -27,6 +27,7 @@ import { getProjectAssetImageUrl } from "@/projects/assets/asset-image-url";
 import { DesignImageLightbox } from "@/projects/assets/DesignImageLightbox";
 import { VoiceSelector } from "@/projects/assets/VoiceSelector";
 import { VoicePreviewButton } from "@/projects/assets/VoicePreviewButton";
+import { useGenerationBusy } from "@/shell/GenerationBusyGuard";
 
 export type DesignAssetModalProps = {
   open: boolean;
@@ -137,8 +138,17 @@ function DesignAssetModalBody({
   const [promptHistory, setPromptHistory] =
     useState<AssetDesignPromptHistoryEntry[]>(initialHistory);
   const [loadingPrompt, setLoadingPrompt] = useState(false);
+  const [requirementOpen, setRequirementOpen] = useState(false);
+  const [requirementDraft, setRequirementDraft] = useState("");
+  const [requirementError, setRequirementError] = useState("");
+  const requirementFieldId = useId();
   const [generatingAsset, setGeneratingAsset] = useState(false);
   const generateBusy = generatingAsset || isGeneratingAsset;
+  useGenerationBusy(
+    generateBusy || loadingPrompt,
+    `design-modal-${item.id}`,
+    loadingPrompt ? "资产提示词生成" : "资产图生成",
+  );
   const [copyNote, setCopyNote] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -290,59 +300,85 @@ function DesignAssetModalBody({
     };
   }, []);
 
-  const regeneratePrompt = useCallback(async () => {
-    setLoadingPrompt(true);
-    setError("");
-    setCopyNote("");
-    try {
-      const urls = apiBase(surface, projectId, episodeId, item.id);
-      const res = await fetch(urls.prompt, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          idempotencyKey: `prompt-${item.id}-${Date.now()}`,
-        }),
-      });
-      const payload = (await res.json()) as {
-        error?: string;
-        prompt?: string;
-        designPrompt?: {
-          text?: string;
-          status?: string;
-          history?: AssetDesignPromptHistoryEntry[];
-          generationId?: string | null;
-        };
-      };
-      if (!res.ok) {
-        throw new Error(payload.error ?? "提示词生成失败");
-      }
-      const text =
-        payload.prompt ??
-        payload.designPrompt?.text ??
-        initialPromptForItem(item);
-      const now = new Date().toISOString();
-      const history =
-        payload.designPrompt?.history ??
-        pushLocalPromptHistory(promptHistory, {
-          text,
-          generatedAt: now,
-          generationId: payload.designPrompt?.generationId ?? null,
-          source: "regenerate",
+  const regeneratePrompt = useCallback(
+    async (userRequirement: string) => {
+      setLoadingPrompt(true);
+      setError("");
+      setCopyNote("");
+      setRequirementError("");
+      try {
+        const urls = apiBase(surface, projectId, episodeId, item.id);
+        const res = await fetch(urls.prompt, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            idempotencyKey: `prompt-${item.id}-${Date.now()}`,
+            userRequirement,
+          }),
         });
-      setPromptText(text);
-      setPromptHistory(history);
-      setSyncedPromptHistoryLen(history.length);
-      setStaleHint(false);
-      onPromptUpdatedRef.current(item.id, text, {
-        history,
-        generationId: payload.designPrompt?.generationId ?? null,
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "提示词生成失败");
-    } finally {
-      setLoadingPrompt(false);
+        const payload = (await res.json()) as {
+          error?: string;
+          prompt?: string;
+          designPrompt?: {
+            text?: string;
+            status?: string;
+            history?: AssetDesignPromptHistoryEntry[];
+            generationId?: string | null;
+          };
+        };
+        if (!res.ok) {
+          throw new Error(payload.error ?? "提示词生成失败");
+        }
+        const text =
+          payload.prompt ??
+          payload.designPrompt?.text ??
+          initialPromptForItem(item);
+        const now = new Date().toISOString();
+        const history =
+          payload.designPrompt?.history ??
+          pushLocalPromptHistory(promptHistory, {
+            text,
+            generatedAt: now,
+            generationId: payload.designPrompt?.generationId ?? null,
+            source: "regenerate",
+          });
+        setPromptText(text);
+        setPromptHistory(history);
+        setSyncedPromptHistoryLen(history.length);
+        setStaleHint(false);
+        setRequirementOpen(false);
+        setRequirementDraft("");
+        onPromptUpdatedRef.current(item.id, text, {
+          history,
+          generationId: payload.designPrompt?.generationId ?? null,
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "提示词生成失败");
+      } finally {
+        setLoadingPrompt(false);
+      }
+    },
+    [item, surface, projectId, episodeId, promptHistory],
+  );
+
+  const openRequirementDialog = useCallback(() => {
+    setRequirementDraft("");
+    setRequirementError("");
+    setRequirementOpen(true);
+  }, []);
+
+  const submitRequirement = useCallback(() => {
+    const trimmed = requirementDraft.trim();
+    if (!trimmed) {
+      setRequirementError("请输入素材要求");
+      return;
     }
-  }, [item, surface, projectId, episodeId, promptHistory]);
+    if (trimmed.length > 800) {
+      setRequirementError("素材要求最多 800 字");
+      return;
+    }
+    void regeneratePrompt(trimmed);
+  }, [requirementDraft, regeneratePrompt]);
 
   const handleCopy = useCallback(async () => {
     setCopyNote("");
@@ -973,7 +1009,7 @@ function DesignAssetModalBody({
               className="amw-btn"
               data-testid="design-regenerate-prompt"
               disabled={loadingPrompt || generateBusy}
-              onClick={() => void regeneratePrompt()}
+              onClick={openRequirementDialog}
             >
               {loadingPrompt ? "生成中…" : "重新生成提示词"}
             </button>
@@ -1013,6 +1049,83 @@ function DesignAssetModalBody({
         alt={`${item.name} 放大预览`}
         onClose={() => setLightboxOpen(false)}
       />
+      {requirementOpen ? (
+        <div
+          className="amw-overlay amw-overlay--stacked"
+          role="presentation"
+          data-testid="design-regenerate-requirement-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !loadingPrompt) {
+              setRequirementOpen(false);
+            }
+          }}
+        >
+          <div
+            className="amw-dialog ead-requirement-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`${requirementFieldId}-title`}
+          >
+            <h3 id={`${requirementFieldId}-title`}>重新生成提示词</h3>
+            <p className="amw-dialog-desc">
+              输入素材要求。将基于当前资产「{item.name}」并结合你的要求重新生成提示词。
+            </p>
+            <div className="amw-fields amw-fields--stack">
+              <div className="amw-field">
+                <label htmlFor={requirementFieldId}>输入素材要求</label>
+                <textarea
+                  id={requirementFieldId}
+                  className="amw-textarea"
+                  rows={5}
+                  value={requirementDraft}
+                  disabled={loadingPrompt}
+                  placeholder="例如：更正式的西装、侧光、半身构图…"
+                  data-testid="design-regenerate-requirement-input"
+                  onChange={(e) => {
+                    setRequirementDraft(e.target.value);
+                    if (requirementError) setRequirementError("");
+                  }}
+                  onKeyDown={(e) => {
+                    if (
+                      e.key === "Enter" &&
+                      (e.metaKey || e.ctrlKey) &&
+                      !loadingPrompt
+                    ) {
+                      e.preventDefault();
+                      submitRequirement();
+                    }
+                  }}
+                />
+              </div>
+              {requirementError ? (
+                <p className="amw-field-error" role="alert">
+                  {requirementError}
+                </p>
+              ) : null}
+            </div>
+            <div className="amw-dialog-actions">
+              <button
+                type="button"
+                className="amw-btn"
+                disabled={loadingPrompt}
+                data-testid="design-regenerate-requirement-cancel"
+                onClick={() => setRequirementOpen(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="amw-btn amw-btn-primary"
+                disabled={loadingPrompt}
+                data-testid="design-regenerate-requirement-submit"
+                onClick={submitRequirement}
+              >
+                {loadingPrompt ? "生成中…" : "生成提示词"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

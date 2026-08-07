@@ -303,15 +303,21 @@ func (handler *VideoGenerations) get(writer http.ResponseWriter, request *http.R
 		return
 	}
 	records := make([]map[string]any, 0, len(index.GenerationIDs))
+	documents, err := loadDocumentsBatch(request.Context(), handler.store, handler.cache, videoGenerationNamespace, index.GenerationIDs)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "video generation read failed")
+		return
+	}
 	for _, generationID := range index.GenerationIDs {
-		_, record, found, readErr := handler.readRecord(request, generationID)
-		if readErr != nil {
-			writeError(writer, http.StatusInternalServerError, "video generation read failed")
-			return
+		document, found := documents[generationID]
+		if !found {
+			continue
 		}
-		if found {
-			records = append(records, record)
+		var record map[string]any
+		if json.Unmarshal(document.Value, &record) != nil || !validVideoGenerationRecord(record) {
+			continue
 		}
+		records = append(records, record)
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"records": records})
 }

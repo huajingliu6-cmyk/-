@@ -1,9 +1,26 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect } from "react";
 import { AppearanceButton } from "@/shell/AppearanceProvider";
-import { WorkflowEditor } from "@/workflow/components/WorkflowEditor";
+import { RouteLoadingOverlay } from "@/shell/RouteLoadingOverlay";
 import { useWorkflowStore } from "@/workflow/store";
+
+const WorkflowEditor = dynamic(
+  () =>
+    import("@/workflow/components/WorkflowEditor").then((mod) => ({
+      default: mod.WorkflowEditor,
+    })),
+  {
+    ssr: false,
+    loading: () => (
+      <RouteLoadingOverlay
+        title="正在加载视频画布…"
+        description="按需加载 React Flow 编辑器，不阻塞首屏壳层"
+      />
+    ),
+  },
+);
 
 /**
  * 仅在服务端通过 requireVideoCanvasAccess 后挂载。

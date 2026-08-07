@@ -29,7 +29,7 @@ func TestRealDocumentTransactionRejectsMissingPhysicalObject(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	metadata, err := postgres.Open(ctx, databaseURL)
+	metadata, err := postgres.Open(ctx, databaseURL, postgres.DefaultPoolConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

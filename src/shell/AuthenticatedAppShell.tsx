@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AuthenticatedHeader } from "@/shell/AuthenticatedHeader";
+import { GenerationBusyGuard } from "@/shell/GenerationBusyGuard";
 import { useAuthUser } from "@/shell/useAuthUser";
 import { APP_SHELL_ROOT } from "@/shell/nav";
 import "@/shell/shell.css";
@@ -38,15 +39,32 @@ export function AuthenticatedAppShell({
   const pathname = usePathname();
 
   useEffect(() => {
+    // 仅确认 guest 时踢回；loading 期间不要误判
     if (auth.status === "guest") {
-      router.replace(`/?login=1&next=${encodeURIComponent(pathname || APP_SHELL_ROOT)}`);
+      router.replace(
+        `/?login=1&next=${encodeURIComponent(pathname || APP_SHELL_ROOT)}`,
+      );
     }
   }, [auth.status, pathname, router]);
+
+  if (auth.status === "loading") {
+    return (
+      <div className="shell-app flex h-full min-h-full flex-col overflow-hidden bg-[#070811]">
+        <ShellHeaderPlaceholder />
+        <div className="shell-outlet relative min-h-0 flex-1 overflow-hidden">
+          <p className="p-6 text-sm text-white/45">正在恢复登录状态…</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="shell-app flex h-full min-h-full flex-col overflow-hidden bg-[#070811]">
       {auth.status === "authenticated" ? (
-        <AuthenticatedHeader user={auth.user} />
+        <>
+          <AuthenticatedHeader user={auth.user} />
+          <GenerationBusyGuard />
+        </>
       ) : (
         <ShellHeaderPlaceholder />
       )}

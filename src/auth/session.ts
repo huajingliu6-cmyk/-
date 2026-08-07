@@ -123,12 +123,25 @@ export async function verifySessionToken(
   }
 }
 
-export function sessionCookieOptions(maxAge = SESSION_TTL_SECONDS) {
+export function sessionCookieOptions(
+  maxAge = SESSION_TTL_SECONDS,
+  request?: Request,
+) {
+  const forwardedProto = request?.headers
+    .get("x-forwarded-proto")
+    ?.split(",")[0]
+    ?.trim()
+    .toLowerCase();
+  // HTTPS（含 Cloudflare 隧道）必须 Secure，否则部分浏览器不接受/不回传 Cookie
+  const secure =
+    process.env.NODE_ENV === "production" ||
+    process.env.AUTH_COOKIE_SECURE === "true" ||
+    forwardedProto === "https";
   return {
     httpOnly: true,
     sameSite: "lax" as const,
     path: "/",
-    secure: process.env.NODE_ENV === "production",
+    secure,
     maxAge,
   };
 }

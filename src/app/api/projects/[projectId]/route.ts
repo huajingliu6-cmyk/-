@@ -7,16 +7,50 @@ import {
   canEditProjectHighlights,
 } from "@/auth/capabilities";
 import {
+  deleteProjectRecord,
   getProjectRecord,
+  ProjectNameConflictError,
   ProjectNotFoundError,
   updateProjectHighlights,
+  updateProjectName,
 } from "@/projects/project-access";
-import { PROJECT_HIGHLIGHTS_MAX_LENGTH } from "@/projects/validate-create-project";
+import {
+  PROJECT_HIGHLIGHTS_MAX_LENGTH,
+  PROJECT_NAME_MAX_LENGTH,
+} from "@/projects/validate-create-project";
 import { isRemoteDataServiceError } from "@/persistence/remote-data-client";
 
 type RouteContext = {
   params: Promise<{ projectId: string }>;
 };
+
+function toProjectJson(record: {
+  projectId: string;
+  rootFolderId: string;
+  name: string;
+  ownerId: string;
+  creationSource: string;
+  projectMode: string;
+  status: string;
+  highlights: string;
+  passwordEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}) {
+  return {
+    projectId: record.projectId,
+    rootFolderId: record.rootFolderId,
+    name: record.name,
+    ownerId: record.ownerId,
+    creationSource: record.creationSource,
+    projectMode: record.projectMode,
+    status: record.status,
+    highlights: record.highlights,
+    passwordEnabled: record.passwordEnabled,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
 
 /** GET：项目管理中的项目公开元数据（不含密码） */
 export async function GET(_request: Request, context: RouteContext) {
@@ -46,24 +80,12 @@ export async function GET(_request: Request, context: RouteContext) {
   }
 
   return NextResponse.json({
-    project: {
-      projectId: record.projectId,
-      rootFolderId: record.rootFolderId,
-      name: record.name,
-      ownerId: record.ownerId,
-      creationSource: record.creationSource,
-      projectMode: record.projectMode,
-      status: record.status,
-      highlights: record.highlights,
-      passwordEnabled: record.passwordEnabled,
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt,
-    },
+    project: toProjectJson(record),
     effectiveRole: gated.access.role,
   });
 }
 
-/** PATCH：更新项目要点（仅项目主理人 / 系统管理员） */
+/** PATCH：更新项目名称和/或要点（仅项目主理人 / 系统管理员） */
 export async function PATCH(request: Request, context: RouteContext) {
   const { projectId } = await context.params;
   let gated;
@@ -92,7 +114,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   if (!canEditProjectHighlights(gated.user, record.ownerId)) {
     return NextResponse.json(
-      { error: "仅项目主理人或系统管理员可以修改项目要点" },
+      { error: "仅项目主理人或系统管理员可以修改项目" },
       { status: 403 },
     );
   }
@@ -118,38 +140,96 @@ export async function PATCH(request: Request, context: RouteContext) {
     );
   }
 
-  const highlights =
-    body &&
-    typeof body === "object" &&
-    "highlights" in body &&
-    typeof (body as { highlights: unknown }).highlights === "string"
-      ? (body as { highlights: string }).highlights
+  const raw =
+    body && typeof body === "object" && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
       : null;
-
-  if (highlights === null) {
-    return NextResponse.json({ error: "highlights 无效" }, { status: 400 });
+  if (!raw) {
+    return NextResponse.json({ error: "无效请求" }, { status: 400 });
   }
-  if (highlights.length > PROJECT_HIGHLIGHTS_MAX_LENGTH) {
-    return NextResponse.json({ error: "项目要点过长" }, { status: 400 });
+
+  const hasName = typeof raw.name === "string";
+  const hasHighlights = typeof raw.highlights === "string";
+  if (!hasName && !hasHighlights) {
+    return NextResponse.json(
+      { error: "请提供 name 或 highlights" },
+      { status: 400 },
+    );
   }
 
   try {
-    const updated = await updateProjectHighlights(projectId, highlights);
-    return NextResponse.json({
-      project: {
-        projectId: updated.projectId,
-        rootFolderId: updated.rootFolderId,
-        name: updated.name,
-        ownerId: updated.ownerId,
-        creationSource: updated.creationSource,
-        projectMode: updated.projectMode,
-        status: updated.status,
-        highlights: updated.highlights,
-        passwordEnabled: updated.passwordEnabled,
-        createdAt: updated.createdAt,
-        updatedAt: updated.updatedAt,
-      },
-    });
+    let updated = toProjectJson(record);
+    if (hasName) {
+      const name = (raw.name as string).trim();
+      if (!name || name.length > PROJECT_NAME_MAX_LENGTH) {
+        return NextResponse.json({ error: "项目名称无效" }, { status: 400 });
+      }
+      updated = toProjectJson(await updateProjectName(projectId, name));
+    }
+    if (hasHighlights) {
+      const highlights = raw.highlights as string;
+      if (highlights.length > PROJECT_HIGHLIGHTS_MAX_LENGTH) {
+        return NextResponse.json({ error: "项目要点过长" }, { status: 400 });
+      }
+      updated = toProjectJson(
+        await updateProjectHighlights(projectId, highlights),
+      );
+    }
+    return NextResponse.json({ project: updated });
+  } catch (error) {
+    if (error instanceof ProjectNotFoundError) {
+      return NextResponse.json({ error: "项目不存在" }, { status: 404 });
+    }
+    if (error instanceof ProjectNameConflictError) {
+      return NextResponse.json(
+        { error: "项目名称已存在", code: "PROJECT_NAME_CONFLICT" },
+        { status: 409 },
+      );
+    }
+    if (isRemoteDataServiceError(error)) {
+      return NextResponse.json({ error: "内网数据服务不可用" }, { status: 503 });
+    }
+    return NextResponse.json({ error: "更新失败" }, { status: 500 });
+  }
+}
+
+/** DELETE：删除项目（仅项目主理人 / 系统管理员） */
+export async function DELETE(_request: Request, context: RouteContext) {
+  const { projectId } = await context.params;
+  let gated;
+  try {
+    gated = await requireProjectOwnerOrSystemAdmin(projectId);
+  } catch (error) {
+    if (isRemoteDataServiceError(error)) {
+      return NextResponse.json({ error: "内网数据服务不可用" }, { status: 503 });
+    }
+    throw error;
+  }
+  if (!gated.ok) return gated.response;
+
+  let record;
+  try {
+    record = await getProjectRecord(projectId);
+  } catch (error) {
+    if (isRemoteDataServiceError(error)) {
+      return NextResponse.json({ error: "内网数据服务不可用" }, { status: 503 });
+    }
+    throw error;
+  }
+  if (!record) {
+    return NextResponse.json({ error: "项目不存在" }, { status: 404 });
+  }
+
+  if (!canEditProjectHighlights(gated.user, record.ownerId)) {
+    return NextResponse.json(
+      { error: "仅项目主理人或系统管理员可以删除项目" },
+      { status: 403 },
+    );
+  }
+
+  try {
+    await deleteProjectRecord(projectId);
+    return NextResponse.json({ ok: true, projectId });
   } catch (error) {
     if (error instanceof ProjectNotFoundError) {
       return NextResponse.json({ error: "项目不存在" }, { status: 404 });
@@ -157,6 +237,6 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (isRemoteDataServiceError(error)) {
       return NextResponse.json({ error: "内网数据服务不可用" }, { status: 503 });
     }
-    return NextResponse.json({ error: "更新失败" }, { status: 500 });
+    return NextResponse.json({ error: "删除失败" }, { status: 500 });
   }
 }

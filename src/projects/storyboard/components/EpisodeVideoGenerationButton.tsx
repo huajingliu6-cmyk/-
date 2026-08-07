@@ -23,7 +23,7 @@ export function EpisodeVideoGenerationButton({
       title={!enabled ? disabledReason || "暂不可生成" : undefined}
       onClick={onClick}
     >
-      {busy ? "提交中…" : "一键生成本集视频"}
+      {busy ? "提交中…" : "生成视频"}
     </button>
   );
 }

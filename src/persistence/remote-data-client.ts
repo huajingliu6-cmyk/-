@@ -53,11 +53,37 @@ export async function requestRemoteData(
   });
 }
 async function remoteFetch(url: string, init: RequestInit): Promise<Response> {
-  try {
-    return await fetch(url, init);
-  } catch {
-    throw new Error('REMOTE_DATA_UNAVAILABLE');
+  const timeoutMs = resolveRemoteFetchTimeoutMs();
+  const controller = new AbortController();
+  const upstream = init.signal;
+  const onAbort = () => controller.abort();
+  if (upstream?.aborted) {
+    controller.abort();
+  } else {
+    upstream?.addEventListener("abort", onAbort, { once: true });
   }
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+      cache: "no-store",
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("REMOTE_DATA_TIMEOUT");
+    }
+    throw new Error("REMOTE_DATA_UNAVAILABLE");
+  } finally {
+    clearTimeout(timer);
+    upstream?.removeEventListener("abort", onAbort);
+  }
+}
+
+function resolveRemoteFetchTimeoutMs(): number {
+  const parsed = Number(process.env.GO_BACKEND_FETCH_TIMEOUT_MS ?? "10000");
+  if (!Number.isFinite(parsed)) return 10_000;
+  return Math.min(120_000, Math.max(1_000, Math.trunc(parsed)));
 }
 
 export function isRemoteDataOnly(): boolean {

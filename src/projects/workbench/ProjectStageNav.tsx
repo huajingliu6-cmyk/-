@@ -4,6 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { RouteLoadingOverlay } from "@/shell/RouteLoadingOverlay";
+import {
+  confirmGenerationLeaveIfNeeded,
+  isGenerationBusy,
+} from "@/shell/generation-busy";
 
 type ProjectStageNavProps = {
   projectId: string;
@@ -77,7 +81,12 @@ export function ProjectStageNav({
               prefetch={false}
               aria-current={isActive ? "page" : undefined}
               data-testid={`${mode}-nav-${stage.id}`}
-              onClick={() => {
+              onClick={(event) => {
+                if (isGenerationBusy()) {
+                  event.preventDefault();
+                  void confirmGenerationLeaveIfNeeded();
+                  return;
+                }
                 if (!isActive && stage.id === "storyboard") {
                   setPendingNavigation({
                     stageId: stage.id,
