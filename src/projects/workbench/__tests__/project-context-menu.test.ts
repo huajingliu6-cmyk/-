@@ -27,6 +27,18 @@ describe("project management context menu", () => {
     expect(css).toContain(".wb-context-menu");
   });
 
+  it("shows only new project on blank personal project-list space", () => {
+    expect(projectsPage).toContain("PersonalBlankContextMenu");
+    expect(projectsPage).toContain("activeSpace.kind !== \"personal\"");
+    expect(projectsPage).toContain("[data-testid='project-management-card']");
+    expect(readSrc("src/projects/workbench/PersonalBlankContextMenu.tsx")).toContain(
+      'data-testid="personal-blank-ctx-create"',
+    );
+    expect(readSrc("src/projects/workbench/PersonalBlankContextMenu.tsx")).not.toContain(
+      "重命名项目",
+    );
+  });
+
   it("does not allow editing from workbench cards", () => {
     expect(workspacePage).not.toContain("onContextMenu");
     expect(workspacePage).not.toContain("WorkbenchProjectContextMenu");

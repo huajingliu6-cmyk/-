@@ -13,6 +13,10 @@ import {
   type WorkbenchProjectContextAction,
   type WorkbenchProjectContextMenuState,
 } from "@/projects/workbench/WorkbenchProjectContextMenu";
+import {
+  PersonalBlankContextMenu,
+  type PersonalBlankContextMenuState,
+} from "@/projects/workbench/PersonalBlankContextMenu";
 import type { WorkflowProjectSummary } from "@/workflow/lib/workflow-storage";
 import "./projects.css";
 import {
@@ -72,6 +76,8 @@ export default function ProjectsPage() {
   const [apiCanCreate, setApiCanCreate] = useState<boolean | null>(null);
   const [contextMenu, setContextMenu] =
     useState<WorkbenchProjectContextMenuState | null>(null);
+  const [blankContextMenu, setBlankContextMenu] =
+    useState<PersonalBlankContextMenuState | null>(null);
   const [renaming, setRenaming] = useState<{
     projectId: string;
     name: string;
@@ -258,7 +264,23 @@ export default function ProjectsPage() {
   };
 
   return (
-    <div className="pm-page">
+    <div
+      className="pm-page"
+      onContextMenu={(event) => {
+        if (activeSpace.kind !== "personal") return;
+        const target = event.target as Element | null;
+        if (
+          target?.closest(
+            "button, input, textarea, select, a, [role='tab'], [data-testid='project-management-card']",
+          )
+        ) {
+          return;
+        }
+        event.preventDefault();
+        setContextMenu(null);
+        setBlankContextMenu({ x: event.clientX, y: event.clientY });
+      }}
+    >
       <div className="pm-inner">
         <div className="pm-hero">
           <div>
@@ -422,6 +444,13 @@ export default function ProjectsPage() {
         onAction={(action, projectId) => {
           void handleContextAction(action, projectId);
         }}
+      />
+
+      <PersonalBlankContextMenu
+        menu={blankContextMenu}
+        canCreate={canCreate}
+        onClose={() => setBlankContextMenu(null)}
+        onCreate={onNewClick}
       />
 
       {renaming ? (
