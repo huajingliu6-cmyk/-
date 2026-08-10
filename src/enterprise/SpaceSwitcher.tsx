@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Building2, Check, ChevronDown, Plus, Search, UserRound, X } from "lucide-react";
+import { Building2, Check, ChevronDown, Search, UserPlus, UserRound, X } from "lucide-react";
 import {
   ACTIVE_ENTERPRISE_EVENT,
   readActiveSpace,
@@ -31,6 +31,7 @@ export function SpaceSwitcher() {
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [enterprises, setEnterprises] = useState<EnterpriseSummary[]>([]);
   const [pendingJoinRequests, setPendingJoinRequests] = useState<PendingJoinRequest[]>([]);
   const [activeEnterpriseId, setActiveEnterpriseId] = useState<string | null>(null);
@@ -40,6 +41,9 @@ export function SpaceSwitcher() {
   const [result, setResult] = useState<SearchResult | null>(null);
   const [note, setNote] = useState("");
   const [applying, setApplying] = useState(false);
+  const [enterpriseName, setEnterpriseName] = useState("");
+  const [createError, setCreateError] = useState("");
+  const [creating, setCreating] = useState(false);
 
   const reload = useCallback(async () => {
     await Promise.resolve();
@@ -101,6 +105,12 @@ export function SpaceSwitcher() {
     setOpen(false);
     setJoinOpen(true);
     setNote("");
+  };
+
+  const openCreateDialog = () => {
+    setOpen(false);
+    setCreateOpen(true);
+    setCreateError("");
   };
 
   const choosePersonal = () => {
@@ -172,36 +182,61 @@ export function SpaceSwitcher() {
     }
   };
 
+  const createEnterprise = async () => {
+    const name = enterpriseName.trim();
+    if (name.length < 2) {
+      setCreateError("企业名称至少需要 2 个字符");
+      return;
+    }
+    setCreating(true);
+    setCreateError("");
+    try {
+      const response = await fetch("/api/enterprises", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const payload = (await response.json()) as {
+        enterprise?: Pick<EnterpriseSummary, "id" | "accountId" | "name">;
+        error?: string;
+      };
+      if (!response.ok || !payload.enterprise) {
+        throw new Error(payload.error ?? "创建企业失败");
+      }
+      const enterprise = payload.enterprise;
+      setEnterprises((current) => [
+        ...current.filter((item) => item.id !== enterprise.id),
+        { ...enterprise, memberRole: "OWNER", jobRole: "PRODUCER" },
+      ]);
+      setActiveEnterpriseId(enterprise.id);
+      setEnterpriseName("");
+      setCreateOpen(false);
+      writeActiveSpace({ kind: "enterprise", enterpriseId: enterprise.id });
+      router.push("/app/team");
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : "创建企业失败");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <div ref={rootRef} className="space-switcher">
-      <div className="space-switcher__controls">
-        <button
-          type="button"
-          className="space-switcher__trigger"
-          aria-haspopup="menu"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-        >
-          {activeEnterprise ? (
-            <Building2 className="h-3.5 w-3.5" aria-hidden />
-          ) : (
-            <UserRound className="h-3.5 w-3.5" aria-hidden />
-          )}
-          <span>{activeEnterprise?.name ?? "个人空间"}</span>
-          <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-        </button>
-        {!activeEnterprise ? (
-          <button
-            type="button"
-            className="space-switcher__quick-join"
-            aria-haspopup="dialog"
-            onClick={openJoinDialog}
-          >
-            <Plus aria-hidden />
-            <span>加入企业</span>
-          </button>
-        ) : null}
-      </div>
+      <button
+        type="button"
+        className="space-switcher__trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {activeEnterprise ? (
+          <Building2 className="h-3.5 w-3.5" aria-hidden />
+        ) : (
+          <UserRound className="h-3.5 w-3.5" aria-hidden />
+        )}
+        <span>{activeEnterprise?.name ?? "个人空间"}</span>
+        <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+      </button>
 
       {open ? (
         <div className="space-switcher__menu" role="menu">
@@ -248,11 +283,57 @@ export function SpaceSwitcher() {
           <button
             type="button"
             role="menuitem"
+            className="space-switcher__join space-switcher__join--create"
+            onClick={openCreateDialog}
+          >
+            <Building2 aria-hidden />创建企业
+          </button>
+          <button
+            type="button"
+            role="menuitem"
             className="space-switcher__join"
             onClick={openJoinDialog}
           >
-            <Plus aria-hidden />申请加入企业团队
+            <UserPlus aria-hidden />申请加入企业
           </button>
+        </div>
+      ) : null}
+
+      {createOpen ? (
+        <div className="space-join-backdrop" role="presentation" onMouseDown={() => { if (!creating) setCreateOpen(false); }}>
+          <form
+            className="space-join-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="space-create-title"
+            onMouseDown={(event) => event.stopPropagation()}
+            onSubmit={(event) => { event.preventDefault(); void createEnterprise(); }}
+          >
+            <header>
+              <div><h2 id="space-create-title">创建企业</h2><p>创建后你将成为企业所有者，并负责成员、权限和企业数据管理。</p></div>
+              <button type="button" aria-label="关闭" disabled={creating} onClick={() => setCreateOpen(false)}><X aria-hidden /></button>
+            </header>
+            <label className="space-create-field">
+              <span>企业名称</span>
+              <input
+                value={enterpriseName}
+                onChange={(event) => setEnterpriseName(event.target.value)}
+                placeholder="例如：星河动画工作室"
+                minLength={2}
+                maxLength={80}
+                autoFocus
+                required
+              />
+              <small>{enterpriseName.trim().length}/80</small>
+            </label>
+            {createError ? <p className="space-join-note is-error" role="alert">{createError}</p> : null}
+            <div className="space-create-actions">
+              <button type="button" disabled={creating} onClick={() => setCreateOpen(false)}>取消</button>
+              <button type="submit" className="is-primary" disabled={creating || enterpriseName.trim().length < 2}>
+                <Building2 aria-hidden />{creating ? "创建中…" : "创建并进入企业"}
+              </button>
+            </div>
+          </form>
         </div>
       ) : null}
 
