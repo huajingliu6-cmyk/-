@@ -62,6 +62,7 @@ import type {
   TextOutputKind,
 } from "@/text-generation/types";
 import type { TextGenerationProvider } from "@/text-generation/provider/types";
+import { resolveProjectCreditAccount } from "@/enterprise/credit-account";
 
 export type StartTextGenerationInput = {
   projectId: string;
@@ -132,6 +133,18 @@ export async function* runTextGenerationStream(
       });
       return;
     }
+  }
+
+  const creditAccount = await resolveProjectCreditAccount({
+    projectId: input.projectId,
+    actorUserId: input.user.id,
+  });
+  if (!creditAccount) {
+    yield sseEncode({
+      event: "error",
+      data: { code: "FORBIDDEN", message: "你已不是该企业成员，无法使用企业积分" },
+    });
+    return;
   }
 
   let brief = input.brief.trim();
@@ -632,6 +645,7 @@ export async function* runTextGenerationStream(
 
   const reserved = await reserveCredits({
     userId: input.user.id,
+    ...creditAccount,
     points: reservedPoints,
     generationId,
     projectId: input.projectId,

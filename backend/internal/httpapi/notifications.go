@@ -24,6 +24,7 @@ type notification struct {
 	EpisodeID       string  `json:"episodeId"`
 	SubmissionID    string  `json:"submissionId"`
 	SubmitterUserID string  `json:"submitterUserId"`
+	EnterpriseID    string  `json:"enterpriseId,omitempty"`
 	Title           string  `json:"title"`
 	Summary         string  `json:"summary"`
 	CreatedAt       string  `json:"createdAt"`
@@ -126,7 +127,11 @@ func (handler *Notifications) mutateFile(request *http.Request, userID string, m
 }
 
 func validNotificationType(value string) bool {
-	return value == "asset_approval_submitted" || value == "asset_approval_approved" || value == "asset_approval_rejected"
+	return value == "asset_approval_submitted" || value == "asset_approval_approved" || value == "asset_approval_rejected" || value == "enterprise_join_approved" || value == "enterprise_join_rejected"
+}
+
+func enterpriseNotificationType(value string) bool {
+	return value == "enterprise_join_approved" || value == "enterprise_join_rejected"
 }
 
 func (handler *Notifications) list(writer http.ResponseWriter, request *http.Request) {
@@ -164,6 +169,7 @@ func (handler *Notifications) create(writer http.ResponseWriter, request *http.R
 		EpisodeID            string `json:"episodeId"`
 		SubmissionID         string `json:"submissionId"`
 		SubmitterUserID      string `json:"submitterUserId"`
+		EnterpriseID         string `json:"enterpriseId"`
 		Title                string `json:"title"`
 		Summary              string `json:"summary"`
 		DedupeBySubmissionID bool   `json:"dedupeBySubmissionId"`
@@ -171,7 +177,11 @@ func (handler *Notifications) create(writer http.ResponseWriter, request *http.R
 	if err := decodeJSON(writer, request, &input); err != nil {
 		return
 	}
-	if strings.TrimSpace(input.RecipientUserID) == "" || !validNotificationType(input.Type) || strings.TrimSpace(input.ProjectID) == "" || strings.TrimSpace(input.EpisodeID) == "" || strings.TrimSpace(input.SubmissionID) == "" || strings.TrimSpace(input.SubmitterUserID) == "" || strings.TrimSpace(input.Title) == "" {
+	validTarget := strings.TrimSpace(input.ProjectID) != "" && strings.TrimSpace(input.EpisodeID) != ""
+	if enterpriseNotificationType(input.Type) {
+		validTarget = strings.TrimSpace(input.EnterpriseID) != ""
+	}
+	if strings.TrimSpace(input.RecipientUserID) == "" || !validNotificationType(input.Type) || !validTarget || strings.TrimSpace(input.SubmissionID) == "" || strings.TrimSpace(input.SubmitterUserID) == "" || strings.TrimSpace(input.Title) == "" {
 		writeError(writer, http.StatusBadRequest, "invalid notification payload")
 		return
 	}
@@ -180,7 +190,7 @@ func (handler *Notifications) create(writer http.ResponseWriter, request *http.R
 		writeError(writer, http.StatusInternalServerError, "notification id generation failed")
 		return
 	}
-	item := notification{ID: "ntf_" + hex.EncodeToString(idBytes), RecipientUserID: input.RecipientUserID, Type: input.Type, ProjectID: input.ProjectID, EpisodeID: input.EpisodeID, SubmissionID: input.SubmissionID, SubmitterUserID: input.SubmitterUserID, Title: input.Title, Summary: input.Summary, CreatedAt: requestTime()}
+	item := notification{ID: "ntf_" + hex.EncodeToString(idBytes), RecipientUserID: input.RecipientUserID, Type: input.Type, ProjectID: input.ProjectID, EpisodeID: input.EpisodeID, SubmissionID: input.SubmissionID, SubmitterUserID: input.SubmitterUserID, EnterpriseID: input.EnterpriseID, Title: input.Title, Summary: input.Summary, CreatedAt: requestTime()}
 	result, err := handler.mutateFile(request, input.RecipientUserID, func(file *notificationFile) (any, bool, error) {
 		if input.DedupeBySubmissionID {
 			for _, existing := range file.Notifications {

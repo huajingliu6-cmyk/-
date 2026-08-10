@@ -42,7 +42,9 @@ function parseNotification(raw: unknown): AppNotification | null {
   if (
     raw.type !== "asset_approval_submitted" &&
     raw.type !== "asset_approval_approved" &&
-    raw.type !== "asset_approval_rejected"
+    raw.type !== "asset_approval_rejected" &&
+    raw.type !== "enterprise_join_approved" &&
+    raw.type !== "enterprise_join_rejected"
   ) {
     return null;
   }
@@ -65,6 +67,8 @@ function parseNotification(raw: unknown): AppNotification | null {
     episodeId: raw.episodeId,
     submissionId: raw.submissionId,
     submitterUserId: raw.submitterUserId,
+    enterpriseId:
+      typeof raw.enterpriseId === "string" ? raw.enterpriseId : undefined,
     title: raw.title,
     summary: raw.summary,
     createdAt: raw.createdAt,
@@ -142,6 +146,7 @@ export async function createNotification(input: {
   episodeId: string;
   submissionId: string;
   submitterUserId: string;
+  enterpriseId?: string;
   title: string;
   summary: string;
   dedupeBySubmissionId?: boolean;
@@ -164,6 +169,7 @@ export async function createNotification(input: {
     episodeId: input.episodeId,
     submissionId: input.submissionId,
     submitterUserId: input.submitterUserId,
+    enterpriseId: input.enterpriseId,
     title: input.title,
     summary: input.summary,
     createdAt: new Date().toISOString(),

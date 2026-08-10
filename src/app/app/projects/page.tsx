@@ -15,6 +15,11 @@ import {
 } from "@/projects/workbench/WorkbenchProjectContextMenu";
 import type { WorkflowProjectSummary } from "@/workflow/lib/workflow-storage";
 import "./projects.css";
+import {
+  ACTIVE_ENTERPRISE_EVENT,
+  readActiveSpace,
+  type ActiveSpace,
+} from "@/enterprise/client-space";
 
 type StatusFilter = "all" | WorkflowProjectSummary["status"];
 
@@ -72,6 +77,9 @@ export default function ProjectsPage() {
     name: string;
   } | null>(null);
   const [renameBusy, setRenameBusy] = useState(false);
+  const [activeSpace, setActiveSpace] = useState<ActiveSpace>(() =>
+    readActiveSpace(),
+  );
 
   const allowedBySession =
     auth.status === "authenticated" && canCreateProject(auth.user);
@@ -88,6 +96,9 @@ export default function ProjectsPage() {
         page: "1",
         pageSize: "50",
       });
+      if (activeSpace.kind === "enterprise") {
+        params.set("enterpriseId", activeSpace.enterpriseId);
+      }
       if (debouncedQuery.trim()) {
         params.set("q", debouncedQuery.trim());
         params.set("pageSize", "100");
@@ -112,7 +123,16 @@ export default function ProjectsPage() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedQuery]);
+  }, [activeSpace, debouncedQuery]);
+
+  useEffect(() => {
+    const onSpaceChanged = (event: Event) => {
+      const detail = (event as CustomEvent<ActiveSpace>).detail;
+      setActiveSpace(detail ?? readActiveSpace());
+    };
+    window.addEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
+    return () => window.removeEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
+  }, []);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
@@ -242,8 +262,12 @@ export default function ProjectsPage() {
       <div className="pm-inner">
         <div className="pm-hero">
           <div>
-            <h1>项目管理</h1>
-            <p>管理项目、查看生成进度并继续上次创作。</p>
+            <h1>{activeSpace.kind === "enterprise" ? "企业项目" : "我的项目"}</h1>
+            <p>
+              {activeSpace.kind === "enterprise"
+                ? "查看当前企业空间内的项目与创作进度。"
+                : "管理个人项目、查看生成进度并继续上次创作。"}
+            </p>
           </div>
           <button
             ref={newBtnRef}

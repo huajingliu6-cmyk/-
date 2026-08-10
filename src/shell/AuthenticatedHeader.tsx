@@ -11,6 +11,7 @@ import { GlobalBackButton } from "@/shell/GlobalBackButton";
 import { NotificationBell } from "@/shell/NotificationBell";
 import { APP_SHELL_ROOT } from "@/shell/nav";
 import type { AuthUser } from "@/auth/types";
+import { SpaceSwitcher } from "@/enterprise/SpaceSwitcher";
 
 type Props = {
   user: AuthUser;
@@ -38,6 +39,7 @@ export function AuthenticatedHeader({ user }: Props) {
         />
 
         <div className="shell-account shell-account--end">
+          <SpaceSwitcher />
           <AppearanceButton compact />
           <NotificationBell />
           <AccountActions user={user} />

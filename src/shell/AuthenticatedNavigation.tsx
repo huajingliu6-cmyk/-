@@ -11,6 +11,13 @@ import {
   confirmGenerationLeaveIfNeeded,
   isGenerationBusy,
 } from "@/shell/generation-busy";
+import {
+  ACTIVE_ENTERPRISE_EVENT,
+  readActiveSpace,
+  type ActiveSpace,
+} from "@/enterprise/client-space";
+
+const PERSONAL_NAV_IDS = new Set(["projects", "showcase", "guide"]);
 
 function initialNavItems(user?: AuthUser): ShellNavItem[] {
   // Admins already know full nav; avoid flash / stuck workspace-only on API lag.
@@ -28,6 +35,9 @@ export function AuthenticatedNavigation({
   const pathname = usePathname();
   const [bounceId, setBounceId] = useState<string | null>(null);
   const [items, setItems] = useState<ShellNavItem[]>(() => initialNavItems(user));
+  const [activeSpace, setActiveSpace] = useState<ActiveSpace>(() =>
+    readActiveSpace(),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +64,20 @@ export function AuthenticatedNavigation({
     };
   }, []);
 
+  useEffect(() => {
+    const onSpaceChanged = (event: Event) => {
+      const detail = (event as CustomEvent<ActiveSpace>).detail;
+      setActiveSpace(detail ?? readActiveSpace());
+    };
+    window.addEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
+    return () => window.removeEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
+  }, []);
+
+  const visibleItems =
+    activeSpace.kind === "enterprise"
+      ? items
+      : items.filter((item) => PERSONAL_NAV_IDS.has(item.id));
+
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(`${href}/`);
 
@@ -65,7 +89,7 @@ export function AuthenticatedNavigation({
 
   return (
     <nav className="shell-nav" aria-label="业务导航">
-      {items.map((item) => {
+      {visibleItems.map((item) => {
         const active = isActive(item.href);
         const className = [
           "shell-nav__item",

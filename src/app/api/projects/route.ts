@@ -11,6 +11,7 @@ import {
   ProjectNameConflictError,
 } from "@/projects/project-access";
 import { parseCreateProjectBody } from "@/projects/validate-create-project";
+import { getEnterprise, listEnterpriseProjectIdsForUser } from "@/enterprise/store";
 
 /** Next.js 仅负责会话、权限和请求边界；项目数据统一由内网 Go 服务处理。 */
 export async function GET(request: Request) {
@@ -33,6 +34,7 @@ export async function GET(request: Request) {
   const rawSize = Math.trunc(Number(url.searchParams.get("pageSize") ?? "50")) || 50;
   const pageSize = Math.min(100, Math.max(1, rawSize));
   const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+  const enterpriseId = (url.searchParams.get("enterpriseId") ?? "").trim();
 
   try {
     const { projects } = await listProjectListItems();
@@ -41,6 +43,26 @@ export async function GET(request: Request) {
       managed === "all"
         ? projects
         : projects.filter((p) => managed.includes(p.projectId));
+    if (enterpriseId) {
+      const enterprise = await getEnterprise(enterpriseId);
+      const isMember = enterprise?.members.some(
+        (member) => member.userId === session.user.id,
+      );
+      if (!enterprise || !isMember) {
+        return NextResponse.json({ error: "无权访问该企业" }, { status: 403 });
+      }
+      const enterpriseProjects = new Set(enterprise.projectIds);
+      filtered = filtered.filter((project) =>
+        enterpriseProjects.has(project.projectId),
+      );
+    } else {
+      const enterpriseProjects = new Set(
+        await listEnterpriseProjectIdsForUser(session.user.id),
+      );
+      filtered = filtered.filter(
+        (project) => !enterpriseProjects.has(project.projectId),
+      );
+    }
     if (q) {
       filtered = filtered.filter(
         (p) =>

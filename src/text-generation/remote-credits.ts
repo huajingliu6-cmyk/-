@@ -1,6 +1,7 @@
 import "server-only";
 
 import { requestRemoteData } from "@/persistence/remote-data-client";
+import type { LedgerEntry } from "@/text-generation/credits";
 
 async function creditsRequest<T>(
   path: string,
@@ -13,9 +14,9 @@ async function creditsRequest<T>(
   return (await response.json()) as T;
 }
 
-async function getCreditsRemote(userId: string) {
+async function getCreditsRemote(accountId: string) {
   return creditsRequest<{ balance: number; frozen: number }>(
-    `/v1/text-credits?userId=${encodeURIComponent(userId)}`,
+    `/v1/text-credits?accountId=${encodeURIComponent(accountId)}`,
   );
 }
 
@@ -29,6 +30,9 @@ export async function getFrozenCreditsRemote(userId: string): Promise<number> {
 
 export function reserveCreditsRemote(input: {
   userId: string;
+  accountId?: string;
+  actorUserId?: string;
+  enterpriseId?: string;
   points: number;
   generationId: string;
   projectId: string;
@@ -52,4 +56,13 @@ export async function settleReservationRemote(input: {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "settle", ...input }),
   });
+}
+
+export async function listCreditLedgerRemote(accountId: string): Promise<LedgerEntry[]> {
+  const result = await creditsRequest<{ ledger: LedgerEntry[] }>(
+    `/v1/text-credits?accountId=${encodeURIComponent(accountId)}&includeLedger=true`,
+  );
+  return [...(result.ledger ?? [])].sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt),
+  );
 }

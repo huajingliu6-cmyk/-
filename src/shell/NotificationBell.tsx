@@ -17,6 +17,7 @@ import {
   subscribeNotifications,
 } from "@/shell/notifications-poller";
 import { useChipBounce } from "@/shell/useChipBounce";
+import { writeActiveSpace } from "@/enterprise/client-space";
 
 const PANEL_CLOSE_MS = 220;
 const ROW_EXIT_MS = 380;
@@ -122,6 +123,20 @@ export function NotificationBell() {
       router.push(
         `/app/workspace/projects/${encodeURIComponent(note.projectId)}/assets/design?episodeId=${encodeURIComponent(note.episodeId)}`,
       );
+      return;
+    }
+    if (
+      (note.type === "enterprise_join_approved" ||
+        note.type === "enterprise_join_rejected") &&
+      note.enterpriseId
+    ) {
+      if (note.type === "enterprise_join_approved") {
+        writeActiveSpace({ kind: "enterprise", enterpriseId: note.enterpriseId });
+        router.push("/app/team");
+        return;
+      }
+      writeActiveSpace({ kind: "personal" });
+      router.push("/app/projects");
     }
   };
 

@@ -1,6 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ACTIVE_ENTERPRISE_EVENT,
+  readActiveSpace,
+} from "@/enterprise/client-space";
 
 export type CreditsState =
   | { status: "loading" }
@@ -28,8 +32,10 @@ export function useCredits(): UseCreditsResult {
   useEffect(() => {
     const onRefresh = () => setEpoch((n) => n + 1);
     window.addEventListener("ic-credits-refresh", onRefresh);
+    window.addEventListener(ACTIVE_ENTERPRISE_EVENT, onRefresh);
     return () => {
       window.removeEventListener("ic-credits-refresh", onRefresh);
+      window.removeEventListener(ACTIVE_ENTERPRISE_EVENT, onRefresh);
     };
   }, []);
 
@@ -40,7 +46,12 @@ export function useCredits(): UseCreditsResult {
     }
     void (async () => {
       try {
-        const res = await fetch("/api/credits");
+        const space = readActiveSpace();
+        const query =
+          space.kind === "enterprise"
+            ? `?enterpriseId=${encodeURIComponent(space.enterpriseId)}`
+            : "";
+        const res = await fetch(`/api/credits${query}`);
         if (!res.ok) {
           if (!cancelled) {
             hasLoadedRef.current = true;
