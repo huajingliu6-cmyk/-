@@ -97,6 +97,12 @@ export function SpaceSwitcher() {
     (enterprise) => enterprise.id === activeEnterpriseId,
   );
 
+  const openJoinDialog = () => {
+    setOpen(false);
+    setJoinOpen(true);
+    setNote("");
+  };
+
   const choosePersonal = () => {
     setActiveEnterpriseId(null);
     writeActiveSpace({ kind: "personal" });
@@ -168,21 +174,34 @@ export function SpaceSwitcher() {
 
   return (
     <div ref={rootRef} className="space-switcher">
-      <button
-        type="button"
-        className="space-switcher__trigger"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        {activeEnterprise ? (
-          <Building2 className="h-3.5 w-3.5" aria-hidden />
-        ) : (
-          <UserRound className="h-3.5 w-3.5" aria-hidden />
-        )}
-        <span>{activeEnterprise?.name ?? "个人空间"}</span>
-        <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-      </button>
+      <div className="space-switcher__controls">
+        <button
+          type="button"
+          className="space-switcher__trigger"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {activeEnterprise ? (
+            <Building2 className="h-3.5 w-3.5" aria-hidden />
+          ) : (
+            <UserRound className="h-3.5 w-3.5" aria-hidden />
+          )}
+          <span>{activeEnterprise?.name ?? "个人空间"}</span>
+          <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+        </button>
+        {!activeEnterprise ? (
+          <button
+            type="button"
+            className="space-switcher__quick-join"
+            aria-haspopup="dialog"
+            onClick={openJoinDialog}
+          >
+            <Plus aria-hidden />
+            <span>加入企业</span>
+          </button>
+        ) : null}
+      </div>
 
       {open ? (
         <div className="space-switcher__menu" role="menu">
@@ -230,7 +249,7 @@ export function SpaceSwitcher() {
             type="button"
             role="menuitem"
             className="space-switcher__join"
-            onClick={() => { setOpen(false); setJoinOpen(true); setNote(""); }}
+            onClick={openJoinDialog}
           >
             <Plus aria-hidden />申请加入企业团队
           </button>
