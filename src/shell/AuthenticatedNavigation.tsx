@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { AuthUser } from "@/auth/types";
 import { AUTH_NAV_ITEMS, type ShellNavItem } from "@/shell/nav";
+import { navigationForSpace } from "@/shell/space-navigation";
 import { prefersReducedMotion } from "@/shell/login-portal";
 import { memoryFetch } from "@/shell/memory-fetch";
 import {
@@ -17,14 +18,6 @@ import {
   type ActiveSpace,
 } from "@/enterprise/client-space";
 
-const PERSONAL_NAV_IDS = new Set(["projects", "showcase", "guide"]);
-
-function initialNavItems(user?: AuthUser): ShellNavItem[] {
-  // Admins already know full nav; avoid flash / stuck workspace-only on API lag.
-  if (user?.role === "admin") return AUTH_NAV_ITEMS;
-  return AUTH_NAV_ITEMS.filter((item) => item.id === "workspace");
-}
-
 export function AuthenticatedNavigation({
   onNavigate,
   user,
@@ -34,7 +27,9 @@ export function AuthenticatedNavigation({
 }) {
   const pathname = usePathname();
   const [bounceId, setBounceId] = useState<string | null>(null);
-  const [items, setItems] = useState<ShellNavItem[]>(() => initialNavItems(user));
+  const [items, setItems] = useState<ShellNavItem[] | null>(() =>
+    user?.role === "admin" ? AUTH_NAV_ITEMS : null,
+  );
   const [activeSpace, setActiveSpace] = useState<ActiveSpace>(() =>
     readActiveSpace(),
   );
@@ -73,10 +68,7 @@ export function AuthenticatedNavigation({
     return () => window.removeEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
   }, []);
 
-  const visibleItems =
-    activeSpace.kind === "enterprise"
-      ? items
-      : items.filter((item) => PERSONAL_NAV_IDS.has(item.id));
+  const visibleItems = navigationForSpace(activeSpace, items);
 
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(`${href}/`);

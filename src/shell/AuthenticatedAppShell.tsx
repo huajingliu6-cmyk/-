@@ -1,11 +1,17 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AuthenticatedHeader } from "@/shell/AuthenticatedHeader";
 import { GenerationBusyGuard } from "@/shell/GenerationBusyGuard";
 import { useAuthUser } from "@/shell/useAuthUser";
 import { APP_SHELL_ROOT } from "@/shell/nav";
+import {
+  ACTIVE_ENTERPRISE_EVENT,
+  readActiveSpace,
+  type ActiveSpace,
+} from "@/enterprise/client-space";
+import { resolveSpaceRedirect } from "@/enterprise/space-access";
 import "@/shell/shell.css";
 
 function ShellHeaderPlaceholder() {
@@ -37,6 +43,18 @@ export function AuthenticatedAppShell({
   const auth = useAuthUser();
   const router = useRouter();
   const pathname = usePathname();
+  const [activeSpace, setActiveSpace] = useState<ActiveSpace>(() => readActiveSpace());
+
+  useEffect(() => {
+    const onSpaceChanged = (event: Event) => {
+      const detail = (event as CustomEvent<ActiveSpace>).detail;
+      setActiveSpace(detail ?? readActiveSpace());
+    };
+    window.addEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
+    return () => window.removeEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
+  }, []);
+
+  const spaceRedirect = resolveSpaceRedirect(pathname, activeSpace);
 
   useEffect(() => {
     // 仅确认 guest 时踢回；loading 期间不要误判
@@ -46,6 +64,12 @@ export function AuthenticatedAppShell({
       );
     }
   }, [auth.status, pathname, router]);
+
+  useEffect(() => {
+    if (auth.status === "authenticated" && spaceRedirect) {
+      router.replace(spaceRedirect);
+    }
+  }, [auth.status, router, spaceRedirect]);
 
   if (auth.status === "loading") {
     return (
@@ -72,7 +96,7 @@ export function AuthenticatedAppShell({
         key={pathname}
         className="shell-outlet shell-outlet--enter relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
       >
-        {auth.status === "authenticated" ? children : null}
+        {auth.status === "authenticated" && !spaceRedirect ? children : null}
       </div>
     </div>
   );

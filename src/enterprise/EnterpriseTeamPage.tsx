@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Building2, Check, Coins, FolderKanban, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
+import { Check, Coins, FolderKanban, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
 import {
   ACTIVE_ENTERPRISE_EVENT,
   readActiveSpace,
@@ -53,8 +53,6 @@ export function EnterpriseTeamPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
-  const [newEnterpriseName, setNewEnterpriseName] = useState("");
-  const [creating, setCreating] = useState(false);
   const [assignableProjects, setAssignableProjects] = useState<AssignableProject[]>([]);
   const [savingProjects, setSavingProjects] = useState(false);
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
@@ -106,18 +104,6 @@ export function EnterpriseTeamPage() {
 
   const canManageJobs = dashboard?.permissions.canManageJobs ?? false;
   const canManageAdmins = dashboard?.permissions.canManageAdmins ?? false;
-
-  const createEnterprise = async () => {
-    setCreating(true); setError("");
-    try {
-      const response = await fetch("/api/enterprises", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: newEnterpriseName }) });
-      const payload = (await response.json()) as { enterprise?: { id: string }; error?: string };
-      if (!response.ok || !payload.enterprise) throw new Error(payload.error ?? "创建企业失败");
-      const next: ActiveSpace = { kind: "enterprise", enterpriseId: payload.enterprise.id };
-      writeActiveSpace(next); setSpace(next); setNewEnterpriseName("");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "创建企业失败"); }
-    finally { setCreating(false); }
-  };
 
   const updateMember = async (userId: string, patch: { jobRole?: EnterpriseJobRole; enterpriseRole?: "ADMIN" | "MEMBER" }) => {
     if (space.kind !== "enterprise") return;
@@ -212,15 +198,7 @@ export function EnterpriseTeamPage() {
   }), [dashboard]);
 
   if (space.kind !== "enterprise") {
-    return (
-      <main className="ent-page"><div className="ent-empty-space">
-        <span className="ent-empty-space__icon"><Building2 aria-hidden /></span>
-        <h1>当前为个人空间</h1>
-        <p>个人创作不需要团队管理与审批。你可以从右上角申请加入企业，或创建自己的企业团队。</p>
-        <div className="ent-create"><input value={newEnterpriseName} onChange={(event) => setNewEnterpriseName(event.target.value)} placeholder="输入企业名称" maxLength={80} /><button type="button" disabled={creating || newEnterpriseName.trim().length < 2} onClick={() => void createEnterprise()}>{creating ? "创建中…" : "创建企业团队"}</button></div>
-        {error ? <p className="ent-error">{error}</p> : null}
-      </div></main>
-    );
+    return null;
   }
 
   return (
