@@ -39,9 +39,9 @@ export function AuthenticatedHeader({ user }: Props) {
         />
 
         <div className="shell-account shell-account--end">
-          <SpaceSwitcher />
           <AppearanceButton compact />
           <NotificationBell />
+          <SpaceSwitcher />
           <AccountActions user={user} />
           <button
             type="button"
