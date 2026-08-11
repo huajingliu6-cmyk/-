@@ -20,6 +20,7 @@ import {
   appendStoryboardVideoHistory,
 } from "@/projects/storyboard/video-history-ids";
 import { resolveStoryboardVideoOutputParams } from "@/projects/storyboard/storyboard-video-params";
+import { providerModelIdForStoryboardVideoModelChoice } from "@/projects/storyboard/storyboard-video-model-choices";
 import {
   paidGenerationAllowed,
   resolveVideoProviderRuntimeConfig,
@@ -155,6 +156,7 @@ export async function POST(request: Request, context: RouteContext) {
   const outputParams = resolveStoryboardVideoOutputParams(
     body,
     shot.durationSeconds,
+    loaded.context.workspace.videoDefaults,
   );
 
   const submitted = await submitStoryboardShotVideo({
@@ -166,6 +168,10 @@ export async function POST(request: Request, context: RouteContext) {
     resolution: outputParams.resolution,
     aspectRatio: outputParams.aspectRatio,
     durationSeconds: outputParams.durationSeconds,
+    stylePreset: outputParams.stylePreset || undefined,
+    modelIdOverride: providerModelIdForStoryboardVideoModelChoice(
+      outputParams.modelChoice,
+    ),
   });
 
   if (!submitted.ok) {

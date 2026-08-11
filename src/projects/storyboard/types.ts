@@ -1,5 +1,7 @@
 /** 正式创作（分镜工作台）领域类型 — 与 script-draft / assets-draft 同级的服务端持久化 */
 
+import type { StoryboardVideoDefaults } from "@/projects/storyboard/storyboard-video-params";
+
 /** UI 步骤：1 选择剧集 / 确认剧本，2 分镜创作。旧数据中的 3 会归一化为 2。 */
 export type CreationStep = 1 | 2;
 
@@ -221,6 +223,8 @@ export type ProjectStoryboardWorkspace = {
   projectId: string;
   activeEpisodeId: string | null;
   productions: EpisodeProduction[];
+  /** 项目级视频生成默认：比例 / 画质 / 模型 / 风格 */
+  videoDefaults?: StoryboardVideoDefaults | null;
   updatedAt: string;
 };
 

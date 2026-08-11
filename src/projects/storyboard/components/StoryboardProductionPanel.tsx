@@ -8,11 +8,9 @@ import {
   fetchEpisodeProduction,
   fetchVideoGenerationPublicConfig,
   generateEpisodeVideos,
-  generateStoryboard,
   patchWorkingScript,
   ScriptInvalidateRequiredError,
   StoryboardConfirmIncompleteError,
-  StoryboardGenerateInProgressError,
 } from "@/projects/storyboard/api-client";
 import { EpisodeVideoGenerationButton } from "@/projects/storyboard/components/EpisodeVideoGenerationButton";
 import { ShotSceneRequiredDialog } from "@/projects/storyboard/components/ShotSceneRequiredDialog";
@@ -45,6 +43,13 @@ type Props = {
   onNote: (note: string) => void;
   onScriptDraftChange?: (text: string | null) => void;
   canGenerateVideo?: boolean;
+  /** 项目级视频默认；单镜头可覆盖 */
+  videoDefaults?: import("@/projects/storyboard/storyboard-video-params").StoryboardVideoDefaults | null;
+  /** 本集提示词生成展示状态 */
+  promptGenStatus?: import("@/projects/storyboard/prompt-generation-manager").EpisodePromptGenUiStatus;
+  promptGenError?: string;
+  promptQueueHint?: string;
+  onRequestPromptGenerate?: (opts?: { force?: boolean }) => void;
 };
 
 export function StoryboardProductionPanel({
@@ -55,10 +60,14 @@ export function StoryboardProductionPanel({
   onNote,
   onScriptDraftChange,
   canGenerateVideo = true,
+  videoDefaults = null,
+  promptGenStatus = "idle",
+  promptGenError,
+  promptQueueHint,
+  onRequestPromptGenerate,
 }: Props) {
   const idempotencyRef = useRef<string>(crypto.randomUUID());
   const batchKeyRef = useRef<string>(crypto.randomUUID());
-  const [generating, setGenerating] = useState(false);
   const [confirmingScript, setConfirmingScript] = useState(false);
   const [savingScript, setSavingScript] = useState(false);
   const [scriptModalOpen, setScriptModalOpen] = useState(false);
@@ -107,16 +116,12 @@ export function StoryboardProductionPanel({
   );
   const confirmed = production.status === "storyboard_done";
 
-  useEffect(() => {
-    if (!scriptModalOpen) {
-      setScriptText(production.workingScriptText);
-    }
-  }, [
-    scriptModalOpen,
-    production.episodeId,
-    production.workingScriptRevision,
-    production.workingScriptText,
-  ]);
+  const scriptSyncKey = `${production.episodeId}:${production.workingScriptRevision}:${production.workingScriptText}`;
+  const [syncedScriptKey, setSyncedScriptKey] = useState(scriptSyncKey);
+  if (!scriptModalOpen && syncedScriptKey !== scriptSyncKey) {
+    setSyncedScriptKey(scriptSyncKey);
+    setScriptText(production.workingScriptText);
+  }
 
   const validSceneIds = useMemo(
     () => new Set(assets.filter((a) => a.kind === "scene").map((a) => a.id)),
@@ -169,7 +174,6 @@ export function StoryboardProductionPanel({
           onProductionChange(latest);
         }
         if (latest.status !== "storyboard_generating") {
-          setGenerating(false);
           if (
             latest.status === "storyboard_incomplete" ||
             latest.status === "storyboard_done"
@@ -201,15 +205,13 @@ export function StoryboardProductionPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- avoid poll restart storms
   }, [production.status, production.episodeId, projectId]);
 
-  useEffect(() => {
-    if (!storyboard) return;
-    if (seededBoardId === storyboard.id) return;
+  if (storyboard && seededBoardId !== storyboard.id) {
     setSeededBoardId(storyboard.id);
     // Keep all shots collapsed on first paint — expanding one card pulls
     // video-history and mounts heavy editors; users expand on demand.
     setExpanded({});
     setFocusShotId(null);
-  }, [seededBoardId, storyboard]);
+  }
 
   const episodeVideoEnabled = useMemo(() => {
     if (!storyboard || !canGenerateVideo) {
@@ -343,46 +345,18 @@ export function StoryboardProductionPanel({
   ]);
 
   const handleGenerate = useCallback(
-    async (opts?: { force?: boolean }) => {
-      if (storyboard && !production.storyboardStale && !opts?.force) return;
-      setGenerating(true);
-      setFocusShotId(null);
-      setPanelNote(
-        "正在调用模型生成整集提示词，通常需要 1–3 分钟，请勿关闭或刷新页面…",
-      );
-      onNote("正在生成整集分镜提示词…");
-      try {
-        const updated = await generateStoryboard(
-          projectId,
-          production.episodeId,
-          idempotencyRef.current,
-        );
-        onProductionChange(updated);
-        setSeededBoardId(null);
-        setExpanded({});
-        setPanelNote("分镜提示词生成完成，请完善提示词与镜头素材。");
-        onNote("分镜提示词生成完成。");
-      } catch (error) {
-        if (error instanceof StoryboardGenerateInProgressError) {
-          onProductionChange(error.production);
-          setPanelNote(error.message);
-          onNote(error.message);
-          return;
-        }
-        const message =
-          error instanceof Error ? error.message : "分镜生成失败";
-        setPanelNote(message);
-        onNote(message);
-      } finally {
-        setGenerating(false);
+    (opts?: { force?: boolean }) => {
+      if (storyboard && !production.storyboardStale && !opts?.force) {
+        if (production.status !== "generation_failed") return;
       }
+      setFocusShotId(null);
+      setPanelNote("");
+      onRequestPromptGenerate?.(opts);
     },
     [
-      onNote,
-      onProductionChange,
-      production.episodeId,
+      onRequestPromptGenerate,
+      production.status,
       production.storyboardStale,
-      projectId,
       storyboard,
     ],
   );
@@ -639,19 +613,19 @@ export function StoryboardProductionPanel({
   ]);
 
   const isGenerating =
-    production.status === "storyboard_generating" || generating;
-  useGenerationBusy(
-    isGenerating,
-    `storyboard-prompt-${projectId}-${production.episodeId}`,
-    "分镜提示词生成",
-  );
+    promptGenStatus === "generating" ||
+    promptGenStatus === "queued" ||
+    production.status === "storyboard_generating";
   useGenerationBusy(
     batchBusy,
     `storyboard-video-batch-${projectId}-${production.episodeId}`,
     "整集视频生成提交",
   );
-  const canGeneratePrompts = scriptConfirmed && !storyboard;
-  const canRegenerateEpisodePrompts = scriptConfirmed && Boolean(storyboard);
+  const canGeneratePrompts =
+    scriptConfirmed &&
+    (!storyboard ||
+      production.status === "generation_failed" ||
+      production.storyboardStale);
 
   const episodeVideoDisabledReason = !storyboard
     ? "请先生成分镜提示词"
@@ -714,14 +688,33 @@ export function StoryboardProductionPanel({
       <div className="sbw-panel__body">
         {production.storyboardStale ? (
           <div className="sbw-banner" data-testid="script-changed-reminder">
-            剧本已变更，现有分镜提示词可能不再完全适用。可继续使用当前提示词，也可点击「重新生成本集分镜提示词」。
+            剧本已变更，现有分镜提示词可能不再完全适用。可继续使用当前提示词，也可再次「生成分镜提示词」。
           </div>
         ) : null}
 
         {production.status === "generation_failed" &&
-        production.generationError ? (
+        (production.generationError || promptGenError) ? (
           <div className="sbw-banner is-error">
-            生成失败：{production.generationError}
+            生成失败：{promptGenError || production.generationError}
+          </div>
+        ) : null}
+
+        {promptGenStatus === "failed" && promptGenError ? (
+          <div className="sbw-banner is-error" data-testid="episode-prompt-gen-failed">
+            本集提示词生成失败：{promptGenError}
+          </div>
+        ) : null}
+
+        {isGenerating ? (
+          <div
+            className="sbw-banner"
+            data-testid="episode-prompt-gen-busy"
+            aria-live="polite"
+          >
+            {promptGenStatus === "queued"
+              ? "本集提示词排队等待生成中…"
+              : "本集分镜提示词生成中（约 1–3 分钟），可切换其它剧集继续编辑。"}
+            {promptQueueHint ? ` ${promptQueueHint}` : ""}
           </div>
         ) : null}
 
@@ -734,10 +727,31 @@ export function StoryboardProductionPanel({
               disabled={isGenerating}
               onClick={() => {
                 idempotencyRef.current = crypto.randomUUID();
-                void handleGenerate();
+                handleGenerate({
+                  force: Boolean(storyboard) || production.storyboardStale,
+                });
               }}
             >
-              {isGenerating ? "生成中（约 1–3 分钟）…" : "生成分镜提示词"}
+              {promptGenStatus === "queued"
+                ? "排队中…"
+                : isGenerating
+                  ? "生成中（约 1–3 分钟）…"
+                  : "生成分镜提示词"}
+            </button>
+          ) : null}
+          {promptGenStatus === "failed" ||
+          production.status === "generation_failed" ? (
+            <button
+              type="button"
+              className="sbw-btn"
+              data-testid="retry-episode-storyboard-prompts"
+              disabled={isGenerating}
+              onClick={() => {
+                idempotencyRef.current = crypto.randomUUID();
+                handleGenerate({ force: true });
+              }}
+            >
+              重试
             </button>
           ) : null}
           <button
@@ -760,12 +774,6 @@ export function StoryboardProductionPanel({
           />
         </div>
 
-        {isGenerating && !storyboard ? (
-          <p className="sbw-note" data-testid="storyboard-generating-hint">
-            整集提示词由模型一次性生成，通常需要 1–3 分钟。请勿关闭或刷新页面。
-          </p>
-        ) : null}
-
         {incompleteCount > 0 && storyboard ? (
           <p className="sbw-note">
             当前还有 {incompleteCount} 个镜头需要补充提示词或素材。
@@ -775,19 +783,12 @@ export function StoryboardProductionPanel({
         {!storyboard ? (
           <div className="sbw-script-stage">
             {displayScript.trim() ? (
-              <>
-                <pre
-                  className="sbw-pre"
-                  data-testid="storyboard-script-preview"
-                >
-                  {displayScript}
-                </pre>
-                <p className="sbw-hint" style={{ marginTop: 12 }}>
-                  {scriptConfirmed
-                    ? "剧本已确认，点击「生成分镜提示词」继续。人物、道具、场景可在每个镜头中单独添加。"
-                    : "请先点击右上角「确认剧本」，确认后再生成分镜提示词。也可点「修改剧本」编辑正文。"}
-                </p>
-              </>
+              <pre
+                className="sbw-pre"
+                data-testid="storyboard-script-preview"
+              >
+                {displayScript}
+              </pre>
             ) : (
               <div className="sbw-empty">
                 暂无剧本内容。请点击「修改剧本」粘贴本集正文，保存后确认。
@@ -795,31 +796,7 @@ export function StoryboardProductionPanel({
             )}
           </div>
         ) : (
-          <>
-            {canRegenerateEpisodePrompts ? (
-              <div className="sbw-shot-list__toolbar">
-                <button
-                  type="button"
-                  className="sbw-btn sbw-btn-primary"
-                  data-testid="regenerate-episode-storyboard-prompts"
-                  disabled={isGenerating}
-                  onClick={() => {
-                    idempotencyRef.current = crypto.randomUUID();
-                    void handleGenerate({ force: true });
-                  }}
-                >
-                  {isGenerating
-                    ? "生成中（约 1–3 分钟）…"
-                    : "重新生成本集分镜提示词"}
-                </button>
-              </div>
-            ) : null}
-            {isGenerating ? (
-              <p className="sbw-note" data-testid="storyboard-generating-hint">
-                整集提示词由模型一次性生成，镜头较多时可能需要几分钟。若页面曾刷新，将自动同步结果。
-              </p>
-            ) : null}
-            <div className="sbw-shot-list">
+          <div className="sbw-shot-list">
             {flat.map((row) => (
               <StoryboardShotAccordion
                 key={row.shot.id}
@@ -841,14 +818,14 @@ export function StoryboardProductionPanel({
                 highlightUnresolved={focusShotId === row.shot.id}
                 openScenePickerToken={scenePickerTokens[row.shot.id] ?? 0}
                 videoConfig={videoConfig}
+                videoDefaults={videoDefaults}
                 cardRef={(el) => {
                   if (el) cardRefs.current.set(row.shot.id, el);
                   else cardRefs.current.delete(row.shot.id);
                 }}
               />
             ))}
-            </div>
-          </>
+          </div>
         )}
 
         {panelNote ? <p className="sbw-note">{panelNote}</p> : null}

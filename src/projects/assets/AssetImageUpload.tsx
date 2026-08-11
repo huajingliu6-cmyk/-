@@ -35,6 +35,8 @@ type Props = {
   /** Bumps after successful replace so <img> reloads despite Cache-Control. */
   revision?: number;
   onRevisionChange?: (next: number) => void;
+  /** 由外层已展示主图时隐藏本组件内预览，避免重复渲染 */
+  hidePreview?: boolean;
 };
 
 function revokeIfBlob(url: string | null | undefined) {
@@ -55,6 +57,7 @@ export function AssetImageUpload({
   disabled = false,
   revision = 0,
   onRevisionChange,
+  hidePreview = false,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
@@ -228,7 +231,7 @@ export function AssetImageUpload({
           {busy ? "上传中…" : (value.fileName ?? "未选择图片")}
         </span>
       </div>
-      {previewSrc ? (
+      {previewSrc && !hidePreview ? (
         <AmwImagePreview src={previewSrc} alt={value.fileName ?? "预览"} />
       ) : null}
       {error ? <p className="amw-field-error">{error}</p> : null}

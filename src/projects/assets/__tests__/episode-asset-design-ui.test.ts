@@ -130,7 +130,7 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain("CharacterCreateDialog");
     expect(workspace).toContain("SceneCreateDialog");
     expect(workspace).toContain("PropCreateDialog");
-    expect(workspace).toContain("AudioCreateDialog");
+    expect(workspace).not.toContain("AudioCreateDialog");
     expect(workspace).toContain("setCreateDialogType");
     expect(workspace).toContain("create_new");
     expect(workspace).toContain("pendingMedia");
@@ -162,7 +162,8 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain("ead-card__preview--blur");
     expect(workspace).toContain("审批中");
     expect(workspace).toContain("已审批");
-    expect(workspace).toContain("ead-card__corner");
+    expect(workspace).toContain("ead-card--character-portrait");
+    expect(workspace).toContain("ead-card__approval-badge");
     expect(css).toContain("filter: blur(2.5px)");
     expect(css).toContain(".ead-card__approval-overlay");
   });
@@ -204,16 +205,18 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(preview).toContain("Never use HTML disabled");
     expect(preview).toContain("voice-preview-speaker");
     expect(workspace).toContain("ead-card__delete-btn");
-    expect(workspace).toContain('label: "音频需求"');
+    expect(workspace).not.toContain('label: "音频需求"');
     expect(workspace).not.toContain('label: "环境音"');
     expect(workspace).not.toContain("音频类型");
     expect(workspace).not.toContain("ead-type-badge-");
+    expect(workspace).toContain("ead-card--visual-asset");
     expect(css).toContain("max-width: 50%");
     expect(css).toContain("position: absolute");
     expect(css).toContain("right: 10px");
     expect(css).toContain("voice-preview-speaker");
     expect(css).toContain("voice-preview-wave");
     expect(css).toContain("ead-card__voice-actions");
+    expect(css).toContain(".ead-card--visual-asset");
   });
 
   it("resolves design card previews without requiring previewKind", () => {

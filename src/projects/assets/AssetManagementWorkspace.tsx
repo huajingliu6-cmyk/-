@@ -7,7 +7,6 @@ import { AssetTabs } from "@/projects/assets/AssetTabs";
 import { CharacterManager } from "@/projects/assets/CharacterManager";
 import { SceneManager } from "@/projects/assets/SceneManager";
 import { PropManager } from "@/projects/assets/PropManager";
-import { AudioManager } from "@/projects/assets/AudioManager";
 import { buildMockAssetBundle } from "@/projects/assets/mock-data";
 import { persistAssetBundle } from "@/projects/assets/persist-asset-bundle";
 import type {
@@ -57,6 +56,8 @@ export function AssetManagementWorkspace({
   const [tabKey, setTabKey] = useState(0);
   const [hydrated, setHydrated] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  const visibleTab: Exclude<AssetTabId, "audio"> =
+    activeTab === "audio" ? "character" : activeTab;
 
   const isWorkspace = context === "workspace";
   const initial = useMemo(() => buildMockAssetBundle(projectId), [projectId]);
@@ -229,7 +230,7 @@ export function AssetManagementWorkspace({
               ) : null}
               <h1>项目资产管理</h1>
               <p>
-                管理视频制作所需的角色、场景、道具和音频资产。
+                管理视频制作所需的角色、场景和道具资产。
                 {projectName ? ` · ${projectName}` : ""}
                 {loadError ? ` · ${loadError}` : ""}
                 {!hydrated ? " · 加载中…" : ""}
@@ -283,16 +284,17 @@ export function AssetManagementWorkspace({
         </header>
 
         <AssetTabs
-          active={activeTab}
+          active={visibleTab}
           onChange={(tab) => {
+            if (tab === "audio") return;
             setActiveTab(tab);
             setTabKey((k) => k + 1);
             setPageNote("");
           }}
         />
 
-        <div key={`${activeTab}-${tabKey}`}>
-          {activeTab === "character" ? (
+        <div key={`${visibleTab}-${tabKey}`}>
+          {visibleTab === "character" ? (
             <CharacterManager
               projectId={projectId}
               characters={characters}
@@ -305,7 +307,7 @@ export function AssetManagementWorkspace({
               }}
             />
           ) : null}
-          {activeTab === "scene" ? (
+          {visibleTab === "scene" ? (
             <SceneManager
               projectId={projectId}
               scenes={scenes}
@@ -317,7 +319,7 @@ export function AssetManagementWorkspace({
               }}
             />
           ) : null}
-          {activeTab === "prop" ? (
+          {visibleTab === "prop" ? (
             <PropManager
               projectId={projectId}
               props={props}
@@ -326,18 +328,6 @@ export function AssetManagementWorkspace({
               onPersist={async (nextProps) => {
                 setProps(nextProps);
                 await persist({ props: nextProps });
-              }}
-            />
-          ) : null}
-          {activeTab === "audio" ? (
-            <AudioManager
-              projectId={projectId}
-              audios={audios}
-              canEdit={editAllowed}
-              onChange={setAudios}
-              onPersist={async (nextAudios) => {
-                setAudios(nextAudios);
-                await persist({ audios: nextAudios });
               }}
             />
           ) : null}

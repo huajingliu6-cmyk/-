@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { UserRound } from "lucide-react";
 import { useChipBounce } from "@/shell/useChipBounce";
 import { AmwImagePreview } from "@/projects/assets/AmwImagePreview";
 import { AssetImageUpload } from "@/projects/assets/AssetImageUpload";
@@ -82,28 +83,40 @@ export function CharacterDetail({
 }: Props) {
   const saveBounce = useChipBounce();
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
+  const [heroFailed, setHeroFailed] = useState(false);
+  const [heroFailKey, setHeroFailKey] = useState("");
 
   const mediaIds = useMemo(
     () => (character ? listCharacterMediaIds(character) : []),
     [character],
   );
 
-  const mediaIdsKey = mediaIds.join("|");
-  useEffect(() => {
+  const preferredMediaId = character
+    ? character.primaryMediaId?.trim() ||
+      character.imageFileName?.trim() ||
+      mediaIds[0] ||
+      null
+    : null;
+  const mediaSyncKey = character
+    ? `${character.id}:${mediaIds.join("|")}:${preferredMediaId ?? ""}`
+    : "";
+  const [syncedMediaKey, setSyncedMediaKey] = useState(mediaSyncKey);
+  if (syncedMediaKey !== mediaSyncKey) {
+    setSyncedMediaKey(mediaSyncKey);
     if (!character) {
       setSelectedMediaId(null);
-      return;
+    } else {
+      setSelectedMediaId((prev) =>
+        prev && mediaIds.includes(prev) ? prev : preferredMediaId,
+      );
     }
-    const ids = listCharacterMediaIds(character);
-    const preferred =
-      character.primaryMediaId?.trim() ||
-      character.imageFileName?.trim() ||
-      ids[0] ||
-      null;
-    setSelectedMediaId((prev) =>
-      prev && ids.includes(prev) ? prev : preferred,
-    );
-  }, [character, mediaIdsKey]);
+  }
+
+  const heroKey = `${character?.id ?? ""}:${selectedMediaId ?? ""}:${imageRevision}`;
+  if (heroFailKey !== heroKey) {
+    setHeroFailKey(heroKey);
+    setHeroFailed(false);
+  }
 
   if (!character) {
     return (
@@ -184,14 +197,23 @@ export function CharacterDetail({
         </div>
       ) : null}
       <div className="amw-panel__body">
-        <div className="amw-detail">
-          {previewSrc ? (
-            <AmwImagePreview
-              className="amw-image-preview--detail"
-              src={previewSrc}
-              alt={character.imageFileName ?? character.name}
-            />
-          ) : null}
+        <div className="amw-detail amw-detail--character">
+          <div className="amw-character-hero" data-testid="character-hero-image">
+            {previewSrc && !heroFailed ? (
+              <AmwImagePreview
+                className="amw-image-preview--character-hero"
+                src={previewSrc}
+                alt={character.imageFileName ?? character.name}
+                onLoadError={() => setHeroFailed(true)}
+              />
+            ) : (
+              <div className="amw-character-hero__empty" aria-hidden>
+                <UserRound size={36} strokeWidth={1.5} />
+                <span>暂无图片</span>
+              </div>
+            )}
+          </div>
+
           {mediaIds.length > 1 ? (
             <div
               className="ead-history-strip ead-history-strip--images"
@@ -230,6 +252,7 @@ export function CharacterDetail({
               })}
             </div>
           ) : null}
+
           <div className="amw-section">
             <h3>基础信息</h3>
             <div className="amw-fields">
@@ -255,8 +278,28 @@ export function CharacterDetail({
                 />
               </div>
             </div>
+            <div className="amw-fields">
+              <div className="amw-field">
+                <label>性别</label>
+                <input
+                  className="amw-input"
+                  value={character.gender}
+                  disabled={!canEdit}
+                  onChange={(e) => patch({ gender: e.target.value })}
+                />
+              </div>
+              <div className="amw-field">
+                <label>年龄</label>
+                <input
+                  className="amw-input"
+                  value={character.age}
+                  disabled={!canEdit}
+                  onChange={(e) => patch({ age: e.target.value })}
+                />
+              </div>
+            </div>
             <div className="amw-field">
-              <label>角色简介</label>
+              <label>备注</label>
               <textarea
                 className="amw-textarea"
                 value={character.description}
@@ -264,19 +307,16 @@ export function CharacterDetail({
                 onChange={(e) => patch({ description: e.target.value })}
               />
             </div>
-          </div>
-
-          <div className="amw-section">
-            <h3>视觉设定</h3>
             <AssetImageUpload
               id={`character-image-${character.id}`}
               label="角色图片"
-              tip="上传角色图片推荐插画/设定图风格（避免写实真人，以免视频参考被拒）"
+              tip="上传后更新上方主图；推荐插画/设定图风格"
               disabled={!canEdit}
               projectId={projectId}
               assetId={character.id}
               ensurePersisted={ensurePersisted}
               revision={imageRevision}
+              hidePreview
               onRevisionChange={(next) => onImageRevision?.(character.id, next)}
               value={{
                 fileName: character.imageFileName,
@@ -308,53 +348,10 @@ export function CharacterDetail({
                 </button>
               </div>
             ) : null}
-            <div className="amw-field">
-              <label>外貌描述</label>
-              <textarea
-                className="amw-textarea"
-                value={character.appearance}
-                disabled={!canEdit}
-                onChange={(e) => patch({ appearance: e.target.value })}
-              />
-            </div>
-            <div className="amw-field">
-              <label>服装描述</label>
-              <textarea
-                className="amw-textarea"
-                value={character.clothing}
-                disabled={!canEdit}
-                onChange={(e) => patch({ clothing: e.target.value })}
-              />
-            </div>
-            <div className="amw-fields">
-              <div className="amw-field">
-                <label>年龄</label>
-                <input
-                  className="amw-input"
-                  value={character.age}
-                  disabled={!canEdit}
-                  onChange={(e) => patch({ age: e.target.value })}
-                />
-              </div>
-              <div className="amw-field">
-                <label>性别</label>
-                <input
-                  className="amw-input"
-                  value={character.gender}
-                  disabled={!canEdit}
-                  onChange={(e) => patch({ gender: e.target.value })}
-                />
-              </div>
-            </div>
           </div>
 
           <div className="amw-section">
             <h3>声音设定</h3>
-            <p className="amw-hint">
-              {mediaIds.length > 1
-                ? "同一角色的每张历史图需单独绑定音色；切换上方图片后请重新选择并保存。"
-                : "优先从桌面「本地音频库」选择音色。审批入库后抽卡师不可改；主理人在此修改将同步到各集关联人物。"}
-            </p>
             <VoiceSelector
               label={mediaIds.length > 1 ? "本图音色" : undefined}
               value={activeVoice.voiceId}

@@ -55,11 +55,21 @@ export async function patchWorkspaceActiveEpisode(
   projectId: string,
   activeEpisodeId: string,
 ): Promise<ProjectStoryboardWorkspace> {
+  return patchStoryboardWorkspace(projectId, { activeEpisodeId });
+}
+
+export async function patchStoryboardWorkspace(
+  projectId: string,
+  body: {
+    activeEpisodeId?: string;
+    videoDefaults?: import("@/projects/storyboard/storyboard-video-params").StoryboardVideoDefaults | null;
+  },
+): Promise<ProjectStoryboardWorkspace> {
   const res = await fetch(apiBase(projectId), {
     method: "PATCH",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ activeEpisodeId }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     throw new Error(await parseError(res));
@@ -399,6 +409,8 @@ export async function generateShotVideo(
     resolution?: "480P" | "720P" | "1080P";
     aspectRatio?: "16:9" | "9:16";
     durationSeconds?: number;
+    videoModelChoice?: import("@/projects/storyboard/storyboard-video-model-choices").StoryboardVideoModelChoiceId;
+    stylePreset?: string;
   },
 ): Promise<{
   production: EpisodeProduction;

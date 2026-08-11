@@ -18,6 +18,13 @@ const ARK_VIDEO_MODEL_ALIASES: Record<string, string> = {
   "seedance2.0": DEFAULT_ARK_VIDEO_MODEL,
   "seedance-2.0": DEFAULT_ARK_VIDEO_MODEL,
   "seedance 2.0": DEFAULT_ARK_VIDEO_MODEL,
+  "seedance-2.0-mini": "doubao-seedance-2.0-mini",
+  "seedance 2.0 mini": "doubao-seedance-2.0-mini",
+  "doubao-seedance-2.0-mini": "doubao-seedance-2.0-mini",
+  "seedance-2.0-fast": "doubao-seedance-2.0-fast",
+  "seedance 2.0 fast": "doubao-seedance-2.0-fast",
+  "seedace 2.0fast": "doubao-seedance-2.0-fast",
+  "doubao-seedance-2.0-fast": "doubao-seedance-2.0-fast",
 };
 
 /**
@@ -52,6 +59,21 @@ export function normalizeSd2VideoModelId(raw: string): string {
     /^doubao-seedance-\d+-\d+-/i.test(trimmed)
   ) {
     return DEFAULT_SD2_VIDEO_MODEL;
+  }
+  if (
+    key === "seedance-2.0-mini" ||
+    key === "seedance 2.0 mini" ||
+    key === "doubao-seedance-2.0-mini"
+  ) {
+    return "doubao-seedance-2.0-mini";
+  }
+  if (
+    key === "seedance-2.0-fast" ||
+    key === "seedance 2.0 fast" ||
+    key === "seedace 2.0fast" ||
+    key === "doubao-seedance-2.0-fast"
+  ) {
+    return "doubao-seedance-2.0-fast";
   }
   return trimmed;
 }

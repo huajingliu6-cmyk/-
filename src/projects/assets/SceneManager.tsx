@@ -89,30 +89,35 @@ export function SceneManager({
                     <button
                       key={s.id}
                       type="button"
-                      className={`amw-card${selectedId === s.id ? " is-selected" : ""}`}
+                      className={`amw-card asset-card${selectedId === s.id ? " is-selected" : ""}`}
                       style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
                       onClick={() => setSelectedId(s.id)}
                     >
-                      <span className="amw-avatar" aria-hidden>
+                      <span className="amw-avatar asset-card__media" aria-hidden>
                         <AssetListThumb
                           projectId={projectId}
                           asset={s}
                           placeholder={s.name.trim().slice(0, 1) || "景"}
                           revision={imageRevisions[s.id] ?? 0}
+                          fit="contain"
                         />
                       </span>
-                      <span className="amw-card__meta">
-                        <p className="amw-card__title">{s.name}</p>
-                        <p className="amw-card__sub">
-                          {[s.timeOfDay, s.imageFileName ? "已上传图片" : ""]
-                            .filter(Boolean)
-                            .join(" · ") || "未完善设定"}
+                      <span className="amw-card__meta asset-card__content">
+                        <span className="asset-card__header">
+                          <p className="amw-card__title">{s.name}</p>
+                          <span
+                            className={`amw-badge${warn ? " is-warn" : " is-ok"}`}
+                          >
+                            {status}
+                          </span>
+                        </span>
+                        <p className="amw-card__sub asset-card__meta-line">
+                          场景
+                          {s.timeOfDay ? ` · ${s.timeOfDay}` : ""}
                         </p>
-                      </span>
-                      <span
-                        className={`amw-badge${warn ? " is-warn" : " is-ok"}`}
-                      >
-                        {status}
+                        <p className="amw-card__sub asset-card__note">
+                          {s.location?.trim() || "未设定备注位置"}
+                        </p>
                       </span>
                     </button>
                   );
@@ -153,17 +158,6 @@ export function SceneManager({
                     value={selected.timeOfDay}
                     disabled={!canEdit}
                     onChange={(v) => updateOne({ ...selected, timeOfDay: v })}
-                  />
-                </div>
-                <div className="amw-field">
-                  <label>场景描述</label>
-                  <textarea
-                    className="amw-textarea"
-                    value={selected.description}
-                    disabled={!canEdit}
-                    onChange={(e) =>
-                      updateOne({ ...selected, description: e.target.value })
-                    }
                   />
                 </div>
                 <AssetImageUpload

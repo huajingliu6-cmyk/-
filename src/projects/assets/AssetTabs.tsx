@@ -7,7 +7,6 @@ const TABS: Array<{ id: AssetTabId; label: string }> = [
   { id: "character", label: "角色管理" },
   { id: "scene", label: "场景管理" },
   { id: "prop", label: "道具管理" },
-  { id: "audio", label: "音频管理" },
 ];
 
 type Props = {

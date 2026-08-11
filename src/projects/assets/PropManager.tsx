@@ -155,30 +155,35 @@ export function PropManager({
                     <button
                       key={p.id}
                       type="button"
-                      className={`amw-card${selectedId === p.id ? " is-selected" : ""}`}
+                      className={`amw-card asset-card${selectedId === p.id ? " is-selected" : ""}`}
                       style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
                       onClick={() => setSelectedId(p.id)}
                     >
-                      <span className="amw-avatar" aria-hidden>
+                      <span className="amw-avatar asset-card__media" aria-hidden>
                         <AssetListThumb
                           projectId={projectId}
                           asset={p}
                           placeholder={p.name.trim().slice(0, 1) || "道"}
                           revision={imageRevisions[p.id] ?? 0}
+                          fit="contain"
                         />
                       </span>
-                      <span className="amw-card__meta">
-                        <p className="amw-card__title">{p.name}</p>
-                        <p className="amw-card__sub">
-                          {p.imageFileName
-                            ? "已上传图片"
-                            : p.description.trim() || "未设定描述"}
+                      <span className="amw-card__meta asset-card__content">
+                        <span className="asset-card__header">
+                          <p className="amw-card__title">{p.name}</p>
+                          <span
+                            className={`amw-badge${warn ? " is-warn" : " is-ok"}`}
+                          >
+                            {status}
+                          </span>
+                        </span>
+                        <p className="amw-card__sub asset-card__meta-line">
+                          道具
+                          {p.propType ? ` · ${p.propType}` : ""}
                         </p>
-                      </span>
-                      <span
-                        className={`amw-badge${warn ? " is-warn" : " is-ok"}`}
-                      >
-                        {status}
+                        <p className="amw-card__sub asset-card__note">
+                          {p.usage?.trim() || "暂无备注"}
+                        </p>
                       </span>
                     </button>
                   );
@@ -213,17 +218,6 @@ export function PropManager({
                     value={selected.name}
                     disabled={!canEdit}
                     onChange={(v) => updateOne({ ...selected, name: v })}
-                  />
-                </div>
-                <div className="amw-field">
-                  <label>描述</label>
-                  <textarea
-                    className="amw-textarea"
-                    value={selected.description}
-                    disabled={!canEdit}
-                    onChange={(e) =>
-                      updateOne({ ...selected, description: e.target.value })
-                    }
                   />
                 </div>
                 <AssetImageUpload

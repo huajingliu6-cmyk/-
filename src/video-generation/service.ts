@@ -135,11 +135,42 @@ export async function submitVideoGeneration(params: {
     | "video.storyboard-shot.generate"
     | "video.storyboard-episode.generate"
     | "video.workflow-node.generate";
+  /**
+   * 服务端白名单映射后的模型 ID（如 Seedance 变体）；覆盖 runtime 默认模型。
+   * 不得由客户端任意字符串直通。
+   */
+  modelIdOverride?: string;
 }): Promise<GenerationRecord> {
-  const runtime = await resolveVideoProviderRuntimeConfig(undefined, {
+  let runtime = await resolveVideoProviderRuntimeConfig(undefined, {
     capabilityId: params.capabilityId,
     preferAdminConfig: Boolean(params.capabilityId),
   });
+  if (params.modelIdOverride?.trim()) {
+    const {
+      normalizeArkVideoModelId,
+      normalizeSd2VideoModelId,
+      isSd2HttpVideoDialect,
+    } = await import("@/video-generation/provider/http-video-dialect");
+    const { looksLikeArkVideoEndpoint } = await import("@/auth/api-config");
+    const raw = params.modelIdOverride.trim();
+    const httpUrl = (runtime.httpApiUrl ?? "").trim();
+    let modelId = raw;
+    if (runtime.providerId === "http" && httpUrl) {
+      if (looksLikeArkVideoEndpoint(httpUrl)) {
+        modelId = normalizeArkVideoModelId(raw) || raw;
+      } else if (isSd2HttpVideoDialect(httpUrl)) {
+        modelId = normalizeSd2VideoModelId(raw);
+      }
+    } else if (runtime.providerId === "http") {
+      modelId = normalizeArkVideoModelId(raw) || normalizeSd2VideoModelId(raw);
+    }
+    runtime = {
+      ...runtime,
+      t2vModelId: modelId,
+      r2vModelId: modelId,
+      httpModelId: modelId,
+    };
+  }
   const paidGate = paidGenerationAllowed(
     runtime,
     params.confirmPaidGeneration,

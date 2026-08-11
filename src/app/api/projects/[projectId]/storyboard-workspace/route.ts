@@ -6,6 +6,7 @@ import {
   parseJsonBody,
 } from "@/projects/storyboard/api-helpers";
 import { saveWorkspace } from "@/projects/storyboard/production-store";
+import { parseStoryboardVideoDefaults } from "@/projects/storyboard/storyboard-video-params";
 
 type RouteContext = {
   params: Promise<{ projectId: string }>;
@@ -50,24 +51,51 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   const raw = body as Record<string, unknown>;
-  const activeEpisodeId =
-    typeof raw.activeEpisodeId === "string" ? raw.activeEpisodeId : null;
-  if (!activeEpisodeId) {
-    return NextResponse.json({ error: "activeEpisodeId 无效" }, { status: 400 });
+  const hasActiveEpisodeId = typeof raw.activeEpisodeId === "string";
+  const hasVideoDefaults = "videoDefaults" in raw;
+
+  if (!hasActiveEpisodeId && !hasVideoDefaults) {
+    return NextResponse.json(
+      { error: "请提供 activeEpisodeId 或 videoDefaults" },
+      { status: 400 },
+    );
   }
 
   const { workspace, episodes } = loaded.context;
-  const hasEpisode = episodes.some((episode) => episode.id === activeEpisodeId);
-  const hasProduction = workspace.productions.some(
-    (production) => production.episodeId === activeEpisodeId,
-  );
-  if (!hasEpisode || !hasProduction) {
-    return NextResponse.json({ error: "分集不存在" }, { status: 404 });
+  let nextActiveEpisodeId = workspace.activeEpisodeId;
+  let nextVideoDefaults = workspace.videoDefaults;
+
+  if (hasActiveEpisodeId) {
+    const activeEpisodeId = raw.activeEpisodeId as string;
+    const hasEpisode = episodes.some((episode) => episode.id === activeEpisodeId);
+    const hasProduction = workspace.productions.some(
+      (production) => production.episodeId === activeEpisodeId,
+    );
+    if (!hasEpisode || !hasProduction) {
+      return NextResponse.json({ error: "分集不存在" }, { status: 404 });
+    }
+    nextActiveEpisodeId = activeEpisodeId;
+  }
+
+  if (hasVideoDefaults) {
+    if (raw.videoDefaults === null) {
+      nextVideoDefaults = null;
+    } else {
+      const parsed = parseStoryboardVideoDefaults(raw.videoDefaults);
+      if (!parsed) {
+        return NextResponse.json(
+          { error: "videoDefaults 无效" },
+          { status: 400 },
+        );
+      }
+      nextVideoDefaults = parsed;
+    }
   }
 
   const saved = await saveWorkspace({
     ...workspace,
-    activeEpisodeId,
+    activeEpisodeId: nextActiveEpisodeId,
+    videoDefaults: nextVideoDefaults,
   });
 
   return NextResponse.json({ workspace: saved });

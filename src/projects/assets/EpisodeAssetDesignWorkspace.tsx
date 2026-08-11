@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
-  AudioLines,
   MapPinned,
   Package,
   UserRound,
@@ -41,7 +40,6 @@ import {
 } from "@/projects/assets/episode-design/design-media-voice";
 import {
   EPISODE_ASSET_DESIGN_STATUS_LABELS,
-  type AudioDesignItem,
   type CharacterDesignItem,
   type EpisodeAssetDesignAssetType,
   type EpisodeAssetDesignItem,
@@ -59,9 +57,6 @@ const SceneCreateDialog = dynamic(
 );
 const PropCreateDialog = dynamic(
   () => import("@/projects/assets/PropCreateDialog").then((m) => m.PropCreateDialog),
-);
-const AudioCreateDialog = dynamic(
-  () => import("@/projects/assets/AudioCreateDialog").then((m) => m.AudioCreateDialog),
 );
 const SubmitApprovalModal = dynamic(
   () => import("@/projects/assets/approvals/SubmitApprovalModal").then((m) => m.SubmitApprovalModal),
@@ -82,7 +77,6 @@ import { uploadProjectAssetImage } from "@/projects/assets/upload-asset-image";
 import { uploadProjectAssetAudio } from "@/projects/assets/upload-asset-audio";
 import type {
   AudioAsset,
-  AudioDraftInput,
   CharacterDraftInput,
   PropDraftInput,
   ProjectAssetBundle,
@@ -128,7 +122,6 @@ const GROUPS: Array<{
   { type: "character", label: "角色" },
   { type: "scene", label: "场景" },
   { type: "prop", label: "道具" },
-  { type: "audio", label: "音频需求" },
 ];
 /** Skip titles that only repeat「第N集」so the list/detail don't look duplicated. */
 function meaningfulEpisodeTitle(
@@ -239,31 +232,6 @@ function itemFromPropDraft(
   };
 }
 
-function itemFromAudioDraft(
-  draft: AudioDraftInput,
-  options: { id: string; previous?: AudioDesignItem | null },
-): AudioDesignItem {
-  const previous = options.previous;
-  return {
-    id: options.id,
-    name: draft.name.trim(),
-    resolution: previous?.resolution ?? "create_new",
-    existingAssetId: previous?.existingAssetId ?? null,
-    libraryAssetId: previous?.libraryAssetId ?? null,
-    source: previous?.source ?? "manual",
-    note: previous?.note ?? "",
-    assetType: "audio",
-    draft: {
-      description: previous?.draft.description ?? "",
-      audioKind: draft.type,
-      duration: draft.duration,
-      source: draft.source,
-      usageInEpisode: previous?.draft.usageInEpisode ?? "",
-      evidence: previous?.draft.evidence ?? "",
-    },
-  };
-}
-
 function characterDraftFromItem(
   item: CharacterDesignItem,
   pending: PendingMediaEntry | null | undefined,
@@ -321,61 +289,6 @@ function propDraftFromItem(
     imageMimeType: imagePending?.file.type || null,
     pendingImageFile: imagePending?.file ?? null,
   };
-}
-
-function audioDraftFromItem(
-  item: AudioDesignItem,
-  pending: PendingMediaEntry | null | undefined,
-): AudioDraftInput {
-  const audioPending = pending?.kind === "audio" ? pending : null;
-  const dialogUrl = audioPending
-    ? URL.createObjectURL(audioPending.file)
-    : null;
-  return {
-    name: item.name,
-    type: item.draft.audioKind,
-    duration: item.draft.duration,
-    source: item.draft.source,
-    fileName: audioPending?.file.name ?? null,
-    objectUrl: dialogUrl,
-    mimeType: audioPending?.file.type || null,
-    pendingAudioFile: audioPending?.file ?? null,
-  };
-}
-
-function itemSummary(item: EpisodeAssetDesignItem): string {
-  switch (item.assetType) {
-    case "character": {
-      const parts = [item.draft.role, item.draft.age].filter((p) => p.trim());
-      return parts.join(" · ");
-    }
-    case "scene": {
-      const parts = [item.draft.timeOfDay, item.draft.location].filter((p) =>
-        p.trim(),
-      );
-      return parts.join(" · ");
-    }
-    case "prop": {
-      const parts = [item.draft.propType, item.draft.usage].filter((p) =>
-        p.trim(),
-      );
-      return parts.join(" · ");
-    }
-    case "audio": {
-      const kindLabel =
-        item.draft.audioKind === "voice"
-          ? "音色"
-          : item.draft.audioKind === "music"
-            ? "音乐"
-            : item.draft.audioKind === "sfx"
-              ? "音效"
-              : "旁白";
-      const parts = [kindLabel, item.draft.duration, item.draft.source].filter(
-        (p) => p.trim(),
-      );
-      return parts.join(" · ");
-    }
-  }
 }
 
 function formatMetaTime(value: string | null | undefined): string | null {
@@ -1658,35 +1571,6 @@ const updateItem = useCallback(
     [closeCreateDialog, editingItemId, items, upsertPendingMedia],
   );
 
-  const handleAudioDialogSubmit = useCallback(
-    (draft: AudioDraftInput) => {
-      const previous =
-        editingItemId != null
-          ? (items.find(
-              (item) =>
-                item.id === editingItemId && item.assetType === "audio",
-            ) as AudioDesignItem | undefined) ?? null
-          : null;
-      const id = previous?.id ?? newItemId();
-      const nextItem = itemFromAudioDraft(draft, { id, previous });
-      if (previous) {
-        setItems((prev) =>
-          prev.map((item) => (item.id === id ? nextItem : item)),
-        );
-      } else {
-        setItems((prev) => [...prev, nextItem]);
-      }
-      upsertPendingMedia(
-        id,
-        "audio",
-        draft.pendingAudioFile,
-        draft.objectUrl,
-      );
-      closeCreateDialog();
-    },
-    [closeCreateDialog, editingItemId, items, upsertPendingMedia],
-  );
-
   const editingItem = useMemo(() => {
     if (!editingItemId) return null;
     return items.find((item) => item.id === editingItemId) ?? null;
@@ -1708,12 +1592,6 @@ const updateItem = useCallback(
     if (createDialogType !== "prop" || !editingItem) return null;
     if (editingItem.assetType !== "prop") return null;
     return propDraftFromItem(editingItem, pendingMedia[editingItem.id]);
-  }, [createDialogType, editingItem, pendingMedia]);
-
-  const audioInitialDraft = useMemo(() => {
-    if (createDialogType !== "audio" || !editingItem) return null;
-    if (editingItem.assetType !== "audio") return null;
-    return audioDraftFromItem(editingItem, pendingMedia[editingItem.id]);
   }, [createDialogType, editingItem, pendingMedia]);
 
   const staleWarning =
@@ -1815,7 +1693,7 @@ const updateItem = useCallback(
                       : "一键提取"}
                 </button>
               </div>
-              <p>系统将扫描完整剧本，提取角色、场景、道具与音频。</p>
+              <p>系统将扫描完整剧本，提取角色、场景与道具。</p>
             </div>
           </div>
           <div className="ead-progress" aria-label="全剧本资产状态">
@@ -1926,7 +1804,7 @@ const updateItem = useCallback(
                   </button>
                 </div>
               ) : (
-                <p>点击上方「一键提取」，系统将识别角色、场景、道具与音频需求。</p>
+                <p>点击上方「一键提取」，系统将识别角色、场景与道具。</p>
               )}
             </div>
           ) : (
@@ -2327,14 +2205,6 @@ const updateItem = useCallback(
         initialDraft={propInitialDraft}
         submitLabel={editingItemId ? "保存道具" : "添加道具"}
       />
-      <AudioCreateDialog
-        key={`audio-${createDialogType}-${editingItemId ?? "new"}`}
-        open={createDialogType === "audio"}
-        onClose={closeCreateDialog}
-        onSubmit={handleAudioDialogSubmit}
-        initialDraft={audioInitialDraft}
-        submitLabel={editingItemId ? "保存音频" : "添加音频"}
-      />
 
       <DesignAssetModal
         open={
@@ -2534,11 +2404,13 @@ function DesignItemCard({
 }) {
   const [cardLightbox, setCardLightbox] = useState(false);
   const [voiceNote, setVoiceNote] = useState("");
-  const description =
-    item.assetType === "audio"
-      ? item.draft.description
-      : item.draft.description;
-  const summary = itemSummary(item);
+
+  if (item.assetType === "audio") {
+    return null;
+  }
+
+  const isVisualAsset =
+    item.assetType === "scene" || item.assetType === "prop";
   const previewUrl = resolveDesignItemPreviewUrl(
     projectId,
     item,
@@ -2580,7 +2452,6 @@ function DesignItemCard({
   const isInLibrary = Boolean(item.libraryAssetId?.trim());
   const isImageMissing =
     (item.resolution === "create_new" || item.resolution === "pending") &&
-    item.assetType !== "audio" &&
     !currentMediaId;
   const confirmDisabledReason = isInLibrary
     ? "该资产已入库"
@@ -2590,9 +2461,183 @@ function DesignItemCard({
         ? "已设为本集忽略，无需入库"
         : undefined;
 
+  const statusLabel = isInLibrary
+    ? "已入库"
+    : approvalUi === "approved"
+      ? "已入库"
+      : approvalUi === "pending"
+        ? "审批中"
+        : "设计中";
+  const statusClass =
+    statusLabel === "已入库"
+      ? " is-ok"
+      : statusLabel === "审批中"
+        ? " is-pending"
+        : " is-draft";
+
+  const mediaBlock = previewUrl ? (
+    <button
+      type="button"
+      className={
+        approvalUi === "pending"
+          ? "ead-card__preview-btn ead-card__preview-btn--pending"
+          : "ead-card__preview-btn"
+      }
+      title={approvalUi === "pending" ? "审批中" : "点击放大预览"}
+      onClick={() => setCardLightbox(true)}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element -- project binary preview URL */}
+      <img
+        className={
+          approvalUi === "pending"
+            ? "ead-card__preview ead-card__preview--blur"
+            : "ead-card__preview"
+        }
+        src={previewUrl}
+        alt={item.name ? `${item.name} preview` : "asset preview"}
+      />
+      {approvalUi === "pending" ? (
+        <span
+          className="ead-card__approval-overlay"
+          data-testid={`ead-pending-${item.id}`}
+        >
+          审批中
+        </span>
+      ) : null}
+    </button>
+  ) : (
+    <div className="ead-card__icon-wrap asset-card__empty" aria-hidden>
+      {item.assetType === "character" ? (
+        <UserRound className="ead-card__icon" size={28} strokeWidth={1.5} />
+      ) : item.assetType === "scene" ? (
+        <MapPinned className="ead-card__icon" size={28} strokeWidth={1.5} />
+      ) : (
+        <Package className="ead-card__icon" size={28} strokeWidth={1.5} />
+      )}
+      <span className="asset-card__empty-label">暂无图片</span>
+    </div>
+  );
+
+  const actionsBlock = (
+    <div className="asset-card__actions ead-card__actions">
+      <button
+        type="button"
+        className="amw-btn amw-btn-primary ead-card__design-btn"
+        data-testid={`ead-design-${item.id}`}
+        disabled={disabled || designDisabled}
+        title={
+          designDisabled ? "请先提取本集资产后再进行设计" : undefined
+        }
+        onClick={onDesign}
+      >
+        设计
+      </button>
+      {showPersonalConfirm ? (
+        <button
+          type="button"
+          className="amw-btn amw-btn-primary ead-card__confirm-btn"
+          data-testid={`ead-confirm-item-${item.id}`}
+          disabled={
+            disabled ||
+            isInLibrary ||
+            isImageMissing ||
+            item.resolution === "ignore"
+          }
+          title={confirmDisabledReason}
+          onClick={onConfirm}
+        >
+          {confirming ? "入库中…" : isInLibrary ? "已入库" : "确认入库"}
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="amw-btn ead-card__delete-btn"
+        data-testid={`ead-delete-${item.id}`}
+        disabled={disabled || deleteLocked}
+        title={
+          deleteLocked
+            ? "已审批入库的资产仅主理人可在项目管理中删除"
+            : undefined
+        }
+        onClick={onDelete}
+      >
+        删除
+      </button>
+    </div>
+  );
+
+  const noteBlock = (
+    <div className="amw-field ead-card__note">
+      <label>备注</label>
+      <textarea
+        className="amw-textarea asset-card__note"
+        value={item.note ?? ""}
+        disabled={disabled}
+        placeholder="项目内成员均可编辑，失焦后自动同步"
+        data-testid={`ead-note-${item.id}`}
+        onChange={(e) => onChange({ note: e.target.value })}
+        onBlur={(e) => onPersistNote(e.target.value)}
+      />
+    </div>
+  );
+
+  const lightbox = (
+    <DesignImageLightbox
+      src={cardLightbox ? previewUrl : null}
+      alt={`${item.name || "资产"} 放大预览`}
+      onClose={() => setCardLightbox(false)}
+    />
+  );
+
+  const nameTitle = item.name || "未命名资产";
+
+  if (isVisualAsset) {
+    return (
+      <article className="ead-card ead-card--visual-asset">
+        <div className="ead-card__media">
+          {mediaBlock}
+        </div>
+        <div className="ead-card__content">
+          <div className="ead-card__header">
+            <h3 className="ead-card__name" title={nameTitle}>
+              {nameTitle}
+            </h3>
+            <span className={`ead-card__status asset-card__status${statusClass}`}>
+              {statusLabel}
+            </span>
+          </div>
+          {approvalUi === "approved" ? (
+            <span
+              className="ead-card__approval-badge is-approved"
+              data-testid={`ead-approved-${item.id}`}
+            >
+              已审批
+            </span>
+          ) : null}
+          {actionsBlock}
+          {noteBlock}
+        </div>
+        {lightbox}
+      </article>
+    );
+  }
+
+  // Character: name top → large image → compact voice + actions (no side text / description)
   return (
-    <article className="ead-card">
-      <div className="ead-card__corner">
+    <article
+      className="ead-card ead-card--character-portrait"
+      data-testid={`ead-character-card-${item.id}`}
+    >
+      <div className="ead-card__portrait-head">
+        <h3 className="ead-card__name ead-card__name--center" title={nameTitle}>
+          {nameTitle}
+        </h3>
+        <span className={`ead-card__status asset-card__status${statusClass}`}>
+          {statusLabel}
+        </span>
+      </div>
+      <div className="ead-card__media ead-card__media--portrait">{mediaBlock}</div>
+      <div className="ead-card__content ead-card__content--portrait">
         {approvalUi === "approved" ? (
           <span
             className="ead-card__approval-badge is-approved"
@@ -2601,209 +2646,78 @@ function DesignItemCard({
             已审批
           </span>
         ) : null}
-        {showPersonalConfirm ? (
-          <button
-            type="button"
-            className="amw-btn amw-btn-primary ead-card__confirm-btn"
-            data-testid={`ead-confirm-item-${item.id}`}
-            disabled={
-              disabled ||
-              isInLibrary ||
-              isImageMissing ||
-              item.resolution === "ignore"
-            }
-            title={confirmDisabledReason}
-            onClick={onConfirm}
-          >
-            {confirming ? "入库中…" : isInLibrary ? "已入库" : "确认入库"}
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className="amw-btn ead-card__delete-btn"
-          data-testid={`ead-delete-${item.id}`}
-          disabled={disabled || deleteLocked}
-          title={
-            deleteLocked
-              ? "已审批入库的资产仅主理人可在项目管理中删除"
-              : undefined
-          }
-          onClick={onDelete}
-        >
-          删除
-        </button>
-      </div>
-      <div className="ead-card__layout">
-        <div className="ead-card__visual">
-          {previewUrl ? (
+        <div className="ead-card__voice-row ead-card__voice-row--compact">
+          <div className="ead-card__voice-select">
+            {voiceLocked ? (
+              <div className="ead-card__voice-readonly">
+                <span className="ead-card__voice-readonly-label">音色</span>
+                <span
+                  className="ead-card__voice-readonly-value"
+                  data-testid={`ead-voice-readonly-${item.id}`}
+                >
+                  {characterVoiceLabel}
+                </span>
+              </div>
+            ) : (
+              <VoiceSelector
+                label="音色"
+                value={characterVoiceId}
+                disabled={disabled || !currentMediaId}
+                projectVoices={projectVoices}
+                onChange={onVoiceSelect}
+              />
+            )}
+          </div>
+          <div className="ead-card__voice-actions">
+            <VoicePreviewButton
+              projectId={projectId}
+              voiceId={characterVoiceId}
+              audios={audios}
+              className="amw-btn ead-card__voice-preview"
+              testId={`ead-voice-preview-${item.id}`}
+              onStatus={setVoiceNote}
+            />
             <button
               type="button"
-              className={
-                approvalUi === "pending"
-                  ? "ead-card__preview-btn ead-card__preview-btn--pending"
-                  : "ead-card__preview-btn"
+              className={`amw-btn ead-card__voice-bind${
+                voiceBoundLabel ? " is-bound" : ""
+              }${voiceLocked && !hasBoundVoice ? " is-missing" : ""}`}
+              data-testid={`ead-voice-bind-${item.id}`}
+              disabled={
+                disabled ||
+                voiceLocked ||
+                !currentMediaId ||
+                !characterVoiceId ||
+                (mediaVoice != null && isMediaVoiceBound(mediaVoice))
               }
               title={
-                approvalUi === "pending" ? "审批中" : "点击放大预览"
+                !currentMediaId
+                  ? "请先生成图片，再为当前历史图绑定音色"
+                  : voiceLocked && !hasBoundVoice
+                    ? "审批入库时未绑定音色；请主理人在项目管理中为该角色补绑"
+                    : voiceLocked
+                      ? "已审批入库，音色仅主理人可在项目管理中更改"
+                      : mediaVoice != null && isMediaVoiceBound(mediaVoice)
+                        ? "当前历史图音色已绑定"
+                        : "将当前选择的音色绑定到当前历史图"
               }
-              onClick={() => setCardLightbox(true)}
+              onClick={onBindVoice}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element -- project binary preview URL */}
-              <img
-                className={
-                  approvalUi === "pending"
-                    ? "ead-card__preview ead-card__preview--blur"
-                    : "ead-card__preview"
-                }
-                src={previewUrl}
-                alt={item.name ? `${item.name} preview` : "asset preview"}
-              />
-              {approvalUi === "pending" ? (
-                <span
-                  className="ead-card__approval-overlay"
-                  data-testid={`ead-pending-${item.id}`}
-                >
-                  审批中
-                </span>
-              ) : null}
+              {voiceLocked && !hasBoundVoice
+                ? "未绑定"
+                : voiceBoundLabel
+                  ? "已绑定"
+                  : "绑定音色"}
             </button>
-          ) : (
-            <div className="ead-card__icon-wrap" aria-hidden>
-              {item.assetType === "character" ? (
-                <UserRound className="ead-card__icon" size={28} strokeWidth={1.5} />
-              ) : item.assetType === "scene" ? (
-                <MapPinned className="ead-card__icon" size={28} strokeWidth={1.5} />
-              ) : item.assetType === "prop" ? (
-                <Package className="ead-card__icon" size={28} strokeWidth={1.5} />
-              ) : (
-                <AudioLines className="ead-card__icon" size={28} strokeWidth={1.5} />
-              )}
-            </div>
-          )}
-          <p className="ead-card__name">{item.name || "未命名资产"}</p>
-          <button
-            type="button"
-            className="amw-btn amw-btn-primary ead-card__design-btn"
-            data-testid={`ead-design-${item.id}`}
-            disabled={disabled || designDisabled}
-            title={
-              designDisabled
-                ? "请先提取本集资产后再进行设计"
-                : undefined
-            }
-            onClick={onDesign}
-          >
-            设计
-          </button>
-        </div>
-        <div className="ead-card__body">
-          {item.assetType === "character" ? (
-            <div className="ead-card__voice-row">
-              <div className="ead-card__voice-select">
-                {voiceLocked ? (
-                  <div className="ead-card__voice-readonly">
-                    <span className="ead-card__voice-readonly-label">音色</span>
-                    <span
-                      className="ead-card__voice-readonly-value"
-                      data-testid={`ead-voice-readonly-${item.id}`}
-                    >
-                      {characterVoiceLabel}
-                    </span>
-                  </div>
-                ) : (
-                  <VoiceSelector
-                    label="当前图音色"
-                    value={characterVoiceId}
-                    disabled={disabled || !currentMediaId}
-                    projectVoices={projectVoices}
-                    onChange={onVoiceSelect}
-                  />
-                )}
-              </div>
-              <div className="ead-card__voice-actions">
-                <VoicePreviewButton
-                  projectId={projectId}
-                  voiceId={characterVoiceId}
-                  audios={audios}
-                  className="amw-btn ead-card__voice-preview"
-                  testId={`ead-voice-preview-${item.id}`}
-                  onStatus={setVoiceNote}
-                />
-                <button
-                  type="button"
-                  className={`amw-btn ead-card__voice-bind${
-                    voiceBoundLabel ? " is-bound" : ""
-                  }${voiceLocked && !hasBoundVoice ? " is-missing" : ""}`}
-                  data-testid={`ead-voice-bind-${item.id}`}
-                  disabled={
-                    disabled ||
-                    voiceLocked ||
-                    !currentMediaId ||
-                    !characterVoiceId ||
-                    (mediaVoice != null && isMediaVoiceBound(mediaVoice))
-                  }
-                  title={
-                    !currentMediaId
-                      ? "请先生成图片，再为当前历史图绑定音色"
-                      : voiceLocked && !hasBoundVoice
-                        ? "审批入库时未绑定音色；请主理人在项目管理中为该角色补绑"
-                        : voiceLocked
-                          ? "已审批入库，音色仅主理人可在项目管理中更改"
-                          : mediaVoice != null && isMediaVoiceBound(mediaVoice)
-                            ? "当前历史图音色已绑定"
-                            : "将当前选择的音色绑定到当前历史图"
-                  }
-                  onClick={onBindVoice}
-                >
-                  {voiceLocked && !hasBoundVoice
-                    ? "未绑定"
-                    : voiceBoundLabel
-                      ? "已绑定"
-                      : "绑定音色"}
-                </button>
-              </div>
-            </div>
-          ) : null}
-          {voiceNote && item.assetType === "character" ? (
-            <p className="ead-muted ead-card__voice-note">{voiceNote}</p>
-          ) : null}
-          {summary ? (
-            <p className="ead-muted ead-card__summary">{summary}</p>
-          ) : null}
-          {item.assetType !== "scene" && item.assetType !== "prop" ? (
-            <div className="amw-field">
-              <label>描述</label>
-              <textarea
-                className="amw-textarea"
-                value={description}
-                disabled={disabled}
-                onChange={(e) =>
-                  onChange({
-                    draft: { ...item.draft, description: e.target.value },
-                  } as Partial<EpisodeAssetDesignItem>)
-                }
-              />
-            </div>
-          ) : null}
-          <div className="amw-field">
-            <label>备注</label>
-            <textarea
-              className="amw-textarea"
-              value={item.note ?? ""}
-              disabled={disabled}
-              placeholder="项目内成员均可编辑，失焦后自动同步"
-              data-testid={`ead-note-${item.id}`}
-              onChange={(e) => onChange({ note: e.target.value })}
-              onBlur={(e) => onPersistNote(e.target.value)}
-            />
           </div>
         </div>
+        {voiceNote ? (
+          <p className="ead-muted ead-card__voice-note">{voiceNote}</p>
+        ) : null}
+        {actionsBlock}
+        {noteBlock}
       </div>
-      <DesignImageLightbox
-        src={cardLightbox ? previewUrl : null}
-        alt={`${item.name || "资产"} 放大预览`}
-        onClose={() => setCardLightbox(false)}
-      />
+      {lightbox}
     </article>
   );
 }

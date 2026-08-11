@@ -55,8 +55,10 @@ import { applyShotPromptAssetMount } from "@/projects/storyboard/services/shot-p
 import { estimateStoryboardVideoCredits } from "@/projects/storyboard/storyboard-video-constants";
 import {
   defaultStoryboardVideoOutputParams,
+  type StoryboardVideoDefaults,
   type StoryboardVideoOutputParams,
 } from "@/projects/storyboard/storyboard-video-params";
+import { labelForStoryboardVideoModelChoice } from "@/projects/storyboard/storyboard-video-model-choices";
 import type { GenerationJobStatus } from "@/video-generation/types";
 import { formatVideoProviderErrorForUser } from "@/video-generation/user-facing-error";
 
@@ -82,6 +84,8 @@ type Props = {
     r2vModelId: string;
     usesSd2RealPersonCertification?: boolean;
   } | null;
+  /** 项目级视频默认；初始化本镜头控件，不写回全局 */
+  videoDefaults?: StoryboardVideoDefaults | null;
 };
 
 type PickerTarget = {
@@ -145,6 +149,7 @@ export function StoryboardShotAccordion({
   highlightUnresolved = false,
   openScenePickerToken = 0,
   videoConfig,
+  videoDefaults = null,
 }: Props) {
   void _episodeConfirmed;
   const serverPrompt = getShotVideoPrompt(shot);
@@ -169,8 +174,18 @@ export function StoryboardShotAccordion({
   const [videoBusy, setVideoBusy] = useState(false);
   const [videoOutputParams, setVideoOutputParams] =
     useState<StoryboardVideoOutputParams>(() =>
-      defaultStoryboardVideoOutputParams(shot.durationSeconds),
+      defaultStoryboardVideoOutputParams(shot.durationSeconds, videoDefaults),
     );
+  const videoDefaultsKey = JSON.stringify(videoDefaults ?? null);
+  const [syncedVideoDefaultsKey, setSyncedVideoDefaultsKey] =
+    useState(videoDefaultsKey);
+  if (syncedVideoDefaultsKey !== videoDefaultsKey) {
+    setSyncedVideoDefaultsKey(videoDefaultsKey);
+    setVideoOutputParams((prev) => ({
+      ...defaultStoryboardVideoOutputParams(shot.durationSeconds, videoDefaults),
+      durationSeconds: prev.durationSeconds,
+    }));
+  }
   const [videoDialogOpen, setVideoDialogOpen] = useState(false);
   const [shotConfirmVariant, setShotConfirmVariant] = useState<
     "confirm-prompt" | "regen-while-generating"
@@ -784,11 +799,9 @@ export function StoryboardShotAccordion({
       totalDurationSeconds: videoOutputParams.durationSeconds,
       aspectRatio: videoOutputParams.aspectRatio,
       resolution: videoOutputParams.resolution,
-      modelLabel:
-        videoConfig?.r2vModelId ||
-        videoConfig?.t2vModelId ||
-        videoConfig?.providerId ||
-        "默认",
+      modelLabel: labelForStoryboardVideoModelChoice(
+        videoOutputParams.modelChoice,
+      ),
       creditEstimate: estimateStoryboardVideoCredits(
         videoOutputParams.durationSeconds,
       ),
@@ -821,6 +834,7 @@ export function StoryboardShotAccordion({
     videoOutputParams.aspectRatio,
     videoOutputParams.durationSeconds,
     videoOutputParams.resolution,
+    videoOutputParams.modelChoice,
   ]);
 
   const resetVideoUiState = useCallback(() => {
@@ -894,6 +908,8 @@ export function StoryboardShotAccordion({
         resolution: videoOutputParams.resolution,
         aspectRatio: videoOutputParams.aspectRatio,
         durationSeconds: videoOutputParams.durationSeconds,
+        videoModelChoice: videoOutputParams.modelChoice,
+        stylePreset: videoOutputParams.stylePreset,
       });
       onProductionChange(result.production);
       const snap = toSnapshot({
@@ -965,6 +981,8 @@ export function StoryboardShotAccordion({
     videoOutputParams.aspectRatio,
     videoOutputParams.durationSeconds,
     videoOutputParams.resolution,
+    videoOutputParams.modelChoice,
+    videoOutputParams.stylePreset,
   ]);
 
   const handleSavePrompt = useCallback(async () => {

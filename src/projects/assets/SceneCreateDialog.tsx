@@ -88,17 +88,6 @@ export function SceneCreateDialog({
               }
             />
           </div>
-          <div className="amw-field">
-            <label htmlFor={`${formId}-desc`}>场景描述</label>
-            <textarea
-              id={`${formId}-desc`}
-              className="amw-textarea"
-              value={draft.description}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, description: e.target.value }))
-              }
-            />
-          </div>
           <AssetImageUpload
             id={`${formId}-image`}
             label="上传场景图片"

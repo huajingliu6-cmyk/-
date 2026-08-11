@@ -1,35 +1,44 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
 import { useChipBounce } from "@/shell/useChipBounce";
 import type { ScriptEpisode } from "@/projects/script/types";
 import {
   autoMatchStoryboardAssets,
   fetchEpisodeProduction,
   fetchStoryboardWorkspace,
+  generateStoryboard,
+  patchStoryboardWorkspace,
   patchWorkspaceActiveEpisode,
   patchWorkingScript,
+  StoryboardGenerateInProgressError,
 } from "@/projects/storyboard/api-client";
 import { storyboardNeedsLibraryRematch } from "@/projects/storyboard/services/shot-library-match";
 import type { PickerAsset } from "@/projects/storyboard/components/ProjectAssetPickerDialog";
 import { EpisodeSidebar } from "@/projects/storyboard/components/EpisodeSidebar";
+import { StoryboardGlobalSettingsDialog } from "@/projects/storyboard/components/StoryboardGlobalSettingsDialog";
 import { StoryboardProductionPanel } from "@/projects/storyboard/components/StoryboardProductionPanel";
 import type {
   AssetsSummary,
   EpisodeProduction,
   ProjectStoryboardWorkspace,
 } from "@/projects/storyboard/types";
+import type { StoryboardVideoDefaults } from "@/projects/storyboard/storyboard-video-params";
+import {
+  getPromptGenerationServerSnapshot,
+  getPromptGenerationSnapshot,
+  requestEpisodePromptGeneration,
+  resolveEpisodePromptGenDisplayStatus,
+  STORYBOARD_PROMPT_GEN_MAX_CONCURRENT,
+  subscribePromptGeneration,
+  syncPromptGenerationFromProduction,
+} from "@/projects/storyboard/prompt-generation-manager";
 import {
   APP_WORKBENCH_PATH,
   projectManagementPath,
-  workspaceProjectAssetsPath,
 } from "@/shell/nav";
 import { RouteLoadingOverlay } from "@/shell/RouteLoadingOverlay";
-import {
-  isGenerationBusy,
-  subscribeGenerationBusy,
-} from "@/shell/generation-busy";
 import "@/projects/storyboard/storyboard-workspace.css";
 
 type Props = {
@@ -69,16 +78,37 @@ function toPickerAssets(summary: AssetsSummary | null): PickerAsset[] {
   ];
 }
 
+async function waitForEpisodePromptSettled(
+  projectId: string,
+  episodeId: string,
+  onProductionChange: (p: EpisodeProduction) => void,
+): Promise<EpisodeProduction> {
+  const started = Date.now();
+  const maxMs = 12 * 60 * 1000;
+  while (Date.now() - started < maxMs) {
+    const latest = await fetchEpisodeProduction(projectId, episodeId);
+    onProductionChange(latest);
+    if (latest.status !== "storyboard_generating") {
+      if (latest.status === "generation_failed") {
+        throw new Error(latest.generationError || "分镜提示词生成失败");
+      }
+      return latest;
+    }
+    await new Promise((r) => setTimeout(r, 4000));
+  }
+  throw new Error("分镜提示词生成超时，请稍后刷新查看");
+}
+
 export function StoryboardCreationWorkspace({
   projectId,
   context = "management",
 }: Props) {
   const saveBounce = useChipBounce();
   const isWorkspace = context === "workspace";
-  const generationBusy = useSyncExternalStore(
-    subscribeGenerationBusy,
-    isGenerationBusy,
-    () => false,
+  const promptSnap = useSyncExternalStore(
+    subscribePromptGeneration,
+    () => getPromptGenerationSnapshot(projectId),
+    getPromptGenerationServerSnapshot,
   );
 
   const [projectName, setProjectName] = useState("");
@@ -94,6 +124,8 @@ export function StoryboardCreationWorkspace({
   const [saving, setSaving] = useState(false);
   const [switchingEpisode, setSwitchingEpisode] = useState(false);
   const [scriptDraft, setScriptDraft] = useState<string | null>(null);
+  const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
+  const [savingGlobalSettings, setSavingGlobalSettings] = useState(false);
 
   const activeEpisodeId = workspace?.activeEpisodeId ?? null;
   const productions = workspace?.productions ?? [];
@@ -102,6 +134,11 @@ export function StoryboardCreationWorkspace({
     [assetsSummary],
   );
 
+  const promptQueueHint =
+    promptSnap.generatingCount > 0 || promptSnap.queuedCount > 0
+      ? `（生成中 ${promptSnap.generatingCount}/${STORYBOARD_PROMPT_GEN_MAX_CONCURRENT}，等待 ${promptSnap.queuedCount}）`
+      : "";
+
   const loadProduction = useCallback(
     async (episodeId: string, opts?: { prefer?: EpisodeProduction | null }) => {
       let prod =
@@ -109,17 +146,19 @@ export function StoryboardCreationWorkspace({
           ? opts.prefer
           : await fetchEpisodeProduction(projectId, episodeId);
 
-      // Existing storyboards: fill unresolved 人物/场景/道具 from the library.
-      // Skip while prompts are generating — rematch would race the LLM write
-      // and refresh the generating lock timestamp.
-      // Skip when everything is already linked — avoids an extra POST on every open.
+      syncPromptGenerationFromProduction({
+        projectId,
+        episodeId,
+        productionStatus: prod.status,
+        generationError: prod.generationError,
+      });
+
       if (
         prod.activeStoryboard &&
         prod.status !== "storyboard_generating" &&
         storyboardNeedsLibraryRematch(prod.activeStoryboard)
       ) {
         try {
-          // Prefer a fresh server copy before rematch when we painted from workspace cache.
           if (opts?.prefer && opts.prefer.episodeId === episodeId) {
             prod = await fetchEpisodeProduction(projectId, episodeId);
           }
@@ -131,7 +170,7 @@ export function StoryboardCreationWorkspace({
             prod = await autoMatchStoryboardAssets(projectId, episodeId);
           }
         } catch {
-          // Non-blocking: keep loaded production if rematch fails.
+          // Non-blocking
         }
       } else if (opts?.prefer && opts.prefer.episodeId === episodeId) {
         try {
@@ -157,6 +196,15 @@ export function StoryboardCreationWorkspace({
       setWorkspace(data.workspace);
       setAssetsSummary(data.assetsSummary);
 
+      for (const prod of data.workspace?.productions ?? []) {
+        syncPromptGenerationFromProduction({
+          projectId,
+          episodeId: prod.episodeId,
+          productionStatus: prod.status,
+          generationError: prod.generationError,
+        });
+      }
+
       const activeId =
         data.workspace?.activeEpisodeId ?? data.episodes[0]?.id ?? null;
       if (activeId) {
@@ -167,7 +215,6 @@ export function StoryboardCreationWorkspace({
         const fromWorkspace =
           data.workspace?.productions.find((p) => p.episodeId === activeId) ??
           null;
-        // Paint from workspace payload first so the overlay can clear sooner.
         if (fromWorkspace) {
           setProduction(fromWorkspace);
           setLoading(false);
@@ -198,24 +245,80 @@ export function StoryboardCreationWorkspace({
   }, [loadAll]);
 
   const handleProductionChange = useCallback((updated: EpisodeProduction) => {
-    setProduction(updated);
+    setProduction((prev) =>
+      prev && prev.episodeId === updated.episodeId ? updated : prev,
+    );
     setScriptDraft(null);
-    setWorkspace((prev) => {
-      if (!prev) return prev;
+    setWorkspace((ws) => {
+      if (!ws) return ws;
       return {
-        ...prev,
-        productions: prev.productions.map((p) =>
+        ...ws,
+        productions: ws.productions.map((p) =>
           p.episodeId === updated.episodeId ? updated : p,
         ),
       };
     });
-  }, []);
+    syncPromptGenerationFromProduction({
+      projectId,
+      episodeId: updated.episodeId,
+      productionStatus: updated.status,
+      generationError: updated.generationError,
+    });
+  }, [projectId]);
+
+  const handleRequestPromptGenerate = useCallback(
+    (episodeId: string, opts?: { force?: boolean }) => {
+      const result = requestEpisodePromptGeneration({
+        projectId,
+        episodeId,
+        run: async () => {
+          const key = crypto.randomUUID();
+          try {
+            const updated = await generateStoryboard(projectId, episodeId, key);
+            handleProductionChange(updated);
+            if (updated.status === "generation_failed") {
+              throw new Error(
+                updated.generationError || "分镜提示词生成失败",
+              );
+            }
+            if (updated.status === "storyboard_generating") {
+              await waitForEpisodePromptSettled(
+                projectId,
+                episodeId,
+                handleProductionChange,
+              );
+            }
+          } catch (error) {
+            if (error instanceof StoryboardGenerateInProgressError) {
+              handleProductionChange(error.production);
+              await waitForEpisodePromptSettled(
+                projectId,
+                episodeId,
+                handleProductionChange,
+              );
+              return;
+            }
+            throw error;
+          }
+        },
+      });
+      void opts;
+      if (result.message) {
+        setSaveNote(result.message);
+      } else if (result.queued) {
+        setSaveNote(
+          `已进入等待队列（生成中 ${result.generatingCount}，等待 ${result.queuedCount}）`,
+        );
+      } else if (result.accepted) {
+        setSaveNote("正在生成整集分镜提示词…");
+      }
+    },
+    [handleProductionChange, projectId],
+  );
 
   const handleSelectEpisode = useCallback(
     async (episodeId: string) => {
       if (episodeId === activeEpisodeId) return;
-      if (isGenerationBusy()) return;
-      if (production?.status === "storyboard_generating") return;
       setSwitchingEpisode(true);
       setSaveNote("");
       try {
@@ -228,7 +331,7 @@ export function StoryboardCreationWorkspace({
         setSwitchingEpisode(false);
       }
     },
-    [activeEpisodeId, loadProduction, production?.status, projectId],
+    [activeEpisodeId, loadProduction, projectId],
   );
 
   const handleSaveDraft = useCallback(async () => {
@@ -266,13 +369,41 @@ export function StoryboardCreationWorkspace({
     scriptDraft,
   ]);
 
-  const assetsHref = isWorkspace
-    ? workspaceProjectAssetsPath(projectId)
-    : `${projectManagementPath(projectId)}/assets`;
+  const handleSaveGlobalSettings = useCallback(
+    async (next: StoryboardVideoDefaults) => {
+      setSavingGlobalSettings(true);
+      setSaveNote("");
+      try {
+        const saved = await patchStoryboardWorkspace(projectId, {
+          videoDefaults: next,
+          ...(activeEpisodeId ? { activeEpisodeId } : {}),
+        });
+        setWorkspace(saved);
+        setGlobalSettingsOpen(false);
+        setSaveNote("全局设置已保存。");
+      } catch (err) {
+        setSaveNote(
+          err instanceof Error ? err.message : "保存全局设置失败，请稍后重试",
+        );
+      } finally {
+        setSavingGlobalSettings(false);
+      }
+    },
+    [activeEpisodeId, projectId],
+  );
+
   const emptyBackHref = isWorkspace
     ? APP_WORKBENCH_PATH
     : `${projectManagementPath(projectId)}/script`;
   const emptyBackLabel = isWorkspace ? "返回工作台" : "返回剧本处理";
+
+  const activePromptStatus = production
+    ? resolveEpisodePromptGenDisplayStatus({
+        productionStatus: production.status,
+        hasStoryboard: Boolean(production.activeStoryboard),
+        job: promptSnap.jobs[production.episodeId],
+      })
+    : "idle";
 
   if (loading) {
     return (
@@ -338,12 +469,18 @@ export function StoryboardCreationWorkspace({
               确认本集剧本后生成分镜提示词。
               {projectName ? ` · ${projectName}` : ""}
               {error ? ` · ${error}` : ""}
+              {promptQueueHint ? ` · ${promptQueueHint}` : ""}
             </p>
           </div>
           <div className="sbw-head__actions">
-            <Link href={assetsHref} className="sbw-link">
-              返回资产管理
-            </Link>
+            <button
+              type="button"
+              className="sbw-link"
+              data-testid="storyboard-global-settings-btn"
+              onClick={() => setGlobalSettingsOpen(true)}
+            >
+              全局设置
+            </button>
             <button
               type="button"
               className={`sbw-btn sbw-btn-primary sbw-head__save ${saveBounce.bounceClass}`}
@@ -365,11 +502,8 @@ export function StoryboardCreationWorkspace({
             episodes={episodes}
             productions={productions}
             activeEpisodeId={activeEpisodeId}
-            switching={
-              switchingEpisode ||
-              production?.status === "storyboard_generating" ||
-              generationBusy
-            }
+            switching={switchingEpisode}
+            promptJobs={promptSnap.jobs}
             onSelect={(id) => void handleSelectEpisode(id)}
           />
 
@@ -386,10 +520,29 @@ export function StoryboardCreationWorkspace({
               onProductionChange={handleProductionChange}
               onNote={setSaveNote}
               onScriptDraftChange={setScriptDraft}
+              videoDefaults={workspace?.videoDefaults}
+              promptGenStatus={activePromptStatus}
+              promptGenError={
+                promptSnap.jobs[production.episodeId]?.error ||
+                production.generationError ||
+                undefined
+              }
+              promptQueueHint={promptQueueHint}
+              onRequestPromptGenerate={(opts) =>
+                handleRequestPromptGenerate(production.episodeId, opts)
+              }
             />
           )}
         </div>
       </div>
+
+      <StoryboardGlobalSettingsDialog
+        open={globalSettingsOpen}
+        initial={workspace?.videoDefaults}
+        saving={savingGlobalSettings}
+        onClose={() => setGlobalSettingsOpen(false)}
+        onSave={handleSaveGlobalSettings}
+      />
     </div>
   );
 }

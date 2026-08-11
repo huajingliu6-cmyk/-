@@ -1,8 +1,15 @@
-import type { VideoAspectRatio, VideoResolution } from "@/video-generation/types";
+import type { VideoResolution } from "@/video-generation/types";
 import {
   STORYBOARD_VIDEO_ASPECT_RATIO,
   STORYBOARD_VIDEO_RESOLUTION,
 } from "@/projects/storyboard/storyboard-video-constants";
+import {
+  DEFAULT_STORYBOARD_VIDEO_MODEL_CHOICE,
+  parseStoryboardVideoModelChoice,
+  parseStoryboardVideoStylePreset,
+  type StoryboardVideoModelChoiceId,
+  type StoryboardVideoStylePresetId,
+} from "@/projects/storyboard/storyboard-video-model-choices";
 
 export const STORYBOARD_VIDEO_RESOLUTIONS: VideoResolution[] = [
   "480P",
@@ -25,20 +32,59 @@ export const STORYBOARD_VIDEO_DURATION_MAX = 15;
 export const STORYBOARD_PROMPT_DURATION_MIN = 9;
 export const STORYBOARD_PROMPT_DURATION_MAX = 15;
 
+/** 项目级视频生成默认设置（持久化到分镜 workspace） */
+export type StoryboardVideoDefaults = {
+  resolution: VideoResolution;
+  aspectRatio: "16:9" | "9:16";
+  modelChoice: StoryboardVideoModelChoiceId;
+  stylePreset: StoryboardVideoStylePresetId;
+};
+
 export type StoryboardVideoOutputParams = {
   resolution: VideoResolution;
   aspectRatio: "16:9" | "9:16";
   durationSeconds: number;
+  modelChoice: StoryboardVideoModelChoiceId;
+  stylePreset: StoryboardVideoStylePresetId;
 };
 
-export function defaultStoryboardVideoOutputParams(
-  shotDurationSeconds?: number,
-): StoryboardVideoOutputParams {
-  const raw = Math.round(shotDurationSeconds ?? STORYBOARD_VIDEO_DURATION_MIN);
+export function defaultStoryboardVideoDefaults(): StoryboardVideoDefaults {
   return {
     resolution: STORYBOARD_VIDEO_RESOLUTION,
     aspectRatio: STORYBOARD_VIDEO_ASPECT_RATIO === "9:16" ? "9:16" : "16:9",
+    modelChoice: DEFAULT_STORYBOARD_VIDEO_MODEL_CHOICE,
+    stylePreset: "",
+  };
+}
+
+export function parseStoryboardVideoDefaults(
+  value: unknown,
+): StoryboardVideoDefaults | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const base = defaultStoryboardVideoDefaults();
+  return {
+    resolution: parseStoryboardVideoResolution(raw.resolution) ?? base.resolution,
+    aspectRatio:
+      parseStoryboardVideoAspectRatio(raw.aspectRatio) ?? base.aspectRatio,
+    modelChoice:
+      parseStoryboardVideoModelChoice(raw.modelChoice) ?? base.modelChoice,
+    stylePreset: parseStoryboardVideoStylePreset(raw.stylePreset),
+  };
+}
+
+export function defaultStoryboardVideoOutputParams(
+  shotDurationSeconds?: number,
+  projectDefaults?: StoryboardVideoDefaults | null,
+): StoryboardVideoOutputParams {
+  const raw = Math.round(shotDurationSeconds ?? STORYBOARD_VIDEO_DURATION_MIN);
+  const defaults = projectDefaults ?? defaultStoryboardVideoDefaults();
+  return {
+    resolution: defaults.resolution,
+    aspectRatio: defaults.aspectRatio,
     durationSeconds: clampStoryboardVideoDuration(raw),
+    modelChoice: defaults.modelChoice,
+    stylePreset: defaults.stylePreset,
   };
 }
 
@@ -127,8 +173,12 @@ export function parseDurationSecondsFromVideoPrompt(
 export function resolveStoryboardVideoOutputParams(
   body: Record<string, unknown>,
   fallbackDurationSeconds?: number,
+  projectDefaults?: StoryboardVideoDefaults | null,
 ): StoryboardVideoOutputParams {
-  const defaults = defaultStoryboardVideoOutputParams(fallbackDurationSeconds);
+  const defaults = defaultStoryboardVideoOutputParams(
+    fallbackDurationSeconds,
+    projectDefaults,
+  );
   return {
     resolution:
       parseStoryboardVideoResolution(body.resolution) ?? defaults.resolution,
@@ -137,5 +187,13 @@ export function resolveStoryboardVideoOutputParams(
     durationSeconds:
       parseStoryboardVideoDurationSeconds(body.durationSeconds) ??
       defaults.durationSeconds,
+    modelChoice:
+      parseStoryboardVideoModelChoice(body.videoModelChoice) ??
+      parseStoryboardVideoModelChoice(body.modelChoice) ??
+      defaults.modelChoice,
+    stylePreset:
+      body.stylePreset !== undefined
+        ? parseStoryboardVideoStylePreset(body.stylePreset)
+        : defaults.stylePreset,
   };
 }

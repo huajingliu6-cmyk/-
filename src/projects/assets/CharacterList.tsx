@@ -1,5 +1,6 @@
 "use client";
 
+import { Pencil } from "lucide-react";
 import type { CharacterAsset } from "@/projects/assets/types";
 import { characterDisplayStatus } from "@/projects/assets/status";
 import { AssetListThumb } from "@/projects/assets/AssetListThumb";
@@ -46,40 +47,57 @@ export function CharacterList({
         {characters.length === 0 ? (
           <div className="amw-empty">暂无角色。点击「新建角色」开始准备资产。</div>
         ) : (
-          <div className="amw-list">
+          <div className="amw-char-grid" data-testid="character-card-grid">
             {characters.map((c, index) => {
               const status = characterDisplayStatus(c);
               const warn = !c.voiceId || status === "待完善";
+              const title = c.name || "未命名角色";
+              const selected = selectedId === c.id;
               return (
-                <button
+                <article
                   key={c.id}
-                  type="button"
-                  className={`amw-card${selectedId === c.id ? " is-selected" : ""}`}
+                  className={`amw-char-card${selected ? " is-selected" : ""}`}
                   style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
-                  onClick={() => onSelect(c.id)}
+                  data-testid={`character-list-card-${c.id}`}
                 >
-                  <span className="amw-avatar" aria-hidden>
-                    <AssetListThumb
-                      projectId={projectId}
-                      asset={c}
-                      placeholder={initials(c.name)}
-                      revision={imageRevisions[c.id] ?? 0}
-                    />
-                  </span>
-                  <span className="amw-card__meta">
-                    <p className="amw-card__title">{c.name || "未命名角色"}</p>
-                    <p className="amw-card__sub">
-                      {c.role || "未设定定位"}
-                      {" · "}
-                      {c.voiceId
-                        ? c.voiceStyle || c.voiceName || "已绑定音色"
-                        : "未绑定音色"}
+                  <button
+                    type="button"
+                    className="amw-char-card__hit"
+                    onClick={() => onSelect(c.id)}
+                    title={title}
+                  >
+                    <p className="amw-char-card__name" title={title}>
+                      {title}
                     </p>
-                  </span>
-                  <span className={`amw-badge${warn ? " is-warn" : " is-ok"}`}>
-                    {status}
-                  </span>
-                </button>
+                    <span className="amw-char-card__media" aria-hidden>
+                      <AssetListThumb
+                        projectId={projectId}
+                        asset={c}
+                        placeholder={initials(c.name)}
+                        revision={imageRevisions[c.id] ?? 0}
+                        fit="contain"
+                      />
+                    </span>
+                  </button>
+                  <div className="amw-char-card__foot">
+                    <span
+                      className={`amw-badge${warn ? " is-warn" : " is-ok"}`}
+                    >
+                      {status}
+                    </span>
+                    <div className="amw-char-card__actions">
+                      <button
+                        type="button"
+                        className="amw-icon-btn"
+                        title={canEdit ? "编辑" : "查看详情"}
+                        aria-label={canEdit ? "编辑" : "查看详情"}
+                        onClick={() => onSelect(c.id)}
+                      >
+                        <Pencil size={15} strokeWidth={2} aria-hidden />
+                      </button>
+                    </div>
+                  </div>
+                </article>
               );
             })}
           </div>

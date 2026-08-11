@@ -89,8 +89,8 @@ export function VoiceSelector({
     },
     {
       id: "project",
-      label: "项目音色（音频管理）",
-      emptyHint: "暂无项目音色。可在「音频管理」中新建并上传。",
+      label: "项目音色",
+      emptyHint: "暂无项目音色。请优先从「本地音频库」选择可播放文件。",
       options: projectVoices.map(toOption),
     },
     {

@@ -174,25 +174,35 @@ export function AudioManager({
                     <button
                       key={a.id}
                       type="button"
-                      className={`amw-card${selectedId === a.id ? " is-selected" : ""}`}
+                      className={`amw-card asset-card${selectedId === a.id ? " is-selected" : ""}`}
                       style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
                       onClick={() => setSelectedId(a.id)}
                     >
-                      <span className="amw-avatar" aria-hidden>
-                        {TYPE_LABEL[a.type].slice(0, 1)}
+                      <span className="amw-avatar asset-card__media asset-card__empty" aria-hidden>
+                        <span className="asset-card__empty-glyph">
+                          {TYPE_LABEL[a.type].slice(0, 1)}
+                        </span>
+                        <span className="asset-card__empty-label">音频</span>
                       </span>
-                      <span className="amw-card__meta">
-                        <p className="amw-card__title">{a.name}</p>
-                        <p className="amw-card__sub">
+                      <span className="amw-card__meta asset-card__content">
+                        <span className="asset-card__header">
+                          <p className="amw-card__title">{a.name}</p>
+                          <span
+                            className={`amw-badge${warn ? " is-warn" : " is-ok"}`}
+                          >
+                            {status}
+                          </span>
+                        </span>
+                        <p className="amw-card__sub asset-card__meta-line">
                           {TYPE_LABEL[a.type]}
                           {a.duration ? ` · ${a.duration}` : ""}
-                          {a.fileName ? ` · ${a.fileName}` : ""}
                         </p>
-                      </span>
-                      <span
-                        className={`amw-badge${warn ? " is-warn" : " is-ok"}`}
-                      >
-                        {status}
+                        <p className="amw-card__sub asset-card__description">
+                          {a.source?.trim() || "暂无来源说明"}
+                        </p>
+                        <p className="amw-card__sub asset-card__note">
+                          {a.fileName || "未上传文件"}
+                        </p>
                       </span>
                     </button>
                   );

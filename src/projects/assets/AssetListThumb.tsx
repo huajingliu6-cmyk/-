@@ -12,6 +12,8 @@ type Props = {
   };
   placeholder: string;
   revision?: string | number | null;
+  /** Library/design cards use contain so the subject is not cropped. */
+  fit?: "cover" | "contain";
 };
 
 /** List/avatar thumb: server URL or blob preview; falls back to category glyph. */
@@ -20,13 +22,33 @@ export function AssetListThumb({
   asset,
   placeholder,
   revision,
+  fit = "cover",
 }: Props) {
   const src = resolveAssetImageSrc(projectId, asset, { revision });
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const failed = !src || failedSrc === src;
 
   if (!src || failed) {
-    return <>{placeholder}</>;
+    return (
+      <span className="asset-card__empty">
+        <span className="asset-card__empty-glyph">{placeholder}</span>
+        <span className="asset-card__empty-label">暂无图片</span>
+      </span>
+    );
+  }
+
+  if (fit === "contain") {
+    return (
+      <>
+        {/* eslint-disable-next-line @next/next/no-img-element -- project binary preview URL */}
+        <img
+          className="asset-card__media-img"
+          src={src}
+          alt=""
+          onError={() => setFailedSrc(src)}
+        />
+      </>
+    );
   }
 
   return (

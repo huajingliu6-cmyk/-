@@ -116,7 +116,7 @@ describe("asset module management routes", () => {
     expect(source).toContain("CharacterCreateDialog");
     expect(source).toContain("SceneCreateDialog");
     expect(source).toContain("PropCreateDialog");
-    expect(source).toContain("AudioCreateDialog");
+    expect(source).not.toContain("AudioCreateDialog");
     expect(source).toContain("pendingMedia");
     expect(source).toContain("createdAssets");
     expect(source).toContain("ead-extract-all");

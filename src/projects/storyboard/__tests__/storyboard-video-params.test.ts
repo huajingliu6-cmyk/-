@@ -61,11 +61,25 @@ describe("storyboard video output params", () => {
       resolution: "1080P",
       aspectRatio: "9:16",
       durationSeconds: 12,
+      modelChoice: "seedance-2.0",
+      stylePreset: "",
     });
 
     const fallback = resolveStoryboardVideoOutputParams({}, 5);
     expect(fallback.resolution).toBe("720P");
     expect(fallback.aspectRatio).toBe("16:9");
     expect(fallback.durationSeconds).toBe(5);
+    expect(fallback.modelChoice).toBe("seedance-2.0");
+    expect(fallback.stylePreset).toBe("");
+
+    const withChoice = resolveStoryboardVideoOutputParams(
+      {
+        videoModelChoice: "seedance-2.0-fast",
+        stylePreset: "cinematic",
+      },
+      8,
+    );
+    expect(withChoice.modelChoice).toBe("seedance-2.0-fast");
+    expect(withChoice.stylePreset).toBe("cinematic");
   });
 });
