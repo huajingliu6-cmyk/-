@@ -16,6 +16,8 @@ type Props = {
   onChange: (voice: VoiceOption | null) => void;
   disabled?: boolean;
   label?: string;
+  /** Hide visible label (title shown in voice panel header instead). */
+  labelHidden?: boolean;
   /** 来自音频管理「音色」分类的项目音色 */
   projectVoices?: VoiceOption[];
   /** 外部已加载的本地音频库（可选；未传时组件自行拉取） */
@@ -55,6 +57,7 @@ export function VoiceSelector({
   onChange,
   disabled = false,
   label = "音色选择",
+  labelHidden = false,
   projectVoices = [],
   localVoices: localVoicesProp,
 }: Props) {
@@ -103,12 +106,16 @@ export function VoiceSelector({
   return (
     <GlassSelect
       label={label}
+      hideLabel={labelHidden}
       disabled={disabled}
       value={value ?? ""}
       placeholder="选择音色"
       allowClear
       clearLabel="清除绑定"
       groups={groups}
+      menuPortal
+      menuSideOffset={6}
+      menuCollisionPadding={12}
       onOpen={ensureLocalVoices}
       onChange={(id) => {
         if (!id) {

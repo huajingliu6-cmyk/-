@@ -1943,14 +1943,20 @@ const updateItem = useCallback(
                 </div>
               ) : null}
 
-              <div className="ead-tabs" role="tablist" aria-label="资产分类">
+              <div
+                className="amw-tabs asset-type-tabs"
+                role="tablist"
+                aria-label="资产分类"
+              >
                 {GROUPS.map((group) => (
                   <button
                     key={group.type}
                     type="button"
                     role="tab"
                     aria-selected={activeGroup === group.type}
-                    className={`ead-tab${activeGroup === group.type ? " is-active" : ""}`}
+                    className={`amw-tab asset-type-tab${
+                      activeGroup === group.type ? " is-active" : ""
+                    }`}
                     onClick={() => setActiveGroup(group.type)}
                   >
                     {group.label}
@@ -2590,6 +2596,14 @@ function DesignItemCard({
   );
 
   const nameTitle = item.name || "未命名资产";
+  const characterSummary =
+    item.assetType === "character"
+      ? [item.draft.role, item.draft.age]
+          .filter((part) => part.trim())
+          .join(" · ")
+      : "";
+  const characterDescription =
+    item.assetType === "character" ? item.draft.description : "";
 
   if (isVisualAsset) {
     return (
@@ -2622,22 +2636,13 @@ function DesignItemCard({
     );
   }
 
-  // Character: name top → large image → compact voice + actions (no side text / description)
+  // Character: previous side-by-side layout (do not share visual-asset styles)
   return (
     <article
-      className="ead-card ead-card--character-portrait"
+      className="ead-card ead-card--character"
       data-testid={`ead-character-card-${item.id}`}
     >
-      <div className="ead-card__portrait-head">
-        <h3 className="ead-card__name ead-card__name--center" title={nameTitle}>
-          {nameTitle}
-        </h3>
-        <span className={`ead-card__status asset-card__status${statusClass}`}>
-          {statusLabel}
-        </span>
-      </div>
-      <div className="ead-card__media ead-card__media--portrait">{mediaBlock}</div>
-      <div className="ead-card__content ead-card__content--portrait">
+      <div className="ead-card__corner">
         {approvalUi === "approved" ? (
           <span
             className="ead-card__approval-badge is-approved"
@@ -2646,76 +2651,144 @@ function DesignItemCard({
             已审批
           </span>
         ) : null}
-        <div className="ead-card__voice-row ead-card__voice-row--compact">
-          <div className="ead-card__voice-select">
-            {voiceLocked ? (
-              <div className="ead-card__voice-readonly">
-                <span className="ead-card__voice-readonly-label">音色</span>
-                <span
-                  className="ead-card__voice-readonly-value"
-                  data-testid={`ead-voice-readonly-${item.id}`}
-                >
-                  {characterVoiceLabel}
-                </span>
-              </div>
-            ) : (
-              <VoiceSelector
-                label="音色"
-                value={characterVoiceId}
-                disabled={disabled || !currentMediaId}
-                projectVoices={projectVoices}
-                onChange={onVoiceSelect}
-              />
-            )}
-          </div>
-          <div className="ead-card__voice-actions">
-            <VoicePreviewButton
-              projectId={projectId}
-              voiceId={characterVoiceId}
-              audios={audios}
-              className="amw-btn ead-card__voice-preview"
-              testId={`ead-voice-preview-${item.id}`}
-              onStatus={setVoiceNote}
-            />
-            <button
-              type="button"
-              className={`amw-btn ead-card__voice-bind${
-                voiceBoundLabel ? " is-bound" : ""
-              }${voiceLocked && !hasBoundVoice ? " is-missing" : ""}`}
-              data-testid={`ead-voice-bind-${item.id}`}
-              disabled={
-                disabled ||
-                voiceLocked ||
-                !currentMediaId ||
-                !characterVoiceId ||
-                (mediaVoice != null && isMediaVoiceBound(mediaVoice))
-              }
-              title={
-                !currentMediaId
-                  ? "请先生成图片，再为当前历史图绑定音色"
-                  : voiceLocked && !hasBoundVoice
-                    ? "审批入库时未绑定音色；请主理人在项目管理中为该角色补绑"
-                    : voiceLocked
-                      ? "已审批入库，音色仅主理人可在项目管理中更改"
-                      : mediaVoice != null && isMediaVoiceBound(mediaVoice)
-                        ? "当前历史图音色已绑定"
-                        : "将当前选择的音色绑定到当前历史图"
-              }
-              onClick={onBindVoice}
-            >
-              {voiceLocked && !hasBoundVoice
-                ? "未绑定"
-                : voiceBoundLabel
-                  ? "已绑定"
-                  : "绑定音色"}
-            </button>
-          </div>
-        </div>
-        {voiceNote ? (
-          <p className="ead-muted ead-card__voice-note">{voiceNote}</p>
+        {showPersonalConfirm ? (
+          <button
+            type="button"
+            className="amw-btn amw-btn-primary ead-card__confirm-btn"
+            data-testid={`ead-confirm-item-${item.id}`}
+            disabled={
+              disabled ||
+              isInLibrary ||
+              isImageMissing ||
+              item.resolution === "ignore"
+            }
+            title={confirmDisabledReason}
+            onClick={onConfirm}
+          >
+            {confirming ? "入库中…" : isInLibrary ? "已入库" : "确认入库"}
+          </button>
         ) : null}
-        {actionsBlock}
-        {noteBlock}
+        <button
+          type="button"
+          className="amw-btn ead-card__delete-btn"
+          data-testid={`ead-delete-${item.id}`}
+          disabled={disabled || deleteLocked}
+          title={
+            deleteLocked
+              ? "已审批入库的资产仅主理人可在项目管理中删除"
+              : undefined
+          }
+          onClick={onDelete}
+        >
+          删除
+        </button>
+      </div>
+      <div className="ead-card__layout">
+        <div className="ead-card__visual">
+          {mediaBlock}
+          <p className="ead-card__name" title={nameTitle}>
+            {nameTitle}
+          </p>
+          <button
+            type="button"
+            className="amw-btn amw-btn-primary ead-card__design-btn"
+            data-testid={`ead-design-${item.id}`}
+            disabled={disabled || designDisabled}
+            title={
+              designDisabled ? "请先提取本集资产后再进行设计" : undefined
+            }
+            onClick={onDesign}
+          >
+            设计
+          </button>
+        </div>
+        <div className="ead-card__body">
+          <div className="ead-card__voice-row">
+            <div className="ead-card__voice-select">
+              {voiceLocked ? (
+                <div className="ead-card__voice-readonly">
+                  <span className="ead-card__voice-readonly-label">音色</span>
+                  <span
+                    className="ead-card__voice-readonly-value"
+                    data-testid={`ead-voice-readonly-${item.id}`}
+                  >
+                    {characterVoiceLabel}
+                  </span>
+                </div>
+              ) : (
+                <VoiceSelector
+                  label="当前图音色"
+                  value={characterVoiceId}
+                  disabled={disabled || !currentMediaId}
+                  projectVoices={projectVoices}
+                  onChange={onVoiceSelect}
+                />
+              )}
+            </div>
+            <div className="ead-card__voice-actions">
+              <VoicePreviewButton
+                projectId={projectId}
+                voiceId={characterVoiceId}
+                audios={audios}
+                className="amw-btn ead-card__voice-preview"
+                testId={`ead-voice-preview-${item.id}`}
+                onStatus={setVoiceNote}
+              />
+              <button
+                type="button"
+                className={`amw-btn ead-card__voice-bind${
+                  voiceBoundLabel ? " is-bound" : ""
+                }${voiceLocked && !hasBoundVoice ? " is-missing" : ""}`}
+                data-testid={`ead-voice-bind-${item.id}`}
+                disabled={
+                  disabled ||
+                  voiceLocked ||
+                  !currentMediaId ||
+                  !characterVoiceId ||
+                  (mediaVoice != null && isMediaVoiceBound(mediaVoice))
+                }
+                title={
+                  !currentMediaId
+                    ? "请先生成图片，再为当前历史图绑定音色"
+                    : voiceLocked && !hasBoundVoice
+                      ? "审批入库时未绑定音色；请主理人在项目管理中为该角色补绑"
+                      : voiceLocked
+                        ? "已审批入库，音色仅主理人可在项目管理中更改"
+                        : mediaVoice != null && isMediaVoiceBound(mediaVoice)
+                          ? "当前历史图音色已绑定"
+                          : "将当前选择的音色绑定到当前历史图"
+                }
+                onClick={onBindVoice}
+              >
+                {voiceLocked && !hasBoundVoice
+                  ? "未绑定"
+                  : voiceBoundLabel
+                    ? "已绑定"
+                    : "绑定音色"}
+              </button>
+            </div>
+          </div>
+          {voiceNote ? (
+            <p className="ead-muted ead-card__voice-note">{voiceNote}</p>
+          ) : null}
+          {characterSummary ? (
+            <p className="ead-muted ead-card__summary">{characterSummary}</p>
+          ) : null}
+          <div className="amw-field">
+            <label>描述</label>
+            <textarea
+              className="amw-textarea"
+              value={characterDescription}
+              disabled={disabled}
+              onChange={(e) =>
+                onChange({
+                  draft: { ...item.draft, description: e.target.value },
+                } as Partial<EpisodeAssetDesignItem>)
+              }
+            />
+          </div>
+          {noteBlock}
+        </div>
       </div>
       {lightbox}
     </article>

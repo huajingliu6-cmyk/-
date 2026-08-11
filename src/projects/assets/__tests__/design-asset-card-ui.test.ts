@@ -23,7 +23,8 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(workspace).toContain("MapPinned");
     expect(workspace).toContain("Package");
     expect(workspace).toContain("ead-card--visual-asset");
-    expect(workspace).toContain("ead-card--character-portrait");
+    expect(workspace).toContain("ead-card--character");
+    expect(workspace).not.toContain("ead-card--character-portrait");
   });
 
   it("DesignAssetModal wired with copy and generate actions", () => {
@@ -44,8 +45,9 @@ describe("Batch H1 design asset card UI contract", () => {
   it("includes card and modal layout styles", () => {
     expect(css).toContain(".ead-card__layout");
     expect(css).toContain(".ead-card--visual-asset");
-    expect(css).toContain(".ead-card--character-portrait");
-    expect(css).toContain(".amw-char-grid");
+    expect(css).toContain(".ead-card--character");
+    expect(css).not.toContain(".ead-card--character-portrait");
+    expect(css).toContain(".asset-compact-list");
     expect(css).toContain(".ead-modal-backdrop");
     expect(css).toContain(".ead-card__design-btn");
   });

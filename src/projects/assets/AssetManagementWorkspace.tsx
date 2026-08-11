@@ -87,15 +87,23 @@ export function AssetManagementWorkspace({
               : `/api/projects/${encodeURIComponent(projectId)}`;
             const meta = await fetch(metaUrl, { credentials: "include" });
             if (meta.ok) {
-              const data = (await meta.json()) as {
-                project?: { name?: string };
-              };
-              setProjectName(data.project?.name ?? "");
+              const metaText = await meta.text();
+              if (metaText.trim()) {
+                const data = JSON.parse(metaText) as {
+                  project?: { name?: string };
+                };
+                setProjectName(data.project?.name ?? "");
+              }
             }
           }
           return;
         }
-        const data = (await res.json()) as {
+        const draftText = await res.text();
+        if (!draftText.trim()) {
+          if (!cancelled) setLoadError("无法加载资产草稿");
+          return;
+        }
+        const data = JSON.parse(draftText) as {
           project?: { name?: string };
           draft?: ProjectAssetBundle | null;
           canEdit?: boolean;
@@ -214,11 +222,25 @@ export function AssetManagementWorkspace({
   }, [editAllowed, persist, projectId, router, storyboardHref]);
 
   return (
-    <div className={embedded ? "amw-library-workspace" : "amw"}>
+    <div
+      className={
+        embedded
+          ? "amw-library-workspace asset-library-page"
+          : "amw asset-library-page"
+      }
+    >
       <div
-        className={embedded ? "amw-library-workspace__inner" : "amw-inner"}
+        className={
+          embedded
+            ? "amw-library-workspace__inner asset-library-page__inner"
+            : "amw-inner asset-library-page__inner"
+        }
       >
-        <header className={`amw-head${embedded ? " amw-head--embedded" : ""}`}>
+        <header
+          className={`amw-head asset-library-toolbar${
+            embedded ? " amw-head--embedded" : ""
+          }`}
+        >
           {!embedded ? (
             <div className="amw-head__titles">
               {isWorkspace && backHref ? (
@@ -283,17 +305,22 @@ export function AssetManagementWorkspace({
           ) : null}
         </header>
 
-        <AssetTabs
-          active={visibleTab}
-          onChange={(tab) => {
-            if (tab === "audio") return;
-            setActiveTab(tab);
-            setTabKey((k) => k + 1);
-            setPageNote("");
-          }}
-        />
+        <div className="asset-library-toolbar">
+          <AssetTabs
+            active={visibleTab}
+            onChange={(tab) => {
+              if (tab === "audio") return;
+              setActiveTab(tab);
+              setTabKey((k) => k + 1);
+              setPageNote("");
+            }}
+          />
+        </div>
 
-        <div key={`${visibleTab}-${tabKey}`}>
+        <div
+          className="asset-library-content"
+          key={`${visibleTab}-${tabKey}`}
+        >
           {visibleTab === "character" ? (
             <CharacterManager
               projectId={projectId}

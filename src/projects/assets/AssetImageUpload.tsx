@@ -37,6 +37,8 @@ type Props = {
   onRevisionChange?: (next: number) => void;
   /** 由外层已展示主图时隐藏本组件内预览，避免重复渲染 */
   hidePreview?: boolean;
+  /** Compact single-row actions for library controls pane */
+  compact?: boolean;
 };
 
 function revokeIfBlob(url: string | null | undefined) {
@@ -58,6 +60,7 @@ export function AssetImageUpload({
   revision = 0,
   onRevisionChange,
   hidePreview = false,
+  compact = false,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
@@ -194,8 +197,10 @@ export function AssetImageUpload({
   };
 
   return (
-    <div className="amw-field">
-      <label htmlFor={id}>{label}</label>
+    <div
+      className={`amw-field${compact ? " amw-field--image-compact" : ""}`}
+    >
+      {compact ? null : <label htmlFor={id}>{label}</label>}
       <input
         ref={inputRef}
         id={id}
@@ -208,7 +213,11 @@ export function AssetImageUpload({
           e.target.value = "";
         }}
       />
-      <div className="amw-file-row">
+      <div
+        className={
+          compact ? "asset-controls__image-actions-row amw-file-row" : "amw-file-row"
+        }
+      >
         <button
           type="button"
           className="amw-btn"
@@ -217,17 +226,15 @@ export function AssetImageUpload({
         >
           {busy ? "处理中…" : "选择图片"}
         </button>
-        {value.fileName || value.objectUrl ? (
-          <button
-            type="button"
-            className="amw-btn"
-            disabled={disabled || busy}
-            onClick={clear}
-          >
-            清除
-          </button>
-        ) : null}
-        <span className="amw-file-name">
+        <button
+          type="button"
+          className="amw-btn"
+          disabled={disabled || busy || !(value.fileName || value.objectUrl)}
+          onClick={clear}
+        >
+          清除
+        </button>
+        <span className="amw-file-name" title={value.fileName ?? undefined}>
           {busy ? "上传中…" : (value.fileName ?? "未选择图片")}
         </span>
       </div>
@@ -235,7 +242,7 @@ export function AssetImageUpload({
         <AmwImagePreview src={previewSrc} alt={value.fileName ?? "预览"} />
       ) : null}
       {error ? <p className="amw-field-error">{error}</p> : null}
-      {tip ? (
+      {tip && !compact ? (
         <p className="amw-hint">
           <span className="req">*</span> {tip}
         </p>

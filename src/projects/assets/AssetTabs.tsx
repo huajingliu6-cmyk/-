@@ -16,7 +16,11 @@ type Props = {
 
 export function AssetTabs({ active, onChange }: Props) {
   return (
-    <div className="amw-tabs" role="tablist" aria-label="资产类型">
+    <div
+      className="amw-tabs asset-type-tabs"
+      role="tablist"
+      aria-label="资产类型"
+    >
       {TABS.map((tab) => (
         <TabButton
           key={tab.id}
@@ -44,7 +48,7 @@ function TabButton({
       type="button"
       role="tab"
       aria-selected={active}
-      className={`amw-tab${active ? " is-active" : ""} ${bounce.bounceClass}`}
+      className={`amw-tab asset-type-tab${active ? " is-active" : ""} ${bounce.bounceClass}`}
       onClick={() => {
         bounce.trigger();
         onSelect();

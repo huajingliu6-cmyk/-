@@ -3,7 +3,9 @@
 import { useMemo, useState } from "react";
 import { UserRound } from "lucide-react";
 import { useChipBounce } from "@/shell/useChipBounce";
-import { AmwImagePreview } from "@/projects/assets/AmwImagePreview";
+import { AssetBasicInfo } from "@/projects/assets/AssetBasicInfo";
+import { AssetDetailImage } from "@/projects/assets/AssetDetailImage";
+import { AssetDetailLayout } from "@/projects/assets/AssetDetailLayout";
 import { AssetImageUpload } from "@/projects/assets/AssetImageUpload";
 import { VoiceSelector } from "@/projects/assets/VoiceSelector";
 import { VoicePreviewButton } from "@/projects/assets/VoicePreviewButton";
@@ -83,8 +85,6 @@ export function CharacterDetail({
 }: Props) {
   const saveBounce = useChipBounce();
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
-  const [heroFailed, setHeroFailed] = useState(false);
-  const [heroFailKey, setHeroFailKey] = useState("");
 
   const mediaIds = useMemo(
     () => (character ? listCharacterMediaIds(character) : []),
@@ -112,20 +112,14 @@ export function CharacterDetail({
     }
   }
 
-  const heroKey = `${character?.id ?? ""}:${selectedMediaId ?? ""}:${imageRevision}`;
-  if (heroFailKey !== heroKey) {
-    setHeroFailKey(heroKey);
-    setHeroFailed(false);
-  }
-
   if (!character) {
     return (
-      <section className="amw-panel" aria-label="角色详情">
-        <div className="amw-panel__head">
-          <h2>角色详情</h2>
-        </div>
-        <div className="amw-empty">在左侧选择角色，或新建角色开始编辑。</div>
-      </section>
+      <AssetDetailLayout
+        title="角色详情"
+        aria-label="角色详情"
+        empty
+        emptyMessage="在左侧选择角色，或新建角色开始编辑。"
+      />
     );
   }
 
@@ -185,45 +179,116 @@ export function CharacterDetail({
         revision: imageRevision,
       });
 
-  return (
-    <section className="amw-panel" aria-label="角色详情">
-      <div className="amw-panel__head">
-        <h2>角色详情</h2>
-        <span className="amw-badge">{characterDisplayStatus(character)}</span>
-      </div>
-      {!canEdit ? (
-        <div className="amw-readonly-banner">
-          当前账号无资产编辑权限（默认仅项目主理人可编辑）。
-        </div>
-      ) : null}
-      <div className="amw-panel__body">
-        <div className="amw-detail amw-detail--character">
-          <div className="amw-character-hero" data-testid="character-hero-image">
-            {previewSrc && !heroFailed ? (
-              <AmwImagePreview
-                className="amw-image-preview--character-hero"
-                src={previewSrc}
-                alt={character.imageFileName ?? character.name}
-                onLoadError={() => setHeroFailed(true)}
-              />
-            ) : (
-              <div className="amw-character-hero__empty" aria-hidden>
-                <UserRound size={36} strokeWidth={1.5} />
-                <span>暂无图片</span>
-              </div>
-            )}
-          </div>
+  const statusLabel = characterDisplayStatus(character);
+  const voiceBound = Boolean(activeVoice.voiceId);
 
+  return (
+    <AssetDetailLayout
+      title="角色详情"
+      aria-label="角色详情"
+      className="character-detail"
+      status={<span className="amw-badge">{statusLabel}</span>}
+      banner={
+        !canEdit ? (
+          <div className="amw-readonly-banner">
+            当前账号无资产编辑权限（默认仅项目主理人可编辑）。
+          </div>
+        ) : null
+      }
+      preview={
+        <AssetDetailImage
+          fill
+          src={previewSrc}
+          alt={character.imageFileName ?? character.name}
+          testId="character-hero-image"
+          emptyIcon={<UserRound size={36} strokeWidth={1.5} />}
+        />
+      }
+      basicInfo={
+        <AssetBasicInfo
+          compact
+          fields={[
+            {
+              key: "name",
+              label: (
+                <>
+                  名称<span className="req">*</span>
+                </>
+              ),
+              value: character.name,
+              disabled: !canEdit,
+              onChange: (v) => patch({ name: v }),
+            },
+            {
+              key: "role",
+              label: "定位",
+              value: character.role,
+              disabled: !canEdit,
+              placeholder: "如：女主角",
+              onChange: (v) => patch({ role: v }),
+            },
+            {
+              key: "gender",
+              label: "性别",
+              value: character.gender,
+              disabled: !canEdit,
+              onChange: (v) => patch({ gender: v }),
+            },
+            {
+              key: "age",
+              label: "年龄",
+              value: character.age,
+              disabled: !canEdit,
+              onChange: (v) => patch({ age: v }),
+            },
+          ]}
+        />
+      }
+      notes={
+        <div className="amw-field amw-field--notes-compact">
+          <label>备注</label>
+          <textarea
+            className="amw-textarea asset-controls__notes-textarea"
+            value={character.description}
+            disabled={!canEdit}
+            onChange={(e) => patch({ description: e.target.value })}
+          />
+        </div>
+      }
+      imageActions={
+        <>
+          <AssetImageUpload
+            id={`character-image-${character.id}`}
+            label="角色图片"
+            compact
+            hidePreview
+            disabled={!canEdit}
+            projectId={projectId}
+            assetId={character.id}
+            ensurePersisted={ensurePersisted}
+            revision={imageRevision}
+            onRevisionChange={(next) => onImageRevision?.(character.id, next)}
+            value={{
+              fileName: character.imageFileName,
+              objectUrl: character.imageObjectUrl,
+              mimeType: character.imageMimeType,
+            }}
+            onChange={(image) =>
+              patch({
+                imageFileName: image.fileName,
+                imageObjectUrl: image.objectUrl,
+                imageMimeType: image.mimeType,
+                videoRefSafety: null,
+              })
+            }
+          />
           {mediaIds.length > 1 ? (
             <div
-              className="ead-history-strip ead-history-strip--images"
+              className="ead-history-strip ead-history-strip--images ead-history-strip--compact"
               data-testid="character-media-history"
             >
               {mediaIds.map((id) => {
                 const active = id === activeMediaId;
-                const bound = Boolean(
-                  resolveVoiceForMedia(character, id).voiceId,
-                );
                 return (
                   <button
                     key={id}
@@ -233,11 +298,7 @@ export function CharacterDetail({
                         ? "ead-history-thumb is-active"
                         : "ead-history-thumb"
                     }
-                    title={
-                      bound
-                        ? `${id}（已绑音色）`
-                        : `${id}（未绑音色，请重新绑定）`
-                    }
+                    title={id}
                     onClick={() => setSelectedMediaId(id)}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -250,146 +311,91 @@ export function CharacterDetail({
                   </button>
                 );
               })}
-            </div>
-          ) : null}
-
-          <div className="amw-section">
-            <h3>基础信息</h3>
-            <div className="amw-fields">
-              <div className="amw-field">
-                <label>
-                  角色名称<span className="req">*</span>
-                </label>
-                <input
-                  className="amw-input"
-                  value={character.name}
-                  disabled={!canEdit}
-                  onChange={(e) => patch({ name: e.target.value })}
-                />
-              </div>
-              <div className="amw-field">
-                <label>角色定位</label>
-                <input
-                  className="amw-input"
-                  value={character.role}
-                  disabled={!canEdit}
-                  placeholder="如：女主角"
-                  onChange={(e) => patch({ role: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="amw-fields">
-              <div className="amw-field">
-                <label>性别</label>
-                <input
-                  className="amw-input"
-                  value={character.gender}
-                  disabled={!canEdit}
-                  onChange={(e) => patch({ gender: e.target.value })}
-                />
-              </div>
-              <div className="amw-field">
-                <label>年龄</label>
-                <input
-                  className="amw-input"
-                  value={character.age}
-                  disabled={!canEdit}
-                  onChange={(e) => patch({ age: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="amw-field">
-              <label>备注</label>
-              <textarea
-                className="amw-textarea"
-                value={character.description}
-                disabled={!canEdit}
-                onChange={(e) => patch({ description: e.target.value })}
-              />
-            </div>
-            <AssetImageUpload
-              id={`character-image-${character.id}`}
-              label="角色图片"
-              tip="上传后更新上方主图；推荐插画/设定图风格"
-              disabled={!canEdit}
-              projectId={projectId}
-              assetId={character.id}
-              ensurePersisted={ensurePersisted}
-              revision={imageRevision}
-              hidePreview
-              onRevisionChange={(next) => onImageRevision?.(character.id, next)}
-              value={{
-                fileName: character.imageFileName,
-                objectUrl: character.imageObjectUrl,
-                mimeType: character.imageMimeType,
-              }}
-              onChange={(image) =>
-                patch({
-                  imageFileName: image.fileName,
-                  imageObjectUrl: image.objectUrl,
-                  imageMimeType: image.mimeType,
-                  videoRefSafety: null,
-                })
-              }
-            />
-            {activeMediaId &&
-            mediaIds.length > 1 &&
-            activeMediaId !==
-              (character.primaryMediaId?.trim() ||
-                character.imageFileName?.trim()) ? (
-              <div className="amw-actions">
+              {activeMediaId &&
+              activeMediaId !==
+                (character.primaryMediaId?.trim() ||
+                  character.imageFileName?.trim()) ? (
                 <button
                   type="button"
                   className="amw-btn"
                   disabled={!canEdit}
                   onClick={() => setPrimaryMedia(activeMediaId)}
                 >
-                  设为当前主图
+                  设为主图
                 </button>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="amw-section">
-            <h3>声音设定</h3>
-            <VoiceSelector
-              label={mediaIds.length > 1 ? "本图音色" : undefined}
-              value={activeVoice.voiceId}
-              disabled={!canEdit}
-              projectVoices={projectVoices}
-              onChange={bindVoiceForActiveMedia}
-            />
-            {character.voiceStyle &&
-            activeMediaId ===
-              (character.primaryMediaId?.trim() ||
-                character.imageFileName?.trim()) ? (
-              <p className="amw-hint">当前风格：{character.voiceStyle}</p>
-            ) : null}
-            <div className="amw-actions">
-              <VoicePreviewButton
-                projectId={projectId}
-                voiceId={activeVoice.voiceId}
-                audios={audios}
-                disabled={!activeVoice.voiceId}
-                onStatus={onPreviewStatus}
-              />
-              <button
-                type="button"
-                className={`amw-btn amw-btn-primary ${saveBounce.bounceClass}`}
-                disabled={!canEdit || !character.name.trim()}
-                onClick={() => {
-                  saveBounce.trigger();
-                  onSave();
-                }}
-                onAnimationEnd={saveBounce.onAnimationEnd}
-              >
-                保存
-              </button>
+              ) : null}
             </div>
-            {note ? <p className="amw-note">{note}</p> : null}
+          ) : null}
+        </>
+      }
+      voice={
+        <>
+          <div className="asset-controls__voice-head">
+            <span className="asset-controls__voice-title">
+              {mediaIds.length > 1 ? "本图音色" : "音色"}
+            </span>
+            <span
+              className={`amw-badge${voiceBound ? " is-ok" : " is-warn"}`}
+            >
+              {voiceBound
+                ? activeVoice.voiceName || "已绑定"
+                : "待绑定音色"}
+            </span>
           </div>
-        </div>
-      </div>
-    </section>
+          <VoiceSelector
+            label="音色选择"
+            labelHidden
+            value={activeVoice.voiceId}
+            disabled={!canEdit}
+            projectVoices={projectVoices}
+            onChange={bindVoiceForActiveMedia}
+          />
+          {character.voiceStyle &&
+          activeMediaId ===
+            (character.primaryMediaId?.trim() ||
+              character.imageFileName?.trim()) ? (
+            <p className="amw-hint">当前风格：{character.voiceStyle}</p>
+          ) : null}
+          <div className="asset-controls__voice-actions">
+            <VoicePreviewButton
+              projectId={projectId}
+              voiceId={activeVoice.voiceId}
+              audios={audios}
+              disabled={!activeVoice.voiceId}
+              onStatus={onPreviewStatus}
+            />
+            <button
+              type="button"
+              className="amw-btn amw-btn-primary"
+              disabled={!canEdit || !activeVoice.voiceId}
+              title="音色选择后已写入当前草稿，点击保存即可持久化"
+              onClick={() => {
+                saveBounce.trigger();
+                onSave();
+              }}
+            >
+              {voiceBound ? "确认绑定" : "绑定音色"}
+            </button>
+          </div>
+        </>
+      }
+      footer={
+        <>
+          <button
+            type="button"
+            className={`amw-btn amw-btn-primary ${saveBounce.bounceClass}`}
+            disabled={!canEdit || !character.name.trim()}
+            onClick={() => {
+              saveBounce.trigger();
+              onSave();
+            }}
+            onAnimationEnd={saveBounce.onAnimationEnd}
+          >
+            保存
+          </button>
+          {note ? <p className="amw-note">{note}</p> : null}
+        </>
+      }
+    />
   );
 }

@@ -44,7 +44,9 @@ export function fetchAuthMeOnce(signal?: AbortSignal): Promise<AuthUser | null> 
           cache: "no-store",
         });
         if (!res.ok) return null;
-        const payload = (await res.json()) as { user?: AuthUser | null };
+        const text = await res.text();
+        if (!text.trim()) return null;
+        const payload = JSON.parse(text) as { user?: AuthUser | null };
         return payload.user ?? null;
       } catch {
         return null;

@@ -41,7 +41,8 @@ export type GlassSelectVariant = "default" | "toolbar" | "compact";
 type MenuPlacement = "bottom" | "top";
 
 type MenuPosition = {
-  top: number;
+  top?: number;
+  bottom?: number;
   left: number;
   width: number;
   maxHeight: number;
@@ -148,7 +149,7 @@ function computeMenuPosition(
 
   const maxHeight = Math.max(80, Math.min(preferredMaxHeight, spaceAbove));
   return {
-    top: trigger.top - sideOffset - maxHeight,
+    bottom: vh - trigger.top + sideOffset,
     left,
     width,
     maxHeight,
@@ -210,7 +211,7 @@ export function GlassSelect({
   const selectedIndex = flatOptions.findIndex((o) => o.id === value);
 
   const clearCloseTimer = useCallback(() => {
-    if (closeTimerRef. current != null) {
+    if (closeTimerRef.current != null) {
       window.clearTimeout(closeTimerRef.current);
       closeTimerRef.current = null;
     }
@@ -313,6 +314,20 @@ export function GlassSelect({
     };
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [closing, open, requestClose]);
+
+  useEffect(() => {
+    if (!open || closing) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      requestClose();
+      triggerRef.current?.focus();
+    };
+    // Capture so nested dialog document listeners do not close the host first.
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
   }, [closing, open, requestClose]);
 
   useEffect(() => {
@@ -436,11 +451,14 @@ export function GlassSelect({
       ? {
           position: "fixed",
           top: menuPosition.top,
+          bottom: menuPosition.bottom,
           left: menuPosition.left,
           width: menuPosition.width,
           minWidth: menuPosition.width,
           maxHeight: menuPosition.maxHeight,
           zIndex: 2600,
+          ["--radix-select-trigger-width" as string]: `${menuPosition.width}px`,
+          ["--radix-select-content-available-height" as string]: `${menuPosition.maxHeight}px`,
         }
       : undefined;
 

@@ -24,7 +24,7 @@ export function ProjectAssetsShell({
   showDesign = true,
 }: Props) {
   return (
-    <div className={`amw amw--${module}`}>
+    <div className={`amw amw--${module}${module === "library" ? " amw--library-scroll" : ""}`}>
       <div className="amw-inner">
         <AssetModuleNav
           projectId={projectId}
@@ -32,7 +32,9 @@ export function ProjectAssetsShell({
           context={context}
           showDesign={showDesign}
         />
-        {children}
+        <div className={module === "library" ? "amw-shell-main" : undefined}>
+          {children}
+        </div>
       </div>
     </div>
   );

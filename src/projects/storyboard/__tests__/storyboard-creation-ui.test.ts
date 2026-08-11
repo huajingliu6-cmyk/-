@@ -134,4 +134,33 @@ describe("storyboard creation UI flow contracts", () => {
     expect(editor).toContain("findAssetChipBeforeCaret");
     expect(editor).toContain("removeAssetChip");
   });
+
+  it("uses portaled floating selects in global settings dialog", () => {
+    const dialog = readSrc(
+      "src/projects/storyboard/components/StoryboardGlobalSettingsDialog.tsx",
+    );
+    const glassSelect = readSrc("src/shell/glass-select/GlassSelect.tsx");
+    const css = readSrc("src/projects/storyboard/storyboard-workspace.css");
+    expect(dialog).toContain("createPortal");
+    expect(dialog).toContain("document.body");
+    expect(dialog).toContain("menuPortal");
+    expect(dialog).toContain("global-settings-select-content");
+    expect(dialog).toContain("global-settings-modal");
+    expect(dialog).toContain('label="画面比例"');
+    expect(dialog).toContain('label="画质"');
+    expect(dialog).toContain('label="模型"');
+    expect(dialog).toContain('label="风格"');
+    expect(glassSelect).toContain("createPortal");
+    expect(glassSelect).toContain("menuPortal");
+    expect(glassSelect).toContain('position: "fixed"');
+    expect(css).toMatch(
+      /\.global-settings-modal\s*\{[\s\S]*?max-height:\s*min\(720px/,
+    );
+    expect(css).toMatch(
+      /\.global-settings-select-content\s*\{[\s\S]*?z-index:\s*2600/,
+    );
+    expect(css).toMatch(
+      /\.global-settings-select-item\s*\{[\s\S]*?min-height:\s*42px/,
+    );
+  });
 });

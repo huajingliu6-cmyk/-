@@ -1,10 +1,17 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useState } from "react";
+import { MapPinned } from "lucide-react";
 import { useChipBounce } from "@/shell/useChipBounce";
-import { AmwImagePreview } from "@/projects/assets/AmwImagePreview";
+import { AssetBasicInfo } from "@/projects/assets/AssetBasicInfo";
+import {
+  AssetCompactList,
+  AssetListPanelHeader,
+} from "@/projects/assets/AssetCompactList";
+import { AssetDetailImage } from "@/projects/assets/AssetDetailImage";
+import { AssetDetailLayout } from "@/projects/assets/AssetDetailLayout";
 import { AssetImageUpload } from "@/projects/assets/AssetImageUpload";
-import { AssetListThumb } from "@/projects/assets/AssetListThumb";
+import { AssetLibraryLayout } from "@/projects/assets/AssetLibraryLayout";
 import { SceneCreateDialog } from "@/projects/assets/SceneCreateDialog";
 import { deriveSceneStatus, sceneDisplayStatus } from "@/projects/assets/status";
 import { resolveAssetImageSrc } from "@/projects/assets/asset-image-url";
@@ -64,105 +71,139 @@ export function SceneManager({
 
   return (
     <>
-      <div className="amw-layout">
-        <section className="amw-panel" aria-label="场景列表">
-          <div className="amw-panel__head">
-            <h2>场景列表</h2>
-            <button
-              type="button"
-              className="amw-btn amw-btn-primary"
-              disabled={!canEdit}
-              onClick={() => setCreateOpen(true)}
-            >
-              + 新建场景
-            </button>
-          </div>
-          <div className="amw-panel__body">
-            {scenes.length === 0 ? (
-              <div className="amw-empty">暂无场景资产。</div>
-            ) : (
-              <div className="amw-list">
-                {scenes.map((s, index) => {
-                  const status = sceneDisplayStatus(s);
-                  const warn = status === "待完善" || status === "草稿";
-                  return (
-                    <button
-                      key={s.id}
-                      type="button"
-                      className={`amw-card asset-card${selectedId === s.id ? " is-selected" : ""}`}
-                      style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
-                      onClick={() => setSelectedId(s.id)}
-                    >
-                      <span className="amw-avatar asset-card__media" aria-hidden>
-                        <AssetListThumb
-                          projectId={projectId}
-                          asset={s}
-                          placeholder={s.name.trim().slice(0, 1) || "景"}
-                          revision={imageRevisions[s.id] ?? 0}
-                          fit="contain"
-                        />
-                      </span>
-                      <span className="amw-card__meta asset-card__content">
-                        <span className="asset-card__header">
-                          <p className="amw-card__title">{s.name}</p>
-                          <span
-                            className={`amw-badge${warn ? " is-warn" : " is-ok"}`}
-                          >
-                            {status}
-                          </span>
-                        </span>
-                        <p className="amw-card__sub asset-card__meta-line">
-                          场景
-                          {s.timeOfDay ? ` · ${s.timeOfDay}` : ""}
-                        </p>
-                        <p className="amw-card__sub asset-card__note">
-                          {s.location?.trim() || "未设定备注位置"}
-                        </p>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </section>
-
-        <section className="amw-panel" aria-label="场景详情">
-          <div className="amw-panel__head">
-            <h2>场景详情</h2>
-            {selected ? (
-              <span className="amw-badge">{sceneDisplayStatus(selected)}</span>
-            ) : null}
-          </div>
-          <div className="amw-panel__body">
-            {!selected ? (
-              <div className="amw-empty">选择或新建场景以编辑详情。</div>
-            ) : (
-              <div className="amw-detail">
-                {previewSrc ? (
-                  <AmwImagePreview
-                    className="amw-image-preview--detail"
-                    src={previewSrc}
-                    alt={selected.imageFileName ?? selected.name}
-                  />
-                ) : null}
-                <div className="amw-fields">
-                  <Field
-                    label="场景名称"
-                    value={selected.name}
+      <AssetLibraryLayout
+        listLabel="场景列表"
+        listHeader={
+          <AssetListPanelHeader
+            title="场景列表"
+            action={
+              <button
+                type="button"
+                className="amw-btn amw-btn-primary"
+                disabled={!canEdit}
+                onClick={() => setCreateOpen(true)}
+              >
+                + 新建场景
+              </button>
+            }
+          />
+        }
+        list={
+          <AssetCompactList
+            projectId={projectId}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            emptyMessage="暂无场景资产。"
+            testId="scene-compact-list"
+            items={scenes.map((s) => {
+              const status = sceneDisplayStatus(s);
+              return {
+                id: s.id,
+                name: s.name || "未命名场景",
+                status,
+                warn: status === "待完善" || status === "草稿",
+                placeholder: s.name.trim().slice(0, 1) || "景",
+                asset: s,
+                revision: imageRevisions[s.id] ?? 0,
+              };
+            })}
+          />
+        }
+        details={
+          <AssetDetailLayout
+            title="场景详情"
+            aria-label="场景详情"
+            className="scene-detail"
+            empty={!selected}
+            emptyMessage="选择或新建场景以编辑详情。"
+            status={
+              selected ? (
+                <span className="amw-badge">
+                  {sceneDisplayStatus(selected)}
+                </span>
+              ) : null
+            }
+            preview={
+              selected ? (
+                <AssetDetailImage
+                  fill
+                  src={previewSrc}
+                  alt={selected.imageFileName ?? selected.name}
+                  testId="scene-detail-image"
+                  emptyIcon={<MapPinned size={36} strokeWidth={1.5} />}
+                />
+              ) : null
+            }
+            basicInfo={
+              selected ? (
+                <AssetBasicInfo
+                  compact
+                  fields={[
+                    {
+                      key: "name",
+                      label: (
+                        <>
+                          名称<span className="req">*</span>
+                        </>
+                      ),
+                      value: selected.name,
+                      disabled: !canEdit,
+                      onChange: (v) => updateOne({ ...selected, name: v }),
+                    },
+                    {
+                      key: "sceneType",
+                      label: "类型",
+                      value: selected.sceneType,
+                      disabled: !canEdit,
+                      placeholder: "如：室内 / 外景",
+                      onChange: (v) =>
+                        updateOne({ ...selected, sceneType: v }),
+                    },
+                    {
+                      key: "timeOfDay",
+                      label: "时间",
+                      value: selected.timeOfDay,
+                      disabled: !canEdit,
+                      onChange: (v) =>
+                        updateOne({ ...selected, timeOfDay: v }),
+                    },
+                    {
+                      key: "location",
+                      label: "位置",
+                      value: selected.location,
+                      disabled: !canEdit,
+                      onChange: (v) =>
+                        updateOne({ ...selected, location: v }),
+                    },
+                  ]}
+                />
+              ) : null
+            }
+            notes={
+              selected ? (
+                <div className="amw-field amw-field--notes-compact">
+                  <label>备注</label>
+                  <textarea
+                    className="amw-textarea asset-controls__notes-textarea"
+                    value={selected.description}
                     disabled={!canEdit}
-                    onChange={(v) => updateOne({ ...selected, name: v })}
-                  />
-                  <Field
-                    label="时间"
-                    value={selected.timeOfDay}
-                    disabled={!canEdit}
-                    onChange={(v) => updateOne({ ...selected, timeOfDay: v })}
+                    onChange={(e) =>
+                      updateOne({
+                        ...selected,
+                        description: e.target.value,
+                      })
+                    }
                   />
                 </div>
+              ) : null
+            }
+            imageActions={
+              selected ? (
                 <AssetImageUpload
                   id={`scene-image-${selected.id}`}
                   label="场景图片"
+                  compact
+                  hidePreview
                   disabled={!canEdit}
                   projectId={projectId}
                   assetId={selected.id}
@@ -190,7 +231,11 @@ export function SceneManager({
                     })
                   }
                 />
-                <div className="amw-actions">
+              ) : null
+            }
+            footer={
+              selected ? (
+                <>
                   <button
                     type="button"
                     className={`amw-btn amw-btn-primary ${saveBounce.bounceClass}`}
@@ -203,13 +248,13 @@ export function SceneManager({
                   >
                     保存
                   </button>
-                </div>
-                {note ? <p className="amw-note">{note}</p> : null}
-              </div>
-            )}
-          </div>
-        </section>
-      </div>
+                  {note ? <p className="amw-note">{note}</p> : null}
+                </>
+              ) : null
+            }
+          />
+        }
+      />
 
       <SceneCreateDialog
         open={createOpen}
@@ -279,31 +324,5 @@ export function SceneManager({
         }}
       />
     </>
-  );
-}
-
-function Field({
-  label,
-  value,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  disabled: boolean;
-  onChange: (v: string) => void;
-}) {
-  const id = useId();
-  return (
-    <div className="amw-field">
-      <label htmlFor={id}>{label}</label>
-      <input
-        id={id}
-        className="amw-input"
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </div>
   );
 }

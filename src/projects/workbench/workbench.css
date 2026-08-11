@@ -56,13 +56,22 @@
   min-height: 100%;
 }
 
+/* Asset library: stage nav + page fill remaining viewport under shell header */
+.project-route-shell:has(.amw--library-scroll) {
+  height: calc(100dvh - var(--shell-header-h, 68px));
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
 .project-stage-nav {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
   width: min(1480px, calc(100% - 64px));
   margin: 0 auto;
-  padding: 16px 0 0;
+  padding: 8px 0 0;
 }
 
 .project-stage-nav--workspace {
@@ -71,11 +80,11 @@
 
 .project-stage-nav__link {
   display: flex;
-  min-height: 42px;
+  min-height: 34px;
   align-items: center;
   justify-content: center;
   border: 1px solid rgba(167, 139, 250, 0.2);
-  border-radius: 12px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.035);
   color: rgba(244, 241, 255, 0.64);
   font-size: 13px;

@@ -104,6 +104,20 @@ export function VoicePreviewButton({
       >
         试听
       </button>
+      <button
+        type="button"
+        className={className}
+        disabled={!playing}
+        title="停止试听"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          stop();
+          onStatusRef.current?.("");
+        }}
+      >
+        停止
+      </button>
       {playing ? (
         <span className="voice-preview-speaker" aria-hidden title="播放中">
           <Volume2

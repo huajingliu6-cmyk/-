@@ -21,26 +21,31 @@ describe("character asset portrait UI contracts", () => {
     expect(detail).not.toContain("视觉设定");
     expect(detail).not.toContain("外貌描述");
     expect(detail).not.toContain("服装描述");
-    expect(detail).toContain("基础信息");
+    expect(detail).toContain("AssetBasicInfo");
     expect(detail).toContain("年龄");
     expect(detail).toContain("性别");
     expect(detail).toContain("hidePreview");
     expect(detail).toContain("character-hero-image");
-    expect(detail).toContain("amw-image-preview--character-hero");
+    expect(detail).toContain("AssetDetailImage");
+    expect(readSrc("src/projects/assets/AssetBasicInfo.tsx")).toContain(
+      "基础信息",
+    );
   });
 
-  it("library cards are image-first with centered name", () => {
-    expect(list).toContain("amw-char-grid");
-    expect(list).toContain("amw-char-card__name");
+  it("library cards are compact list rows with independent scroll", () => {
+    expect(list).toContain("AssetCompactList");
+    expect(list).toContain("character-card-grid");
     expect(list).not.toContain("asset-card__description");
     expect(list).not.toContain("amw-card__sub");
-    expect(css).toContain(".amw-char-card__media");
+    expect(css).toContain(".asset-library__list-scroll");
     expect(css).toMatch(/object-fit:\s*contain/);
   });
 
-  it("design character cards use portrait layout without side description", () => {
-    expect(design).toContain("ead-card--character-portrait");
-    expect(design).toContain("ead-card__name--center");
+  it("design character cards restore side-by-side layout without portrait class", () => {
+    expect(design).toContain("ead-card--character");
+    expect(design).toContain("ead-card__layout");
+    expect(design).not.toContain("ead-card--character-portrait");
+    expect(design).toContain("ead-card--visual-asset");
     expect(upload).toContain("hidePreview");
   });
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
+import { createPortal } from "react-dom";
 import { GlassSelect } from "@/shell/glass-select";
 import type { StoryboardVideoDefaults } from "@/projects/storyboard/storyboard-video-params";
 import {
@@ -49,11 +50,20 @@ export function StoryboardGlobalSettingsDialog({
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose, saving]);
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
-  return (
+  const selectProps = {
+    menuPortal: true as const,
+    menuSideOffset: 6,
+    menuCollisionPadding: 12,
+    menuClassName: "global-settings-select-content",
+    optionClassName: "global-settings-select-item",
+    disabled: saving,
+  };
+
+  return createPortal(
     <div
-      className="sbw-modal-backdrop"
+      className="sbw-modal-backdrop global-settings-modal-backdrop"
       role="presentation"
       data-testid="storyboard-global-settings-backdrop"
       onClick={() => {
@@ -61,14 +71,14 @@ export function StoryboardGlobalSettingsDialog({
       }}
     >
       <div
-        className="sbw-modal"
+        className="sbw-modal global-settings-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         data-testid="storyboard-global-settings-dialog"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="sbw-modal__head">
+        <header className="sbw-modal__head global-settings-modal__header">
           <h3 id={titleId}>全局设置</h3>
           <button
             type="button"
@@ -79,16 +89,15 @@ export function StoryboardGlobalSettingsDialog({
           >
             关闭
           </button>
-        </div>
-        <div className="sbw-modal__body">
-          <p className="sbw-hint" style={{ marginTop: 0 }}>
+        </header>
+        <div className="sbw-modal__body global-settings-modal__body">
+          <p className="sbw-hint global-settings-modal__hint">
             保存后作为本项目新建视频任务的默认值；单个分镜仍可临时修改，不会写回此处。
           </p>
           <div className="sbw-global-settings-grid">
             <GlassSelect
               label="画面比例"
               value={draft.aspectRatio}
-              disabled={saving}
               options={STORYBOARD_VIDEO_ASPECT_RATIOS.map((r) => ({
                 id: r,
                 label: r,
@@ -98,11 +107,11 @@ export function StoryboardGlobalSettingsDialog({
                   setDraft((prev) => ({ ...prev, aspectRatio: id }));
                 }
               }}
+              {...selectProps}
             />
             <GlassSelect
               label="画质"
               value={draft.resolution}
-              disabled={saving}
               options={STORYBOARD_VIDEO_RESOLUTIONS.map((r) => ({
                 id: r,
                 label: r,
@@ -112,11 +121,11 @@ export function StoryboardGlobalSettingsDialog({
                   setDraft((prev) => ({ ...prev, resolution: id }));
                 }
               }}
+              {...selectProps}
             />
             <GlassSelect
               label="模型"
               value={draft.modelChoice}
-              disabled={saving}
               options={STORYBOARD_VIDEO_MODEL_CHOICES.map((m) => ({
                 id: m.id,
                 label: m.label,
@@ -127,11 +136,11 @@ export function StoryboardGlobalSettingsDialog({
                   modelChoice: id as StoryboardVideoModelChoiceId,
                 }));
               }}
+              {...selectProps}
             />
             <GlassSelect
               label="风格"
               value={draft.stylePreset || "__default__"}
-              disabled={saving}
               options={STORYBOARD_VIDEO_STYLE_OPTIONS.map((s) => ({
                 id: s.id || "__default__",
                 label: s.label,
@@ -144,10 +153,11 @@ export function StoryboardGlobalSettingsDialog({
                   ) as StoryboardVideoStylePresetId,
                 }));
               }}
+              {...selectProps}
             />
           </div>
         </div>
-        <div className="sbw-modal__foot">
+        <footer className="sbw-modal__foot global-settings-modal__footer">
           <button
             type="button"
             className="sbw-btn"
@@ -166,8 +176,9 @@ export function StoryboardGlobalSettingsDialog({
           >
             {saving ? "保存中…" : "保存设置"}
           </button>
-        </div>
+        </footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

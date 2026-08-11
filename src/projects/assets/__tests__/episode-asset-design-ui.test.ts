@@ -162,7 +162,8 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain("ead-card__preview--blur");
     expect(workspace).toContain("审批中");
     expect(workspace).toContain("已审批");
-    expect(workspace).toContain("ead-card--character-portrait");
+    expect(workspace).toContain("ead-card--character");
+    expect(workspace).not.toContain("ead-card--character-portrait");
     expect(workspace).toContain("ead-card__approval-badge");
     expect(css).toContain("filter: blur(2.5px)");
     expect(css).toContain(".ead-card__approval-overlay");
@@ -205,11 +206,14 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(preview).toContain("Never use HTML disabled");
     expect(preview).toContain("voice-preview-speaker");
     expect(workspace).toContain("ead-card__delete-btn");
+    expect(workspace).toContain("ead-card__corner");
+    expect(workspace).toContain("ead-card__layout");
     expect(workspace).not.toContain('label: "音频需求"');
     expect(workspace).not.toContain('label: "环境音"');
     expect(workspace).not.toContain("音频类型");
     expect(workspace).not.toContain("ead-type-badge-");
     expect(workspace).toContain("ead-card--visual-asset");
+    expect(workspace).toContain("ead-card--character");
     expect(css).toContain("max-width: 50%");
     expect(css).toContain("position: absolute");
     expect(css).toContain("right: 10px");
@@ -217,6 +221,16 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(css).toContain("voice-preview-wave");
     expect(css).toContain("ead-card__voice-actions");
     expect(css).toContain(".ead-card--visual-asset");
+  });
+
+  it("uses the same type-tab classes as the asset library", () => {
+    expect(workspace).toContain("amw-tabs");
+    expect(workspace).toContain("asset-type-tabs");
+    expect(workspace).toContain("amw-tab");
+    expect(workspace).toContain("asset-type-tab");
+    expect(css).toMatch(/\.asset-type-tab\s*,|\.amw-tab,\s*\n\.asset-type-tab|\.amw-tab,\s*\.asset-type-tab/);
+    expect(css).toMatch(/height:\s*38px/);
+    expect(css).toMatch(/font-size:\s*15px/);
   });
 
   it("resolves design card previews without requiring previewKind", () => {
