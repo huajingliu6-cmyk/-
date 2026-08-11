@@ -8,17 +8,23 @@
  * - default: dark form control (story / assets / settings)
  * - toolbar: light compact pill (workflow float bars)
  * - compact: dark compact control (node cards)
+ *
+ * Set `menuPortal` to mount the menu on document.body with fixed positioning
+ * (avoids clipping inside overflow / modal scroll containers).
  */
 import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
 import { prefersReducedMotion } from "@/shell/login-portal";
 import { useChipBounce } from "@/shell/useChipBounce";
@@ -31,6 +37,16 @@ import "@/shell/glass-select/glass-select.css";
 export type { GlassSelectGroup, GlassSelectOption } from "@/shell/glass-select/types";
 
 export type GlassSelectVariant = "default" | "toolbar" | "compact";
+
+type MenuPlacement = "bottom" | "top";
+
+type MenuPosition = {
+  top: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+  placement: MenuPlacement;
+};
 
 type Props = {
   /** Flat options (ignored when `groups` is provided) */
@@ -61,10 +77,28 @@ type Props = {
   /** Optional leading icon inside the trigger (toolbar) */
   leadingIcon?: ReactNode;
   className?: string;
+  /** Extra class names for the dropdown menu panel */
+  menuClassName?: string;
+  /** Extra class names for each option row */
+  optionClassName?: string;
+  /**
+   * Mount menu via portal to document.body with position:fixed.
+   * Use inside modals / overflow containers so options are not clipped.
+   */
+  menuPortal?: boolean;
+  /** Gap between trigger and menu when portaled (px). Default 6. */
+  menuSideOffset?: number;
+  /** Viewport edge padding when portaled (px). Default 12. */
+  menuCollisionPadding?: number;
   onOpen?: () => void;
+  /** Fires when open state changes (after open / after finish close). */
+  onOpenChange?: (open: boolean) => void;
 };
 
 const CLOSE_MS = 220;
+const DEFAULT_SIDE_OFFSET = 6;
+const DEFAULT_COLLISION_PADDING = 12;
+const MENU_MAX_HEIGHT = 320;
 
 function flattenOptions(
   options: GlassSelectOption[] | undefined,
@@ -74,6 +108,52 @@ function flattenOptions(
     return groups.flatMap((g) => g.options);
   }
   return options ?? [];
+}
+
+function computeMenuPosition(
+  trigger: DOMRect,
+  opts: {
+    sideOffset: number;
+    collisionPadding: number;
+    preferredMaxHeight: number;
+  },
+): MenuPosition {
+  const { sideOffset, collisionPadding, preferredMaxHeight } = opts;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const width = Math.min(trigger.width, vw - collisionPadding * 2);
+  const left = Math.min(
+    Math.max(trigger.left, collisionPadding),
+    vw - collisionPadding - width,
+  );
+
+  const spaceBelow = vh - trigger.bottom - sideOffset - collisionPadding;
+  const spaceAbove = trigger.top - sideOffset - collisionPadding;
+  const placeBottom =
+    spaceBelow >= Math.min(preferredMaxHeight, 160) || spaceBelow >= spaceAbove;
+
+  if (placeBottom) {
+    const maxHeight = Math.max(
+      80,
+      Math.min(preferredMaxHeight, spaceBelow),
+    );
+    return {
+      top: trigger.bottom + sideOffset,
+      left,
+      width,
+      maxHeight,
+      placement: "bottom",
+    };
+  }
+
+  const maxHeight = Math.max(80, Math.min(preferredMaxHeight, spaceAbove));
+  return {
+    top: trigger.top - sideOffset - maxHeight,
+    left,
+    width,
+    maxHeight,
+    placement: "top",
+  };
 }
 
 export function GlassSelect({
@@ -93,19 +173,27 @@ export function GlassSelect({
   variant = "default",
   leadingIcon,
   className = "",
+  menuClassName = "",
+  optionClassName = "",
+  menuPortal = false,
+  menuSideOffset = DEFAULT_SIDE_OFFSET,
+  menuCollisionPadding = DEFAULT_COLLISION_PADDING,
   onOpen,
+  onOpenChange,
 }: Props) {
   const autoId = useId();
   const triggerId = id ?? `${autoId}-trigger`;
   const listboxId = `${autoId}-listbox`;
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<Array<HTMLDivElement | null>>([]);
   const closeTimerRef = useRef<number | null>(null);
 
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(0);
+  const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null);
   const bounce = useChipBounce();
 
   const isDense = variant === "toolbar" || variant === "compact";
@@ -122,7 +210,7 @@ export function GlassSelect({
   const selectedIndex = flatOptions.findIndex((o) => o.id === value);
 
   const clearCloseTimer = useCallback(() => {
-    if (closeTimerRef.current != null) {
+    if (closeTimerRef. current != null) {
       window.clearTimeout(closeTimerRef.current);
       closeTimerRef.current = null;
     }
@@ -131,8 +219,10 @@ export function GlassSelect({
   const finishClose = useCallback(() => {
     setClosing(false);
     setOpen(false);
+    setMenuPosition(null);
     clearCloseTimer();
-  }, [clearCloseTimer]);
+    onOpenChange?.(false);
+  }, [clearCloseTimer, onOpenChange]);
 
   const requestClose = useCallback(() => {
     if (!open || closing) return;
@@ -155,7 +245,8 @@ export function GlassSelect({
     setClosing(false);
     setHighlightIndex(selectedIndex >= 0 ? selectedIndex : 0);
     setOpen(true);
-  }, [clearCloseTimer, disabled, onOpen, selectedIndex]);
+    onOpenChange?.(true);
+  }, [clearCloseTimer, disabled, onOpen, onOpenChange, selectedIndex]);
 
   const toggleMenu = useCallback(() => {
     bounce.trigger();
@@ -175,16 +266,48 @@ export function GlassSelect({
     [onChange, requestClose],
   );
 
+  const updateMenuPosition = useCallback(() => {
+    if (!menuPortal) return;
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    setMenuPosition(
+      computeMenuPosition(trigger.getBoundingClientRect(), {
+        sideOffset: menuSideOffset,
+        collisionPadding: menuCollisionPadding,
+        preferredMaxHeight: MENU_MAX_HEIGHT,
+      }),
+    );
+  }, [menuCollisionPadding, menuPortal, menuSideOffset]);
+
   useEffect(() => {
     return () => clearCloseTimer();
   }, [clearCloseTimer]);
 
+  useLayoutEffect(() => {
+    if (!menuPortal || !open) return;
+    updateMenuPosition();
+  }, [menuPortal, open, updateMenuPosition, flatOptions.length]);
+
+  useEffect(() => {
+    if (!menuPortal || !open || closing) return;
+    const onReposition = () => updateMenuPosition();
+    window.addEventListener("resize", onReposition);
+    // Capture scroll from nested overflow containers (modal body, etc.)
+    window.addEventListener("scroll", onReposition, true);
+    return () => {
+      window.removeEventListener("resize", onReposition);
+      window.removeEventListener("scroll", onReposition, true);
+    };
+  }, [closing, menuPortal, open, updateMenuPosition]);
+
   useEffect(() => {
     if (!open || closing) return;
     const onPointerDown = (event: MouseEvent) => {
-      const root = rootRef.current;
-      if (!root) return;
-      if (event.target instanceof Node && !root.contains(event.target)) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      const inRoot = rootRef.current?.contains(target) ?? false;
+      const inMenu = menuRef.current?.contains(target) ?? false;
+      if (!inRoot && !inMenu) {
         requestClose();
       }
     };
@@ -230,7 +353,9 @@ export function GlassSelect({
     }
     if (event.key === "Escape" && open) {
       event.preventDefault();
+      event.stopPropagation();
       requestClose();
+      triggerRef.current?.focus();
     }
   };
 
@@ -248,6 +373,7 @@ export function GlassSelect({
     }
     if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
       requestClose();
       triggerRef.current?.focus();
     }
@@ -272,7 +398,11 @@ export function GlassSelect({
         id={`${listboxId}-opt-${optionKey}`}
         className={`gs__option${compactOption ? " is-compact" : ""}${
           isSelected ? " is-selected" : ""
-        }${isActive ? " is-active" : ""}`}
+        }${isActive ? " is-active" : ""}${
+          optionClassName ? ` ${optionClassName}` : ""
+        }`}
+        data-highlighted={isActive ? "" : undefined}
+        data-state={isSelected ? "checked" : "unchecked"}
         onMouseEnter={() => setHighlightIndex(flatIndex)}
         onClick={() => selectOption(option.id)}
       >
@@ -300,6 +430,70 @@ export function GlassSelect({
       : variant === "compact"
         ? " gs--compact"
         : "";
+
+  const portalMenuStyle: CSSProperties | undefined =
+    menuPortal && menuPosition
+      ? {
+          position: "fixed",
+          top: menuPosition.top,
+          left: menuPosition.left,
+          width: menuPosition.width,
+          minWidth: menuPosition.width,
+          maxHeight: menuPosition.maxHeight,
+          zIndex: 2600,
+        }
+      : undefined;
+
+  const menuNode = menuVisible ? (
+    <div
+      ref={menuRef}
+      id={listboxId}
+      className={`gs__menu${menuPortal ? " gs__menu--portal" : ""}${
+        menuPosition?.placement === "top" ? " gs__menu--top" : ""
+      }${closing ? " is-closing" : ""}${menuClassName ? ` ${menuClassName}` : ""}`}
+      role="listbox"
+      aria-label={label}
+      tabIndex={-1}
+      style={portalMenuStyle}
+      data-side={menuPosition?.placement ?? "bottom"}
+      onKeyDown={onListKeyDown}
+      onMouseDown={(event) => {
+        // Keep focus/selection behavior stable; avoid backdrop click-close races.
+        event.stopPropagation();
+      }}
+    >
+      {useGroups
+        ? groups!.map((group) => {
+            const start = flatCursor;
+            const nodes = group.options.map((option, i) =>
+              renderOption(option, start + i),
+            );
+            flatCursor += group.options.length;
+            return (
+              <div key={group.id} className="gs__group">
+                <p className="gs__group-title">{group.label}</p>
+                {group.options.length === 0 ? (
+                  <p className="gs__empty">
+                    {group.emptyHint ?? "暂无选项"}
+                  </p>
+                ) : (
+                  nodes
+                )}
+              </div>
+            );
+          })
+        : flatOptions.map((option, index) => renderOption(option, index))}
+      {allowClear && value ? (
+        <button
+          type="button"
+          className="gs__clear"
+          onClick={() => selectOption("")}
+        >
+          {clearLabel}
+        </button>
+      ) : null}
+    </div>
+  ) : null;
 
   return (
     <div
@@ -350,47 +544,11 @@ export function GlassSelect({
         <ChevronDown className="gs__chevron" aria-hidden size={chevronSize} />
       </button>
 
-      {menuVisible ? (
-        <div
-          id={listboxId}
-          className={`gs__menu${closing ? " is-closing" : ""}`}
-          role="listbox"
-          aria-label={label}
-          tabIndex={-1}
-          onKeyDown={onListKeyDown}
-        >
-          {useGroups
-            ? groups!.map((group) => {
-                const start = flatCursor;
-                const nodes = group.options.map((option, i) =>
-                  renderOption(option, start + i),
-                );
-                flatCursor += group.options.length;
-                return (
-                  <div key={group.id} className="gs__group">
-                    <p className="gs__group-title">{group.label}</p>
-                    {group.options.length === 0 ? (
-                      <p className="gs__empty">
-                        {group.emptyHint ?? "暂无选项"}
-                      </p>
-                    ) : (
-                      nodes
-                    )}
-                  </div>
-                );
-              })
-            : flatOptions.map((option, index) => renderOption(option, index))}
-          {allowClear && value ? (
-            <button
-              type="button"
-              className="gs__clear"
-              onClick={() => selectOption("")}
-            >
-              {clearLabel}
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      {menuPortal
+        ? menuNode && typeof document !== "undefined"
+          ? createPortal(menuNode, document.body)
+          : null
+        : menuNode}
     </div>
   );
 }
