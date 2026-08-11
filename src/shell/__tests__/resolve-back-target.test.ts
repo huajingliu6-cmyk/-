@@ -13,30 +13,30 @@ describe("resolveBackTarget", () => {
     expect(resolveBackTarget("/app")).toEqual({ kind: "hide" });
   });
 
-  it("故事 / 剧本 / 资产 / 分镜返回项目管理详情", () => {
+  it("个人空间项目阶段返回项目列表", () => {
     expect(resolveBackTarget("/app/projects/p_abc/story")).toEqual({
       kind: "href",
-      href: "/app/projects/p_abc",
+      href: "/app/projects",
     });
     expect(resolveBackTarget("/app/projects/p_abc/script")).toEqual({
       kind: "href",
-      href: "/app/projects/p_abc",
+      href: "/app/projects",
     });
     expect(resolveBackTarget("/app/projects/p_abc/assets")).toEqual({
       kind: "href",
-      href: "/app/projects/p_abc",
+      href: "/app/projects",
     });
     expect(resolveBackTarget("/app/projects/p_abc/assets/design")).toEqual({
       kind: "href",
-      href: "/app/projects/p_abc",
+      href: "/app/projects",
     });
     expect(resolveBackTarget("/app/projects/p_abc/assets/library")).toEqual({
       kind: "href",
-      href: "/app/projects/p_abc",
+      href: "/app/projects",
     });
     expect(resolveBackTarget("/app/projects/p_abc/storyboard")).toEqual({
       kind: "href",
-      href: "/app/projects/p_abc",
+      href: "/app/projects",
     });
   });
 

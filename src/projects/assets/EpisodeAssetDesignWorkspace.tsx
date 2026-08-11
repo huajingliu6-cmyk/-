@@ -16,6 +16,11 @@ import {
 } from "@/shell/glass-select";
 import { useGenerationBusy } from "@/shell/GenerationBusyGuard";
 import {
+  ACTIVE_ENTERPRISE_EVENT,
+  readActiveSpace,
+  type ActiveSpace,
+} from "@/enterprise/client-space";
+import {
   cancelStoryGeneration,
   notifyCreditsRefresh,
   streamStoryGeneration,
@@ -408,6 +413,9 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       ? `/api/workspace/projects/${encodeURIComponent(projectId)}`
       : `/api/projects/${encodeURIComponent(projectId)}`;
   const queryEpisodeId = searchParams.get("episodeId")?.trim() || null;
+  const [activeSpace, setActiveSpace] = useState<ActiveSpace>(() =>
+    readActiveSpace(),
+  );
   const [episodes, setEpisodes] = useState<EpisodeListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>(
     () => queryEpisodeId || SCRIPT_ASSET_DESIGN_ID,
@@ -434,6 +442,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   const [batchExtracting, setBatchExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [confirmingItemId, setConfirmingItemId] = useState<string | null>(null);
   const [pageNote, setPageNote] = useState("");
   const [confirmSummary, setConfirmSummary] = useState<string | null>(null);
   const [reextractOpen, setReextractOpen] = useState(false);
@@ -462,11 +471,22 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   const abortRef = useRef<AbortController | null>(null);
   const generationIdRef = useRef<string | null>(null);
   const generatingRef = useRef(false);
+  const isPersonalSpace = activeSpace.kind === "personal";
+
+  useEffect(() => {
+    const onSpaceChanged = (event: Event) => {
+      const detail = (event as CustomEvent<ActiveSpace>).detail;
+      setActiveSpace(detail ?? readActiveSpace());
+    };
+    window.addEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
+    return () =>
+      window.removeEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
+  }, []);
 
   // Modal open state is driven only by the URL so closing (strip query) and
   // re-clicking the unread notification (push query again) both work.
   const ownerApprovalSubmissionId =
-    surface === "project_management"
+    !isPersonalSpace && surface === "project_management"
       ? searchParams.get("approvalSubmissionId")?.trim() || null
       : null;
   const ownerApprovalOpen = Boolean(ownerApprovalSubmissionId);
@@ -603,7 +623,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     );
     groups.push({
       id: "ready",
-      label: "已提取，可复核或审批",
+      label: isPersonalSpace ? "已提取，可确认" : "已提取，可复核或审批",
       emptyHint: "暂无可复核剧集",
       options: readyEpisodes.map((episode) => ({
         id: episode.episodeId,
@@ -611,12 +631,14 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       })),
     });
     return groups;
-  }, [episodes, pendingEpisodes]);
+  }, [episodes, isPersonalSpace, pendingEpisodes]);
   const episodeSelectPlaceholder = listLoading
     ? "加载剧集…"
     : pendingEpisodes.length > 0
       ? `待补提取（${pendingEpisodes.length}）`
-      : "选择剧集复核";
+      : isPersonalSpace
+        ? "选择剧集确认"
+        : "选择剧集复核";
   const isFullScriptDesign = selectedId === SCRIPT_ASSET_DESIGN_ID;
 
   const loadList = useCallback(async () => {
@@ -664,6 +686,11 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
 
   const loadApprovalMediaFlags = useCallback(
     async (episodeId: string) => {
+      if (isPersonalSpace) {
+        setPendingApprovalMediaIds(new Set());
+        setApprovedApprovalMediaIds(new Set());
+        return;
+      }
       try {
         const url =
           surface === "workspace"
@@ -709,7 +736,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         setApprovedApprovalMediaIds(new Set());
       }
     },
-    [apiRoot, projectId, surface],
+    [apiRoot, isPersonalSpace, projectId, surface],
   );
 
   const loadDetail = useCallback(
@@ -1207,6 +1234,25 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
 
   const handleConfirm = useCallback(async () => {
     if (!selectedId || !fingerprint) return;
+    const missingImages = items.filter(
+      (item) =>
+        (item.resolution === "create_new" || item.resolution === "pending") &&
+        item.assetType !== "audio" &&
+        !item.generatedMedia?.currentId?.trim(),
+    );
+    if (missingImages.length > 0) {
+      setPageNote(
+        `无法确认：${missingImages.map((item) => item.name).join("、")}尚未生成图片。`,
+      );
+      return;
+    }
+    const unboundVoices = items.filter((item) => {
+      if (item.resolution !== "create_new" || item.assetType !== "character") {
+        return false;
+      }
+      const mediaId = item.generatedMedia?.currentId?.trim();
+      return !mediaId || !isMediaVoiceBound(getDesignMediaVoiceBinding(item, mediaId));
+    });
     setConfirming(true);
     setPageNote("");
     try {
@@ -1290,6 +1336,12 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         }
       }
       if (note) setPageNote(note);
+      if (unboundVoices.length > 0) {
+        const voiceReminder = `${unboundVoices.length} 个角色尚未绑定音色，可在资产库中继续补充。`;
+        setPageNote((current) =>
+          current ? `${current} ${voiceReminder}` : voiceReminder,
+        );
+      }
       await loadList();
       await loadBundle();
     } catch (error) {
@@ -1310,6 +1362,111 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     saveItems,
     selectedId,
   ]);
+
+  const handleConfirmItem = useCallback(
+    async (itemId: string) => {
+      if (!isPersonalSpace || !selectedId || !fingerprint) return;
+      const item = items.find((candidate) => candidate.id === itemId);
+      if (!item) return;
+      if (
+        (item.resolution === "create_new" || item.resolution === "pending") &&
+        item.assetType !== "audio" &&
+        !item.generatedMedia?.currentId?.trim()
+      ) {
+        setPageNote(`无法确认：「${item.name}」尚未生成图片。`);
+        return;
+      }
+
+      setConfirming(true);
+      setConfirmingItemId(itemId);
+      setPageNote("");
+      try {
+        const savedRecord = await saveItems(items, { skipReloadList: true });
+        if (!savedRecord) return;
+        const res = await fetch(
+          `${apiRoot}/asset-designs/episodes/${encodeURIComponent(selectedId)}/confirm`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              expectedRevision: savedRecord.revision,
+              fingerprint,
+              itemId,
+            }),
+          },
+        );
+        const payload = (await res.json()) as {
+          record?: EpisodeAssetDesignRecord;
+          createdAssets?: Array<{
+            itemId: string;
+            assetId: string;
+            assetType: EpisodeAssetDesignAssetType;
+          }>;
+          error?: string;
+        };
+        if (!res.ok) throw new Error(payload.error ?? "确认入库失败");
+        if (payload.record) applyRecord(payload.record);
+
+        const created = payload.createdAssets?.find(
+          (entry) => entry.itemId === itemId,
+        );
+        const pending = pendingMedia[itemId];
+        let mediaUploadFailed = false;
+        if (created && pending) {
+          try {
+            if (pending.kind === "image") {
+              await uploadProjectAssetImage(
+                projectId,
+                created.assetId,
+                pending.file,
+              );
+            } else {
+              await uploadProjectAssetAudio(
+                projectId,
+                created.assetId,
+                pending.file,
+              );
+            }
+            if (pending.objectUrl.startsWith("blob:")) {
+              URL.revokeObjectURL(pending.objectUrl);
+            }
+            setPendingMedia((previous) => {
+              const next = { ...previous };
+              delete next[itemId];
+              return next;
+            });
+          } catch {
+            mediaUploadFailed = true;
+          }
+        }
+
+        setPageNote(
+          mediaUploadFailed
+            ? `「${item.name}」已入库，但媒体上传失败，可在资产库补传。`
+            : `「${item.name}」已确认入库。`,
+        );
+        await Promise.all([loadList(), loadBundle()]);
+      } catch (error) {
+        setPageNote(error instanceof Error ? error.message : "确认入库失败");
+      } finally {
+        setConfirming(false);
+        setConfirmingItemId(null);
+      }
+    },
+    [
+      apiRoot,
+      applyRecord,
+      fingerprint,
+      isPersonalSpace,
+      items,
+      loadBundle,
+      loadList,
+      pendingMedia,
+      projectId,
+      saveItems,
+      selectedId,
+    ],
+  );
 
 const updateItem = useCallback(
     (id: string, patch: Partial<EpisodeAssetDesignItem>) => {
@@ -1583,6 +1740,19 @@ const updateItem = useCallback(
     isFullScriptDesign &&
     designStatus === "not_started" &&
     items.length === 0;
+  const missingImageItems = items.filter(
+    (item) =>
+      (item.resolution === "create_new" || item.resolution === "pending") &&
+      item.assetType !== "audio" &&
+      !item.generatedMedia?.currentId?.trim(),
+  );
+  const unboundVoiceItems = items.filter((item) => {
+    if (item.resolution !== "create_new" || item.assetType !== "character") {
+      return false;
+    }
+    const mediaId = item.generatedMedia?.currentId?.trim();
+    return !mediaId || !isMediaVoiceBound(getDesignMediaVoiceBinding(item, mediaId));
+  });
   const canConfirm =
     !generating &&
     !saving &&
@@ -1591,7 +1761,12 @@ const updateItem = useCallback(
     designStatus !== "stale" &&
     designStatus !== "generating" &&
     designStatus !== "not_started" &&
-    designStatus !== "failed";
+    designStatus !== "failed" &&
+    missingImageItems.length === 0;
+  const confirmDisabledReason =
+    missingImageItems.length > 0
+      ? `请先为${missingImageItems.map((item) => item.name).join("、")}生成图片`
+      : undefined;
 
   const canSubmitApproval =
     !generating && !saving && Boolean(selectedId);
@@ -1856,6 +2031,7 @@ const updateItem = useCallback(
                     type="button"
                     className={`amw-btn${canConfirm ? " amw-btn-primary" : ""}`}
                     disabled={!canConfirm}
+                    title={confirmDisabledReason}
                     onClick={() => void handleConfirm()}
                     data-testid="ead-confirm"
                   >
@@ -1867,6 +2043,20 @@ const updateItem = useCallback(
                   </button>
                 )}
               </div>
+
+              {surface !== "workspace" && missingImageItems.length > 0 ? (
+                <p className="ead-warn" data-testid="ead-missing-image-warning">
+                  无法确认：{missingImageItems.map((item) => item.name).join("、")}
+                  尚未生成图片。生成图片后才能确认入库。
+                </p>
+              ) : null}
+              {surface !== "workspace" &&
+              missingImageItems.length === 0 &&
+              unboundVoiceItems.length > 0 ? (
+                <p className="ead-warn" data-testid="ead-unbound-voice-warning">
+                  提醒：{unboundVoiceItems.length} 个角色尚未绑定音色，可先绑定，或确认入库后在资产库补充。
+                </p>
+              ) : null}
 
               {pageNote ? <p className="amw-note">{pageNote}</p> : null}
               {confirmSummary ? (
@@ -1930,11 +2120,20 @@ const updateItem = useCallback(
                                 surface === "workspace" &&
                                 isApprovedEpisodeDesignItem(item)
                               }
-                              approvalUi={designCardApprovalUi(
-                                item,
-                                pendingApprovalMediaIds,
-                                approvedApprovalMediaIds,
-                              )}
+                              approvalUi={
+                                isPersonalSpace
+                                  ? "none"
+                                  : designCardApprovalUi(
+                                      item,
+                                      pendingApprovalMediaIds,
+                                      approvedApprovalMediaIds,
+                                    )
+                              }
+                              showPersonalConfirm={
+                                isPersonalSpace && surface === "project_management"
+                              }
+                              confirming={confirmingItemId === item.id}
+                              onConfirm={() => void handleConfirmItem(item.id)}
                               onChange={(patch) => updateItem(item.id, patch)}
                               onVoiceSelect={(voice) => {
                                 if (item.assetType !== "character") return;
@@ -2301,6 +2500,9 @@ function DesignItemCard({
   designDisabled,
   deleteLocked,
   approvalUi,
+  showPersonalConfirm,
+  confirming,
+  onConfirm,
   onChange,
   onVoiceSelect,
   onBindVoice,
@@ -2320,6 +2522,9 @@ function DesignItemCard({
   designDisabled: boolean;
   deleteLocked: boolean;
   approvalUi: "none" | "pending" | "approved";
+  showPersonalConfirm: boolean;
+  confirming: boolean;
+  onConfirm: () => void;
   onChange: (patch: Partial<EpisodeAssetDesignItem>) => void;
   onVoiceSelect: (voice: VoiceOption | null) => void;
   onBindVoice: () => void;
@@ -2372,6 +2577,18 @@ function DesignItemCard({
     (mediaVoice != null && isMediaVoiceBound(mediaVoice)) ||
     (voiceLocked && Boolean(characterVoiceId));
   const voiceBoundLabel = hasBoundVoice;
+  const isInLibrary = Boolean(item.libraryAssetId?.trim());
+  const isImageMissing =
+    (item.resolution === "create_new" || item.resolution === "pending") &&
+    item.assetType !== "audio" &&
+    !currentMediaId;
+  const confirmDisabledReason = isInLibrary
+    ? "该资产已入库"
+    : isImageMissing
+      ? "请先生成图片"
+      : item.resolution === "ignore"
+        ? "已设为本集忽略，无需入库"
+        : undefined;
 
   return (
     <article className="ead-card">
@@ -2383,6 +2600,23 @@ function DesignItemCard({
           >
             已审批
           </span>
+        ) : null}
+        {showPersonalConfirm ? (
+          <button
+            type="button"
+            className="amw-btn amw-btn-primary ead-card__confirm-btn"
+            data-testid={`ead-confirm-item-${item.id}`}
+            disabled={
+              disabled ||
+              isInLibrary ||
+              isImageMissing ||
+              item.resolution === "ignore"
+            }
+            title={confirmDisabledReason}
+            onClick={onConfirm}
+          >
+            {confirming ? "入库中…" : isInLibrary ? "已入库" : "确认入库"}
+          </button>
         ) : null}
         <button
           type="button"

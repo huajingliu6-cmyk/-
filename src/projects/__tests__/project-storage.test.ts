@@ -72,7 +72,7 @@ describe("project storage + password safety", () => {
     expect(record!.passwordSalt).toBeNull();
   });
 
-  it("拒绝重名项目", async () => {
+  it("allows the same project name for different owners", async () => {
     await createProjectRecord("owner-1", {
       name: "同名",
       creationSource: "story",
@@ -82,6 +82,23 @@ describe("project storage + password safety", () => {
     await expect(
       createProjectRecord("owner-2", {
         name: "同名",
+        creationSource: "story",
+        projectMode: "canvas",
+        passwordEnabled: false,
+      }),
+    ).resolves.toMatchObject({ ownerId: "owner-2", name: "同名" });
+  });
+
+  it("rejects duplicate project names for the same owner", async () => {
+    await createProjectRecord("owner-1", {
+      name: "同一账号重名",
+      creationSource: "story",
+      projectMode: "canvas",
+      passwordEnabled: false,
+    });
+    await expect(
+      createProjectRecord("owner-1", {
+        name: "同一账号重名",
         creationSource: "story",
         projectMode: "canvas",
         passwordEnabled: false,

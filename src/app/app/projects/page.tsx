@@ -8,6 +8,7 @@ import { getSystemRole } from "@/auth/roles";
 import { useAuthUser } from "@/shell/useAuthUser";
 import { projectWorkbenchPath } from "@/shell/nav";
 import { CreateProjectWizardDialog } from "@/projects/components/CreateProjectWizardDialog";
+import { ProjectRulesDialog } from "@/projects/components/ProjectRulesDialog";
 import {
   WorkbenchProjectContextMenu,
   type WorkbenchProjectContextAction,
@@ -82,6 +83,10 @@ export default function ProjectsPage() {
     projectId: string;
     name: string;
   } | null>(null);
+  const [rulesProject, setRulesProject] = useState<{
+    projectId: string;
+    projectName: string;
+  } | null>(null);
   const [renameBusy, setRenameBusy] = useState(false);
   const [activeSpace, setActiveSpace] = useState<ActiveSpace>(() =>
     readActiveSpace(),
@@ -89,10 +94,13 @@ export default function ProjectsPage() {
 
   const allowedBySession =
     auth.status === "authenticated" && canCreateProject(auth.user);
-  const canCreate = apiCanCreate ?? allowedBySession;
-  const canEditRules =
-    auth.status === "authenticated" &&
-    getSystemRole(auth.user) === "SYSTEM_ADMIN";
+  const canCreate =
+    activeSpace.kind === "personal"
+      ? allowedBySession
+      : auth.status === "authenticated" &&
+        getSystemRole(auth.user) === "SYSTEM_ADMIN" &&
+        apiCanCreate !== false;
+  const canEditRules = auth.status === "authenticated";
 
   const reloadProjects = useCallback(async () => {
     setLoading(true);
@@ -170,10 +178,30 @@ export default function ProjectsPage() {
   }, [projects, filter, debouncedQuery]);
 
   const openProject = useCallback(
-    (projectId: string) => {
-      router.push(projectWorkbenchPath(projectId));
+    async (projectId: string) => {
+      setNote("");
+      if (activeSpace.kind === "enterprise") {
+        router.push(projectWorkbenchPath(projectId));
+        return;
+      }
+      try {
+        const response = await fetch(
+          `/api/projects/${encodeURIComponent(projectId)}/entry`,
+          { credentials: "include", cache: "no-store" },
+        );
+        const payload = (await response.json()) as {
+          path?: string;
+          error?: string;
+        };
+        if (!response.ok || !payload.path) {
+          throw new Error(payload.error ?? "无法判断项目进度");
+        }
+        router.push(payload.path);
+      } catch (error) {
+        setNote(error instanceof Error ? error.message : "无法打开项目");
+      }
     },
-    [router],
+    [activeSpace, router],
   );
 
   const handleContextAction = useCallback(
@@ -182,11 +210,11 @@ export default function ProjectsPage() {
       if (!project) return;
       setNote("");
       if (action === "open") {
-        openProject(projectId);
+        await openProject(projectId);
         return;
       }
       if (action === "rules") {
-        window.dispatchEvent(new CustomEvent("lumina:open-api-manage"));
+        setRulesProject({ projectId, projectName: project.name });
         return;
       }
       if (action === "rename") {
@@ -298,7 +326,7 @@ export default function ProjectsPage() {
             onClick={onNewClick}
             aria-disabled={!canCreate}
             title={
-              canCreate ? "新建项目" : "仅项目主理人可以新建项目"
+              canCreate ? "新建项目" : "仅企业管理员可以新建企业项目"
             }
           >
             <Plus className="h-4 w-4" aria-hidden />
@@ -306,7 +334,7 @@ export default function ProjectsPage() {
           </button>
         </div>
         {!canCreate && auth.status === "authenticated" ? (
-          <p className="pm-perm-hint">仅项目主理人可以新建项目</p>
+          <p className="pm-perm-hint">仅企业管理员可以新建企业项目</p>
         ) : null}
 
         <div className="pm-toolbar">
@@ -385,7 +413,7 @@ export default function ProjectsPage() {
                 type="button"
                 className="pm-card"
                 data-testid="project-management-card"
-                onClick={() => openProject(project.projectId)}
+                onClick={() => void openProject(project.projectId)}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   setContextMenu({
@@ -451,6 +479,14 @@ export default function ProjectsPage() {
         canCreate={canCreate}
         onClose={() => setBlankContextMenu(null)}
         onCreate={onNewClick}
+      />
+
+      <ProjectRulesDialog
+        open={rulesProject !== null}
+        projectId={rulesProject?.projectId ?? null}
+        projectName={rulesProject?.projectName ?? ""}
+        onClose={() => setRulesProject(null)}
+        onSaved={() => setNote("项目规则已保存")}
       />
 
       {renaming ? (

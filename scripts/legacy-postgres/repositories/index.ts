@@ -165,9 +165,9 @@ export class ProjectRepository {
     });
   }
 
-  async findByName(name: string) {
+  async findByName(name: string, ownerId?: string) {
     return this.db.project.findFirst({
-      where: { name },
+      where: ownerId ? { name, ownerId } : { name },
     });
   }
 

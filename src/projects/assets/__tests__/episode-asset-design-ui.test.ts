@@ -156,12 +156,33 @@ describe("Batch G1-UI episode asset design chrome", () => {
 
   it("shows pending blur overlay and approved badge on cards", () => {
     expect(workspace).toContain("designCardApprovalUi");
+    expect(workspace).toContain("isPersonalSpace");
+    expect(workspace).toContain('? "none"');
+    expect(workspace).toContain("if (isPersonalSpace)");
     expect(workspace).toContain("ead-card__preview--blur");
     expect(workspace).toContain("审批中");
     expect(workspace).toContain("已审批");
     expect(workspace).toContain("ead-card__corner");
     expect(css).toContain("filter: blur(2.5px)");
     expect(css).toContain(".ead-card__approval-overlay");
+  });
+
+  it("blocks image-less confirmation and warns about unbound voices", () => {
+    expect(workspace).toContain("missingImageItems");
+    expect(workspace).toContain("ead-missing-image-warning");
+    expect(workspace).toContain("生成图片后才能确认入库");
+    expect(workspace).toContain("unboundVoiceItems");
+    expect(workspace).toContain("ead-unbound-voice-warning");
+    expect(workspace).toContain("尚未绑定音色");
+  });
+
+  it("shows per-asset confirmation only in personal project management", () => {
+    expect(workspace).toContain("handleConfirmItem");
+    expect(workspace).toContain('surface === "project_management"');
+    expect(workspace).toContain("showPersonalConfirm");
+    expect(workspace).toContain("确认入库");
+    expect(workspace).toContain("已入库");
+    expect(workspace).toContain("ead-confirm-item-");
   });
 
   it("character cards keep voice select and preview; delete sits top-right", () => {

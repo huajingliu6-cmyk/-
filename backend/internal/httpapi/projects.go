@@ -302,7 +302,7 @@ func (handler *Projects) create(writer http.ResponseWriter, request *http.Reques
 			}
 		}
 		for _, existing := range catalog.Projects {
-			if existing.Name == project.Name {
+			if existing.OwnerID == project.OwnerID && existing.Name == project.Name {
 				return nil, false, errProjectNameConflict
 			}
 		}
@@ -368,7 +368,7 @@ func (handler *Projects) patch(writer http.ResponseWriter, request *http.Request
 		project := catalog.Projects[index]
 		if name != nil && project.Name != *name {
 			for _, existing := range catalog.Projects {
-				if existing.ProjectID != projectID && existing.Name == *name {
+				if existing.ProjectID != projectID && existing.OwnerID == project.OwnerID && existing.Name == *name {
 					return nil, false, errProjectNameConflict
 				}
 			}

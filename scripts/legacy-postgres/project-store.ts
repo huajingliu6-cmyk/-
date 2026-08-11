@@ -163,7 +163,7 @@ export async function createProjectRecordPostgres(
     }
   }
 
-  const existingName = await projects.findByName(input.name.trim());
+  const existingName = await projects.findByName(input.name.trim(), ownerId);
   if (existingName) {
     throw new ProjectNameConflictError();
   }
@@ -213,7 +213,7 @@ export async function createProjectRecordPostgres(
       }
     }
     if (isUniqueViolation(error)) {
-      const byName = await projects.findByName(input.name.trim());
+      const byName = await projects.findByName(input.name.trim(), ownerId);
       if (byName) {
         throw new ProjectNameConflictError();
       }

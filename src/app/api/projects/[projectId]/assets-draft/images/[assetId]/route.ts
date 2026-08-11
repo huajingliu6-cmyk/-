@@ -62,8 +62,11 @@ export async function GET(_request: Request, context: RouteContext) {
     if (!wsGate.ok) return ownerGate.response;
   }
 
-  const filePath = resolveAssetImageFilePath(projectId, assetId);
-  if (!filePath) {
+  const remoteOnly = isRemoteDataOnly();
+  const filePath = remoteOnly
+    ? null
+    : resolveAssetImageFilePath(projectId, assetId);
+  if (!remoteOnly && !filePath) {
     return notFound("资产不属于当前项目");
   }
 
@@ -86,7 +89,7 @@ export async function GET(_request: Request, context: RouteContext) {
     }
 
     const storageKey = resolveAssetImageStorageKey(found.asset);
-    if (isRemoteDataOnly()) {
+    if (remoteOnly) {
       try {
         const blob = await getRemoteAssetImage(projectId, storageKey);
         if (!blob) return NextResponse.json({ error: "暂无参考图" }, { status: 404 });
@@ -101,6 +104,7 @@ export async function GET(_request: Request, context: RouteContext) {
         return remoteDataError(error) ?? NextResponse.json({ error: "读取图片失败" }, { status: 500 });
       }
     }
+    if (!filePath) return notFound();
     const storagePath =
       resolveAssetImageFilePath(projectId, storageKey) ?? filePath;
 
@@ -129,7 +133,7 @@ export async function GET(_request: Request, context: RouteContext) {
     }
   }
 
-  if (isRemoteDataOnly()) {
+  if (remoteOnly) {
     try {
       const blob = await getRemoteAssetImage(projectId, assetId);
       if (!blob) return NextResponse.json({ error: "暂无参考图" }, { status: 404 });
@@ -142,6 +146,7 @@ export async function GET(_request: Request, context: RouteContext) {
     }
   }
 
+  if (!filePath) return notFound();
   try {
     const buf = await fs.readFile(filePath);
     let mimeType = "image/png";
@@ -175,8 +180,8 @@ export async function PUT(request: Request, context: RouteContext) {
   const gated = await requireProjectManagementProjectAccess(projectId);
   if (!gated.ok) return gated.response;
 
-  const filePath = resolveAssetImageFilePath(projectId, assetId);
-  if (!filePath) {
+  const remoteOnly = isRemoteDataOnly();
+  if (!remoteOnly && !resolveAssetImageFilePath(projectId, assetId)) {
     return notFound("资产不属于当前项目");
   }
 
@@ -248,7 +253,7 @@ export async function PUT(request: Request, context: RouteContext) {
       ? file.name.trim().slice(0, 255)
       : `${assetId}.${sniffed === "image/png" ? "png" : sniffed === "image/webp" ? "webp" : "jpg"}`;
 
-  if (isRemoteDataOnly()) {
+  if (remoteOnly) {
     try {
       const previousBlob = await getRemoteAssetImage(projectId, assetId);
       await putRemoteAssetImage({ projectId, assetId, mimeType: sniffed, body: buffer });
@@ -346,8 +351,8 @@ export async function DELETE(_request: Request, context: RouteContext) {
   const gated = await requireProjectManagementProjectAccess(projectId);
   if (!gated.ok) return gated.response;
 
-  const filePath = resolveAssetImageFilePath(projectId, assetId);
-  if (!filePath) {
+  const remoteOnly = isRemoteDataOnly();
+  if (!remoteOnly && !resolveAssetImageFilePath(projectId, assetId)) {
     return notFound("资产不属于当前项目");
   }
 
@@ -365,7 +370,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
     return notFound("资产不属于当前项目");
   }
 
-  if (isRemoteDataOnly()) {
+  if (remoteOnly) {
     const previousFileName = found.asset.imageFileName;
     const previousMimeType = found.asset.imageMimeType;
     try {

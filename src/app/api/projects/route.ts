@@ -7,6 +7,7 @@ import { isRemoteDataServiceError } from "@/persistence/remote-data-client";
 import {
   createProjectRecord,
   findProjectByCreateIdempotency,
+  listProjectRecords,
   listProjectListItems,
   ProjectNameConflictError,
 } from "@/projects/project-access";
@@ -56,6 +57,17 @@ export async function GET(request: Request) {
         enterpriseProjects.has(project.projectId),
       );
     } else {
+      // Personal space is always scoped to the signed-in user's own projects.
+      // System administrators may manage enterprise data, but must not see
+      // other users' personal projects in this view.
+      const personalProjectIds = new Set(
+        (await listProjectRecords())
+          .filter((project) => project.ownerId === session.user.id)
+          .map((project) => project.projectId),
+      );
+      filtered = filtered.filter((project) =>
+        personalProjectIds.has(project.projectId),
+      );
       const enterpriseProjects = new Set(
         await listEnterpriseProjectIdsForUser(session.user.id),
       );
@@ -101,7 +113,7 @@ export async function POST(request: Request) {
 
   if (!canCreateProject(session.user)) {
     return NextResponse.json(
-      { error: "仅项目主理人可以新建项目" },
+      { error: "当前账号无法新建项目" },
       { status: 403 },
     );
   }

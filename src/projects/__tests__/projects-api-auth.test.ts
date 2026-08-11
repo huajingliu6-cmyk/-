@@ -93,10 +93,23 @@ describe("GET/POST /api/projects auth gates", () => {
     expect(res.status).toBe(401);
   });
 
-  it("rejects non-principal create", async () => {
+  it("allows a regular user to create a personal project", async () => {
     vi.mocked(requireSessionUser).mockResolvedValue({
       ok: true,
       user: memberUser,
+    });
+    vi.mocked(createProjectRecord).mockResolvedValue({
+      projectId: "p_member",
+      rootFolderId: "p_member",
+      name: "个人项目",
+      ownerId: memberUser.id,
+      creationSource: "story",
+      projectMode: "canvas",
+      status: "draft",
+      highlights: "",
+      passwordEnabled: false,
+      createdAt: "t",
+      updatedAt: "t",
     });
     const res = await POST(
       new Request("http://localhost/api/projects", {
@@ -110,8 +123,11 @@ describe("GET/POST /api/projects auth gates", () => {
         }),
       }),
     );
-    expect(res.status).toBe(403);
-    expect(createProjectRecord).not.toHaveBeenCalled();
+    expect(res.status).toBe(201);
+    expect(createProjectRecord).toHaveBeenCalledWith(
+      memberUser.id,
+      expect.objectContaining({ name: "x" }),
+    );
   });
 
   it("rejects client-supplied ownerId", async () => {

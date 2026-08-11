@@ -75,6 +75,7 @@ function timingSafeEqualString(a: string, b: string): boolean {
 
 export async function createSessionToken(params: {
   userId: string;
+  sessionId: string;
   username: string;
   role: UserRole;
   displayName: string;
@@ -82,6 +83,7 @@ export async function createSessionToken(params: {
 }): Promise<string> {
   const payload: SessionPayload = {
     userId: params.userId,
+    sessionId: params.sessionId,
     username: params.username,
     role: params.role,
     displayName: params.displayName,
@@ -110,6 +112,7 @@ export async function verifySessionToken(
     const payload = JSON.parse(json) as SessionPayload;
     if (
       !payload.userId ||
+      !payload.sessionId ||
       !payload.username ||
       !payload.role ||
       typeof payload.exp !== "number"

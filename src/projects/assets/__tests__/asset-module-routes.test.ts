@@ -37,6 +37,17 @@ describe("asset module management routes", () => {
     expect(source).not.toContain("EpisodeAssetDesignWorkspace");
     expect(source).not.toContain("剧集列表");
     expect(source).toContain("embedded");
+
+    const workspace = readSrc(
+      "src/projects/assets/AssetManagementWorkspace.tsx",
+    );
+    const shell = readSrc("src/projects/assets/ProjectAssetsShell.tsx");
+    const css = readSrc("src/projects/assets/asset-workspace.css");
+    expect(workspace).toContain("amw-library-workspace");
+    expect(shell).not.toContain("amw-head--shell");
+    expect(css).toMatch(
+      /\.amw-layout\s*\{[\s\S]*grid-template-columns:\s*minmax\(260px, 3fr\) minmax\(0, 7fr\)/,
+    );
   });
 
   it("workspace assets entry sends all asset roles to design (CE included)", () => {

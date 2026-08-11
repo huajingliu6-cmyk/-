@@ -45,14 +45,14 @@ export function resolveBackTarget(pathname: string): BackTarget {
     return { kind: "href", href: APP_WORKBENCH_PATH };
   }
 
-  // 项目管理：故事 / 剧本 / 资产(含 design|library) / 分镜 / 拆解 → 项目详情
+  // 个人空间项目内各阶段返回项目文件夹列表
   const projectStageMatch = pathname.match(
     /^\/app\/projects\/([^/]+)\/(story|script|assets(?:\/(?:design|library))?|storyboard|breakdown)\/?$/,
   );
   if (projectStageMatch) {
     return {
       kind: "href",
-      href: `${APP_PROJECTS_PATH}/${projectStageMatch[1]}`,
+      href: APP_PROJECTS_PATH,
     };
   }
 

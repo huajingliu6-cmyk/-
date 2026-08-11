@@ -37,6 +37,7 @@ export async function confirmEpisodeAssetDesignRemote(input: {
   expectedRevision: number;
   userId: string;
   fingerprint: string;
+  itemId?: string;
 }): Promise<ConfirmEpisodeAssetDesignResult> {
   for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
     const [designDocument, assetDocument] = await Promise.all([

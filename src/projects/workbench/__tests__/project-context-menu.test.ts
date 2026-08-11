@@ -23,7 +23,9 @@ describe("project management context menu", () => {
     expect(projectsPage).toContain("project-rename-dialog");
     expect(menu).toContain("重命名");
     expect(menu).toContain("删除项目");
-    expect(menu).toContain("编辑任务规则");
+    expect(menu).toContain("编辑项目规则");
+    expect(projectsPage).toContain("ProjectRulesDialog");
+    expect(projectsPage).not.toContain("lumina:open-api-manage");
     expect(css).toContain(".wb-context-menu");
   });
 

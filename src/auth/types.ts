@@ -16,6 +16,7 @@ export type StoredUser = AuthUser & {
 
 export type SessionPayload = {
   userId: string;
+  sessionId: string;
   username: string;
   role: UserRole;
   displayName: string;

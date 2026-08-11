@@ -213,8 +213,10 @@ export function AssetManagementWorkspace({
   }, [editAllowed, persist, projectId, router, storyboardHref]);
 
   return (
-    <div className={embedded ? undefined : "amw"}>
-      <div className={embedded ? undefined : "amw-inner"}>
+    <div className={embedded ? "amw-library-workspace" : "amw"}>
+      <div
+        className={embedded ? "amw-library-workspace__inner" : "amw-inner"}
+      >
         <header className={`amw-head${embedded ? " amw-head--embedded" : ""}`}>
           {!embedded ? (
             <div className="amw-head__titles">

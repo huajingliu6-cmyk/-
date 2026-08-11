@@ -6,6 +6,7 @@ import {
 } from "@/auth/session";
 import { authenticateUser } from "@/auth/users";
 import { isRemoteDataServiceError } from "@/persistence/remote-data-client";
+import { issueActiveSession } from "@/auth/session-registry";
 
 export async function POST(request: Request) {
   try {
@@ -31,8 +32,10 @@ export async function POST(request: Request) {
       );
     }
 
+    const sessionId = await issueActiveSession(user.id);
     const token = await createSessionToken({
       userId: user.id,
+      sessionId,
       username: user.username,
       role: user.role,
       displayName: user.displayName,

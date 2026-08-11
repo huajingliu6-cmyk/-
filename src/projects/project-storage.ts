@@ -157,10 +157,15 @@ export async function listProjectRecords(): Promise<ProjectRecord[]> {
 
 export async function findProjectByName(
   name: string,
+  ownerId?: string,
 ): Promise<ProjectRecord | null> {
   const trimmed = name.trim();
   const all = await listProjectRecords();
-  return all.find((p) => p.name === trimmed) ?? null;
+  return (
+    all.find(
+      (p) => p.name === trimmed && (ownerId == null || p.ownerId === ownerId),
+    ) ?? null
+  );
 }
 
 /**
@@ -173,7 +178,7 @@ export async function createProjectRecord(
 ): Promise<ProjectPublic> {
   await ensureDir();
 
-  const existing = await findProjectByName(input.name);
+  const existing = await findProjectByName(input.name, ownerId);
   if (existing) {
     throw new ProjectNameConflictError();
   }
@@ -271,7 +276,7 @@ export async function updateProjectName(
   if (record.name === trimmed) {
     return toPublic(record);
   }
-  const conflict = await findProjectByName(trimmed);
+  const conflict = await findProjectByName(trimmed, record.ownerId);
   if (conflict && conflict.projectId !== projectId) {
     throw new ProjectNameConflictError();
   }
