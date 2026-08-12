@@ -25,22 +25,30 @@ describe("post-login session handoff", () => {
     expect(menu).toContain('credentials: "include"');
   });
 
-  it("marks cookies Secure behind https proxies", () => {
-    const httpsReq = new Request("http://127.0.0.1:3000/api/auth/login", {
-      headers: { "x-forwarded-proto": "https" },
-    });
-    expect(sessionCookieOptions(60, httpsReq).secure).toBe(true);
+  it("marks cookies Secure behind https proxies, not plain http LAN", () => {
+    const prev = process.env.AUTH_COOKIE_SECURE;
+    delete process.env.AUTH_COOKIE_SECURE;
+    try {
+      const httpsReq = new Request("http://127.0.0.1:3000/api/auth/login", {
+        headers: { "x-forwarded-proto": "https" },
+      });
+      expect(sessionCookieOptions(60, httpsReq).secure).toBe(true);
 
-    const httpReq = new Request("http://127.0.0.1:3000/api/auth/login", {
-      headers: { "x-forwarded-proto": "http" },
-    });
-    // In development without AUTH_COOKIE_SECURE, plain http stays non-secure
-    if (process.env.NODE_ENV === "production") {
-      expect(sessionCookieOptions(60, httpReq).secure).toBe(true);
-    } else if (process.env.AUTH_COOKIE_SECURE === "true") {
-      expect(sessionCookieOptions(60, httpReq).secure).toBe(true);
-    } else {
+      const httpReq = new Request("http://192.168.31.105:3080/api/auth/login", {
+        headers: { "x-forwarded-proto": "http" },
+      });
       expect(sessionCookieOptions(60, httpReq).secure).toBe(false);
+
+      const httpsUrlReq = new Request("https://example.com/api/auth/login");
+      expect(sessionCookieOptions(60, httpsUrlReq).secure).toBe(true);
+
+      process.env.AUTH_COOKIE_SECURE = "true";
+      expect(sessionCookieOptions(60, httpReq).secure).toBe(true);
+      process.env.AUTH_COOKIE_SECURE = "false";
+      expect(sessionCookieOptions(60, httpsReq).secure).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env.AUTH_COOKIE_SECURE;
+      else process.env.AUTH_COOKIE_SECURE = prev;
     }
   });
 

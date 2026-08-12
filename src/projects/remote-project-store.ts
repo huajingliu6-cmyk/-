@@ -156,6 +156,22 @@ export async function updateProjectNameRemote(
   return result.project;
 }
 
+export async function updateProjectOwnerIdRemote(
+  projectId: string,
+  ownerId: string,
+): Promise<ProjectPublic> {
+  const result = await projectRequest<ProjectResponse<ProjectPublic>>(
+    `/v1/projects/${encodeURIComponent(projectId)}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ownerId }),
+    },
+  );
+  if (!result) throw new ProjectNotFoundError();
+  return result.project;
+}
+
 export async function deleteProjectRecordRemote(
   projectId: string,
 ): Promise<void> {

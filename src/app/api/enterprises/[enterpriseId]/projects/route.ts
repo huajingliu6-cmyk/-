@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getUserById } from "@/auth/users";
 import { requireEnterpriseAccess } from "@/enterprise/access";
 import { assignEnterpriseProjects } from "@/enterprise/store";
 import { listProjectRecords } from "@/projects/project-access";
@@ -18,11 +19,19 @@ export async function GET(_request: Request, context: RouteContext) {
       ? allProjects
       : allProjects.filter((project) => managed.includes(project.projectId));
   return NextResponse.json({
-    projects: projects.map((project) => ({
-      projectId: project.projectId,
-      name: project.name,
-      attached: access.enterprise.projectIds.includes(project.projectId),
-    })),
+    projects: await Promise.all(
+      projects.map(async (project) => {
+        const owner = await getUserById(project.ownerId);
+        return {
+          projectId: project.projectId,
+          name: project.name,
+          attached: access.enterprise.projectIds.includes(project.projectId),
+          ownerId: project.ownerId,
+          ownerDisplayName: owner?.displayName ?? project.ownerId,
+          ownerUsername: owner?.username ?? project.ownerId,
+        };
+      }),
+    ),
   });
 }
 

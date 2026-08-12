@@ -4,9 +4,6 @@ import {
   requireProjectOwnerOrSystemAdmin,
 } from "@/auth/require-access";
 import {
-  canEditProjectHighlights,
-} from "@/auth/capabilities";
-import {
   deleteProjectRecord,
   getProjectRecord,
   ProjectNameConflictError,
@@ -85,7 +82,7 @@ export async function GET(_request: Request, context: RouteContext) {
   });
 }
 
-/** PATCH：更新项目名称和/或要点（仅项目主理人 / 系统管理员） */
+/** PATCH：更新项目名称和/或要点（仅项目主理人 / 挂靠企业所有者） */
 export async function PATCH(request: Request, context: RouteContext) {
   const { projectId } = await context.params;
   let gated;
@@ -110,13 +107,6 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
   if (!record) {
     return NextResponse.json({ error: "项目不存在" }, { status: 404 });
-  }
-
-  if (!canEditProjectHighlights(gated.user, record.ownerId)) {
-    return NextResponse.json(
-      { error: "仅项目主理人或系统管理员可以修改项目" },
-      { status: 403 },
-    );
   }
 
   let body: unknown;
@@ -193,7 +183,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 }
 
-/** DELETE：删除项目（仅项目主理人 / 系统管理员） */
+/** DELETE：删除项目（仅项目主理人 / 挂靠企业所有者） */
 export async function DELETE(_request: Request, context: RouteContext) {
   const { projectId } = await context.params;
   let gated;
@@ -218,13 +208,6 @@ export async function DELETE(_request: Request, context: RouteContext) {
   }
   if (!record) {
     return NextResponse.json({ error: "项目不存在" }, { status: 404 });
-  }
-
-  if (!canEditProjectHighlights(gated.user, record.ownerId)) {
-    return NextResponse.json(
-      { error: "仅项目主理人或系统管理员可以删除项目" },
-      { status: 403 },
-    );
   }
 
   try {

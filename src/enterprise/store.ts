@@ -490,3 +490,28 @@ export async function assignEnterpriseProjects(input: {
     return enterprise;
   });
 }
+
+/** Record that an enterprise owner assigned / changed a project's 项目主理人. */
+export async function recordProjectPrincipalAssignment(input: {
+  enterpriseId: string;
+  actorUserId: string;
+  targetUserId: string;
+  projectId: string;
+  projectName: string;
+}): Promise<void> {
+  await mutateCatalog((catalog) => {
+    const enterprise = catalog.enterprises.find((item) => item.id === input.enterpriseId);
+    if (!enterprise) throw new Error("企业不存在");
+    catalog.auditEvents.push(
+      audit(
+        enterprise.id,
+        "PROJECT_PRINCIPAL_ASSIGNED",
+        input.actorUserId,
+        `将项目「${input.projectName}」的主理人指定为成员`,
+        input.targetUserId,
+        input.projectId,
+      ),
+    );
+  });
+}
+

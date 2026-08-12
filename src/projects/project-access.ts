@@ -15,6 +15,7 @@ import {
   listProjectRecords as listProjectRecordsLocal,
   updateProjectHighlights as updateProjectHighlightsLocal,
   updateProjectName as updateProjectNameLocal,
+  updateProjectOwnerId as updateProjectOwnerIdLocal,
   deleteProjectRecord as deleteProjectRecordLocal,
 } from "@/projects/project-storage";
 import {
@@ -26,6 +27,7 @@ import {
   listProjectSummariesRemote,
   updateProjectHighlightsRemote,
   updateProjectNameRemote,
+  updateProjectOwnerIdRemote,
   deleteProjectRecordRemote,
 } from "@/projects/remote-project-store";
 
@@ -90,6 +92,15 @@ export function updateProjectName(
   return isRemoteDataOnly()
     ? updateProjectNameRemote(projectId, name)
     : updateProjectNameLocal(projectId, name);
+}
+
+export function updateProjectOwnerId(
+  projectId: string,
+  ownerId: string,
+): Promise<ProjectPublic> {
+  return isRemoteDataOnly()
+    ? updateProjectOwnerIdRemote(projectId, ownerId)
+    : updateProjectOwnerIdLocal(projectId, ownerId);
 }
 
 export function deleteProjectRecord(projectId: string): Promise<void> {

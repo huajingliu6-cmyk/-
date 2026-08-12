@@ -1,4 +1,5 @@
 import type { AssetRecord } from "@/workflow/types";
+import { safeRandomUUID } from "@/lib/safe-random-id";
 
 export type CharacterGenerateResponse = {
   asset: AssetRecord;
@@ -25,7 +26,7 @@ export async function requestCharacterAppearance(params: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       ...params,
-      idempotencyKey: crypto.randomUUID(),
+      idempotencyKey: safeRandomUUID(),
     }),
   });
   const payload = (await res.json()) as CharacterGenerateResponse & {

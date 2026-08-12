@@ -281,7 +281,7 @@ describe("require-access and workspace API gates", () => {
     if (!gated.ok) {
       expect(gated.response.status).toBe(403);
       const body = (await gated.response.json()) as { error?: string };
-      expect(body.error).toBe("仅项目主理人可操作");
+      expect(body.error).toBe("仅项目主理人或企业所有者可操作");
     }
     expect((await requireActualProjectOwner(project.projectId)).ok).toBe(false);
     expect((await requireVideoCanvasAccess(project.projectId)).ok).toBe(true);

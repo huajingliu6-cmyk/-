@@ -330,9 +330,10 @@ func (handler *Projects) patch(writer http.ResponseWriter, request *http.Request
 	var input struct {
 		Highlights *string `json:"highlights"`
 		Name       *string `json:"name"`
+		OwnerID    *string `json:"ownerId"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
-	if err := decoder.Decode(&input); err != nil || (input.Highlights == nil && input.Name == nil) {
+	if err := decoder.Decode(&input); err != nil || (input.Highlights == nil && input.Name == nil && input.OwnerID == nil) {
 		writeError(writer, http.StatusBadRequest, "invalid project payload")
 		return
 	}
@@ -354,6 +355,15 @@ func (handler *Projects) patch(writer http.ResponseWriter, request *http.Request
 		}
 		name = &value
 	}
+	var ownerID *string
+	if input.OwnerID != nil {
+		value := strings.TrimSpace(*input.OwnerID)
+		if value == "" {
+			writeError(writer, http.StatusBadRequest, "invalid project owner")
+			return
+		}
+		ownerID = &value
+	}
 	result, err := handler.mutateCatalog(request, func(catalog *projectCatalog) (any, bool, error) {
 		index := -1
 		for i, project := range catalog.Projects {
@@ -366,13 +376,25 @@ func (handler *Projects) patch(writer http.ResponseWriter, request *http.Request
 			return nil, false, postgres.ErrNotFound
 		}
 		project := catalog.Projects[index]
+		nextOwnerID := project.OwnerID
+		if ownerID != nil {
+			nextOwnerID = *ownerID
+		}
 		if name != nil && project.Name != *name {
 			for _, existing := range catalog.Projects {
-				if existing.ProjectID != projectID && existing.OwnerID == project.OwnerID && existing.Name == *name {
+				if existing.ProjectID != projectID && existing.OwnerID == nextOwnerID && existing.Name == *name {
 					return nil, false, errProjectNameConflict
 				}
 			}
 			project.Name = *name
+		}
+		if ownerID != nil && project.OwnerID != *ownerID {
+			for _, existing := range catalog.Projects {
+				if existing.ProjectID != projectID && existing.OwnerID == *ownerID && existing.Name == project.Name {
+					return nil, false, errProjectNameConflict
+				}
+			}
+			project.OwnerID = *ownerID
 		}
 		if highlights != nil {
 			project.Highlights = *highlights

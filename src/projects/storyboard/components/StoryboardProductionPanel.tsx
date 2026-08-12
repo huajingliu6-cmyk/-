@@ -34,6 +34,7 @@ import {
   STORYBOARD_VIDEO_RESOLUTION,
 } from "@/projects/storyboard/storyboard-video-constants";
 import { useGenerationBusy } from "@/shell/GenerationBusyGuard";
+import { safeRandomUUID } from "@/lib/safe-random-id";
 
 type Props = {
   projectId: string;
@@ -66,8 +67,8 @@ export function StoryboardProductionPanel({
   promptQueueHint,
   onRequestPromptGenerate,
 }: Props) {
-  const idempotencyRef = useRef<string>(crypto.randomUUID());
-  const batchKeyRef = useRef<string>(crypto.randomUUID());
+  const idempotencyRef = useRef<string>(safeRandomUUID());
+  const batchKeyRef = useRef<string>(safeRandomUUID());
   const [confirmingScript, setConfirmingScript] = useState(false);
   const [savingScript, setSavingScript] = useState(false);
   const [scriptModalOpen, setScriptModalOpen] = useState(false);
@@ -615,7 +616,7 @@ export function StoryboardProductionPanel({
         onNote(message);
       }
     } finally {
-      batchKeyRef.current = crypto.randomUUID();
+      batchKeyRef.current = safeRandomUUID();
       setBatchBusy(false);
     }
   }, [
@@ -747,7 +748,7 @@ export function StoryboardProductionPanel({
               data-testid="generate-storyboard-prompts"
               disabled={isGenerating}
               onClick={() => {
-                idempotencyRef.current = crypto.randomUUID();
+                idempotencyRef.current = safeRandomUUID();
                 handleGenerate({
                   force: Boolean(storyboard) || production.storyboardStale,
                 });
@@ -768,7 +769,7 @@ export function StoryboardProductionPanel({
               data-testid="retry-episode-storyboard-prompts"
               disabled={isGenerating}
               onClick={() => {
-                idempotencyRef.current = crypto.randomUUID();
+                idempotencyRef.current = safeRandomUUID();
                 handleGenerate({ force: true });
               }}
             >

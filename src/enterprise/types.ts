@@ -58,7 +58,8 @@ export type EnterpriseAuditEventType =
   | "MEMBER_LEFT"
   | "OWNERSHIP_TRANSFERRED"
   | "ENTERPRISE_DISSOLVED"
-  | "PROJECTS_ASSIGNED";
+  | "PROJECTS_ASSIGNED"
+  | "PROJECT_PRINCIPAL_ASSIGNED";
 
 export type EnterpriseAuditEvent = {
   id: string;

@@ -31,7 +31,7 @@ type Props = {
   audios?: AudioAsset[];
   imageRevision?: number;
   onChange: (next: CharacterAsset) => void;
-  onSave: () => void;
+  onSave: (snapshot?: CharacterAsset) => void;
   onPreviewStatus?: (message: string) => void;
   onImageRevision?: (assetId: string, next: number) => void;
   ensurePersisted?: () => Promise<void>;
@@ -218,10 +218,29 @@ export function CharacterDetail({
           type="button"
           className="amw-btn amw-btn-primary"
           disabled={!canEdit || !activeVoice.voiceId}
-          title="音色选择后已写入当前草稿，点击保存即可持久化"
+          title="将当前选择的音色写入角色并保存"
           onClick={() => {
             saveBounce.trigger();
-            onSave();
+            const voiceId = activeVoice.voiceId;
+            const voiceName = activeVoice.voiceName;
+            let snapshot = character;
+            if (voiceId) {
+              const mediaVoices = activeMediaId
+                ? {
+                    ...(character.mediaVoices ?? {}),
+                    [activeMediaId]: { voiceId, voiceName },
+                  }
+                : character.mediaVoices;
+              snapshot = {
+                ...character,
+                ...(mediaVoices ? { mediaVoices } : {}),
+                voiceId,
+                voiceName,
+                voiceStyle: null,
+              };
+              onChange(snapshot);
+            }
+            onSave(snapshot);
           }}
         >
           {voiceBound ? "确认绑定" : "绑定音色"}

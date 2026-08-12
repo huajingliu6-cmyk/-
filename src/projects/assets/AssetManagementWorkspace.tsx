@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useChipBounce } from "@/shell/useChipBounce";
 import { AssetTabs } from "@/projects/assets/AssetTabs";
 import { CharacterManager } from "@/projects/assets/CharacterManager";
@@ -18,14 +17,10 @@ import type {
   SceneAsset,
 } from "@/projects/assets/types";
 import "@/projects/assets/asset-workspace.css";
-import {
-  projectManagementPath,
-  workspaceProjectStoryboardPath,
-} from "@/shell/nav";
 
 type Props = {
   projectId: string;
-  /** management：项目管理资产；workspace：工作台资产（隐藏开始创作等） */
+  /** management：项目管理资产；workspace：工作台资产 */
   context?: "management" | "workspace";
   /** 嵌入 ProjectAssetsShell 时隐藏外层标题与容器 */
   embedded?: boolean;
@@ -45,8 +40,6 @@ export function AssetManagementWorkspace({
   backHref,
   backLabel = "返回",
 }: Props) {
-  const router = useRouter();
-  const nextBounce = useChipBounce();
   const saveBounce = useChipBounce();
   const [projectName, setProjectName] = useState("");
   const [loadError, setLoadError] = useState("");
@@ -129,12 +122,6 @@ export function AssetManagementWorkspace({
     };
   }, [isWorkspace, projectId]);
 
-  const storyboardHref = isWorkspace
-    ? workspaceProjectStoryboardPath(projectId)
-    : `${projectManagementPath(projectId)}/storyboard`;
-  const scriptHref = `${projectManagementPath(projectId)}/script`;
-  const [startBlocked, setStartBlocked] = useState(false);
-
   const applyDraft = useCallback((draft: ProjectAssetBundle) => {
     setCharacters(draft.characters);
     setScenes(draft.scenes);
@@ -183,43 +170,6 @@ export function AssetManagementWorkspace({
       setSaving(false);
     }
   }, [editAllowed, persist]);
-
-  const handleStartCreation = useCallback(async () => {
-    if (!editAllowed) {
-      setPageNote("当前账号无资产编辑权限。");
-      return;
-    }
-    setSaving(true);
-    setPageNote("");
-    setStartBlocked(false);
-    try {
-      await persist();
-      const res = await fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/script-draft`,
-      );
-      if (!res.ok) {
-        throw new Error("无法检查项目剧集，请稍后重试");
-      }
-      const data = (await res.json()) as {
-        draft?: { episodes?: unknown[] } | null;
-      };
-      const episodes = data.draft?.episodes ?? [];
-      if (!Array.isArray(episodes) || episodes.length === 0) {
-        setStartBlocked(true);
-        setPageNote(
-          "当前项目还没有可创作的剧集，请先返回剧本处理页面完成分集并保存。",
-        );
-        return;
-      }
-      router.push(storyboardHref);
-    } catch (error) {
-      setPageNote(
-        error instanceof Error ? error.message : "无法开始创作，请稍后重试",
-      );
-    } finally {
-      setSaving(false);
-    }
-  }, [editAllowed, persist, projectId, router, storyboardHref]);
 
   return (
     <div
@@ -280,29 +230,8 @@ export function AssetManagementWorkspace({
             >
               {saving ? "保存中…" : "保存页面"}
             </button>
-            {!isWorkspace ? (
-              <button
-                type="button"
-                className={`amw-btn amw-btn-primary amw-head__start ${nextBounce.bounceClass}`}
-                disabled={!editAllowed || saving || !hydrated}
-                onClick={() => {
-                  nextBounce.trigger();
-                  void handleStartCreation();
-                }}
-                onAnimationEnd={nextBounce.onAnimationEnd}
-              >
-                开始创作
-              </button>
-            ) : null}
           </div>
           {pageNote ? <p className="amw-head__note">{pageNote}</p> : null}
-          {!isWorkspace && startBlocked ? (
-            <p className="amw-head__note">
-              <a className="amw-head__link" href={scriptHref}>
-                返回剧本处理
-              </a>
-            </p>
-          ) : null}
         </header>
 
         <div className="asset-library-toolbar">

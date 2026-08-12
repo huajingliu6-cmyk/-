@@ -1,0 +1,20 @@
+﻿# LAN overlay: build from this enterprise-spaces tree (current feature work).
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile.lan
+    environment:
+      AUTH_SECRET: ${AUTH_SECRET:-infinite-canvas-dev-secret-change-me}
+      AI_CONFIG_ENCRYPTION_KEY: ${AI_CONFIG_ENCRYPTION_KEY:-}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+    ports:
+      - "${WEB_PORT:-3080}:3000"
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+  blobstore:
+    build:
+      context: ../backend
+      dockerfile: Blobstore.Dockerfile

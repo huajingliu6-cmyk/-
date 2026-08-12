@@ -14,6 +14,11 @@ import {
   type GlassSelectGroup,
 } from "@/shell/glass-select";
 import { useGenerationBusy } from "@/shell/GenerationBusyGuard";
+import { safeRandomUUID } from "@/lib/safe-random-id";
+import {
+  DesignGenerationOverlay,
+  type AssetGenerationProgress,
+} from "@/projects/assets/DesignGenerationOverlay";
 import {
   ACTIVE_ENTERPRISE_EVENT,
   readActiveSpace,
@@ -38,6 +43,10 @@ import {
   isMediaVoiceBound,
   withDesignMediaVoiceBinding,
 } from "@/projects/assets/episode-design/design-media-voice";
+import {
+  itemFromCharacterDraft,
+  mergePatchedDesignItem,
+} from "@/projects/assets/episode-design/character-design-item";
 import {
   EPISODE_ASSET_DESIGN_STATUS_LABELS,
   type CharacterDesignItem,
@@ -70,7 +79,7 @@ const DesignAssetModal = dynamic(
 const DesignImageLightbox = dynamic(
   () => import("@/projects/assets/DesignImageLightbox").then((m) => m.DesignImageLightbox),
 );
-import { findVoiceOption, voiceOptionsFromAudios } from "@/projects/assets/voice-catalog";
+import { voiceOptionsFromAudios } from "@/projects/assets/voice-catalog";
 import { VoiceSelector } from "@/projects/assets/VoiceSelector";
 import { VoicePreviewButton } from "@/projects/assets/VoicePreviewButton";
 import { uploadProjectAssetImage } from "@/projects/assets/upload-asset-image";
@@ -143,44 +152,7 @@ function meaningfulEpisodeTitle(
 }
 
 function newItemId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `item_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function itemFromCharacterDraft(
-  draft: CharacterDraftInput,
-  options: {
-    id: string;
-    projectVoices: VoiceOption[];
-    previous?: CharacterDesignItem | null;
-  },
-): CharacterDesignItem {
-  const voice = findVoiceOption(draft.voiceId, options.projectVoices);
-  const previous = options.previous;
-  return {
-    id: options.id,
-    name: draft.name.trim(),
-    resolution: previous?.resolution ?? "create_new",
-    existingAssetId: previous?.existingAssetId ?? null,
-    libraryAssetId: previous?.libraryAssetId ?? null,
-    source: previous?.source ?? "manual",
-    note: previous?.note ?? "",
-    assetType: "character",
-    draft: {
-      description: draft.description,
-      appearance: previous?.draft.appearance ?? "",
-      clothing: draft.clothing,
-      role: draft.role,
-      age: draft.age,
-      voiceId: voice?.id ?? draft.voiceId ?? null,
-      voiceName: voice?.name ?? previous?.draft.voiceName ?? null,
-      voiceBound: previous?.draft.voiceBound ?? false,
-      usageInEpisode: previous?.draft.usageInEpisode ?? "",
-      evidence: previous?.draft.evidence ?? "",
-    },
-  };
+  return `item_${safeRandomUUID()}`;
 }
 
 function itemFromSceneDraft(
@@ -335,7 +307,15 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   );
   const [detail, setDetail] = useState<EpisodeDetailPayload | null>(null);
   const [items, setItems] = useState<EpisodeAssetDesignItem[]>([]);
+  const itemsRef = useRef(items);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
   const [revision, setRevision] = useState(0);
+  const revisionRef = useRef(revision);
+  useEffect(() => {
+    revisionRef.current = revision;
+  }, [revision]);
   const [fingerprint, setFingerprint] = useState("");
   const [designStatus, setDesignStatus] =
     useState<EpisodeAssetDesignStatus>("not_started");
@@ -356,6 +336,9 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [confirmingItemId, setConfirmingItemId] = useState<string | null>(null);
+  const [savingVoiceItemIds, setSavingVoiceItemIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [pageNote, setPageNote] = useState("");
   const [confirmSummary, setConfirmSummary] = useState<string | null>(null);
   const [reextractOpen, setReextractOpen] = useState(false);
@@ -373,6 +356,9 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   const [generatingAssetIds, setGeneratingAssetIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [assetGenerationProgress, setAssetGenerationProgress] = useState<
+    Record<string, AssetGenerationProgress>
+  >({});
   const [pendingApprovalMediaIds, setPendingApprovalMediaIds] = useState<
     Set<string>
   >(() => new Set());
@@ -693,6 +679,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
           return mergedMedia ? { ...next, generatedMedia: mergedMedia } : next;
         });
         setRevision(payload.record.revision);
+        revisionRef.current = payload.record.revision;
         setFingerprint(payload.currentFingerprint);
         // Orphaned “提取中” after refresh / crashed stream — unlock the UI.
         if (payload.designStatus === "generating" && !generatingRef.current) {
@@ -717,7 +704,9 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
               };
               if (fixed.record) {
                 setItems(fixed.record.items);
+                itemsRef.current = fixed.record.items;
                 setRevision(fixed.record.revision);
+                revisionRef.current = fixed.record.revision;
                 setDesignStatus(fixed.record.status);
               }
             }
@@ -848,7 +837,9 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
 
     const applyRecord = useCallback((record: EpisodeAssetDesignRecord) => {
     setItems(record.items);
+    itemsRef.current = record.items;
     setRevision(record.revision);
+    revisionRef.current = record.revision;
     setDesignStatus(record.status);
   }, []);
 
@@ -877,7 +868,8 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              expectedRevision: options?.expectedRevision ?? revision,
+              expectedRevision:
+                options?.expectedRevision ?? revisionRef.current,
               fingerprint,
               items: nextItems.map((item) => ({
                 ...item,
@@ -913,7 +905,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         }
       }
     },
-    [apiRoot, applyRecord, fingerprint, loadList, revision, selectedId],
+    [apiRoot, applyRecord, fingerprint, loadList, selectedId],
   );
 
   const markExtractStatus = useCallback(
@@ -1147,7 +1139,8 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
 
   const handleConfirm = useCallback(async () => {
     if (!selectedId || !fingerprint) return;
-    const missingImages = items.filter(
+    const latestItems = itemsRef.current;
+    const missingImages = latestItems.filter(
       (item) =>
         (item.resolution === "create_new" || item.resolution === "pending") &&
         item.assetType !== "audio" &&
@@ -1159,7 +1152,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       );
       return;
     }
-    const unboundVoices = items.filter((item) => {
+    const unboundVoices = latestItems.filter((item) => {
       if (item.resolution !== "create_new" || item.assetType !== "character") {
         return false;
       }
@@ -1169,7 +1162,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     setConfirming(true);
     setPageNote("");
     try {
-      const savedRecord = await saveItems(items);
+      const savedRecord = await saveItems(latestItems);
       if (!savedRecord) return;
 
       const res = await fetch(
@@ -1267,7 +1260,6 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     applyRecord,
     fingerprint,
     isFullScriptDesign,
-    items,
     loadBundle,
     loadList,
     pendingMedia,
@@ -1279,7 +1271,8 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   const handleConfirmItem = useCallback(
     async (itemId: string) => {
       if (!isPersonalSpace || !selectedId || !fingerprint) return;
-      const item = items.find((candidate) => candidate.id === itemId);
+      const latestItems = itemsRef.current;
+      const item = latestItems.find((candidate) => candidate.id === itemId);
       if (!item) return;
       if (
         (item.resolution === "create_new" || item.resolution === "pending") &&
@@ -1294,7 +1287,9 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       setConfirmingItemId(itemId);
       setPageNote("");
       try {
-        const savedRecord = await saveItems(items, { skipReloadList: true });
+        const savedRecord = await saveItems(latestItems, {
+          skipReloadList: true,
+        });
         if (!savedRecord) return;
         const res = await fetch(
           `${apiRoot}/asset-designs/episodes/${encodeURIComponent(selectedId)}/confirm`,
@@ -1371,7 +1366,6 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       applyRecord,
       fingerprint,
       isPersonalSpace,
-      items,
       loadBundle,
       loadList,
       pendingMedia,
@@ -1478,7 +1472,7 @@ const updateItem = useCallback(
     (draft: CharacterDraftInput) => {
       const previous =
         editingItemId != null
-          ? (items.find(
+          ? (itemsRef.current.find(
               (item) =>
                 item.id === editingItemId && item.assetType === "character",
             ) as CharacterDesignItem | undefined) ?? null
@@ -1504,13 +1498,7 @@ const updateItem = useCallback(
       );
       closeCreateDialog();
     },
-    [
-      closeCreateDialog,
-      editingItemId,
-      items,
-      projectVoices,
-      upsertPendingMedia,
-    ],
+    [closeCreateDialog, editingItemId, projectVoices, upsertPendingMedia],
   );
 
   const handleSceneDialogSubmit = useCallback(
@@ -1998,7 +1986,16 @@ const updateItem = useCallback(
                               projectVoices={projectVoices}
                               audios={bundle.audios}
                               libraryAssets={bundle}
-                              disabled={generating || confirming}
+                              generationProgress={
+                                item.assetType === "character"
+                                  ? assetGenerationProgress[item.id]
+                                  : undefined
+                              }
+                              disabled={
+                                generating ||
+                                confirming ||
+                                savingVoiceItemIds.has(item.id)
+                              }
                               designDisabled={!canDesign}
                               deleteLocked={
                                 surface === "workspace" &&
@@ -2021,76 +2018,130 @@ const updateItem = useCallback(
                               onChange={(patch) => updateItem(item.id, patch)}
                               onVoiceSelect={(voice) => {
                                 if (item.assetType !== "character") return;
-                                const mediaId =
-                                  item.generatedMedia?.currentId?.trim() ?? "";
-                                if (!mediaId) {
-                                  setPageNote(
-                                    "请先生成图片，再为当前历史图选择音色",
+                                if (savingVoiceItemIds.has(item.id)) return;
+                                void (async () => {
+                                  const latest = itemsRef.current;
+                                  const current =
+                                    (latest.find(
+                                      (row) => row.id === item.id,
+                                    ) as CharacterDesignItem | undefined) ??
+                                    item;
+                                  if (current.assetType !== "character") return;
+                                  const mediaId =
+                                    current.generatedMedia?.currentId?.trim() ??
+                                    "";
+                                  if (!mediaId) {
+                                    setPageNote(
+                                      "请先生成图片，再为当前历史图选择音色",
+                                    );
+                                    return;
+                                  }
+                                  const patched = withDesignMediaVoiceBinding(
+                                    current,
+                                    mediaId,
+                                    {
+                                      voiceId: voice?.id ?? null,
+                                      voiceName: voice?.name ?? null,
+                                      voiceBound: false,
+                                    },
                                   );
-                                  return;
-                                }
-                                const patched = withDesignMediaVoiceBinding(
-                                  item,
-                                  mediaId,
-                                  {
-                                    voiceId: voice?.id ?? null,
-                                    voiceName: voice?.name ?? null,
-                                    voiceBound: false,
-                                  },
-                                );
-                                const next = items.map((row) =>
-                                  row.id === item.id ? patched : row,
-                                );
-                                setItems(next);
-                                void saveItems(next, { silent: true });
+                                  const next = latest.map((row) =>
+                                    row.id === item.id ? patched : row,
+                                  );
+                                  itemsRef.current = next;
+                                  setItems(next);
+                                  setSavingVoiceItemIds((prev) => {
+                                    const nextIds = new Set(prev);
+                                    nextIds.add(item.id);
+                                    return nextIds;
+                                  });
+                                  try {
+                                    await saveItems(next, { silent: true });
+                                  } finally {
+                                    setSavingVoiceItemIds((prev) => {
+                                      const nextIds = new Set(prev);
+                                      nextIds.delete(item.id);
+                                      return nextIds;
+                                    });
+                                  }
+                                })();
                               }}
                               onBindVoice={() => {
                                 if (item.assetType !== "character") return;
-                                const mediaId =
-                                  item.generatedMedia?.currentId?.trim() ?? "";
-                                if (!mediaId) {
-                                  setPageNote(
-                                    "请先生成图片，再为当前历史图绑定音色",
+                                if (savingVoiceItemIds.has(item.id)) return;
+                                void (async () => {
+                                  const latest = itemsRef.current;
+                                  const current =
+                                    (latest.find(
+                                      (row) => row.id === item.id,
+                                    ) as CharacterDesignItem | undefined) ??
+                                    item;
+                                  if (current.assetType !== "character") return;
+                                  const mediaId =
+                                    current.generatedMedia?.currentId?.trim() ??
+                                    "";
+                                  if (!mediaId) {
+                                    setPageNote(
+                                      "请先生成图片，再为当前历史图绑定音色",
+                                    );
+                                    return;
+                                  }
+                                  const binding = getDesignMediaVoiceBinding(
+                                    current,
+                                    mediaId,
                                   );
-                                  return;
-                                }
-                                const binding = getDesignMediaVoiceBinding(
-                                  item,
-                                  mediaId,
-                                );
-                                if (!binding.voiceId) {
-                                  setPageNote("请先选择音色再绑定");
-                                  return;
-                                }
-                                const patched = withDesignMediaVoiceBinding(
-                                  item,
-                                  mediaId,
-                                  {
-                                    voiceId: binding.voiceId,
-                                    voiceName: binding.voiceName,
-                                    voiceBound: true,
-                                  },
-                                );
-                                const next = items.map((row) =>
-                                  row.id === item.id ? patched : row,
-                                );
-                                setItems(next);
-                                void saveItems(next).then(() => {
-                                  setPageNote(
-                                    `已为「${item.name}」当前图绑定音色${
-                                      binding.voiceName
-                                        ? `：${binding.voiceName}`
-                                        : ""
-                                    }`,
+                                  if (!binding.voiceId) {
+                                    setPageNote("请先选择音色再绑定");
+                                    return;
+                                  }
+                                  const patched = withDesignMediaVoiceBinding(
+                                    current,
+                                    mediaId,
+                                    {
+                                      voiceId: binding.voiceId,
+                                      voiceName: binding.voiceName,
+                                      voiceBound: true,
+                                    },
                                   );
-                                });
+                                  const next = latest.map((row) =>
+                                    row.id === item.id ? patched : row,
+                                  );
+                                  itemsRef.current = next;
+                                  setItems(next);
+                                  setSavingVoiceItemIds((prev) => {
+                                    const nextIds = new Set(prev);
+                                    nextIds.add(item.id);
+                                    return nextIds;
+                                  });
+                                  try {
+                                    const record = await saveItems(next);
+                                    if (record) {
+                                      setPageNote(
+                                        `已为「${current.name}」当前图绑定音色${
+                                          binding.voiceName
+                                            ? `：${binding.voiceName}`
+                                            : ""
+                                        }`,
+                                      );
+                                    }
+                                  } finally {
+                                    setSavingVoiceItemIds((prev) => {
+                                      const nextIds = new Set(prev);
+                                      nextIds.delete(item.id);
+                                      return nextIds;
+                                    });
+                                  }
+                                })();
                               }}
                               onPersistNote={(note) => {
-                                const next = items.map((row) =>
+                                if (savingVoiceItemIds.has(item.id)) return;
+                                const latest = itemsRef.current;
+                                const next = latest.map((row) =>
                                   row.id === item.id
                                     ? ({ ...row, note } as EpisodeAssetDesignItem)
                                     : row,
                                 );
+                                itemsRef.current = next;
                                 setItems(next);
                                 void saveItems(next, { silent: true });
                               }}
@@ -2236,17 +2287,33 @@ const updateItem = useCallback(
             return next;
           });
         }}
+        onGenerationProgress={(itemId, progress) => {
+          setAssetGenerationProgress((prev) => {
+            if (!progress) {
+              const next = { ...prev };
+              delete next[itemId];
+              return next;
+            }
+            return { ...prev, [itemId]: progress };
+          });
+        }}
         onClose={() => setDesignModalItem(null)}
-        onItemPatched={(itemId, nextItem) => {
+        onItemPatched={(itemId, incomingItem) => {
           setItems((prev) => {
             const next = prev.map((row) =>
-              row.id === itemId ? nextItem : row,
+              row.id === itemId
+                ? mergePatchedDesignItem(row, incomingItem)
+                : row,
             );
+            itemsRef.current = next;
             void saveItems(next, { silent: true });
             return next;
           });
+
           setDesignModalItem((prev) =>
-            prev && prev.id === itemId ? nextItem : prev,
+            prev && prev.id === itemId
+              ? mergePatchedDesignItem(prev, incomingItem)
+              : prev,
           );
         }}
         onPromptUpdated={(itemId, promptText, meta) => {
@@ -2372,6 +2439,7 @@ function DesignItemCard({
   projectVoices,
   audios,
   libraryAssets,
+  generationProgress,
   disabled,
   designDisabled,
   deleteLocked,
@@ -2394,6 +2462,7 @@ function DesignItemCard({
     ProjectAssetBundle,
     "characters" | "scenes" | "props"
   >;
+  generationProgress?: AssetGenerationProgress;
   disabled: boolean;
   designDisabled: boolean;
   deleteLocked: boolean;
@@ -2436,21 +2505,27 @@ function DesignItemCard({
     currentMediaId && libraryCharacter?.mediaVoices?.[currentMediaId]
       ? libraryCharacter.mediaVoices[currentMediaId]
       : null;
-  /** Prefer per-media design binding; fall back to library per-media / primary. */
+  const voiceLocked = approvalUi === "approved";
+  /** Prefer per-media design binding; library fallback only when voice is locked (approved). */
   const characterVoiceId =
     item.assetType === "character"
       ? mediaVoice?.voiceId ||
-        libraryMediaVoice?.voiceId ||
-        (!currentMediaId ? libraryCharacter?.voiceId ?? null : null)
+        (voiceLocked
+          ? libraryMediaVoice?.voiceId ||
+            libraryCharacter?.voiceId ||
+            null
+          : null)
       : null;
   const characterVoiceLabel =
     item.assetType === "character"
       ? mediaVoice?.voiceName ||
-        libraryMediaVoice?.voiceName ||
-        libraryCharacter?.voiceName ||
+        (voiceLocked
+          ? libraryMediaVoice?.voiceName ||
+            libraryCharacter?.voiceName ||
+            null
+          : null) ||
         (characterVoiceId ? "已绑定音色" : "未绑定音色")
       : "";
-  const voiceLocked = approvalUi === "approved";
   const hasBoundVoice =
     (mediaVoice != null && isMediaVoiceBound(mediaVoice)) ||
     (voiceLocked && Boolean(characterVoiceId));
@@ -2485,9 +2560,14 @@ function DesignItemCard({
     <button
       type="button"
       className={
-        approvalUi === "pending"
-          ? "ead-card__preview-btn ead-card__preview-btn--pending"
-          : "ead-card__preview-btn"
+        [
+          approvalUi === "pending"
+            ? "ead-card__preview-btn ead-card__preview-btn--pending"
+            : "ead-card__preview-btn",
+          generationProgress ? "is-generating" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
       }
       title={approvalUi === "pending" ? "审批中" : "点击放大预览"}
       onClick={() => setCardLightbox(true)}
@@ -2512,7 +2592,14 @@ function DesignItemCard({
       ) : null}
     </button>
   ) : (
-    <div className="ead-card__icon-wrap asset-card__empty" aria-hidden>
+    <div
+      className={
+        generationProgress
+          ? "ead-card__icon-wrap asset-card__empty is-generating"
+          : "ead-card__icon-wrap asset-card__empty"
+      }
+      aria-hidden
+    >
       {item.assetType === "character" ? (
         <UserRound className="ead-card__icon" size={28} strokeWidth={1.5} />
       ) : item.assetType === "scene" ? (
@@ -2754,7 +2841,10 @@ function DesignItemCard({
         <div className="ead-card__visual">
           <div className="ead-card__media-wrap">
             {mediaBlock}
-            {editButton}
+            {generationProgress ? (
+              <DesignGenerationOverlay progress={generationProgress} />
+            ) : null}
+            {!generationProgress ? editButton : null}
           </div>
           <p className="ead-card__name" title={nameTitle}>
             {nameTitle}

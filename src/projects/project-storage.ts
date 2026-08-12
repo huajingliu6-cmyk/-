@@ -292,6 +292,38 @@ export async function updateProjectName(
   return toPublic(next);
 }
 
+/** Transfer project principal (ownerId). Name uniqueness remains scoped to the new owner. */
+export async function updateProjectOwnerId(
+  projectId: string,
+  ownerId: string,
+): Promise<ProjectPublic> {
+  const nextOwnerId = ownerId.trim();
+  if (!nextOwnerId) {
+    throw new Error("INVALID_PROJECT_OWNER");
+  }
+  const record = await getProjectRecord(projectId);
+  if (!record) {
+    throw new ProjectNotFoundError();
+  }
+  if (record.ownerId === nextOwnerId) {
+    return toPublic(record);
+  }
+  const conflict = await findProjectByName(record.name, nextOwnerId);
+  if (conflict && conflict.projectId !== projectId) {
+    throw new ProjectNameConflictError();
+  }
+  const next: ProjectRecord = {
+    ...record,
+    ownerId: nextOwnerId,
+    updatedAt: new Date().toISOString(),
+  };
+  const target = metaFilePath(projectId);
+  const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(temp, JSON.stringify(next, null, 2), "utf-8");
+  await fs.rename(temp, target);
+  return toPublic(next);
+}
+
 /** Soft-destructive: remove project meta + on-disk project root tree. */
 export async function deleteProjectRecord(projectId: string): Promise<void> {
   const record = await getProjectRecord(projectId);

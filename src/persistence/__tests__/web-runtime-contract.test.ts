@@ -105,4 +105,29 @@ describe("Web runtime contract", () => {
       }),
     ).not.toThrow();
   });
+
+  it("allows LAN opt-in local voice library directory only", () => {
+    expect(() =>
+      validateWebRuntimeContract({
+        NODE_ENV: "production",
+        REMOTE_DATA_ONLY: "true",
+        GO_BACKEND_INTERNAL_URL: "http://api:8080",
+        INTERNAL_API_TOKEN: "test-token",
+        LOCAL_VOICE_LIBRARY_ALLOW_IN_REMOTE: "true",
+        LOCAL_VOICE_LIBRARY_DIR: "/var/lib/infinite-canvas/local-voice-library",
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      validateWebRuntimeContract({
+        NODE_ENV: "production",
+        REMOTE_DATA_ONLY: "true",
+        GO_BACKEND_INTERNAL_URL: "http://api:8080",
+        INTERNAL_API_TOKEN: "test-token",
+        LOCAL_VOICE_LIBRARY_DIR: "/var/lib/infinite-canvas/local-voice-library",
+      }),
+    ).toThrowError(
+      "must not configure direct storage via LOCAL_VOICE_LIBRARY_DIR",
+    );
+  });
 });

@@ -14,6 +14,7 @@ describe("Batch H1 design asset card UI contract", () => {
   );
   const modal = readSrc("src/projects/assets/DesignAssetModal.tsx");
   const css = readSrc("src/projects/assets/asset-workspace.css");
+  const overlay = readSrc("src/projects/assets/DesignGenerationOverlay.tsx");
 
   it("DesignItemCard exposes design action and asset type icons", () => {
     expect(workspace).toContain("function DesignItemCard");
@@ -57,5 +58,55 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(css).toContain("aspect-ratio: 16 / 9");
     expect(css).toContain(".ead-card__media-delete");
     expect(css).toContain("padding: 72px 14px 12px");
+  });
+
+  it("wires character generation frosted overlay on media wrap", () => {
+    expect(overlay).toContain("export type AssetGenerationStage");
+    expect(overlay).toContain("export type AssetGenerationProgress");
+    expect(overlay).toContain("export function DesignGenerationOverlay");
+    expect(overlay).toContain('role="status"');
+    expect(overlay).toContain('aria-live="polite"');
+    expect(overlay).toContain("ead-generation-overlay__readout");
+    expect(overlay).toContain("ead-generation-overlay__number");
+    expect(overlay).toContain("ead-generation-overlay__unit");
+    expect(overlay).not.toContain("LoaderCircle");
+    expect(overlay).not.toContain("Check");
+    expect(overlay).not.toContain("STAGE_LABELS");
+    expect(overlay).not.toContain("ead-generation-overlay__track");
+    expect(overlay).not.toContain("ead-generation-overlay__steps");
+
+    expect(workspace).toContain("DesignGenerationOverlay");
+    expect(workspace).toContain("generationProgress");
+    expect(workspace).toContain("assetGenerationProgress");
+    expect(workspace).toContain('item.assetType === "character"');
+    expect(workspace).toContain("assetGenerationProgress[item.id]");
+    expect(workspace).toContain("ead-card__media-wrap");
+    expect(workspace).toContain(
+      "<DesignGenerationOverlay progress={generationProgress} />",
+    );
+
+    const mediaWrapIdx = workspace.indexOf(
+      '<div className="ead-card__media-wrap">',
+    );
+    const overlayIdx = workspace.indexOf(
+      "<DesignGenerationOverlay progress={generationProgress} />",
+    );
+    const mediaWrapCloseIdx = workspace.indexOf("</div>", overlayIdx);
+    expect(mediaWrapIdx).toBeGreaterThan(-1);
+    expect(overlayIdx).toBeGreaterThan(mediaWrapIdx);
+    expect(mediaWrapCloseIdx).toBeGreaterThan(overlayIdx);
+
+    expect(modal).toContain("onGenerationProgress");
+    expect(modal).toContain('stage: "validating"');
+    expect(modal).toContain('stage: "generating"');
+    expect(modal).toContain('stage: "completed"');
+    expect(modal).toContain('stage: "failed"');
+
+    expect(css).toContain(".ead-generation-overlay");
+    expect(css).toContain(".ead-generation-overlay__readout");
+    expect(css).toContain("@keyframes ead-generation-breathe");
+    expect(css).not.toContain(".ead-generation-overlay__track");
+    expect(css).not.toContain(".ead-generation-overlay__steps");
+    expect(css).toContain("@media (prefers-reduced-motion: reduce)");
   });
 });

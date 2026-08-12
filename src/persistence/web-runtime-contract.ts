@@ -47,6 +47,11 @@ function required(environment: RuntimeEnvironment, name: string): string {
   return value;
 }
 
+function isTruthy(value: string | undefined): boolean {
+  const normalized = (value ?? "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
 function assertInternalBackendUrl(value: string): void {
   let url: URL;
   try {
@@ -86,12 +91,28 @@ export function validateWebRuntimeContract(
     );
   }
 
+  const allowLanVoiceLibrary = isTruthy(
+    environment.LOCAL_VOICE_LIBRARY_ALLOW_IN_REMOTE,
+  );
+
   for (const name of DIRECT_STORAGE_ENVIRONMENT_VARIABLES) {
+    if (name === "LOCAL_VOICE_LIBRARY_DIR" && allowLanVoiceLibrary) {
+      continue;
+    }
     if ((environment[name] ?? "").trim()) {
       throw new WebRuntimeContractError(
         `production Web must not configure direct storage via ${name}`,
       );
     }
+  }
+
+  if (
+    allowLanVoiceLibrary &&
+    !(environment.LOCAL_VOICE_LIBRARY_DIR ?? "").trim()
+  ) {
+    throw new WebRuntimeContractError(
+      "LOCAL_VOICE_LIBRARY_ALLOW_IN_REMOTE requires LOCAL_VOICE_LIBRARY_DIR",
+    );
   }
 
   const backendUrl = required(environment, "GO_BACKEND_INTERNAL_URL");

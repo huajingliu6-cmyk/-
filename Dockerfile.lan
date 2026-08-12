@@ -1,0 +1,32 @@
+# LAN build: use China npm mirror to avoid registry.npmjs.org resets.
+FROM node:22-alpine AS dependencies
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm config set registry https://registry.npmmirror.com \
+  && npm ci
+
+FROM node:22-alpine AS build
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV REMOTE_DATA_ONLY=true
+ENV GO_BACKEND_INTERNAL_URL=http://api:8080
+ENV INTERNAL_API_TOKEN=build-only-placeholder
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+FROM node:22-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3000
+RUN addgroup --system --gid 1001 nodejs \
+  && adduser --system --uid 1001 nextjs
+COPY --from=build --chown=nextjs:nodejs /app/public ./public
+COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=build --chown=nextjs:nodejs /app/scripts/validate-production-web-env.mjs ./validate-production-web-env.mjs
+USER nextjs
+EXPOSE 3000
+CMD ["sh", "-c", "node validate-production-web-env.mjs && exec node server.js"]

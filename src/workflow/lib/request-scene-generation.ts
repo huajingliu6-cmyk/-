@@ -1,4 +1,5 @@
 import type { AssetRecord } from "@/workflow/types";
+import { safeRandomUUID } from "@/lib/safe-random-id";
 
 export type SceneGenerateResponse = {
   asset: AssetRecord;
@@ -20,7 +21,7 @@ export async function requestSceneImage(params: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       ...params,
-      idempotencyKey: crypto.randomUUID(),
+      idempotencyKey: safeRandomUUID(),
     }),
   });
   const payload = (await res.json()) as SceneGenerateResponse & {

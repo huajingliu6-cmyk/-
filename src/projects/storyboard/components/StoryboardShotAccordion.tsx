@@ -32,6 +32,7 @@ import {
 } from "@/projects/storyboard/resolve-shot-video";
 import { mapGenerationToUiStatus } from "@/projects/storyboard/shot-video-status";
 import type { ShotVideoUiStatus } from "@/projects/storyboard/shot-video-status";
+import { safeRandomUUID } from "@/lib/safe-random-id";
 import {
   SHOT_STATUS_LABEL,
   type EpisodeProduction,
@@ -208,7 +209,7 @@ export function StoryboardShotAccordion({
   const [historyVideos, setHistoryVideos] = useState<ShotVideoHistoryItem[]>(
     [],
   );
-  const videoKeyRef = useRef<string>(crypto.randomUUID());
+  const videoKeyRef = useRef<string>(safeRandomUUID());
   const sceneSectionRef = useRef<HTMLDivElement | null>(null);
   const lastSceneTokenRef = useRef(0);
 
@@ -886,7 +887,7 @@ export function StoryboardShotAccordion({
       return;
     }
 
-    const clientKey = crypto.randomUUID();
+    const clientKey = safeRandomUUID();
     setPendingSlots((prev) => [
       {
         id: clientKey,
@@ -967,7 +968,7 @@ export function StoryboardShotAccordion({
       }
     } finally {
       // 无论成功失败都换新幂等键，避免改提示词/模型后重试被拒
-      videoKeyRef.current = crypto.randomUUID();
+      videoKeyRef.current = safeRandomUUID();
       setVideoBusy(false);
     }
   }, [

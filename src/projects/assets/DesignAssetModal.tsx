@@ -28,6 +28,8 @@ import { DesignImageLightbox } from "@/projects/assets/DesignImageLightbox";
 import { VoiceSelector } from "@/projects/assets/VoiceSelector";
 import { VoicePreviewButton } from "@/projects/assets/VoicePreviewButton";
 import { useGenerationBusy } from "@/shell/GenerationBusyGuard";
+import { safeRandomUUID } from "@/lib/safe-random-id";
+import type { AssetGenerationProgress } from "@/projects/assets/DesignGenerationOverlay";
 
 export type DesignAssetModalProps = {
   open: boolean;
@@ -56,6 +58,11 @@ export type DesignAssetModalProps = {
   ) => void;
   /** Persist voice / media patches from the modal (per history image). */
   onItemPatched?: (itemId: string, next: EpisodeAssetDesignItem) => void;
+  /** Temporary UI progress for card overlay; null clears it. */
+  onGenerationProgress?: (
+    itemId: string,
+    progress: AssetGenerationProgress | null,
+  ) => void;
 };
 
 function apiBase(
@@ -127,6 +134,7 @@ function DesignAssetModalBody({
   onPromptUpdated,
   onAssetGenerated,
   onItemPatched,
+  onGenerationProgress,
 }: DesignAssetModalBodyProps) {
   const titleId = useId();
   const seed = initialPromptForItem(item);
@@ -170,6 +178,7 @@ function DesignAssetModalBody({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const previewObjectUrlRef = useRef<string | null>(null);
+  const progressClearTimerRef = useRef<number | null>(null);
   const onPromptUpdatedRef = useRef(onPromptUpdated);
   const [syncedMediaCurrentId, setSyncedMediaCurrentId] = useState(
     item.generatedMedia?.currentId ?? null,
@@ -181,6 +190,35 @@ function DesignAssetModalBody({
   useEffect(() => {
     onPromptUpdatedRef.current = onPromptUpdated;
   }, [onPromptUpdated]);
+
+  useEffect(() => {
+    return () => {
+      if (progressClearTimerRef.current != null) {
+        window.clearTimeout(progressClearTimerRef.current);
+        progressClearTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const reportProgress = useCallback(
+    (progress: AssetGenerationProgress | null) => {
+      onGenerationProgress?.(item.id, progress);
+    },
+    [item.id, onGenerationProgress],
+  );
+
+  const scheduleProgressClear = useCallback(
+    (delayMs: number) => {
+      if (progressClearTimerRef.current != null) {
+        window.clearTimeout(progressClearTimerRef.current);
+      }
+      progressClearTimerRef.current = window.setTimeout(() => {
+        progressClearTimerRef.current = null;
+        onGenerationProgress?.(item.id, null);
+      }, delayMs);
+    },
+    [item.id, onGenerationProgress],
+  );
 
   useEffect(() => {
     if (!didSeedExtract) return;
@@ -447,14 +485,21 @@ function DesignAssetModalBody({
     onGeneratingAssetChange?.(item.id, true);
     setError("");
     setNotice("");
+    if (progressClearTimerRef.current != null) {
+      window.clearTimeout(progressClearTimerRef.current);
+      progressClearTimerRef.current = null;
+    }
     try {
+      reportProgress({ stage: "validating", percent: 8 });
       const urls = apiBase(surface, projectId, episodeId, item.id);
+      reportProgress({ stage: "submitted", percent: 22 });
+      reportProgress({ stage: "generating", percent: 38 });
       const res = await fetch(urls.generate, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: promptText,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: safeRandomUUID(),
           confirmPaidGeneration: false,
         }),
       });
@@ -470,6 +515,7 @@ function DesignAssetModalBody({
       if (!res.ok) {
         throw new Error(payload.error ?? "资产生成失败");
       }
+      reportProgress({ stage: "saving", percent: 88 });
       const media = payload.generatedMedia ?? null;
       if (media?.currentId) {
         setPickedMediaId(media.currentId);
@@ -498,10 +544,15 @@ function DesignAssetModalBody({
       setSyncedPromptHistoryLen(history.length);
       onPromptUpdated(item.id, promptText, { history });
       onAssetGenerated(item.id, media);
+      reportProgress({ stage: "completed", percent: 100 });
+      scheduleProgressClear(900);
       setNotice(payload.notice ?? "已生成 4K · 16:9 参考图");
       setShowImageHistory(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "资产生成失败");
+      const message = e instanceof Error ? e.message : "资产生成失败";
+      setError(message);
+      reportProgress({ stage: "failed", percent: 0, message });
+      scheduleProgressClear(2200);
     } finally {
       setGeneratingAsset(false);
       onGeneratingAssetChange?.(item.id, false);
@@ -517,6 +568,9 @@ function DesignAssetModalBody({
     onGeneratingAssetChange,
     onPromptUpdated,
     onAssetGenerated,
+    onGenerationProgress,
+    reportProgress,
+    scheduleProgressClear,
   ]);
 
   const handleVideoRefPrecheck = useCallback(async () => {

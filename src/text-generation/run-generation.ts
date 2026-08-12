@@ -113,12 +113,15 @@ export async function* runTextGenerationStream(
     return;
   }
   if (project.ownerId !== input.user.id) {
+    const access = await resolveProjectAccess(input.user, input.projectId);
+    const isPrincipal = access?.role === "PROJECT_OWNER";
     const workspaceAssetKinds =
       input.outputKind === "script_asset_design" ||
       input.outputKind === "episode_asset_design" ||
       input.outputKind === "asset_design_prompt";
-    if (workspaceAssetKinds) {
-      const access = await resolveProjectAccess(input.user, input.projectId);
+    if (isPrincipal) {
+      // enterprise owner treated as project principal — fall through
+    } else if (workspaceAssetKinds) {
       if (!access || !hasWorkspaceFeature(access, "assets")) {
         yield sseEncode({
           event: "error",

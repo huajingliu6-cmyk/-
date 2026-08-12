@@ -24,7 +24,14 @@ type Dashboard = {
   auditEvents: Array<{ id: string; kind: "CREDIT" | "ENTERPRISE"; actorName: string; targetName?: string | null; projectName?: string | null; delta: number | null; balanceAfter: number | null; reason: string; summary: string; createdAt: string }>;
 };
 
-type AssignableProject = { projectId: string; name: string; attached: boolean };
+type AssignableProject = {
+  projectId: string;
+  name: string;
+  attached: boolean;
+  ownerId?: string;
+  ownerDisplayName?: string;
+  ownerUsername?: string;
+};
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: "members", label: "成员与职务" },
@@ -104,6 +111,7 @@ export function EnterpriseTeamPage() {
 
   const canManageJobs = dashboard?.permissions.canManageJobs ?? false;
   const canManageAdmins = dashboard?.permissions.canManageAdmins ?? false;
+  const isEnterpriseOwner = dashboard?.currentMember.enterpriseRole === "OWNER";
 
   const updateMember = async (userId: string, patch: { jobRole?: EnterpriseJobRole; enterpriseRole?: "ADMIN" | "MEMBER" }) => {
     if (space.kind !== "enterprise") return;
@@ -189,6 +197,41 @@ export function EnterpriseTeamPage() {
     finally { setSavingProjects(false); }
   };
 
+  const assignProjectPrincipal = async (projectId: string, ownerUserId: string) => {
+    if (space.kind !== "enterprise") return;
+    setNote(""); setError("");
+    const response = await fetch(
+      `/api/enterprises/${encodeURIComponent(space.enterpriseId)}/projects/${encodeURIComponent(projectId)}/principal`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ownerUserId }),
+      },
+    );
+    const payload = (await response.json()) as {
+      error?: string;
+      owner?: { userId: string; username: string; displayName: string };
+    };
+    if (!response.ok) {
+      setError(payload.error ?? "指定项目主理人失败");
+      return;
+    }
+    setAssignableProjects((current) =>
+      current.map((item) =>
+        item.projectId === projectId
+          ? {
+              ...item,
+              ownerId: payload.owner?.userId ?? ownerUserId,
+              ownerDisplayName: payload.owner?.displayName,
+              ownerUsername: payload.owner?.username,
+            }
+          : item,
+      ),
+    );
+    setNote("项目主理人已更新");
+    await reload(space);
+  };
+
   const visibleTabs = useMemo(() => TABS.filter((item) => {
     if (item.id === "requests") return dashboard?.permissions.canReviewRequests;
     if (item.id === "approvals") return dashboard?.permissions.canReadApprovals;
@@ -218,17 +261,17 @@ export function EnterpriseTeamPage() {
         </section>
         <nav className="ent-tabs" aria-label="团队管理栏目">{visibleTabs.map((item) => <button key={item.id} type="button" className={tab === item.id ? "is-active" : ""} onClick={() => setTab(item.id)}>{item.label}{item.id === "requests" && dashboard.stats.pendingJoinRequestCount ? ` · ${dashboard.stats.pendingJoinRequestCount}` : ""}</button>)}</nav>
 
-        {tab === "members" ? <section className="ent-panel"><div className="ent-panel-head"><div><h2>成员与职务</h2><p>企业身份决定组织管理权限；制作职务决定业务职责，两者互不替代。</p></div></div><div className="ent-table-wrap"><table><thead><tr><th>成员</th><th>企业身份</th><th>制作职务</th><th>加入时间</th>{dashboard.permissions.canRemoveMembers ? <th>操作</th> : null}</tr></thead><tbody>{dashboard.members.map((member) => <tr key={member.userId}><td><span className="ent-member"><span>{(member.displayName || member.username).slice(0,1)}</span><span><strong>{member.displayName}</strong><small>@{member.username}</small></span></span></td><td>{canManageAdmins && member.enterpriseRole !== "OWNER" ? <select value={member.enterpriseRole} onChange={(event) => void updateMember(member.userId, { enterpriseRole: event.target.value as "ADMIN" | "MEMBER" })}><option value="ADMIN">企业管理员</option><option value="MEMBER">企业成员</option></select> : ENTERPRISE_ROLE_LABELS[member.enterpriseRole]}</td><td>{canManageJobs && member.enterpriseRole !== "OWNER" ? <select value={member.jobRole} onChange={(event) => void updateMember(member.userId, { jobRole: event.target.value as EnterpriseJobRole })}>{Object.entries(ENTERPRISE_JOB_ROLE_LABELS).map(([id,label]) => <option key={id} value={id}>{label}</option>)}</select> : ENTERPRISE_JOB_ROLE_LABELS[member.jobRole]}</td><td>{formatTime(member.joinedAt)}</td>{dashboard.permissions.canRemoveMembers ? <td>{member.enterpriseRole === "OWNER" || member.userId === dashboard.currentMember.userId ? "—" : <button type="button" className="ent-remove-member" disabled={removingUserId === member.userId} onClick={() => void removeMember(member)}><Trash2 aria-hidden />{removingUserId === member.userId ? "移除中…" : "移除"}</button>}</td> : null}</tr>)}</tbody></table></div></section> : null}
+        {tab === "members" ? <section className="ent-panel"><div className="ent-panel-head"><div><h2>成员与职务</h2><p>企业身份决定组织管理权限；制作职务决定业务职责。企业所有者对挂靠项目拥有与「项目主理人」相同的业务权限，并可在「项目范围」中为成员指定项目主理人。</p></div></div><div className="ent-table-wrap"><table><thead><tr><th>成员</th><th>企业身份</th><th>制作职务</th><th>加入时间</th>{dashboard.permissions.canRemoveMembers ? <th>操作</th> : null}</tr></thead><tbody>{dashboard.members.map((member) => <tr key={member.userId}><td><span className="ent-member"><span>{(member.displayName || member.username).slice(0,1)}</span><span><strong>{member.displayName}</strong><small>@{member.username}</small></span></span></td><td>{canManageAdmins && member.enterpriseRole !== "OWNER" ? <select value={member.enterpriseRole} onChange={(event) => void updateMember(member.userId, { enterpriseRole: event.target.value as "ADMIN" | "MEMBER" })}><option value="ADMIN">企业管理员</option><option value="MEMBER">企业成员</option></select> : ENTERPRISE_ROLE_LABELS[member.enterpriseRole]}</td><td>{canManageJobs && member.enterpriseRole !== "OWNER" ? <select value={member.jobRole} onChange={(event) => void updateMember(member.userId, { jobRole: event.target.value as EnterpriseJobRole })}>{Object.entries(ENTERPRISE_JOB_ROLE_LABELS).map(([id,label]) => <option key={id} value={id}>{label}</option>)}</select> : ENTERPRISE_JOB_ROLE_LABELS[member.jobRole]}</td><td>{formatTime(member.joinedAt)}</td>{dashboard.permissions.canRemoveMembers ? <td>{member.enterpriseRole === "OWNER" || member.userId === dashboard.currentMember.userId ? "—" : <button type="button" className="ent-remove-member" disabled={removingUserId === member.userId} onClick={() => void removeMember(member)}><Trash2 aria-hidden />{removingUserId === member.userId ? "移除中…" : "移除"}</button>}</td> : null}</tr>)}</tbody></table></div></section> : null}
 
         {tab === "members" && canManageJobs ? <section className="ent-panel ent-governance"><div className="ent-panel-head"><div><h2>直接邀请成员</h2><p>输入现有用户的完整用户名，并分配初始制作职务。</p></div></div><div className="ent-governance__row"><input value={inviteUsername} onChange={(event) => setInviteUsername(event.target.value)} placeholder="完整用户名" /><select value={inviteJobRole} onChange={(event) => setInviteJobRole(event.target.value as EnterpriseJobRole)}>{Object.entries(ENTERPRISE_JOB_ROLE_LABELS).map(([id,label]) => <option key={id} value={id}>{label}</option>)}</select><button type="button" disabled={inviting || !inviteUsername.trim()} onClick={() => void inviteMember()}>{inviting ? "邀请中…" : "邀请加入"}</button></div></section> : null}
 
-        {tab === "members" ? <section className="ent-panel ent-governance"><div className="ent-panel-head"><div><h2>企业生命周期</h2><p>所有权转让、退出和解散均不会改变项目管理员身份；企业钱包记录会保留用于财务审计。</p></div></div>{dashboard.currentMember.enterpriseRole === "OWNER" ? <div className="ent-governance__stack"><div className="ent-governance__row"><select value={transferTargetUserId} onChange={(event) => setTransferTargetUserId(event.target.value)}><option value="">选择新企业所有者</option>{dashboard.members.filter((member) => member.userId !== dashboard.currentMember.userId).map((member) => <option key={member.userId} value={member.userId}>{member.displayName} · {ENTERPRISE_JOB_ROLE_LABELS[member.jobRole]}</option>)}</select><button type="button" disabled={lifecycleBusy || !transferTargetUserId} onClick={() => void runLifecycle("transfer")}>转让所有权</button></div><button type="button" className="ent-danger-action" disabled={lifecycleBusy} onClick={() => void runLifecycle("dissolve")}>解散企业</button></div> : <button type="button" className="ent-danger-action" disabled={lifecycleBusy} onClick={() => void runLifecycle("leave")}>退出企业</button>}</section> : null}
+        {tab === "members" ? <section className="ent-panel ent-governance"><div className="ent-panel-head"><div><h2>企业生命周期</h2><p>转让/退出/解散企业不会自动清空项目主理人记录；企业所有者对挂靠项目始终具备与主理人相同的业务权限。</p></div></div>{dashboard.currentMember.enterpriseRole === "OWNER" ? <div className="ent-governance__stack"><div className="ent-governance__row"><select value={transferTargetUserId} onChange={(event) => setTransferTargetUserId(event.target.value)}><option value="">选择新企业所有者</option>{dashboard.members.filter((member) => member.userId !== dashboard.currentMember.userId).map((member) => <option key={member.userId} value={member.userId}>{member.displayName} · {ENTERPRISE_JOB_ROLE_LABELS[member.jobRole]}</option>)}</select><button type="button" disabled={lifecycleBusy || !transferTargetUserId} onClick={() => void runLifecycle("transfer")}>转让所有权</button></div><button type="button" className="ent-danger-action" disabled={lifecycleBusy} onClick={() => void runLifecycle("dissolve")}>解散企业</button></div> : <button type="button" className="ent-danger-action" disabled={lifecycleBusy} onClick={() => void runLifecycle("leave")}>退出企业</button>}</section> : null}
 
         {tab === "requests" ? <section className="ent-panel"><div className="ent-panel-head"><div><h2>加入申请</h2><p>通过后成员默认成为企业成员与抽卡工程师，可再调整职务。</p></div></div><div className="ent-list">{dashboard.joinRequests.length === 0 ? <p className="ent-muted">暂无加入申请</p> : dashboard.joinRequests.map((request) => <article key={request.id}><div><strong>{request.applicantDisplayName}</strong><small>@{request.applicantUsername} · {formatTime(request.createdAt)}</small>{request.message ? <p>{request.message}</p> : null}</div><span className={`ent-status ent-status--${request.status.toLowerCase()}`}>{request.status === "PENDING" ? "待处理" : request.status === "APPROVED" ? "已通过" : "已驳回"}</span>{request.status === "PENDING" ? <div className="ent-actions"><button type="button" onClick={() => void decideRequest(request.id, "REJECTED")}>驳回</button><button type="button" className="is-primary" onClick={() => void decideRequest(request.id, "APPROVED")}>通过</button></div> : null}</article>)}</div></section> : null}
 
         {tab === "approvals" ? <section className="ent-panel"><div className="ent-panel-head"><div><h2>审批记录</h2><p>只显示明确归属当前企业的项目审批，不包含个人项目。</p></div></div><div className="ent-list">{dashboard.approvals.length === 0 ? <p className="ent-muted">暂无企业审批记录</p> : dashboard.approvals.map((approval) => <article key={approval.id}><div><strong>{approval.projectName} · {approval.episodeId}</strong><small>提交人 {approval.submitter} · 审批人 {approval.approver}</small><p>{approval.itemCount} 项素材 · 提交于 {formatTime(approval.submittedAt)}{approval.completedAt ? ` · 完成于 ${formatTime(approval.completedAt)}` : ""}</p></div><span className={`ent-status ent-status--${approval.status}`}>{statusLabel(approval.status)}</span></article>)}</div></section> : null}
 
-        {tab === "projects" ? <section className="ent-panel"><div className="ent-panel-head"><div><h2>企业项目范围</h2><p>只有明确勾选的项目才会进入企业项目、审批汇总和积分操作日志。</p></div><button type="button" className="ent-save" disabled={savingProjects} onClick={() => void saveProjects()}>{savingProjects ? "保存中…" : "保存范围"}</button></div><div className="ent-project-grid">{assignableProjects.length === 0 ? <p className="ent-muted">暂无可分配项目</p> : assignableProjects.map((project) => <label key={project.projectId}><input type="checkbox" checked={project.attached} onChange={(event) => setAssignableProjects((current) => current.map((item) => item.projectId === project.projectId ? { ...item, attached: event.target.checked } : item))} /><span><strong>{project.name}</strong><small>{project.projectId}</small></span></label>)}</div></section> : null}
+        {tab === "projects" ? <section className="ent-panel"><div className="ent-panel-head"><div><h2>企业项目范围</h2><p>勾选归属企业的项目。企业所有者可在下方为已挂靠项目指定「项目主理人」（沿用现有主理人权限）。</p></div><button type="button" className="ent-save" disabled={savingProjects} onClick={() => void saveProjects()}>{savingProjects ? "保存中…" : "保存范围"}</button></div><div className="ent-project-grid">{assignableProjects.length === 0 ? <p className="ent-muted">暂无可分配项目</p> : assignableProjects.map((project) => <label key={project.projectId}><input type="checkbox" checked={project.attached} onChange={(event) => setAssignableProjects((current) => current.map((item) => item.projectId === project.projectId ? { ...item, attached: event.target.checked } : item))} /><span><strong>{project.name}</strong><small>{project.projectId}</small>{project.attached && project.ownerDisplayName ? <small>当前主理人：{project.ownerDisplayName}{project.ownerUsername ? ` (@${project.ownerUsername})` : ""}</small> : null}</span></label>)}</div>{isEnterpriseOwner && assignableProjects.some((project) => project.attached) ? <div className="ent-governance__stack" style={{ marginTop: 16 }}><div className="ent-panel-head"><div><h2>指定项目主理人</h2><p>仅企业所有者可指定；被指定人必须是企业成员，将获得该项目完整主理人权限。</p></div></div>{assignableProjects.filter((project) => project.attached).map((project) => <div key={`principal-${project.projectId}`} className="ent-governance__row"><span style={{ minWidth: 140 }}>{project.name}</span><select value={project.ownerId ?? ""} onChange={(event) => void assignProjectPrincipal(project.projectId, event.target.value)}><option value="" disabled>选择项目主理人</option>{(dashboard?.members ?? []).map((member) => <option key={member.userId} value={member.userId}>{member.displayName} · {ENTERPRISE_ROLE_LABELS[member.enterpriseRole]}</option>)}</select></div>)}</div> : null}</section> : null}
 
         {tab === "audit" ? <section className="ent-panel"><div className="ent-panel-head"><div><h2>操作日志与企业积分使用记录</h2><p>积分记录来自企业项目的真实成员流水；组织变更记录成员、职务与项目范围操作。</p></div></div><div className="ent-list ent-audit">{dashboard.auditEvents.length === 0 ? <p className="ent-muted">暂无操作日志</p> : dashboard.auditEvents.map((event) => <article key={event.id}><span className={`ent-event-icon ${event.kind === "CREDIT" ? "is-credit" : ""}`}>{event.kind === "CREDIT" ? <Coins aria-hidden /> : <ShieldCheck aria-hidden />}</span><div><strong>{event.summary}</strong><small>{event.actorName}{event.projectName ? ` · ${event.projectName}` : ""} · {formatTime(event.createdAt)}</small><p>{event.kind === "CREDIT" ? `${event.reason}${event.balanceAfter != null ? ` · 余额 ${event.balanceAfter}` : ""}` : event.reason}</p></div>{event.delta != null ? <span className={`ent-delta${event.delta < 0 ? " is-spend" : " is-refund"}`}>{event.delta > 0 ? "+" : ""}{event.delta}</span> : null}</article>)}</div></section> : null}
       </>) : null}

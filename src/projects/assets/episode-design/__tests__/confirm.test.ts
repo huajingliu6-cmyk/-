@@ -120,6 +120,12 @@ describe("confirmEpisodeAssetDesign", () => {
     expect(bundle?.characters[0]?.age).toBe("28");
     expect(bundle?.characters[0]?.voiceId).toBe("voice_1");
     expect(bundle?.characters[0]?.voiceName).toBe("测试音色");
+    expect(bundle?.characters[0]?.mediaVoices?.["gen_character_1"]?.voiceId).toBe(
+      "voice_1",
+    );
+    expect(
+      bundle?.characters[0]?.mediaVoices?.["gen_character_1"]?.voiceName,
+    ).toBe("测试音色");
   });
 
   it("confirms one item without closing the record or duplicating it later", async () => {
