@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { MapPinned } from "lucide-react";
-import { useChipBounce } from "@/shell/useChipBounce";
 import { AssetBasicInfo } from "@/projects/assets/AssetBasicInfo";
 import {
   AssetCompactList,
@@ -41,26 +40,12 @@ export function SceneManager({
   const [imageRevisions, setImageRevisions] = useState<Record<string, number>>(
     {},
   );
-  const saveBounce = useChipBounce();
 
   const selected = scenes.find((s) => s.id === selectedId) ?? null;
 
   const updateOne = (next: SceneAsset) => {
     const withStatus = { ...next, status: deriveSceneStatus(next) };
     onChange(scenes.map((s) => (s.id === withStatus.id ? withStatus : s)));
-  };
-
-  const handleSave = () => {
-    if (!selected) return;
-    const nextItem = { ...selected, status: deriveSceneStatus(selected) };
-    const next = scenes.map((s) => (s.id === nextItem.id ? nextItem : s));
-    onChange(next);
-    setNote("正在保存场景…");
-    void onPersist(next)
-      .then(() => setNote("已保存场景到服务器。"))
-      .catch((err: unknown) => {
-        setNote(err instanceof Error ? err.message : "保存失败");
-      });
   };
 
   const previewSrc = selected
@@ -197,12 +182,13 @@ export function SceneManager({
                 </div>
               ) : null
             }
-            imageActions={
+            previewOverlayActions={
               selected ? (
                 <AssetImageUpload
                   id={`scene-image-${selected.id}`}
                   label="场景图片"
                   compact
+                  replaceOnly
                   hidePreview
                   disabled={!canEdit}
                   projectId={projectId}
@@ -233,25 +219,7 @@ export function SceneManager({
                 />
               ) : null
             }
-            footer={
-              selected ? (
-                <>
-                  <button
-                    type="button"
-                    className={`amw-btn amw-btn-primary ${saveBounce.bounceClass}`}
-                    disabled={!canEdit || !selected.name.trim()}
-                    onClick={() => {
-                      saveBounce.trigger();
-                      handleSave();
-                    }}
-                    onAnimationEnd={saveBounce.onAnimationEnd}
-                  >
-                    保存
-                  </button>
-                  {note ? <p className="amw-note">{note}</p> : null}
-                </>
-              ) : null
-            }
+            footer={note ? <p className="amw-note">{note}</p> : null}
           />
         }
       />

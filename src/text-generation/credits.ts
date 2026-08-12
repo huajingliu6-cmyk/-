@@ -120,7 +120,10 @@ export async function reserveCredits(input: {
   generationId: string;
   projectId: string;
   reason: string;
-}): Promise<{ ok: true; balance: number } | { ok: false; error: string }> {
+}): Promise<
+  | { ok: true; balance: number }
+  | { ok: false; error: string; code: "INSUFFICIENT_CREDITS" }
+> {
   if (isRemoteDataOnly()) return reserveCreditsRemote(input);
   const file = await readFile();
   const accountId = input.accountId ?? input.userId;
@@ -128,7 +131,11 @@ export async function reserveCredits(input: {
   const bal = file.balances[accountId] ?? defaultBalance();
   file.balances[accountId] = bal;
   if (bal < input.points) {
-    return { ok: false, error: "剩余积分不足" };
+    return {
+      ok: false,
+      error: "剩余积分不足",
+      code: "INSUFFICIENT_CREDITS",
+    };
   }
   if (file.reservations[input.generationId]) {
     return { ok: true, balance: bal };

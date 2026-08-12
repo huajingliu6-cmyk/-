@@ -13,6 +13,12 @@ import {
 } from "@/projects/assets/episode-design/generated-media-history";
 import { syncManagementToWorkspace } from "@/projects/workspace-sync/sync-management-to-workspace";
 import { guardEpisodeAssetDesignRemoteData } from "@/projects/assets/episode-design/route-remote-guard";
+import {
+  parseIdempotencyKey,
+  releaseGenerationCredits,
+  reserveImageGenerationCredits,
+  settleGenerationCredits,
+} from "@/credits/generation-billing";
 
 type RouteContext = {
   params: Promise<{ projectId: string; episodeId: string; itemId: string }>;
@@ -42,6 +48,13 @@ async function post(request: Request, context: RouteContext) {
   if (!prompt) {
     return NextResponse.json({ error: "缺少提示词" }, { status: 400 });
   }
+  const idempotencyKey = parseIdempotencyKey(raw?.idempotencyKey);
+  if (!idempotencyKey) {
+    return NextResponse.json(
+      { error: "缺少 idempotencyKey", code: "IDEMPOTENCY_KEY_REQUIRED" },
+      { status: 400 },
+    );
+  }
 
   const detail = await getEpisodeAssetDesignDetail(projectId, episodeId);
   if (!detail.ok) {
@@ -65,6 +78,15 @@ async function post(request: Request, context: RouteContext) {
     );
   }
 
+  const reserved = await reserveImageGenerationCredits({
+    projectId,
+    actorUserId: gated.user.id,
+    itemKey: `${episodeId}:${itemId}`,
+    idempotencyKey,
+    generatedMedia: item.generatedMedia,
+  });
+  if (!reserved.ok) return reserved.response;
+
   let generated: Awaited<ReturnType<typeof generateDesignAssetImage>>;
   try {
     generated = await generateDesignAssetImage({
@@ -74,6 +96,11 @@ async function post(request: Request, context: RouteContext) {
       prompt,
     });
   } catch (error) {
+    await releaseGenerationCredits({
+      reservationId: reserved.reservationId,
+      projectId,
+      reason: "asset-image-provider-failed",
+    });
     const status =
       error &&
       typeof error === "object" &&
@@ -143,12 +170,25 @@ async function post(request: Request, context: RouteContext) {
     await deleteProjectAssetImageFile(projectId, generated.mediaId).catch(
       () => undefined,
     );
+    await releaseGenerationCredits({
+      reservationId: reserved.reservationId,
+      projectId,
+      reason: "asset-image-save-failed",
+    });
     throw error;
   }
   if (!saved.ok) {
     await deleteProjectAssetImageFile(projectId, generated.mediaId).catch(
       () => undefined,
     );
+    await releaseGenerationCredits({
+      reservationId: reserved.reservationId,
+      projectId,
+      reason:
+        saved.code === "REVISION_CONFLICT" || saved.code === "FINGERPRINT_STALE"
+          ? "asset-image-revision-conflict"
+          : "asset-image-save-rejected",
+    });
     const status =
       saved.code === "REVISION_CONFLICT" || saved.code === "FINGERPRINT_STALE"
         ? 409
@@ -158,6 +198,14 @@ async function post(request: Request, context: RouteContext) {
       { status },
     );
   }
+
+  const credit = await settleGenerationCredits({
+    reservationId: reserved.reservationId,
+    projectId,
+    actualPoints: reserved.points,
+    reason: "asset-image-generation-settle",
+    knownBalance: reserved.balance,
+  });
   await syncManagementToWorkspace(projectId);
 
   return NextResponse.json({
@@ -169,6 +217,10 @@ async function post(request: Request, context: RouteContext) {
     aspectRatio: generated.aspectRatio,
     resolution: generated.resolution,
     generatedMedia,
+    credit: {
+      ...credit,
+      firstGeneration: reserved.firstGeneration,
+    },
   });
 }
 

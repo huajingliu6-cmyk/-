@@ -182,6 +182,54 @@ export function CharacterDetail({
   const statusLabel = characterDisplayStatus(character);
   const voiceBound = Boolean(activeVoice.voiceId);
 
+  const voicePanel = (
+    <div className="asset-controls__voice character-preview__voice">
+      <div className="asset-controls__voice-head">
+        <span className="asset-controls__voice-title">
+          {mediaIds.length > 1 ? "本图音色" : "音色"}
+        </span>
+        <span className={`amw-badge${voiceBound ? " is-ok" : " is-warn"}`}>
+          {voiceBound ? activeVoice.voiceName || "已绑定" : "待绑定音色"}
+        </span>
+      </div>
+      <VoiceSelector
+        label="音色选择"
+        labelHidden
+        value={activeVoice.voiceId}
+        disabled={!canEdit}
+        projectVoices={projectVoices}
+        onChange={bindVoiceForActiveMedia}
+      />
+      {character.voiceStyle &&
+      activeMediaId ===
+        (character.primaryMediaId?.trim() ||
+          character.imageFileName?.trim()) ? (
+        <p className="amw-hint">当前风格：{character.voiceStyle}</p>
+      ) : null}
+      <div className="asset-controls__voice-actions">
+        <VoicePreviewButton
+          projectId={projectId}
+          voiceId={activeVoice.voiceId}
+          audios={audios}
+          disabled={!activeVoice.voiceId}
+          onStatus={onPreviewStatus}
+        />
+        <button
+          type="button"
+          className="amw-btn amw-btn-primary"
+          disabled={!canEdit || !activeVoice.voiceId}
+          title="音色选择后已写入当前草稿，点击保存即可持久化"
+          onClick={() => {
+            saveBounce.trigger();
+            onSave();
+          }}
+        >
+          {voiceBound ? "确认绑定" : "绑定音色"}
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <AssetDetailLayout
       title="角色详情"
@@ -203,6 +251,83 @@ export function CharacterDetail({
           testId="character-hero-image"
           emptyIcon={<UserRound size={36} strokeWidth={1.5} />}
         />
+      }
+      previewOverlayActions={
+        <AssetImageUpload
+          id={`character-image-${character.id}`}
+          label="角色图片"
+          compact
+          replaceOnly
+          hidePreview
+          disabled={!canEdit}
+          projectId={projectId}
+          assetId={character.id}
+          ensurePersisted={ensurePersisted}
+          revision={imageRevision}
+          onRevisionChange={(next) => onImageRevision?.(character.id, next)}
+          value={{
+            fileName: character.imageFileName,
+            objectUrl: character.imageObjectUrl,
+            mimeType: character.imageMimeType,
+          }}
+          onChange={(image) =>
+            patch({
+              imageFileName: image.fileName,
+              imageObjectUrl: image.objectUrl,
+              imageMimeType: image.mimeType,
+              videoRefSafety: null,
+            })
+          }
+        />
+      }
+      previewContent={
+        <>
+          {voicePanel}
+          {mediaIds.length > 1 ? (
+            <div
+              className="ead-history-strip ead-history-strip--images ead-history-strip--compact"
+              data-testid="character-media-history"
+            >
+              {mediaIds.map((id) => {
+                const active = id === activeMediaId;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className={
+                      active
+                        ? "ead-history-thumb is-active"
+                        : "ead-history-thumb"
+                    }
+                    title={id}
+                    onClick={() => setSelectedMediaId(id)}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={getProjectAssetImageUrl(projectId, id, {
+                        revision: id,
+                      })}
+                      alt=""
+                    />
+                  </button>
+                );
+              })}
+              {activeMediaId &&
+              activeMediaId !==
+                (character.primaryMediaId?.trim() ||
+                  character.imageFileName?.trim()) ? (
+                <button
+                  type="button"
+                  className="amw-btn"
+                  disabled={!canEdit}
+                  onClick={() => setPrimaryMedia(activeMediaId)}
+                >
+                  设为主图
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </>
       }
       basicInfo={
         <AssetBasicInfo
@@ -255,147 +380,7 @@ export function CharacterDetail({
           />
         </div>
       }
-      imageActions={
-        <>
-          <AssetImageUpload
-            id={`character-image-${character.id}`}
-            label="角色图片"
-            compact
-            hidePreview
-            disabled={!canEdit}
-            projectId={projectId}
-            assetId={character.id}
-            ensurePersisted={ensurePersisted}
-            revision={imageRevision}
-            onRevisionChange={(next) => onImageRevision?.(character.id, next)}
-            value={{
-              fileName: character.imageFileName,
-              objectUrl: character.imageObjectUrl,
-              mimeType: character.imageMimeType,
-            }}
-            onChange={(image) =>
-              patch({
-                imageFileName: image.fileName,
-                imageObjectUrl: image.objectUrl,
-                imageMimeType: image.mimeType,
-                videoRefSafety: null,
-              })
-            }
-          />
-          {mediaIds.length > 1 ? (
-            <div
-              className="ead-history-strip ead-history-strip--images ead-history-strip--compact"
-              data-testid="character-media-history"
-            >
-              {mediaIds.map((id) => {
-                const active = id === activeMediaId;
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    className={
-                      active
-                        ? "ead-history-thumb is-active"
-                        : "ead-history-thumb"
-                    }
-                    title={id}
-                    onClick={() => setSelectedMediaId(id)}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={getProjectAssetImageUrl(projectId, id, {
-                        revision: id,
-                      })}
-                      alt=""
-                    />
-                  </button>
-                );
-              })}
-              {activeMediaId &&
-              activeMediaId !==
-                (character.primaryMediaId?.trim() ||
-                  character.imageFileName?.trim()) ? (
-                <button
-                  type="button"
-                  className="amw-btn"
-                  disabled={!canEdit}
-                  onClick={() => setPrimaryMedia(activeMediaId)}
-                >
-                  设为主图
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </>
-      }
-      voice={
-        <>
-          <div className="asset-controls__voice-head">
-            <span className="asset-controls__voice-title">
-              {mediaIds.length > 1 ? "本图音色" : "音色"}
-            </span>
-            <span
-              className={`amw-badge${voiceBound ? " is-ok" : " is-warn"}`}
-            >
-              {voiceBound
-                ? activeVoice.voiceName || "已绑定"
-                : "待绑定音色"}
-            </span>
-          </div>
-          <VoiceSelector
-            label="音色选择"
-            labelHidden
-            value={activeVoice.voiceId}
-            disabled={!canEdit}
-            projectVoices={projectVoices}
-            onChange={bindVoiceForActiveMedia}
-          />
-          {character.voiceStyle &&
-          activeMediaId ===
-            (character.primaryMediaId?.trim() ||
-              character.imageFileName?.trim()) ? (
-            <p className="amw-hint">当前风格：{character.voiceStyle}</p>
-          ) : null}
-          <div className="asset-controls__voice-actions">
-            <VoicePreviewButton
-              projectId={projectId}
-              voiceId={activeVoice.voiceId}
-              audios={audios}
-              disabled={!activeVoice.voiceId}
-              onStatus={onPreviewStatus}
-            />
-            <button
-              type="button"
-              className="amw-btn amw-btn-primary"
-              disabled={!canEdit || !activeVoice.voiceId}
-              title="音色选择后已写入当前草稿，点击保存即可持久化"
-              onClick={() => {
-                saveBounce.trigger();
-                onSave();
-              }}
-            >
-              {voiceBound ? "确认绑定" : "绑定音色"}
-            </button>
-          </div>
-        </>
-      }
-      footer={
-        <>
-          <button
-            type="button"
-            className={`amw-btn amw-btn-primary ${saveBounce.bounceClass}`}
-            disabled={!canEdit || !character.name.trim()}
-            onClick={() => {
-              saveBounce.trigger();
-              onSave();
-            }}
-            onAnimationEnd={saveBounce.onAnimationEnd}
-          >
-            保存
-          </button>
-          {note ? <p className="amw-note">{note}</p> : null}
-        </>
-      }
+      footer={note ? <p className="amw-note">{note}</p> : null}
     />
   );
 }

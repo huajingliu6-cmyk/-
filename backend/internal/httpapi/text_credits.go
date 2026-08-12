@@ -263,7 +263,11 @@ func (handler *TextCredits) reserve(writer http.ResponseWriter, request *http.Re
 			return
 		}
 		if account.Balance < points {
-			writeJSON(writer, 200, map[string]any{"ok": false, "error": "剩余积分不足"})
+			writeJSON(writer, 402, map[string]any{
+				"ok":    false,
+				"error": "剩余积分不足",
+				"code":  "INSUFFICIENT_CREDITS",
+			})
 			return
 		}
 		now := requestTime()

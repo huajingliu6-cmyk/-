@@ -39,6 +39,8 @@ type Props = {
   hidePreview?: boolean;
   /** Compact single-row actions for library controls pane */
   compact?: boolean;
+  /** Library replace mode: hide clear + filename, keep select-to-replace */
+  replaceOnly?: boolean;
 };
 
 function revokeIfBlob(url: string | null | undefined) {
@@ -61,6 +63,7 @@ export function AssetImageUpload({
   onRevisionChange,
   hidePreview = false,
   compact = false,
+  replaceOnly = false,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
@@ -220,23 +223,29 @@ export function AssetImageUpload({
       >
         <button
           type="button"
-          className="amw-btn"
+          className="amw-btn asset-image-upload__select"
+          data-testid={`${id}-select`}
           disabled={disabled || busy}
           onClick={() => inputRef.current?.click()}
         >
           {busy ? "处理中…" : "选择图片"}
         </button>
-        <button
-          type="button"
-          className="amw-btn"
-          disabled={disabled || busy || !(value.fileName || value.objectUrl)}
-          onClick={clear}
-        >
-          清除
-        </button>
-        <span className="amw-file-name" title={value.fileName ?? undefined}>
-          {busy ? "上传中…" : (value.fileName ?? "未选择图片")}
-        </span>
+        {!replaceOnly ? (
+          <button
+            type="button"
+            className="amw-btn asset-image-upload__clear"
+            data-testid={`${id}-clear`}
+            disabled={disabled || busy || !(value.fileName || value.objectUrl)}
+            onClick={clear}
+          >
+            清除
+          </button>
+        ) : null}
+        {!replaceOnly ? (
+          <span className="amw-file-name" title={value.fileName ?? undefined}>
+            {busy ? "上传中…" : (value.fileName ?? "未选择图片")}
+          </span>
+        ) : null}
       </div>
       {previewSrc && !hidePreview ? (
         <AmwImagePreview src={previewSrc} alt={value.fileName ?? "预览"} />

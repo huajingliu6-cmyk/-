@@ -2,6 +2,7 @@ import type { VideoResolution } from "@/video-generation/types";
 import {
   STORYBOARD_VIDEO_ASPECT_RATIO,
   STORYBOARD_VIDEO_RESOLUTION,
+  estimateStoryboardVideoCredits,
 } from "@/projects/storyboard/storyboard-video-constants";
 import {
   DEFAULT_STORYBOARD_VIDEO_MODEL_CHOICE,
@@ -196,4 +197,14 @@ export function resolveStoryboardVideoOutputParams(
         ? parseStoryboardVideoStylePreset(body.stylePreset)
         : defaults.stylePreset,
   };
+}
+
+/** 前端预计费用展示；实际扣费以服务端 quote 为准。 */
+export function estimateCreditsForStoryboardVideoOutput(
+  params: Pick<StoryboardVideoOutputParams, "resolution" | "durationSeconds">,
+): number | null {
+  return estimateStoryboardVideoCredits(
+    params.durationSeconds,
+    params.resolution,
+  );
 }

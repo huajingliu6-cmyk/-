@@ -377,6 +377,11 @@ export function StoryboardProductionPanel({
     const isMock = videoConfig?.providerId === "mock";
     const isPaid = videoConfig?.providerId === "aliyun-wan27";
     const pending = includeSucceeded ? shotCount : Math.max(pendingVideoCount, 1);
+    const pendingRows = includeSucceeded
+      ? flat
+      : flat.filter(
+          (row) => row.shot.videoContentStale || !row.shot.lastGenerationId,
+        );
     const assetById = new Map(assets.map((a) => [a.id, a]));
     const missingVoiceNames: string[] = [];
     const skippedRealPersonNames: string[] = [];
@@ -395,6 +400,26 @@ export function StoryboardProductionPanel({
         }
       }
     }
+    let creditEstimate: number | null = 0;
+    const estimateRows =
+      pendingRows.length > 0 ? pendingRows : flat.slice(0, pending);
+    for (const row of estimateRows) {
+      const points = estimateStoryboardVideoCredits(
+        row.shot.durationSeconds,
+        STORYBOARD_VIDEO_RESOLUTION,
+      );
+      if (points == null) {
+        creditEstimate = null;
+        break;
+      }
+      creditEstimate += points;
+    }
+    if (estimateRows.length === 0) {
+      creditEstimate = estimateStoryboardVideoCredits(
+        totalDuration,
+        STORYBOARD_VIDEO_RESOLUTION,
+      );
+    }
     return {
       mode: "episode",
       episodeLabel: `第 ${production.episodeNumber} 集`,
@@ -409,11 +434,7 @@ export function StoryboardProductionPanel({
         videoConfig?.t2vModelId ||
         videoConfig?.providerId ||
         "默认",
-      creditEstimate: estimateStoryboardVideoCredits(
-        flat
-          .slice(0, pending)
-          .reduce((s, r) => s + r.shot.durationSeconds, 0) || totalDuration,
-      ),
+      creditEstimate,
       isPaidProvider: Boolean(isPaid),
       isMockProvider: Boolean(isMock),
       allowIncludeSucceeded: true,

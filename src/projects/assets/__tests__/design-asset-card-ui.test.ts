@@ -17,8 +17,11 @@ describe("Batch H1 design asset card UI contract", () => {
 
   it("DesignItemCard exposes design action and asset type icons", () => {
     expect(workspace).toContain("function DesignItemCard");
-    expect(workspace).toContain("设计");
+    expect(workspace).toContain("编辑");
     expect(workspace).toContain('data-testid={`ead-design-${item.id}`}');
+    expect(workspace).toContain("ead-card__media-wrap");
+    expect(workspace).toContain("const deleteButton");
+    expect(workspace).toContain("ead-card__media-delete");
     expect(workspace).toContain("UserRound");
     expect(workspace).toContain("MapPinned");
     expect(workspace).toContain("Package");
@@ -50,5 +53,9 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(css).toContain(".asset-compact-list");
     expect(css).toContain(".ead-modal-backdrop");
     expect(css).toContain(".ead-card__design-btn");
+    expect(css).toContain(".ead-card__media-wrap");
+    expect(css).toContain("aspect-ratio: 16 / 9");
+    expect(css).toContain(".ead-card__media-delete");
+    expect(css).toContain("padding: 72px 14px 12px");
   });
 });

@@ -2524,20 +2524,38 @@ function DesignItemCard({
     </div>
   );
 
+  const editButton = (
+    <button
+      type="button"
+      className="amw-btn amw-btn-primary ead-card__design-btn"
+      data-testid={`ead-design-${item.id}`}
+      disabled={disabled || designDisabled}
+      title={designDisabled ? "请先提取本集资产后再进行设计" : undefined}
+      onClick={onDesign}
+    >
+      编辑
+    </button>
+  );
+
+  const deleteButton = (
+    <button
+      type="button"
+      className="amw-btn ead-card__delete-btn"
+      data-testid={`ead-delete-${item.id}`}
+      disabled={disabled || deleteLocked}
+      title={
+        deleteLocked
+          ? "已审批入库的资产仅主理人可在项目管理中删除"
+          : undefined
+      }
+      onClick={onDelete}
+    >
+      删除
+    </button>
+  );
+
   const actionsBlock = (
     <div className="asset-card__actions ead-card__actions">
-      <button
-        type="button"
-        className="amw-btn amw-btn-primary ead-card__design-btn"
-        data-testid={`ead-design-${item.id}`}
-        disabled={disabled || designDisabled}
-        title={
-          designDisabled ? "请先提取本集资产后再进行设计" : undefined
-        }
-        onClick={onDesign}
-      >
-        设计
-      </button>
       {showPersonalConfirm ? (
         <button
           type="button"
@@ -2555,22 +2573,82 @@ function DesignItemCard({
           {confirming ? "入库中…" : isInLibrary ? "已入库" : "确认入库"}
         </button>
       ) : null}
-      <button
-        type="button"
-        className="amw-btn ead-card__delete-btn"
-        data-testid={`ead-delete-${item.id}`}
-        disabled={disabled || deleteLocked}
-        title={
-          deleteLocked
-            ? "已审批入库的资产仅主理人可在项目管理中删除"
-            : undefined
-        }
-        onClick={onDelete}
-      >
-        删除
-      </button>
     </div>
   );
+
+  const characterVoiceBlock =
+    item.assetType === "character" ? (
+      <div className="ead-card__voice-panel">
+        <div className="ead-card__voice-row">
+          <div className="ead-card__voice-select">
+            {voiceLocked ? (
+              <div className="ead-card__voice-readonly">
+                <span className="ead-card__voice-readonly-label">音色</span>
+                <span
+                  className="ead-card__voice-readonly-value"
+                  data-testid={`ead-voice-readonly-${item.id}`}
+                >
+                  {characterVoiceLabel}
+                </span>
+              </div>
+            ) : (
+              <VoiceSelector
+                label="当前图音色"
+                value={characterVoiceId}
+                disabled={disabled || !currentMediaId}
+                projectVoices={projectVoices}
+                onChange={onVoiceSelect}
+              />
+            )}
+          </div>
+          <div className="ead-card__voice-actions">
+            <VoicePreviewButton
+              projectId={projectId}
+              voiceId={characterVoiceId}
+              audios={audios}
+              className="amw-btn ead-card__voice-preview"
+              testId={`ead-voice-preview-${item.id}`}
+              onStatus={setVoiceNote}
+            />
+            <button
+              type="button"
+              className={`amw-btn ead-card__voice-bind${
+                voiceBoundLabel ? " is-bound" : ""
+              }${voiceLocked && !hasBoundVoice ? " is-missing" : ""}`}
+              data-testid={`ead-voice-bind-${item.id}`}
+              disabled={
+                disabled ||
+                voiceLocked ||
+                !currentMediaId ||
+                !characterVoiceId ||
+                (mediaVoice != null && isMediaVoiceBound(mediaVoice))
+              }
+              title={
+                !currentMediaId
+                  ? "请先生成图片，再为当前历史图绑定音色"
+                  : voiceLocked && !hasBoundVoice
+                    ? "审批入库时未绑定音色；请主理人在项目管理中为该角色补绑"
+                    : voiceLocked
+                      ? "已审批入库，音色仅主理人可在项目管理中更改"
+                      : mediaVoice != null && isMediaVoiceBound(mediaVoice)
+                        ? "当前历史图音色已绑定"
+                        : "将当前选择的音色绑定到当前历史图"
+              }
+              onClick={onBindVoice}
+            >
+              {voiceLocked && !hasBoundVoice
+                ? "未绑定"
+                : voiceBoundLabel
+                  ? "已绑定"
+                  : "绑定音色"}
+            </button>
+          </div>
+        </div>
+        {voiceNote ? (
+          <p className="ead-muted ead-card__voice-note">{voiceNote}</p>
+        ) : null}
+      </div>
+    ) : null;
 
   const noteBlock = (
     <div className="amw-field ead-card__note">
@@ -2610,6 +2688,8 @@ function DesignItemCard({
       <article className="ead-card ead-card--visual-asset">
         <div className="ead-card__media">
           {mediaBlock}
+          {editButton}
+          <div className="ead-card__media-delete">{deleteButton}</div>
         </div>
         <div className="ead-card__content">
           <div className="ead-card__header">
@@ -2668,109 +2748,20 @@ function DesignItemCard({
             {confirming ? "入库中…" : isInLibrary ? "已入库" : "确认入库"}
           </button>
         ) : null}
-        <button
-          type="button"
-          className="amw-btn ead-card__delete-btn"
-          data-testid={`ead-delete-${item.id}`}
-          disabled={disabled || deleteLocked}
-          title={
-            deleteLocked
-              ? "已审批入库的资产仅主理人可在项目管理中删除"
-              : undefined
-          }
-          onClick={onDelete}
-        >
-          删除
-        </button>
+        {deleteButton}
       </div>
       <div className="ead-card__layout">
         <div className="ead-card__visual">
-          {mediaBlock}
+          <div className="ead-card__media-wrap">
+            {mediaBlock}
+            {editButton}
+          </div>
           <p className="ead-card__name" title={nameTitle}>
             {nameTitle}
           </p>
-          <button
-            type="button"
-            className="amw-btn amw-btn-primary ead-card__design-btn"
-            data-testid={`ead-design-${item.id}`}
-            disabled={disabled || designDisabled}
-            title={
-              designDisabled ? "请先提取本集资产后再进行设计" : undefined
-            }
-            onClick={onDesign}
-          >
-            设计
-          </button>
+          {characterVoiceBlock}
         </div>
         <div className="ead-card__body">
-          <div className="ead-card__voice-row">
-            <div className="ead-card__voice-select">
-              {voiceLocked ? (
-                <div className="ead-card__voice-readonly">
-                  <span className="ead-card__voice-readonly-label">音色</span>
-                  <span
-                    className="ead-card__voice-readonly-value"
-                    data-testid={`ead-voice-readonly-${item.id}`}
-                  >
-                    {characterVoiceLabel}
-                  </span>
-                </div>
-              ) : (
-                <VoiceSelector
-                  label="当前图音色"
-                  value={characterVoiceId}
-                  disabled={disabled || !currentMediaId}
-                  projectVoices={projectVoices}
-                  onChange={onVoiceSelect}
-                />
-              )}
-            </div>
-            <div className="ead-card__voice-actions">
-              <VoicePreviewButton
-                projectId={projectId}
-                voiceId={characterVoiceId}
-                audios={audios}
-                className="amw-btn ead-card__voice-preview"
-                testId={`ead-voice-preview-${item.id}`}
-                onStatus={setVoiceNote}
-              />
-              <button
-                type="button"
-                className={`amw-btn ead-card__voice-bind${
-                  voiceBoundLabel ? " is-bound" : ""
-                }${voiceLocked && !hasBoundVoice ? " is-missing" : ""}`}
-                data-testid={`ead-voice-bind-${item.id}`}
-                disabled={
-                  disabled ||
-                  voiceLocked ||
-                  !currentMediaId ||
-                  !characterVoiceId ||
-                  (mediaVoice != null && isMediaVoiceBound(mediaVoice))
-                }
-                title={
-                  !currentMediaId
-                    ? "请先生成图片，再为当前历史图绑定音色"
-                    : voiceLocked && !hasBoundVoice
-                      ? "审批入库时未绑定音色；请主理人在项目管理中为该角色补绑"
-                      : voiceLocked
-                        ? "已审批入库，音色仅主理人可在项目管理中更改"
-                        : mediaVoice != null && isMediaVoiceBound(mediaVoice)
-                          ? "当前历史图音色已绑定"
-                          : "将当前选择的音色绑定到当前历史图"
-                }
-                onClick={onBindVoice}
-              >
-                {voiceLocked && !hasBoundVoice
-                  ? "未绑定"
-                  : voiceBoundLabel
-                    ? "已绑定"
-                    : "绑定音色"}
-              </button>
-            </div>
-          </div>
-          {voiceNote ? (
-            <p className="ead-muted ead-card__voice-note">{voiceNote}</p>
-          ) : null}
           {characterSummary ? (
             <p className="ead-muted ead-card__summary">{characterSummary}</p>
           ) : null}

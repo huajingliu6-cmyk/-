@@ -27,6 +27,11 @@ describe("character asset portrait UI contracts", () => {
     expect(detail).toContain("hidePreview");
     expect(detail).toContain("character-hero-image");
     expect(detail).toContain("AssetDetailImage");
+    expect(detail).toContain("replaceOnly");
+    expect(detail).toContain("character-preview__voice");
+    expect(upload).toContain("replaceOnly");
+    expect(upload).toContain("asset-image-upload__select");
+    expect(upload).toContain("asset-image-upload__clear");
     expect(readSrc("src/projects/assets/AssetBasicInfo.tsx")).toContain(
       "基础信息",
     );
@@ -39,6 +44,9 @@ describe("character asset portrait UI contracts", () => {
     expect(list).not.toContain("amw-card__sub");
     expect(css).toContain(".asset-library__list-scroll");
     expect(css).toMatch(/object-fit:\s*contain/);
+    expect(css).toContain("asset-library-preview--with-content");
+    expect(css).toContain("aspect-ratio: 16 / 9");
+    expect(css).toContain("padding-top: 0");
   });
 
   it("design character cards restore side-by-side layout without portrait class", () => {

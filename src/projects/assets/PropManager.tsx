@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { Package } from "lucide-react";
-import { useChipBounce } from "@/shell/useChipBounce";
 import { AssetBasicInfo } from "@/projects/assets/AssetBasicInfo";
 import {
   AssetCompactList,
@@ -41,30 +40,11 @@ export function PropManager({
   const [imageRevisions, setImageRevisions] = useState<Record<string, number>>(
     {},
   );
-  const saveBounce = useChipBounce();
   const selected = propItems.find((p) => p.id === selectedId) ?? null;
 
   const updateOne = (next: PropAsset) => {
     const withStatus = { ...next, status: derivePropStatus(next) };
     onChange(propItems.map((p) => (p.id === withStatus.id ? withStatus : p)));
-  };
-
-  const handleSave = () => {
-    if (!selected) return;
-    const nextItem = {
-      ...selected,
-      status: derivePropStatus(selected),
-    };
-    const next = propItems.map((p) =>
-      p.id === nextItem.id ? nextItem : p,
-    );
-    onChange(next);
-    setNote("正在保存道具…");
-    void onPersist(next)
-      .then(() => setNote("已保存道具到服务器。"))
-      .catch((err: unknown) => {
-        setNote(err instanceof Error ? err.message : "保存失败");
-      });
   };
 
   const handleCreate = (draft: PropDraftInput) => {
@@ -252,12 +232,13 @@ export function PropManager({
                 </div>
               ) : null
             }
-            imageActions={
+            previewOverlayActions={
               selected ? (
                 <AssetImageUpload
                   id={`prop-image-${selected.id}`}
                   label="上传道具图片"
                   compact
+                  replaceOnly
                   hidePreview
                   disabled={!canEdit}
                   projectId={projectId}
@@ -288,25 +269,7 @@ export function PropManager({
                 />
               ) : null
             }
-            footer={
-              selected ? (
-                <>
-                  <button
-                    type="button"
-                    className={`amw-btn amw-btn-primary ${saveBounce.bounceClass}`}
-                    disabled={!canEdit || !selected.name.trim()}
-                    onClick={() => {
-                      saveBounce.trigger();
-                      handleSave();
-                    }}
-                    onAnimationEnd={saveBounce.onAnimationEnd}
-                  >
-                    保存
-                  </button>
-                  {note ? <p className="amw-note">{note}</p> : null}
-                </>
-              ) : null
-            }
+            footer={note ? <p className="amw-note">{note}</p> : null}
           />
         }
       />

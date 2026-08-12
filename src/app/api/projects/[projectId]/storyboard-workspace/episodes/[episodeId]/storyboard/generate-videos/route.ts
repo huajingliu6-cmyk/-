@@ -25,6 +25,16 @@ import {
   appendShotVideoHistory,
   appendStoryboardVideoHistory,
 } from "@/projects/storyboard/video-history-ids";
+import {
+  defaultStoryboardVideoOutputParams,
+  resolveStoryboardVideoOutputParams,
+} from "@/projects/storyboard/storyboard-video-params";
+import {
+  releaseGenerationCredits,
+  reserveVideoGenerationCredits,
+  settleGenerationCredits,
+} from "@/credits/generation-billing";
+import { INSUFFICIENT_CREDITS, VIDEO_CREDIT_PRICE_NOT_CONFIGURED } from "@/credits/generation-pricing";
 import { readGenerationRecord } from "@/video-generation/generation-store";
 import {
   paidGenerationAllowed,
@@ -210,11 +220,63 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const batchId = `batch_${idempotencyKey}`;
+  const batchOutputDefaults = resolveStoryboardVideoOutputParams(
+    body,
+    undefined,
+    loaded.context.workspace.videoDefaults,
+  );
+
   const results = await mapWithConcurrency(
     candidates,
     STORYBOARD_VIDEO_CONCURRENCY,
     async (row) => {
       const shotKey = `${idempotencyKey}:${row.shot.id}`;
+      const outputParams = defaultStoryboardVideoOutputParams(
+        row.shot.durationSeconds,
+        {
+          resolution: batchOutputDefaults.resolution,
+          aspectRatio: batchOutputDefaults.aspectRatio,
+          modelChoice: batchOutputDefaults.modelChoice,
+          stylePreset: batchOutputDefaults.stylePreset,
+        },
+      );
+
+      const reserved = await reserveVideoGenerationCredits({
+        projectId,
+        actorUserId: videoGate.user.id,
+        shotId: row.shot.id,
+        idempotencyKey: shotKey,
+        resolution: outputParams.resolution,
+        durationSeconds: outputParams.durationSeconds,
+      });
+      if (!reserved.ok) {
+        const payload = await reserved.response.clone().json().catch(() => ({}));
+        const code =
+          payload && typeof payload === "object" && "code" in payload
+            ? String((payload as { code?: unknown }).code ?? "CREDIT_RESERVE_FAILED")
+            : "CREDIT_RESERVE_FAILED";
+        const error =
+          payload && typeof payload === "object" && "error" in payload
+            ? String((payload as { error?: unknown }).error ?? "积分预留失败")
+            : "积分预留失败";
+        return {
+          shotId: row.shot.id,
+          generationId: null as string | null,
+          status: "failed" as const,
+          error,
+          code,
+          httpStatus: reserved.response.status,
+          credit: null as
+            | {
+                chargedPoints: number;
+                balance: number;
+                resolution: string;
+                durationSeconds: number;
+              }
+            | null,
+        };
+      }
+
       const submitted = await submitStoryboardShotVideo({
         projectId,
         shot: row.shot,
@@ -222,8 +284,17 @@ export async function POST(request: Request, context: RouteContext) {
         idempotencyKey: shotKey,
         confirmPaidGeneration,
         capabilityId: "video.storyboard-episode.generate",
+        resolution: outputParams.resolution,
+        aspectRatio: outputParams.aspectRatio,
+        durationSeconds: outputParams.durationSeconds,
+        stylePreset: outputParams.stylePreset || undefined,
       });
       if (!submitted.ok) {
+        await releaseGenerationCredits({
+          reservationId: reserved.reservationId,
+          projectId,
+          reason: "storyboard-video-batch-provider-failed",
+        });
         return {
           shotId: row.shot.id,
           generationId: null as string | null,
@@ -231,8 +302,19 @@ export async function POST(request: Request, context: RouteContext) {
           error: submitted.message,
           code: submitted.code,
           httpStatus: submitted.status ?? 400,
+          credit: null,
         };
       }
+
+      // Provider accepted: charge now. Local persist failures must not refund.
+      const credit = await settleGenerationCredits({
+        reservationId: reserved.reservationId,
+        projectId,
+        actualPoints: reserved.quote.points,
+        reason: "storyboard-video-batch-settle",
+        knownBalance: reserved.balance,
+      });
+
       return {
         shotId: row.shot.id,
         generationId: submitted.generation.id,
@@ -240,19 +322,31 @@ export async function POST(request: Request, context: RouteContext) {
         error: null as string | null,
         code: null as string | null,
         httpStatus: 200,
+        credit: {
+          ...credit,
+          resolution: reserved.quote.resolution,
+          durationSeconds: reserved.quote.durationSeconds,
+        },
       };
     },
   );
 
   const firstBlocked = results.find((r) => r.generationId === null);
   if (firstBlocked && results.every((r) => r.generationId === null)) {
+    const status =
+      firstBlocked.code === INSUFFICIENT_CREDITS
+        ? 402
+        : firstBlocked.code === VIDEO_CREDIT_PRICE_NOT_CONFIGURED
+          ? 403
+          : (firstBlocked.httpStatus ?? 400);
     return NextResponse.json(
       {
         error: firstBlocked.error ?? "批量提交失败",
         code: firstBlocked.code ?? "SUBMIT_FAILED",
         firstBlockedShotId: firstBlocked.shotId,
+        failed: results,
       },
-      { status: firstBlocked.httpStatus ?? 400 },
+      { status },
     );
   }
 
@@ -315,6 +409,12 @@ export async function POST(request: Request, context: RouteContext) {
     shots: batchShots,
     skippedCount: flat.length - candidates.length,
     failed: results.filter((r) => !r.generationId),
+    credits: results
+      .filter((r) => r.credit)
+      .map((r) => ({
+        shotId: r.shotId,
+        ...r.credit!,
+      })),
     production: updated,
   });
 }

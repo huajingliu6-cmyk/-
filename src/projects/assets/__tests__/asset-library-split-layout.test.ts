@@ -26,11 +26,30 @@ describe("asset library three-pane workspace contracts", () => {
     expect(detailLayout).toContain("asset-library-preview");
     expect(detailLayout).toContain("asset-library-controls");
     expect(detailLayout).toContain("asset-controls__voice");
+    expect(detailLayout).toContain("previewOverlayActions");
+    expect(detailLayout).toContain("previewContent");
+    expect(detailLayout).toContain("asset-library-preview__overlay-actions");
+    expect(detailLayout).toContain("asset-library-preview__content");
+    expect(detailLayout).toContain("asset-library-preview__media");
     expect(css).toMatch(
       /\.asset-library-workspace[\s\S]*?280px/,
     );
     expect(css).toContain(".asset-library-preview");
     expect(css).toContain(".asset-library-controls");
+    expect(css).toContain(".asset-library-preview__overlay-actions");
+    expect(css).toContain(".character-preview__voice");
+    expect(css).toContain(".asset-library-preview__media");
+    expect(css).toContain("object-position: center top");
+    expect(css).toContain("grid-template-rows: auto auto");
+    expect(css).toContain("align-content: start");
+    expect(css).toContain("--character-voice-panel-height");
+    expect(css).toContain(".amn-link");
+    expect(css).toContain("font-size: 13px");
+    expect(css).not.toContain(".amw--library-scroll .amn-link");
+    expect(css).toContain("height: 38px");
+    expect(css).toContain("font-size: 15px");
+    expect(css).toContain("min-height: var(--ui-control-h)");
+    expect(css).toContain(".asset-image-upload__select");
   });
 
   it("character detail is mid-preview + right controls with compact fields", () => {
@@ -46,6 +65,14 @@ describe("asset library three-pane workspace contracts", () => {
     expect(detail).toContain("asset-controls__voice");
     expect(detail).toContain("VoiceSelector");
     expect(detail).toContain("VoicePreviewButton");
+    expect(detail).toContain("previewOverlayActions=");
+    expect(detail).toContain("previewContent=");
+    expect(detail).not.toContain("voice={");
+    expect(detail).not.toContain("imageActions=");
+    expect(detail).toContain(
+      'footer={note ? <p className="amw-note">{note}</p> : null}',
+    );
+    expect(detail).not.toMatch(/amw-btn-primary[\s\S]{0,200}>\s*保存\s*</);
     expect(detail).not.toContain("视觉设定");
     expect(voiceSelector).toContain("menuPortal");
     expect(css).toContain(".asset-controls__basic-grid");
@@ -68,14 +95,26 @@ describe("asset library three-pane workspace contracts", () => {
     expect(scene).toContain("AssetDetailImage");
     expect(scene).toContain("preview=");
     expect(scene).toContain("compact");
+    expect(scene).toContain("previewOverlayActions=");
     expect(scene).not.toContain("VoiceSelector");
     expect(scene).not.toContain('label: "性别"');
     expect(scene).not.toContain('label: "年龄"');
+    expect(scene).toContain(
+      'footer={note ? <p className="amw-note">{note}</p> : null}',
+    );
+    expect(scene).not.toContain("handleSave");
+    expect(scene).not.toContain("useChipBounce");
     expect(prop).toContain("AssetLibraryLayout");
     expect(prop).toContain("AssetDetailLayout");
     expect(prop).toContain("preview=");
+    expect(prop).toContain("previewOverlayActions=");
     expect(prop).not.toContain("VoiceSelector");
     expect(prop).not.toContain('label: "性别"');
     expect(prop).not.toContain('label: "年龄"');
+    expect(prop).toContain(
+      'footer={note ? <p className="amw-note">{note}</p> : null}',
+    );
+    expect(prop).not.toContain("handleSave");
+    expect(prop).not.toContain("useChipBounce");
   });
 });

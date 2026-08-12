@@ -17,15 +17,26 @@ export async function requestCharacterAppearance(params: {
   stylePreset?: string;
   aspectRatio?: string;
   resolution?: string;
+  /** Prior media for subsequent pricing; optional. */
+  hasExistingImage?: boolean;
 }): Promise<CharacterGenerateResponse> {
   const res = await fetch("/api/generate/character-image", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify({
+      ...params,
+      idempotencyKey: crypto.randomUUID(),
+    }),
   });
-  const payload = (await res.json()) as CharacterGenerateResponse;
+  const payload = (await res.json()) as CharacterGenerateResponse & {
+    code?: string;
+  };
   if (!res.ok) {
-    throw new Error(payload.error ?? "角色外貌生成失败");
+    const err = new Error(payload.error ?? "角色外貌生成失败") as Error & {
+      code?: string;
+    };
+    err.code = payload.code;
+    throw err;
   }
   return payload;
 }

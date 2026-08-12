@@ -804,6 +804,7 @@ export function StoryboardShotAccordion({
       ),
       creditEstimate: estimateStoryboardVideoCredits(
         videoOutputParams.durationSeconds,
+        videoOutputParams.resolution,
       ),
       isPaidProvider: videoConfig?.providerId === "aliyun-wan27",
       isMockProvider: videoConfig?.providerId === "mock",

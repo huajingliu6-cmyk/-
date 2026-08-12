@@ -17,6 +17,7 @@ import {
   type StoryboardVideoModelChoiceId,
   type StoryboardVideoStylePresetId,
 } from "@/projects/storyboard/storyboard-video-model-choices";
+import { estimateStoryboardVideoCredits } from "@/projects/storyboard/storyboard-video-constants";
 
 type Props = {
   value: StoryboardVideoOutputParams;
@@ -66,6 +67,11 @@ export function ShotVideoOutputParams({ value, onChange, disabled }: Props) {
       onChange({ ...value, durationSeconds: next });
     }
   };
+
+  const creditEstimate = estimateStoryboardVideoCredits(
+    value.durationSeconds,
+    value.resolution,
+  );
 
   return (
     <div
@@ -208,6 +214,15 @@ export function ShotVideoOutputParams({ value, onChange, disabled }: Props) {
           </div>
         ) : null}
       </div>
+      <span
+        className="sbw-shot-video-params__credit-estimate"
+        data-testid="shot-video-credit-estimate"
+        title="预计消耗积分（服务端将重新计价）"
+      >
+        {creditEstimate == null
+          ? "积分未定价"
+          : `预计 ${creditEstimate} 积分`}
+      </span>
     </div>
   );
 }

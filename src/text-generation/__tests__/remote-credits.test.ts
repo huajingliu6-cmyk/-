@@ -60,7 +60,10 @@ vi.mock("@/persistence/remote-data-client", () => ({
       }
       const points = Math.max(0, Math.floor(input.points));
       if (current.balance < points) {
-        return Response.json({ ok: false, error: "剩余积分不足" });
+        return Response.json(
+          { ok: false, error: "剩余积分不足", code: "INSUFFICIENT_CREDITS" },
+          { status: 402 },
+        );
       }
       current.balance -= points;
       current.reservations[input.generationId] = points;
@@ -167,7 +170,11 @@ describe("remote text credits", () => {
 
     expect(outcomes.filter((outcome) => outcome.ok)).toHaveLength(1);
     expect(outcomes.filter((outcome) => !outcome.ok)).toEqual([
-      { ok: false, error: "剩余积分不足" },
+      {
+        ok: false,
+        error: "剩余积分不足",
+        code: "INSUFFICIENT_CREDITS",
+      },
     ]);
     expect(await getCreditBalance("user_1")).toBe(30);
     expect(await getFrozenCredits("user_1")).toBe(70);
@@ -242,5 +249,21 @@ describe("remote text credits", () => {
     });
 
     expect(await getCreditBalance(accountId)).toBe(100);
+  });
+
+  it("returns INSUFFICIENT_CREDITS with HTTP 402 semantics", async () => {
+    const result = await reserveCredits({
+      userId: "user_1",
+      points: 150,
+      generationId: "generation_over",
+      projectId: "project_1",
+      reason: "text.generate",
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: "剩余积分不足",
+      code: "INSUFFICIENT_CREDITS",
+    });
+    expect(await getCreditBalance("user_1")).toBe(100);
   });
 });

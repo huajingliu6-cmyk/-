@@ -10,6 +10,8 @@ type Props = {
   basicInfo?: ReactNode;
   notes?: ReactNode;
   imageActions?: ReactNode;
+  previewOverlayActions?: ReactNode;
+  previewContent?: ReactNode;
   voice?: ReactNode;
   footer?: ReactNode;
   /** @deprecated Prefer structured slots; still accepted as notes/actions dump */
@@ -34,6 +36,8 @@ export function AssetDetailLayout({
   basicInfo,
   notes,
   imageActions,
+  previewOverlayActions,
+  previewContent,
   voice,
   footer,
   remainingContent,
@@ -68,10 +72,32 @@ export function AssetDetailLayout({
       {banner}
       <div className="asset-library-detail__body">
         <section
-          className="asset-library-preview"
+          className={`asset-library-preview${
+            previewContent ? " asset-library-preview--with-content" : ""
+          }`}
           data-testid="asset-library-preview"
         >
-          {previewNode}
+          <div className="asset-library-preview__media">
+            {previewNode}
+
+            {previewOverlayActions ? (
+              <div
+                className="asset-library-preview__overlay-actions"
+                data-testid="asset-library-preview-overlay-actions"
+              >
+                {previewOverlayActions}
+              </div>
+            ) : null}
+          </div>
+
+          {previewContent ? (
+            <div
+              className="asset-library-preview__content"
+              data-testid="asset-library-preview-content"
+            >
+              {previewContent}
+            </div>
+          ) : null}
         </section>
 
         <section

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clampStoryboardVideoDuration,
+  estimateCreditsForStoryboardVideoOutput,
   parseDurationSecondsFromVideoPrompt,
   parseStoryboardVideoAspectRatio,
   parseStoryboardVideoDurationSeconds,
@@ -81,5 +82,26 @@ describe("storyboard video output params", () => {
     );
     expect(withChoice.modelChoice).toBe("seedance-2.0-fast");
     expect(withChoice.stylePreset).toBe("cinematic");
+  });
+
+  it("estimates credits from output params", () => {
+    expect(
+      estimateCreditsForStoryboardVideoOutput({
+        resolution: "480P",
+        durationSeconds: 6,
+      }),
+    ).toBe(30);
+    expect(
+      estimateCreditsForStoryboardVideoOutput({
+        resolution: "720P",
+        durationSeconds: 6,
+      }),
+    ).toBe(60);
+    expect(
+      estimateCreditsForStoryboardVideoOutput({
+        resolution: "1080P",
+        durationSeconds: 6,
+      }),
+    ).toBeNull();
   });
 });
