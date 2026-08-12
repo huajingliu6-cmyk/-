@@ -21,7 +21,6 @@ describe("storyboard creation UI flow contracts", () => {
     expect(workspace).not.toContain("CreationStepHeader");
     expect(workspace).not.toContain("ScriptConfirmationPanel");
     expect(workspace).toContain("StoryboardProductionPanel");
-    expect(workspace).not.toContain("sbw-layout--single");
     expect(workspace).toContain("保存页面");
     expect(workspace).not.toContain("保存草稿");
   });
@@ -31,13 +30,20 @@ describe("storyboard creation UI flow contracts", () => {
     expect(panel).toContain("修改剧本");
     expect(panel).toContain("view-script-modal");
     expect(panel).toContain("view-script-save");
-    expect(panel).toContain("confirm-script-btn");
-    expect(panel).toContain("确认剧本");
+    expect(panel).not.toContain("confirm-script-btn");
+    expect(panel).not.toContain(">确认剧本<");
+    expect(panel).not.toContain(">剧本已确认<");
     expect(panel).toContain("storyboard-script-preview");
     expect(panel).toContain("canGeneratePrompts");
     expect(panel).toContain("script-changed-reminder");
-    expect(panel).toContain("重新生成本集分镜提示词");
-    expect(panel).toContain("regenerate-episode-storyboard-prompts");
+    expect(panel).toContain("生成分镜提示词");
+    expect(panel).not.toContain("重新生成本集分镜提示词");
+    expect(panel).not.toContain("regenerate-episode-storyboard-prompts");
+    expect(panel).toContain("retry-episode-storyboard-prompts");
+    expect(panel).not.toContain("storyboard-generating-hint");
+    expect(panel).not.toContain(
+      "剧本已确认，点击「生成分镜提示词」继续。人物、道具、场景可在每个镜头中单独添加。",
+    );
     expect(panel).not.toContain("重新生成当前镜头提示词");
     expect(panel).not.toContain("regenerate-shot-prompt");
     expect(panel).toContain("createPortal");
@@ -47,6 +53,32 @@ describe("storyboard creation UI flow contracts", () => {
     expect(panel).not.toContain(">查看剧本<");
     expect(panel).toContain(">修改剧本<");
     expect(panel).not.toContain("分镜已过期。请重新生成分镜提示词后继续");
+  });
+
+  it("uses per-episode prompt generation without full-page busy lock", () => {
+    expect(workspace).toContain("requestEpisodePromptGeneration");
+    expect(workspace).toContain("全局设置");
+    expect(workspace).toContain("storyboard-global-settings-btn");
+    expect(workspace).not.toContain("返回资产管理");
+    expect(workspace).not.toContain("isGenerationBusy");
+    expect(panel).toContain("episode-prompt-gen-busy");
+  });
+
+  it("places model control before quality in shot video params", () => {
+    const paramsUi = readSrc(
+      "src/projects/storyboard/components/ShotVideoOutputParams.tsx",
+    );
+    const choices = readSrc(
+      "src/projects/storyboard/storyboard-video-model-choices.ts",
+    );
+    const modelIdx = paramsUi.indexOf('label="模型"');
+    const qualityIdx = paramsUi.indexOf('label="画质"');
+    expect(modelIdx).toBeGreaterThan(-1);
+    expect(qualityIdx).toBeGreaterThan(modelIdx);
+    expect(choices).toContain("Seedance 2.0");
+    expect(choices).toContain("Seedance 2.0 Mini");
+    expect(choices).toContain("Seedance 2.0 Fast");
+    expect(choices).toContain("seedance-2.0-fast");
   });
 
   it("centers view-script dialog on viewport with larger script card", () => {
@@ -102,5 +134,34 @@ describe("storyboard creation UI flow contracts", () => {
     expect(editor).toContain("filterShotMentionAssets");
     expect(editor).toContain("findAssetChipBeforeCaret");
     expect(editor).toContain("removeAssetChip");
+  });
+
+  it("uses portaled floating selects in global settings dialog", () => {
+    const dialog = readSrc(
+      "src/projects/storyboard/components/StoryboardGlobalSettingsDialog.tsx",
+    );
+    const glassSelect = readSrc("src/shell/glass-select/GlassSelect.tsx");
+    const css = readSrc("src/projects/storyboard/storyboard-workspace.css");
+    expect(dialog).toContain("createPortal");
+    expect(dialog).toContain("document.body");
+    expect(dialog).toContain("menuPortal");
+    expect(dialog).toContain("global-settings-select-content");
+    expect(dialog).toContain("global-settings-modal");
+    expect(dialog).toContain('label="画面比例"');
+    expect(dialog).toContain('label="画质"');
+    expect(dialog).toContain('label="模型"');
+    expect(dialog).toContain('label="风格"');
+    expect(glassSelect).toContain("createPortal");
+    expect(glassSelect).toContain("menuPortal");
+    expect(glassSelect).toContain('position: "fixed"');
+    expect(css).toMatch(
+      /\.global-settings-modal\s*\{[\s\S]*?max-height:\s*min\(720px/,
+    );
+    expect(css).toMatch(
+      /\.global-settings-select-content\s*\{[\s\S]*?z-index:\s*2600/,
+    );
+    expect(css).toMatch(
+      /\.global-settings-select-item\s*\{[\s\S]*?min-height:\s*42px/,
+    );
   });
 });

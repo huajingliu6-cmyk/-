@@ -454,16 +454,18 @@ function DesignAssetModalBody({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: promptText,
-          idempotencyKey: `asset-${item.id}-${Date.now()}`,
+          idempotencyKey: crypto.randomUUID(),
           confirmPaidGeneration: false,
         }),
       });
       const payload = (await res.json()) as {
         error?: string;
+        code?: string;
         notice?: string;
         mediaId?: string;
         generatedMedia?: GeneratedMediaState;
         videoRefSafety?: VideoRefSafety;
+        credit?: { chargedPoints: number; balance: number; firstGeneration?: boolean };
       };
       if (!res.ok) {
         throw new Error(payload.error ?? "资产生成失败");

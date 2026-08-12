@@ -20,11 +20,17 @@ import {
   appendStoryboardVideoHistory,
 } from "@/projects/storyboard/video-history-ids";
 import { resolveStoryboardVideoOutputParams } from "@/projects/storyboard/storyboard-video-params";
+import { providerModelIdForStoryboardVideoModelChoice } from "@/projects/storyboard/storyboard-video-model-choices";
 import {
   paidGenerationAllowed,
   resolveVideoProviderRuntimeConfig,
 } from "@/video-generation/provider/config";
 import { sanitizeGenerationForClient } from "@/video-generation/secure-transfer";
+import {
+  releaseGenerationCredits,
+  reserveVideoGenerationCredits,
+  settleGenerationCredits,
+} from "@/credits/generation-billing";
 
 type RouteContext = {
   params: Promise<{ projectId: string; episodeId: string; shotId: string }>;
@@ -155,25 +161,55 @@ export async function POST(request: Request, context: RouteContext) {
   const outputParams = resolveStoryboardVideoOutputParams(
     body,
     shot.durationSeconds,
+    loaded.context.workspace.videoDefaults,
   );
+
+  const shotIdempotencyKey = `${idempotencyKey}:${shotId}`;
+  const reserved = await reserveVideoGenerationCredits({
+    projectId,
+    actorUserId: videoGate.user.id,
+    shotId,
+    idempotencyKey: shotIdempotencyKey,
+    resolution: outputParams.resolution,
+    durationSeconds: outputParams.durationSeconds,
+  });
+  if (!reserved.ok) return reserved.response;
 
   const submitted = await submitStoryboardShotVideo({
     projectId,
     shot,
     assets,
-    idempotencyKey,
+    idempotencyKey: shotIdempotencyKey,
     confirmPaidGeneration,
     resolution: outputParams.resolution,
     aspectRatio: outputParams.aspectRatio,
     durationSeconds: outputParams.durationSeconds,
+    stylePreset: outputParams.stylePreset || undefined,
+    modelIdOverride: providerModelIdForStoryboardVideoModelChoice(
+      outputParams.modelChoice,
+    ),
   });
 
   if (!submitted.ok) {
+    await releaseGenerationCredits({
+      reservationId: reserved.reservationId,
+      projectId,
+      reason: "storyboard-video-provider-failed",
+    });
     return NextResponse.json(
       { error: submitted.message, code: submitted.code },
       { status: submitted.status ?? 400 },
     );
   }
+
+  // Provider accepted: charge now. Local persist failures must not refund.
+  const credit = await settleGenerationCredits({
+    reservationId: reserved.reservationId,
+    projectId,
+    actualPoints: reserved.quote.points,
+    reason: "storyboard-video-generation-settle",
+    knownBalance: reserved.balance,
+  });
 
   const now = new Date().toISOString();
   const nextScenes = storyboard.scenes.map((scene) => ({
@@ -210,6 +246,11 @@ export async function POST(request: Request, context: RouteContext) {
   return NextResponse.json({
     generation: sanitizeGenerationForClient(submitted.generation),
     production: updated,
+    credit: {
+      ...credit,
+      resolution: reserved.quote.resolution,
+      durationSeconds: reserved.quote.durationSeconds,
+    },
     ...(submitted.notice ? { notice: submitted.notice } : {}),
   });
 }

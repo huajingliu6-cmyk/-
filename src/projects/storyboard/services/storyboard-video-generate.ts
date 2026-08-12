@@ -156,6 +156,7 @@ export async function buildStoryboardShotVideoInput(params: {
   resolution?: VideoResolution;
   /** 覆盖分镜镜头时长；未传则用 shot.durationSeconds */
   durationSeconds?: number;
+  stylePreset?: string;
 }): Promise<
   | { ok: true; input: VideoGenerationInput; unsupportedAudioLabels: string[] }
   | { ok: false; code: string; message: string }
@@ -349,6 +350,9 @@ export async function buildStoryboardShotVideoInput(params: {
       cameraAngle: params.shot.cameraAngle,
       cameraMovement: params.shot.cameraMovement,
       actionDescription: params.shot.actionDescription,
+      ...(params.stylePreset
+        ? { stylePreset: params.stylePreset }
+        : {}),
     },
   };
 
@@ -653,6 +657,9 @@ export async function submitStoryboardShotVideo(params: {
   resolution?: VideoResolution;
   aspectRatio?: VideoAspectRatio;
   durationSeconds?: number;
+  stylePreset?: string;
+  /** 白名单模型 choice，服务端映射为 Provider 模型 ID */
+  modelIdOverride?: string;
   capabilityId?:
     | "video.storyboard-shot.generate"
     | "video.storyboard-episode.generate";
@@ -674,6 +681,7 @@ export async function submitStoryboardShotVideo(params: {
     resolution: params.resolution,
     aspectRatio: params.aspectRatio,
     durationSeconds: params.durationSeconds,
+    stylePreset: params.stylePreset,
   });
   if (!built.ok) {
     return { ok: false, code: built.code, message: built.message, status: 400 };
@@ -759,6 +767,7 @@ export async function submitStoryboardShotVideo(params: {
       idempotencyKey: params.idempotencyKey,
       title: `镜头 ${String(params.shot.shotNumber).padStart(2, "0")}`,
       capabilityId: params.capabilityId ?? "video.storyboard-shot.generate",
+      modelIdOverride: params.modelIdOverride,
     });
     return {
       ok: true,

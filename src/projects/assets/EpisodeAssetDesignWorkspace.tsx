@@ -1828,19 +1828,17 @@ const updateItem = useCallback(
                     取消生成
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  className="amw-btn"
-                  disabled={!selectedId || generating || saving || confirming}
-                  onClick={() => void saveItems(items)}
-                  data-testid="ead-save"
-                >
-                  {saving
-                    ? "保存中…"
-                    : isFullScriptDesign
-                      ? "保存全剧本资产"
-                      : "保存本集资产"}
-                </button>
+                {!isFullScriptDesign ? (
+                  <button
+                    type="button"
+                    className="amw-btn"
+                    disabled={!selectedId || generating || saving || confirming}
+                    onClick={() => void saveItems(items)}
+                    data-testid="ead-save"
+                  >
+                    {saving ? "保存中…" : "保存本集资产"}
+                  </button>
+                ) : null}
                 {surface === "workspace" ? (
                   <button
                     type="button"

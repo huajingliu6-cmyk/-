@@ -1,0 +1,184 @@
+"use client";
+
+import { useEffect, useId, useState } from "react";
+import { createPortal } from "react-dom";
+import { GlassSelect } from "@/shell/glass-select";
+import type { StoryboardVideoDefaults } from "@/projects/storyboard/storyboard-video-params";
+import {
+  STORYBOARD_VIDEO_ASPECT_RATIOS,
+  STORYBOARD_VIDEO_RESOLUTIONS,
+  defaultStoryboardVideoDefaults,
+} from "@/projects/storyboard/storyboard-video-params";
+import {
+  STORYBOARD_VIDEO_MODEL_CHOICES,
+  STORYBOARD_VIDEO_STYLE_OPTIONS,
+  type StoryboardVideoModelChoiceId,
+  type StoryboardVideoStylePresetId,
+} from "@/projects/storyboard/storyboard-video-model-choices";
+
+type Props = {
+  open: boolean;
+  initial: StoryboardVideoDefaults | null | undefined;
+  saving?: boolean;
+  onClose: () => void;
+  onSave: (next: StoryboardVideoDefaults) => void | Promise<void>;
+};
+
+export function StoryboardGlobalSettingsDialog({
+  open,
+  initial,
+  saving = false,
+  onClose,
+  onSave,
+}: Props) {
+  const titleId = useId();
+  const seed = initial ?? defaultStoryboardVideoDefaults();
+  const openSeed = open ? JSON.stringify(seed) : "";
+  const [draft, setDraft] = useState<StoryboardVideoDefaults>(seed);
+  const [syncedOpenSeed, setSyncedOpenSeed] = useState(openSeed);
+  if (open && syncedOpenSeed !== openSeed) {
+    setSyncedOpenSeed(openSeed);
+    setDraft(seed);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !saving) onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose, saving]);
+
+  if (!open || typeof document === "undefined") return null;
+
+  const selectProps = {
+    menuPortal: true as const,
+    menuSideOffset: 6,
+    menuCollisionPadding: 12,
+    menuClassName: "global-settings-select-content",
+    optionClassName: "global-settings-select-item",
+    disabled: saving,
+  };
+
+  return createPortal(
+    <div
+      className="sbw-modal-backdrop global-settings-modal-backdrop"
+      role="presentation"
+      data-testid="storyboard-global-settings-backdrop"
+      onClick={() => {
+        if (!saving) onClose();
+      }}
+    >
+      <div
+        className="sbw-modal global-settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        data-testid="storyboard-global-settings-dialog"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="sbw-modal__head global-settings-modal__header">
+          <h3 id={titleId}>全局设置</h3>
+          <button
+            type="button"
+            className="sbw-btn"
+            aria-label="关闭"
+            disabled={saving}
+            onClick={onClose}
+          >
+            关闭
+          </button>
+        </header>
+        <div className="sbw-modal__body global-settings-modal__body">
+          <p className="sbw-hint global-settings-modal__hint">
+            保存后作为本项目新建视频任务的默认值；单个分镜仍可临时修改，不会写回此处。
+          </p>
+          <div className="sbw-global-settings-grid">
+            <GlassSelect
+              label="画面比例"
+              value={draft.aspectRatio}
+              options={STORYBOARD_VIDEO_ASPECT_RATIOS.map((r) => ({
+                id: r,
+                label: r,
+              }))}
+              onChange={(id) => {
+                if (id === "16:9" || id === "9:16") {
+                  setDraft((prev) => ({ ...prev, aspectRatio: id }));
+                }
+              }}
+              {...selectProps}
+            />
+            <GlassSelect
+              label="画质"
+              value={draft.resolution}
+              options={STORYBOARD_VIDEO_RESOLUTIONS.map((r) => ({
+                id: r,
+                label: r,
+              }))}
+              onChange={(id) => {
+                if (id === "480P" || id === "720P" || id === "1080P") {
+                  setDraft((prev) => ({ ...prev, resolution: id }));
+                }
+              }}
+              {...selectProps}
+            />
+            <GlassSelect
+              label="模型"
+              value={draft.modelChoice}
+              options={STORYBOARD_VIDEO_MODEL_CHOICES.map((m) => ({
+                id: m.id,
+                label: m.label,
+              }))}
+              onChange={(id) => {
+                setDraft((prev) => ({
+                  ...prev,
+                  modelChoice: id as StoryboardVideoModelChoiceId,
+                }));
+              }}
+              {...selectProps}
+            />
+            <GlassSelect
+              label="风格"
+              value={draft.stylePreset || "__default__"}
+              options={STORYBOARD_VIDEO_STYLE_OPTIONS.map((s) => ({
+                id: s.id || "__default__",
+                label: s.label,
+              }))}
+              onChange={(id) => {
+                setDraft((prev) => ({
+                  ...prev,
+                  stylePreset: (
+                    id === "__default__" ? "" : id
+                  ) as StoryboardVideoStylePresetId,
+                }));
+              }}
+              {...selectProps}
+            />
+          </div>
+        </div>
+        <footer className="sbw-modal__foot global-settings-modal__footer">
+          <button
+            type="button"
+            className="sbw-btn"
+            disabled={saving}
+            data-testid="storyboard-global-settings-cancel"
+            onClick={onClose}
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            className="sbw-btn sbw-btn-primary"
+            disabled={saving}
+            data-testid="storyboard-global-settings-save"
+            onClick={() => void onSave(draft)}
+          >
+            {saving ? "保存中…" : "保存设置"}
+          </button>
+        </footer>
+      </div>
+    </div>,
+    document.body,
+  );
+}

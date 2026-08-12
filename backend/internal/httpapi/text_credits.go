@@ -21,6 +21,8 @@ const maxCreditWriteAttempts = 6
 type creditLedgerEntry struct {
 	ID           string `json:"id"`
 	UserID       string `json:"userId"`
+	AccountID    string `json:"accountId,omitempty"`
+	EnterpriseID string `json:"enterpriseId,omitempty"`
 	Delta        int    `json:"delta"`
 	BalanceAfter int    `json:"balanceAfter"`
 	Reason       string `json:"reason"`
@@ -30,7 +32,8 @@ type creditLedgerEntry struct {
 }
 type creditAccount struct {
 	Version      int                 `json:"version"`
-	UserID       string              `json:"userId"`
+	UserID       string              `json:"userId,omitempty"`
+	AccountID    string              `json:"accountId,omitempty"`
 	Balance      int                 `json:"balance"`
 	Ledger       []creditLedgerEntry `json:"ledger"`
 	Reservations map[string]int      `json:"reservations"`
@@ -40,7 +43,10 @@ type creditReservation struct {
 	Version      int    `json:"version"`
 	Active       bool   `json:"active"`
 	GenerationID string `json:"generationId"`
-	UserID       string `json:"userId"`
+	UserID       string `json:"userId,omitempty"`
+	AccountID    string `json:"accountId,omitempty"`
+	ActorUserID  string `json:"actorUserId,omitempty"`
+	EnterpriseID string `json:"enterpriseId,omitempty"`
 	Points       int    `json:"points"`
 	CreatedAt    string `json:"createdAt"`
 	UpdatedAt    string `json:"updatedAt"`
@@ -67,8 +73,29 @@ func defaultCreditBalance() int {
 	}
 	return value
 }
-func emptyCreditAccount(userID string) creditAccount {
-	return creditAccount{Version: 1, UserID: userID, Balance: defaultCreditBalance(), Ledger: []creditLedgerEntry{}, Reservations: map[string]int{}, UpdatedAt: requestTime()}
+func emptyCreditAccount(accountID string) creditAccount {
+	return creditAccount{Version: 1, UserID: accountID, AccountID: accountID, Balance: defaultCreditBalance(), Ledger: []creditLedgerEntry{}, Reservations: map[string]int{}, UpdatedAt: requestTime()}
+}
+
+func effectiveCreditAccountID(account creditAccount) string {
+	if strings.TrimSpace(account.AccountID) != "" {
+		return account.AccountID
+	}
+	return account.UserID
+}
+
+func effectiveReservationAccountID(reservation creditReservation) string {
+	if strings.TrimSpace(reservation.AccountID) != "" {
+		return reservation.AccountID
+	}
+	return reservation.UserID
+}
+
+func effectiveReservationActorUserID(reservation creditReservation) string {
+	if strings.TrimSpace(reservation.ActorUserID) != "" {
+		return reservation.ActorUserID
+	}
+	return reservation.UserID
 }
 
 func (handler *TextCredits) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -99,16 +126,16 @@ func (handler *TextCredits) readDocument(request *http.Request, namespace, key s
 	}
 	return document, true, nil
 }
-func (handler *TextCredits) readAccount(request *http.Request, userID string) (int64, creditAccount, error) {
-	document, found, err := handler.readDocument(request, creditAccountNamespace, creditDocumentKey(userID))
+func (handler *TextCredits) readAccount(request *http.Request, accountID string) (int64, creditAccount, error) {
+	document, found, err := handler.readDocument(request, creditAccountNamespace, creditDocumentKey(accountID))
 	if err != nil {
 		return 0, creditAccount{}, err
 	}
 	if !found {
-		return 0, emptyCreditAccount(userID), nil
+		return 0, emptyCreditAccount(accountID), nil
 	}
 	var account creditAccount
-	if json.Unmarshal(document.Value, &account) != nil || account.Version != 1 || account.UserID != userID || account.Balance < 0 {
+	if json.Unmarshal(document.Value, &account) != nil || account.Version != 1 || effectiveCreditAccountID(account) != accountID || account.Balance < 0 {
 		return 0, creditAccount{}, errors.New("REMOTE_CREDITS_CORRUPTED")
 	}
 	if account.Ledger == nil {
@@ -125,29 +152,32 @@ func (handler *TextCredits) readReservation(request *http.Request, generationID 
 		return 0, nil, err
 	}
 	var reservation creditReservation
-	if json.Unmarshal(document.Value, &reservation) != nil || reservation.Version != 1 || reservation.GenerationID == "" || reservation.UserID == "" || reservation.Points < 0 {
+	if json.Unmarshal(document.Value, &reservation) != nil || reservation.Version != 1 || reservation.GenerationID == "" || effectiveReservationAccountID(reservation) == "" || effectiveReservationActorUserID(reservation) == "" || reservation.Points < 0 {
 		return 0, nil, errors.New("REMOTE_CREDITS_CORRUPTED")
 	}
 	return document.Revision, &reservation, nil
 }
 
 func (handler *TextCredits) get(writer http.ResponseWriter, request *http.Request) {
-	userID := strings.TrimSpace(request.URL.Query().Get("userId"))
-	if userID == "" {
-		writeError(writer, 400, "userId is required")
+	accountID := strings.TrimSpace(request.URL.Query().Get("accountId"))
+	if accountID == "" {
+		accountID = strings.TrimSpace(request.URL.Query().Get("userId"))
+	}
+	if accountID == "" {
+		writeError(writer, 400, "accountId is required")
 		return
 	}
 	for attempt := 0; attempt < maxCreditWriteAttempts; attempt++ {
-		revision, account, err := handler.readAccount(request, userID)
+		revision, account, err := handler.readAccount(request, accountID)
 		if err != nil {
 			writeError(writer, 500, "credits read failed")
 			return
 		}
 		if revision == 0 {
 			value, _ := json.Marshal(account)
-			document, err := handler.store.PutDocument(request.Context(), creditAccountNamespace, creditDocumentKey(userID), &revision, value)
+			document, err := handler.store.PutDocument(request.Context(), creditAccountNamespace, creditDocumentKey(accountID), &revision, value)
 			if errors.Is(err, postgres.ErrRevisionConflict) {
-				handler.clearCache(request, userID, "")
+				handler.clearCache(request, accountID, "")
 				continue
 			}
 			if err != nil {
@@ -162,6 +192,10 @@ func (handler *TextCredits) get(writer http.ResponseWriter, request *http.Reques
 		for _, points := range account.Reservations {
 			frozen += points
 		}
+		if request.URL.Query().Get("includeLedger") == "true" {
+			writeJSON(writer, 200, map[string]any{"balance": account.Balance, "frozen": frozen, "ledger": account.Ledger})
+			return
+		}
 		writeJSON(writer, 200, map[string]int{"balance": account.Balance, "frozen": frozen})
 		return
 	}
@@ -171,6 +205,9 @@ func (handler *TextCredits) post(writer http.ResponseWriter, request *http.Reque
 	var input struct {
 		Action       string `json:"action"`
 		UserID       string `json:"userId"`
+		AccountID    string `json:"accountId"`
+		ActorUserID  string `json:"actorUserId"`
+		EnterpriseID string `json:"enterpriseId"`
 		Points       int    `json:"points"`
 		ActualPoints int    `json:"actualPoints"`
 		GenerationID string `json:"generationId"`
@@ -181,7 +218,15 @@ func (handler *TextCredits) post(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	if input.Action == "reserve" {
-		handler.reserve(writer, request, strings.TrimSpace(input.UserID), input.Points, strings.TrimSpace(input.GenerationID), input.ProjectID, input.Reason)
+		accountID := strings.TrimSpace(input.AccountID)
+		if accountID == "" {
+			accountID = strings.TrimSpace(input.UserID)
+		}
+		actorUserID := strings.TrimSpace(input.ActorUserID)
+		if actorUserID == "" {
+			actorUserID = strings.TrimSpace(input.UserID)
+		}
+		handler.reserve(writer, request, accountID, actorUserID, strings.TrimSpace(input.EnterpriseID), input.Points, strings.TrimSpace(input.GenerationID), input.ProjectID, input.Reason)
 		return
 	}
 	if input.Action == "settle" {
@@ -190,16 +235,16 @@ func (handler *TextCredits) post(writer http.ResponseWriter, request *http.Reque
 	}
 	writeError(writer, 400, "invalid credits action")
 }
-func (handler *TextCredits) reserve(writer http.ResponseWriter, request *http.Request, userID string, points int, generationID, projectID, reason string) {
-	if userID == "" || generationID == "" {
-		writeError(writer, 400, "userId and generationId are required")
+func (handler *TextCredits) reserve(writer http.ResponseWriter, request *http.Request, accountID, actorUserID, enterpriseID string, points int, generationID, projectID, reason string) {
+	if accountID == "" || actorUserID == "" || generationID == "" {
+		writeError(writer, 400, "accountId, actorUserId and generationId are required")
 		return
 	}
 	if points < 0 {
 		points = 0
 	}
 	for attempt := 0; attempt < maxCreditWriteAttempts; attempt++ {
-		ar, account, err := handler.readAccount(request, userID)
+		ar, account, err := handler.readAccount(request, accountID)
 		if err != nil {
 			writeError(writer, 500, "credits read failed")
 			return
@@ -210,7 +255,7 @@ func (handler *TextCredits) reserve(writer http.ResponseWriter, request *http.Re
 			return
 		}
 		if existing != nil && existing.Active {
-			if existing.UserID != userID {
+			if effectiveReservationAccountID(*existing) != accountID {
 				writeError(writer, 500, "REMOTE_CREDITS_CORRUPTED")
 				return
 			}
@@ -218,7 +263,11 @@ func (handler *TextCredits) reserve(writer http.ResponseWriter, request *http.Re
 			return
 		}
 		if account.Balance < points {
-			writeJSON(writer, 200, map[string]any{"ok": false, "error": "剩余积分不足"})
+			writeJSON(writer, 402, map[string]any{
+				"ok":    false,
+				"error": "剩余积分不足",
+				"code":  "INSUFFICIENT_CREDITS",
+			})
 			return
 		}
 		now := requestTime()
@@ -230,17 +279,17 @@ func (handler *TextCredits) reserve(writer http.ResponseWriter, request *http.Re
 			writeError(writer, 500, "ledger id failed")
 			return
 		}
-		account.Ledger = append(account.Ledger, creditLedgerEntry{ID: id, UserID: userID, Delta: -points, BalanceAfter: account.Balance, Reason: reason, GenerationID: generationID, ProjectID: projectID, CreatedAt: now})
+		account.Ledger = append(account.Ledger, creditLedgerEntry{ID: id, UserID: actorUserID, AccountID: accountID, EnterpriseID: enterpriseID, Delta: -points, BalanceAfter: account.Balance, Reason: reason, GenerationID: generationID, ProjectID: projectID, CreatedAt: now})
 		createdAt := now
 		if existing != nil {
 			createdAt = existing.CreatedAt
 		}
-		reservation := creditReservation{Version: 1, Active: true, GenerationID: generationID, UserID: userID, Points: points, CreatedAt: createdAt, UpdatedAt: now}
+		reservation := creditReservation{Version: 1, Active: true, GenerationID: generationID, UserID: actorUserID, AccountID: accountID, ActorUserID: actorUserID, EnterpriseID: enterpriseID, Points: points, CreatedAt: createdAt, UpdatedAt: now}
 		av, _ := json.Marshal(account)
 		rv, _ := json.Marshal(reservation)
-		documents, err := handler.store.PutDocumentsAtomic(request.Context(), []postgres.DocumentWrite{{Namespace: creditAccountNamespace, Key: creditDocumentKey(userID), ExpectedRevision: ar, Value: av}, {Namespace: creditReservationNamespace, Key: creditDocumentKey(generationID), ExpectedRevision: rr, Value: rv}}, nil, nil)
+		documents, err := handler.store.PutDocumentsAtomic(request.Context(), []postgres.DocumentWrite{{Namespace: creditAccountNamespace, Key: creditDocumentKey(accountID), ExpectedRevision: ar, Value: av}, {Namespace: creditReservationNamespace, Key: creditDocumentKey(generationID), ExpectedRevision: rr, Value: rv}}, nil, nil)
 		if errors.Is(err, postgres.ErrRevisionConflict) {
-			handler.clearCache(request, userID, generationID)
+			handler.clearCache(request, accountID, generationID)
 			continue
 		}
 		if err != nil {
@@ -271,7 +320,9 @@ func (handler *TextCredits) settle(writer http.ResponseWriter, request *http.Req
 			writeJSON(writer, 200, map[string]bool{"ok": true})
 			return
 		}
-		ar, account, err := handler.readAccount(request, reservation.UserID)
+		accountID := effectiveReservationAccountID(*reservation)
+		actorUserID := effectiveReservationActorUserID(*reservation)
+		ar, account, err := handler.readAccount(request, accountID)
 		if err != nil {
 			writeError(writer, 500, "credits read failed")
 			return
@@ -290,15 +341,15 @@ func (handler *TextCredits) settle(writer http.ResponseWriter, request *http.Req
 				writeError(writer, 500, "ledger id failed")
 				return
 			}
-			account.Ledger = append(account.Ledger, creditLedgerEntry{ID: id, UserID: reservation.UserID, Delta: refund, BalanceAfter: account.Balance, Reason: reason + ":release", GenerationID: generationID, ProjectID: projectID, CreatedAt: now})
+			account.Ledger = append(account.Ledger, creditLedgerEntry{ID: id, UserID: actorUserID, AccountID: accountID, EnterpriseID: reservation.EnterpriseID, Delta: refund, BalanceAfter: account.Balance, Reason: reason + ":release", GenerationID: generationID, ProjectID: projectID, CreatedAt: now})
 		}
 		reservation.Active = false
 		reservation.UpdatedAt = now
 		av, _ := json.Marshal(account)
 		rv, _ := json.Marshal(reservation)
-		documents, err := handler.store.PutDocumentsAtomic(request.Context(), []postgres.DocumentWrite{{Namespace: creditAccountNamespace, Key: creditDocumentKey(reservation.UserID), ExpectedRevision: ar, Value: av}, {Namespace: creditReservationNamespace, Key: creditDocumentKey(generationID), ExpectedRevision: rr, Value: rv}}, nil, nil)
+		documents, err := handler.store.PutDocumentsAtomic(request.Context(), []postgres.DocumentWrite{{Namespace: creditAccountNamespace, Key: creditDocumentKey(accountID), ExpectedRevision: ar, Value: av}, {Namespace: creditReservationNamespace, Key: creditDocumentKey(generationID), ExpectedRevision: rr, Value: rv}}, nil, nil)
 		if errors.Is(err, postgres.ErrRevisionConflict) {
-			handler.clearCache(request, reservation.UserID, generationID)
+			handler.clearCache(request, accountID, generationID)
 			continue
 		}
 		if err != nil {

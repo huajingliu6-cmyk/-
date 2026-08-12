@@ -10,7 +10,9 @@ type Account = {
 type Reservation = {
   active: boolean;
   generationId: string;
-  userId: string;
+  accountId: string;
+  actorUserId: string;
+  enterpriseId?: string;
   points: number;
 };
 
@@ -32,7 +34,11 @@ vi.mock("@/persistence/remote-data-client", () => ({
   requestRemoteData: vi.fn(async (requestPath: string, init: RequestInit = {}) => {
     const url = new URL(requestPath, "http://go-backend.internal");
     if ((init.method ?? "GET") === "GET") {
-      const current = account(url.searchParams.get("userId") ?? "");
+      const current = account(
+        url.searchParams.get("accountId") ??
+          url.searchParams.get("userId") ??
+          "",
+      );
       return Response.json({
         balance: current.balance,
         frozen: Object.values(current.reservations).reduce(
@@ -45,21 +51,28 @@ vi.mock("@/persistence/remote-data-client", () => ({
     const input = JSON.parse(String(init.body));
     if (input.action === "reserve") {
       await Promise.resolve();
-      const current = account(input.userId);
+      const accountId = input.accountId ?? input.userId;
+      const actorUserId = input.actorUserId ?? input.userId;
+      const current = account(accountId);
       const existing = state.reservations.get(input.generationId);
       if (existing?.active) {
         return Response.json({ ok: true, balance: current.balance });
       }
       const points = Math.max(0, Math.floor(input.points));
       if (current.balance < points) {
-        return Response.json({ ok: false, error: "剩余积分不足" });
+        return Response.json(
+          { ok: false, error: "剩余积分不足", code: "INSUFFICIENT_CREDITS" },
+          { status: 402 },
+        );
       }
       current.balance -= points;
       current.reservations[input.generationId] = points;
       state.reservations.set(input.generationId, {
         active: true,
         generationId: input.generationId,
-        userId: input.userId,
+        accountId,
+        actorUserId,
+        enterpriseId: input.enterpriseId,
         points,
       });
       return Response.json({ ok: true, balance: current.balance });
@@ -68,7 +81,7 @@ vi.mock("@/persistence/remote-data-client", () => ({
     if (input.action === "settle") {
       const reservation = state.reservations.get(input.generationId);
       if (!reservation?.active) return Response.json({ ok: true });
-      const current = account(reservation.userId);
+      const current = account(reservation.accountId);
       const refund = Math.max(
         0,
         reservation.points - Math.max(0, Math.floor(input.actualPoints)),
@@ -157,7 +170,11 @@ describe("remote text credits", () => {
 
     expect(outcomes.filter((outcome) => outcome.ok)).toHaveLength(1);
     expect(outcomes.filter((outcome) => !outcome.ok)).toEqual([
-      { ok: false, error: "剩余积分不足" },
+      {
+        ok: false,
+        error: "剩余积分不足",
+        code: "INSUFFICIENT_CREDITS",
+      },
     ]);
     expect(await getCreditBalance("user_1")).toBe(30);
     expect(await getFrozenCredits("user_1")).toBe(70);
@@ -199,5 +216,54 @@ describe("remote text credits", () => {
     });
     expect(await getCreditBalance("user_1")).toBe(90);
     expect(await getCreditBalance("user_2")).toBe(100);
+  });
+
+  it("charges an enterprise account while preserving the acting user", async () => {
+    const accountId = "enterprise:enterprise_1";
+
+    expect(
+      await reserveCredits({
+        userId: "member_1",
+        accountId,
+        actorUserId: "member_1",
+        enterpriseId: "enterprise_1",
+        points: 35,
+        generationId: "enterprise_generation_1",
+        projectId: "enterprise_project_1",
+        reason: "text.generate",
+      }),
+    ).toEqual({ ok: true, balance: 65 });
+
+    expect(await getCreditBalance(accountId)).toBe(65);
+    expect(await getCreditBalance("member_1")).toBe(100);
+    expect(state.reservations.get("enterprise_generation_1")).toMatchObject({
+      accountId,
+      actorUserId: "member_1",
+      enterpriseId: "enterprise_1",
+    });
+
+    await releaseReservation({
+      generationId: "enterprise_generation_1",
+      projectId: "enterprise_project_1",
+      reason: "text.generate",
+    });
+
+    expect(await getCreditBalance(accountId)).toBe(100);
+  });
+
+  it("returns INSUFFICIENT_CREDITS with HTTP 402 semantics", async () => {
+    const result = await reserveCredits({
+      userId: "user_1",
+      points: 150,
+      generationId: "generation_over",
+      projectId: "project_1",
+      reason: "text.generate",
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: "剩余积分不足",
+      code: "INSUFFICIENT_CREDITS",
+    });
+    expect(await getCreditBalance("user_1")).toBe(100);
   });
 });

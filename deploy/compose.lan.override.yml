@@ -1,0 +1,25 @@
+﻿# Redirect LAN build/run to enterprise-spaces worktree where credit+UI updates landed.
+services:
+  web:
+    build:
+      context: ../../infinite-canvas-enterprise-spaces
+      dockerfile: Dockerfile.lan
+    environment:
+      AUTH_SECRET: ${AUTH_SECRET:-infinite-canvas-dev-secret-change-me}
+      AI_CONFIG_ENCRYPTION_KEY: ${AI_CONFIG_ENCRYPTION_KEY:-}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      # LAN: expose host desktop voice library (read-only mount) for 音色选择
+      LOCAL_VOICE_LIBRARY_DIR: /var/lib/infinite-canvas/local-voice-library
+      LOCAL_VOICE_LIBRARY_ALLOW_IN_REMOTE: "true"
+    volumes:
+      - ${LOCAL_VOICE_LIBRARY_HOST_DIR:-E:/DevWorkspace/runtime/InfiniteCanvas/local-voice-library}:/var/lib/infinite-canvas/local-voice-library:ro
+    ports:
+      - "${WEB_PORT:-3080}:3000"
+  api:
+    build:
+      context: ../../infinite-canvas-enterprise-spaces/backend
+      dockerfile: Dockerfile
+  blobstore:
+    build:
+      context: ../../infinite-canvas-enterprise-spaces/backend
+      dockerfile: Blobstore.Dockerfile

@@ -35,6 +35,14 @@ type Props = {
   /** Bumps after successful replace so <img> reloads despite Cache-Control. */
   revision?: number;
   onRevisionChange?: (next: number) => void;
+  /** 由外层已展示主图时隐藏本组件内预览，避免重复渲染 */
+  hidePreview?: boolean;
+  /** Compact single-row actions for library controls pane */
+  compact?: boolean;
+  /** Library replace mode: hide clear + filename, keep select-to-replace */
+  replaceOnly?: boolean;
+  /** Adapt select-button text/chrome to image luminance */
+  adaptiveContrast?: boolean;
 };
 
 function revokeIfBlob(url: string | null | undefined) {
@@ -55,10 +63,15 @@ export function AssetImageUpload({
   disabled = false,
   revision = 0,
   onRevisionChange,
+  hidePreview = false,
+  compact = false,
+  replaceOnly = false,
+  adaptiveContrast = false,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [imageTone, setImageTone] = useState<"light" | "dark">("dark");
   const valueRef = useRef(value);
 
   useEffect(() => {
@@ -78,6 +91,74 @@ export function AssetImageUpload({
     }
     return null;
   })();
+
+  useEffect(() => {
+    if (!adaptiveContrast || !previewSrc) {
+      setImageTone("dark");
+      return;
+    }
+
+    let cancelled = false;
+    const image = new Image();
+
+    if (!previewSrc.startsWith("blob:")) {
+      image.crossOrigin = "anonymous";
+    }
+
+    image.onload = () => {
+      if (cancelled) return;
+
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 16;
+        canvas.height = 16;
+
+        const context = canvas.getContext("2d", {
+          willReadFrequently: true,
+        });
+
+        if (!context) {
+          setImageTone("dark");
+          return;
+        }
+
+        context.drawImage(image, 0, 0, 16, 16);
+
+        const pixels = context.getImageData(0, 0, 16, 16).data;
+        let luminance = 0;
+        let count = 0;
+
+        for (let index = 0; index < pixels.length; index += 4) {
+          const alpha = pixels[index + 3] / 255;
+          if (alpha < 0.1) continue;
+
+          const red = pixels[index] / 255;
+          const green = pixels[index + 1] / 255;
+          const blue = pixels[index + 2] / 255;
+
+          luminance +=
+            (0.2126 * red + 0.7152 * green + 0.0722 * blue) * alpha;
+          count += alpha;
+        }
+
+        if (!cancelled && count > 0) {
+          setImageTone(luminance / count > 0.62 ? "light" : "dark");
+        }
+      } catch {
+        if (!cancelled) setImageTone("dark");
+      }
+    };
+
+    image.onerror = () => {
+      if (!cancelled) setImageTone("dark");
+    };
+
+    image.src = previewSrc;
+
+    return () => {
+      cancelled = true;
+    };
+  }, [adaptiveContrast, previewSrc]);
 
   const handleFile = (file: File | null) => {
     setError("");
@@ -191,8 +272,10 @@ export function AssetImageUpload({
   };
 
   return (
-    <div className="amw-field">
-      <label htmlFor={id}>{label}</label>
+    <div
+      className={`amw-field${compact ? " amw-field--image-compact" : ""}`}
+    >
+      {compact ? null : <label htmlFor={id}>{label}</label>}
       <input
         ref={inputRef}
         id={id}
@@ -205,34 +288,43 @@ export function AssetImageUpload({
           e.target.value = "";
         }}
       />
-      <div className="amw-file-row">
+      <div
+        className={
+          compact ? "asset-controls__image-actions-row amw-file-row" : "amw-file-row"
+        }
+      >
         <button
           type="button"
-          className="amw-btn"
+          className="amw-btn asset-image-upload__select"
+          data-testid={`${id}-select`}
+          data-image-tone={adaptiveContrast ? imageTone : undefined}
           disabled={disabled || busy}
           onClick={() => inputRef.current?.click()}
         >
           {busy ? "处理中…" : "选择图片"}
         </button>
-        {value.fileName || value.objectUrl ? (
+        {!replaceOnly ? (
           <button
             type="button"
-            className="amw-btn"
-            disabled={disabled || busy}
+            className="amw-btn asset-image-upload__clear"
+            data-testid={`${id}-clear`}
+            disabled={disabled || busy || !(value.fileName || value.objectUrl)}
             onClick={clear}
           >
             清除
           </button>
         ) : null}
-        <span className="amw-file-name">
-          {busy ? "上传中…" : (value.fileName ?? "未选择图片")}
-        </span>
+        {!replaceOnly ? (
+          <span className="amw-file-name" title={value.fileName ?? undefined}>
+            {busy ? "上传中…" : (value.fileName ?? "未选择图片")}
+          </span>
+        ) : null}
       </div>
-      {previewSrc ? (
+      {previewSrc && !hidePreview ? (
         <AmwImagePreview src={previewSrc} alt={value.fileName ?? "预览"} />
       ) : null}
       {error ? <p className="amw-field-error">{error}</p> : null}
-      {tip ? (
+      {tip && !compact ? (
         <p className="amw-hint">
           <span className="req">*</span> {tip}
         </p>

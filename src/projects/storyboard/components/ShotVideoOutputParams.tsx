@@ -11,6 +11,13 @@ import {
   STORYBOARD_VIDEO_RESOLUTIONS,
   clampStoryboardVideoDuration,
 } from "@/projects/storyboard/storyboard-video-params";
+import {
+  STORYBOARD_VIDEO_MODEL_CHOICES,
+  STORYBOARD_VIDEO_STYLE_OPTIONS,
+  type StoryboardVideoModelChoiceId,
+  type StoryboardVideoStylePresetId,
+} from "@/projects/storyboard/storyboard-video-model-choices";
+import { estimateStoryboardVideoCredits } from "@/projects/storyboard/storyboard-video-constants";
 
 type Props = {
   value: StoryboardVideoOutputParams;
@@ -19,18 +26,19 @@ type Props = {
 };
 
 /**
- * 镜头视频出参：画质 / 比例 / 时长（时长下拉内含滑条 + 秒数输入）。
- * 所选值会随 generate-video 请求上送模型。
+ * 镜头视频出参：模型 → 画质 → 比例 → 风格 → 时长。
+ * 所选值会随 generate-video 请求上送（模型为白名单 choice ID）。
  */
 export function ShotVideoOutputParams({ value, onChange, disabled }: Props) {
   const durationPanelId = useId();
   const [durationOpen, setDurationOpen] = useState(false);
   const durationWrapRef = useRef<HTMLDivElement>(null);
   const [durationDraft, setDurationDraft] = useState(String(value.durationSeconds));
-
-  useEffect(() => {
+  const [syncedDuration, setSyncedDuration] = useState(value.durationSeconds);
+  if (syncedDuration !== value.durationSeconds) {
+    setSyncedDuration(value.durationSeconds);
     setDurationDraft(String(value.durationSeconds));
-  }, [value.durationSeconds]);
+  }
 
   useEffect(() => {
     if (!durationOpen) return;
@@ -60,11 +68,35 @@ export function ShotVideoOutputParams({ value, onChange, disabled }: Props) {
     }
   };
 
+  const creditEstimate = estimateStoryboardVideoCredits(
+    value.durationSeconds,
+    value.resolution,
+  );
+
   return (
     <div
       className="sbw-shot-video-params"
       data-testid="shot-video-output-params"
     >
+      <GlassSelect
+        variant="compact"
+        label="模型"
+        hideLabel
+        title="模型"
+        value={value.modelChoice}
+        disabled={disabled}
+        options={STORYBOARD_VIDEO_MODEL_CHOICES.map((m) => ({
+          id: m.id,
+          label: m.label,
+        }))}
+        onChange={(id) => {
+          onChange({
+            ...value,
+            modelChoice: id as StoryboardVideoModelChoiceId,
+          });
+        }}
+        className="sbw-shot-video-params__select"
+      />
       <GlassSelect
         variant="compact"
         label="画质"
@@ -98,6 +130,25 @@ export function ShotVideoOutputParams({ value, onChange, disabled }: Props) {
           if (id === "16:9" || id === "9:16") {
             onChange({ ...value, aspectRatio: id });
           }
+        }}
+        className="sbw-shot-video-params__select"
+      />
+      <GlassSelect
+        variant="compact"
+        label="风格"
+        hideLabel
+        title="风格"
+        value={value.stylePreset || "__default__"}
+        disabled={disabled}
+        options={STORYBOARD_VIDEO_STYLE_OPTIONS.map((s) => ({
+          id: s.id || "__default__",
+          label: s.label,
+        }))}
+        onChange={(id) => {
+          const stylePreset = (
+            id === "__default__" ? "" : id
+          ) as StoryboardVideoStylePresetId;
+          onChange({ ...value, stylePreset });
         }}
         className="sbw-shot-video-params__select"
       />
@@ -163,6 +214,15 @@ export function ShotVideoOutputParams({ value, onChange, disabled }: Props) {
           </div>
         ) : null}
       </div>
+      <span
+        className="sbw-shot-video-params__credit-estimate"
+        data-testid="shot-video-credit-estimate"
+        title="预计消耗积分（服务端将重新计价）"
+      >
+        {creditEstimate == null
+          ? "积分未定价"
+          : `预计 ${creditEstimate} 积分`}
+      </span>
     </div>
   );
 }

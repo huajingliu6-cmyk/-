@@ -17,9 +17,11 @@ import {
 
 const FILE = () => resolveAppDataPath("credits.json");
 
-type LedgerEntry = {
+export type LedgerEntry = {
   id: string;
   userId: string;
+  accountId?: string;
+  enterpriseId?: string;
   delta: number;
   balanceAfter: number;
   reason: string;
@@ -35,7 +37,14 @@ type CreditsFile = {
   ledger: LedgerEntry[];
   reservations: Record<
     string,
-    { userId: string; points: number; createdAt: string }
+    {
+      accountId?: string;
+      actorUserId?: string;
+      userId?: string;
+      enterpriseId?: string;
+      points: number;
+      createdAt: string;
+    }
   >;
 };
 
@@ -83,48 +92,76 @@ export async function getFrozenCredits(userId: string): Promise<number> {
   const file = await readFile();
   let frozen = 0;
   for (const reservation of Object.values(file.reservations)) {
-    if (reservation.userId === userId) {
+    if ((reservation.accountId ?? reservation.userId) === userId) {
       frozen += Math.max(0, Math.floor(reservation.points));
     }
   }
   return frozen;
 }
 
+/** Read-only ledger view for organization audit screens. */
+export async function listCreditLedger(userId: string): Promise<LedgerEntry[]> {
+  if (isRemoteDataOnly()) {
+    const { listCreditLedgerRemote } = await import("@/text-generation/remote-credits");
+    return listCreditLedgerRemote(userId);
+  }
+  const file = await readFile();
+  return file.ledger
+    .filter((entry) => (entry.accountId ?? entry.userId) === userId)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
 export async function reserveCredits(input: {
   userId: string;
+  accountId?: string;
+  actorUserId?: string;
+  enterpriseId?: string;
   points: number;
   generationId: string;
   projectId: string;
   reason: string;
-}): Promise<{ ok: true; balance: number } | { ok: false; error: string }> {
+}): Promise<
+  | { ok: true; balance: number }
+  | { ok: false; error: string; code: "INSUFFICIENT_CREDITS" }
+> {
   if (isRemoteDataOnly()) return reserveCreditsRemote(input);
   const file = await readFile();
-  const bal = file.balances[input.userId] ?? defaultBalance();
-  file.balances[input.userId] = bal;
+  const accountId = input.accountId ?? input.userId;
+  const actorUserId = input.actorUserId ?? input.userId;
+  const bal = file.balances[accountId] ?? defaultBalance();
+  file.balances[accountId] = bal;
   if (bal < input.points) {
-    return { ok: false, error: "剩余积分不足" };
+    return {
+      ok: false,
+      error: "剩余积分不足",
+      code: "INSUFFICIENT_CREDITS",
+    };
   }
   if (file.reservations[input.generationId]) {
     return { ok: true, balance: bal };
   }
-  file.balances[input.userId] = bal - input.points;
+  file.balances[accountId] = bal - input.points;
   file.reservations[input.generationId] = {
-    userId: input.userId,
+    accountId,
+    actorUserId,
+    enterpriseId: input.enterpriseId,
     points: input.points,
     createdAt: new Date().toISOString(),
   };
   file.ledger.push({
     id: randomUUID(),
-    userId: input.userId,
+    userId: actorUserId,
+    accountId,
+    enterpriseId: input.enterpriseId,
     delta: -input.points,
-    balanceAfter: file.balances[input.userId]!,
+    balanceAfter: file.balances[accountId]!,
     reason: input.reason,
     generationId: input.generationId,
     projectId: input.projectId,
     createdAt: new Date().toISOString(),
   });
   await writeFile(file);
-  return { ok: true, balance: file.balances[input.userId]! };
+  return { ok: true, balance: file.balances[accountId]! };
 }
 
 export async function settleReservation(input: {
@@ -137,14 +174,19 @@ export async function settleReservation(input: {
   const file = await readFile();
   const res = file.reservations[input.generationId];
   if (!res) return;
+  const accountId = res.accountId ?? res.userId;
+  const actorUserId = res.actorUserId ?? res.userId;
+  if (!accountId || !actorUserId) return;
   const refund = Math.max(0, res.points - input.actualPoints);
   if (refund > 0) {
-    file.balances[res.userId] = (file.balances[res.userId] ?? 0) + refund;
+    file.balances[accountId] = (file.balances[accountId] ?? 0) + refund;
     file.ledger.push({
       id: randomUUID(),
-      userId: res.userId,
+      userId: actorUserId,
+      accountId,
+      enterpriseId: res.enterpriseId,
       delta: refund,
-      balanceAfter: file.balances[res.userId]!,
+      balanceAfter: file.balances[accountId]!,
       reason: `${input.reason}:release`,
       generationId: input.generationId,
       projectId: input.projectId,
