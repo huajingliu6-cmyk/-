@@ -59,15 +59,15 @@ describe("asset library three-pane workspace contracts", () => {
     expect(detail).toContain("AssetDetailImage");
     expect(detail).toContain("fill");
     expect(detail).toContain('label: "定位"');
-    expect(detail).toContain('label: "性别"');
+    expect(detail).not.toContain('label: "性别"');
     expect(detail).toContain('label: "年龄"');
     expect(detail).toContain("character-hero-image");
-    expect(detail).toContain("asset-controls__voice");
+    expect(detail).toContain("character-preview__voice");
     expect(detail).toContain("VoiceSelector");
     expect(detail).toContain("VoicePreviewButton");
     expect(detail).toContain("previewOverlayActions=");
     expect(detail).toContain("previewContent=");
-    expect(detail).not.toContain("voice={");
+    expect(detail).toContain("voice={voicePanel}");
     expect(detail).not.toContain("imageActions=");
     expect(detail).toContain(
       'footer={note ? <p className="amw-note">{note}</p> : null}',
@@ -78,6 +78,8 @@ describe("asset library three-pane workspace contracts", () => {
     expect(css).toContain(".asset-controls__basic-grid");
     expect(css).toMatch(/object-fit:\s*contain/);
     expect(css).toContain(".asset-controls__notes-textarea");
+    expect(css).toContain("grid-template-rows: auto auto auto minmax(0, 1fr) auto");
+    expect(css).toContain('data-image-tone="light"');
   });
 
   it("character list is compact sidebar rows", () => {

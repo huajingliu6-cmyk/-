@@ -69,7 +69,6 @@ export function StoryboardProductionPanel({
 }: Props) {
   const idempotencyRef = useRef<string>(safeRandomUUID());
   const batchKeyRef = useRef<string>(safeRandomUUID());
-  const [confirmingScript, setConfirmingScript] = useState(false);
   const [savingScript, setSavingScript] = useState(false);
   const [scriptModalOpen, setScriptModalOpen] = useState(false);
   const [scriptText, setScriptText] = useState(production.workingScriptText);
@@ -310,40 +309,6 @@ export function StoryboardProductionPanel({
       scriptText,
     ],
   );
-
-  const handleConfirmScript = useCallback(async () => {
-    if (scriptDirty) {
-      setPanelNote("有未保存的修改，请先在「修改剧本」中保存后再确认。");
-      return;
-    }
-    if (!production.workingScriptText.trim()) {
-      setPanelNote("剧本为空，无法确认。");
-      return;
-    }
-    setConfirmingScript(true);
-    setPanelNote("");
-    try {
-      const updated = await confirmScript(projectId, production.episodeId);
-      onProductionChange(updated);
-      setScriptModalOpen(false);
-      setPanelNote("剧本已确认，可以生成分镜提示词。");
-      onNote("剧本已确认。");
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "确认失败，请稍后重试";
-      setPanelNote(message);
-      onNote(message);
-    } finally {
-      setConfirmingScript(false);
-    }
-  }, [
-    onNote,
-    onProductionChange,
-    production.episodeId,
-    production.workingScriptText,
-    projectId,
-    scriptDirty,
-  ]);
 
   const handleGenerate = useCallback(
     (opts?: { force?: boolean }) => {
@@ -675,7 +640,7 @@ export function StoryboardProductionPanel({
             type="button"
             className="sbw-btn"
             data-testid="view-script-btn"
-            disabled={savingScript || confirmingScript}
+            disabled={savingScript}
             onClick={() => {
               setScriptText(production.workingScriptText);
               onScriptDraftChange?.(null);
@@ -683,26 +648,6 @@ export function StoryboardProductionPanel({
             }}
           >
             修改剧本
-          </button>
-          <button
-            type="button"
-            className="sbw-btn sbw-btn-primary"
-            data-testid="confirm-script-btn"
-            disabled={
-              confirmingScript ||
-              savingScript ||
-              scriptModalOpen ||
-              scriptDirty ||
-              !production.workingScriptText.trim() ||
-              (scriptConfirmed && !production.storyboardStale)
-            }
-            onClick={() => void handleConfirmScript()}
-          >
-            {confirmingScript
-              ? "确认中…"
-              : scriptConfirmed
-                ? "剧本已确认"
-                : "确认剧本"}
           </button>
         </div>
       </div>

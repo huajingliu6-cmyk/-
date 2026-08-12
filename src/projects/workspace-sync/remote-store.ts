@@ -29,12 +29,25 @@ function loadRemoteDocument(kind: WorkspaceKind, projectId: string) {
 }
 
 async function saveRemoteValue<T>(kind: WorkspaceKind, projectId: string, value: T): Promise<T> {
-  const result = await requestWorkspaceData<T>(kind, projectId, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ value }),
-  });
-  return result.value as T;
+  const current = await requestWorkspaceData<T>(kind, projectId);
+  const response = await requestRemoteData(
+    `${ENDPOINT}?kind=${encodeURIComponent(kind)}&projectId=${encodeURIComponent(projectId)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        value,
+        expectedRevision: current.revision,
+      }),
+    },
+  );
+  if (response.status === 409) {
+    throw new Error("REMOTE_WORKSPACE_REQUEST_FAILED:409");
+  }
+  if (!response.ok) {
+    throw new Error(`REMOTE_WORKSPACE_REQUEST_FAILED:${response.status}`);
+  }
+  return ((await response.json()) as { value: T }).value;
 }
 
 export const loadWorkspaceSnapshotRemoteValue = (projectId: string) => loadRemoteValue("snapshot", projectId);

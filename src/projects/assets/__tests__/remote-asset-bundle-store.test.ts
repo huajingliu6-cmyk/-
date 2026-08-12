@@ -139,7 +139,7 @@ describe('remote asset bundle store', () => {
     expect(documents.get('asset-bundles/project_1')?.revision).toBe(1);
   });
 
-  it('defers voice sync but refreshes the remote workspace snapshot', async () => {
+  it('syncs character voices and refreshes the remote workspace snapshot', async () => {
     downstream.workspace.mockResolvedValue({ ok: true, revision: 1 });
     const next = await saveAssetBundleDraft(bundle('project_1', '林清'));
     const result = await synchronizeAssetDraftDownstream({
@@ -148,7 +148,11 @@ describe('remote asset bundle store', () => {
       next,
     });
     expect(result).toEqual({ deferred: true });
-    expect(downstream.voice).not.toHaveBeenCalled();
+    expect(downstream.voice).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      previous: null,
+      next,
+    });
     expect(downstream.workspace).toHaveBeenCalledWith('project_1');
   });
 });

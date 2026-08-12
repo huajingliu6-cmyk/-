@@ -69,6 +69,7 @@ export async function reserveImageGenerationCredits(input: {
   itemKey: string;
   idempotencyKey: string;
   generatedMedia?: GeneratedMediaState | null;
+  count?: number;
   reason?: string;
 }): Promise<
   | {
@@ -91,7 +92,10 @@ export async function reserveImageGenerationCredits(input: {
     };
   }
 
-  const estimate = estimateAssetImageCredits(input.generatedMedia);
+  const estimate = estimateAssetImageCredits(
+    input.generatedMedia,
+    input.count ?? 1,
+  );
   const reservationId = buildImageCreditReservationId({
     projectId: input.projectId,
     itemKey: input.itemKey,

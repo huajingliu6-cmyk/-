@@ -27,6 +27,10 @@ import {
   mergePromptHistories,
 } from "@/projects/assets/episode-design/generated-media-history";
 import { preserveApprovedCharacterVoice } from "@/projects/assets/episode-design/approved-item";
+import { preserveBoundCharacterMediaVoices } from "@/projects/assets/episode-design/design-media-voice";
+import {
+  isRemoteProjectAssetDataConflict,
+} from "@/projects/assets/remote-project-asset-data";
 
 export type EpisodeAssetDesignListItem = {
   episodeId: string;
@@ -209,108 +213,133 @@ export async function saveEpisodeAssetDesignItems(input: {
       message: string;
     }
 > {
-  const detail = await getEpisodeAssetDesignDetail(
-    input.projectId,
-    input.episodeId,
-  );
-  if (!detail.ok) {
-    return detail;
-  }
-  if (!detail.episode.content.trim()) {
-    return {
-      ok: false,
-      code: "EPISODE_CONTENT_EMPTY",
-      message: "剧集正文为空，无法保存资产设计",
-    };
-  }
-  if (detail.currentFingerprint !== input.fingerprint) {
-    return {
-      ok: false,
-      code: "FINGERPRINT_STALE",
-      message: "剧集正文已变更，请刷新后重试",
-    };
-  }
-  if (detail.record.revision !== input.expectedRevision) {
-    return {
-      ok: false,
-      code: "REVISION_CONFLICT",
-      message: "资产设计版本已变更，请刷新后重试",
-    };
-  }
+  const maxAttempts = 6;
+  let lastConflict = false;
 
-  const store = await loadEpisodeAssetDesignStore(input.projectId);
-  const now = new Date().toISOString();
-  const nextStatus =
-    input.status ??
-    (input.items.length > 0 ? "review" : detail.record.status);
-  const mergedItems = input.items.map((clientItem) => {
-    const serverItem = detail.record.items.find((i) => i.id === clientItem.id);
-    const lockedVoiceItem = preserveApprovedCharacterVoice(
-      serverItem,
-      clientItem,
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const detail = await getEpisodeAssetDesignDetail(
+      input.projectId,
+      input.episodeId,
     );
-    const mergedMedia = mergeGeneratedMediaState(
-      serverItem?.generatedMedia,
-      lockedVoiceItem.generatedMedia,
-    );
-    const promptHistory = mergePromptHistories(
-      serverItem?.designPrompt?.history,
-      lockedVoiceItem.designPrompt?.history,
-    );
-    return {
-      ...lockedVoiceItem,
-      ...(mergedMedia ? { generatedMedia: mergedMedia } : {}),
-      ...(lockedVoiceItem.designPrompt || serverItem?.designPrompt
-        ? {
-            designPrompt: {
-              status:
-                lockedVoiceItem.designPrompt?.status ??
-                serverItem?.designPrompt?.status ??
-                "idle",
-              text:
-                lockedVoiceItem.designPrompt?.text ??
-                serverItem?.designPrompt?.text ??
-                "",
-              generationId:
-                lockedVoiceItem.designPrompt?.generationId ??
-                serverItem?.designPrompt?.generationId ??
-                null,
-              sourceFingerprint:
-                lockedVoiceItem.designPrompt?.sourceFingerprint ??
-                serverItem?.designPrompt?.sourceFingerprint ??
-                null,
-              generatedAt:
-                lockedVoiceItem.designPrompt?.generatedAt ??
-                serverItem?.designPrompt?.generatedAt ??
-                null,
-              updatedAt:
-                lockedVoiceItem.designPrompt?.updatedAt ??
-                serverItem?.designPrompt?.updatedAt ??
-                null,
-              errorMessage:
-                lockedVoiceItem.designPrompt?.errorMessage ??
-                serverItem?.designPrompt?.errorMessage ??
-                null,
-              ...(promptHistory.length > 0 ? { history: promptHistory } : {}),
-            },
-          }
+    if (!detail.ok) {
+      return detail;
+    }
+    if (!detail.episode.content.trim()) {
+      return {
+        ok: false,
+        code: "EPISODE_CONTENT_EMPTY",
+        message: "剧集正文为空，无法保存资产设计",
+      };
+    }
+    if (detail.currentFingerprint !== input.fingerprint) {
+      return {
+        ok: false,
+        code: "FINGERPRINT_STALE",
+        message: "剧集正文已变更，请刷新后重试",
+      };
+    }
+    // First attempt enforces the client revision; retries rebase onto latest.
+    if (
+      attempt === 0 &&
+      detail.record.revision !== input.expectedRevision
+    ) {
+      return {
+        ok: false,
+        code: "REVISION_CONFLICT",
+        message: "资产设计版本已变更，请刷新后重试",
+      };
+    }
+
+    const store = await loadEpisodeAssetDesignStore(input.projectId);
+    const now = new Date().toISOString();
+    const nextStatus =
+      input.status ??
+      (input.items.length > 0 ? "review" : detail.record.status);
+    const mergedItems = input.items.map((clientItem) => {
+      const serverItem = detail.record.items.find((i) => i.id === clientItem.id);
+      const lockedVoiceItem = preserveBoundCharacterMediaVoices(
+        serverItem,
+        preserveApprovedCharacterVoice(serverItem, clientItem),
+      );
+      const mergedMedia = mergeGeneratedMediaState(
+        serverItem?.generatedMedia,
+        lockedVoiceItem.generatedMedia,
+      );
+      const promptHistory = mergePromptHistories(
+        serverItem?.designPrompt?.history,
+        lockedVoiceItem.designPrompt?.history,
+      );
+      return {
+        ...lockedVoiceItem,
+        ...(mergedMedia ? { generatedMedia: mergedMedia } : {}),
+        ...(lockedVoiceItem.designPrompt || serverItem?.designPrompt
+          ? {
+              designPrompt: {
+                status:
+                  lockedVoiceItem.designPrompt?.status ??
+                  serverItem?.designPrompt?.status ??
+                  "idle",
+                text:
+                  lockedVoiceItem.designPrompt?.text ??
+                  serverItem?.designPrompt?.text ??
+                  "",
+                generationId:
+                  lockedVoiceItem.designPrompt?.generationId ??
+                  serverItem?.designPrompt?.generationId ??
+                  null,
+                sourceFingerprint:
+                  lockedVoiceItem.designPrompt?.sourceFingerprint ??
+                  serverItem?.designPrompt?.sourceFingerprint ??
+                  null,
+                generatedAt:
+                  lockedVoiceItem.designPrompt?.generatedAt ??
+                  serverItem?.designPrompt?.generatedAt ??
+                  null,
+                updatedAt:
+                  lockedVoiceItem.designPrompt?.updatedAt ??
+                  serverItem?.designPrompt?.updatedAt ??
+                  null,
+                errorMessage:
+                  lockedVoiceItem.designPrompt?.errorMessage ??
+                  serverItem?.designPrompt?.errorMessage ??
+                  null,
+                ...(promptHistory.length > 0 ? { history: promptHistory } : {}),
+              },
+            }
+          : {}),
+      };
+    });
+    const nextRecord: EpisodeAssetDesignRecord = {
+      ...detail.record,
+      items: mergedItems,
+      status: nextStatus,
+      contentFingerprint: input.fingerprint,
+      revision: detail.record.revision + 1,
+      updatedAt: now,
+      ...(input.designConversation
+        ? { designConversation: input.designConversation }
         : {}),
     };
-  });
-  const nextRecord: EpisodeAssetDesignRecord = {
-    ...detail.record,
-    items: mergedItems,
-    status: nextStatus,
-    contentFingerprint: input.fingerprint,
-    revision: detail.record.revision + 1,
-    updatedAt: now,
-    ...(input.designConversation
-      ? { designConversation: input.designConversation }
-      : {}),
+    const nextStore = upsertEpisodeRecord(store, nextRecord);
+    try {
+      await saveEpisodeAssetDesignStore(nextStore);
+      return { ok: true, record: nextRecord };
+    } catch (error) {
+      if (isRemoteProjectAssetDataConflict(error)) {
+        lastConflict = true;
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return {
+    ok: false,
+    code: "REVISION_CONFLICT",
+    message: lastConflict
+      ? "资产设计版本已变更，请刷新后重试"
+      : "资产设计保存冲突，请刷新后重试",
   };
-  const nextStore = upsertEpisodeRecord(store, nextRecord);
-  await saveEpisodeAssetDesignStore(nextStore);
-  return { ok: true, record: nextRecord };
 }
 
 export async function applyEpisodeAssetDesignGeneration(input: {

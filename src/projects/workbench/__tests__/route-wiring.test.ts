@@ -64,15 +64,13 @@ describe("workbench vs canvas route wiring", () => {
     expect(source).not.toContain("/workflow?projectId");
   });
 
-  it("assets start creation still targets storyboard in management context", () => {
+  it("asset management workspace no longer exposes start creation", () => {
     const source = readSrc(
       "src/projects/assets/AssetManagementWorkspace.tsx",
     );
-    expect(source).toContain("/storyboard");
-    expect(source).toContain("开始创作");
-    expect(source).not.toMatch(
-      /开始创作[\s\S]{0,400}\/workflow/,
-    );
+    expect(source).not.toContain("开始创作");
+    expect(source).not.toContain("handleStartCreation");
+    expect(source).not.toContain("amw-head__start");
   });
 
   it("storyboard entry uses the shared route loading card", () => {

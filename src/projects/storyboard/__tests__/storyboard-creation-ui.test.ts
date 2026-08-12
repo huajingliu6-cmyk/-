@@ -30,8 +30,9 @@ describe("storyboard creation UI flow contracts", () => {
     expect(panel).toContain("修改剧本");
     expect(panel).toContain("view-script-modal");
     expect(panel).toContain("view-script-save");
-    expect(panel).toContain("confirm-script-btn");
-    expect(panel).toContain("确认剧本");
+    expect(panel).not.toContain("confirm-script-btn");
+    expect(panel).not.toContain(">确认剧本<");
+    expect(panel).not.toContain(">剧本已确认<");
     expect(panel).toContain("storyboard-script-preview");
     expect(panel).toContain("canGeneratePrompts");
     expect(panel).toContain("script-changed-reminder");

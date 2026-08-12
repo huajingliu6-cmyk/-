@@ -9,12 +9,11 @@ import (
 	"strings"
 )
 
-const maxWorkspaceDataWriteAttempts = 6
-
 var workspaceDataNamespaces = map[string]string{"snapshot": "workspace-snapshots", "assets": "workspace-assets", "episode-designs": "workspace-episode-asset-designs"}
 
 type workspaceDataSaveInput struct {
-	Value any `json:"value"`
+	Value            any    `json:"value"`
+	ExpectedRevision *int64 `json:"expectedRevision"`
 }
 type WorkspaceData struct {
 	store *postgres.Store
@@ -87,33 +86,33 @@ func (h *WorkspaceData) save(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid workspace data request")
 		return
 	}
-	for a := 0; a < maxWorkspaceDataWriteAttempts; a++ {
-		d, found, e := h.read(r, ns, id)
-		if e != nil {
-			writeError(w, 500, "workspace data read failed")
-			return
-		}
-		rev := int64(0)
-		if found {
-			rev = d.Revision
-		}
-		value, _ := json.Marshal(in.Value)
-		saved, e := h.store.PutDocument(r.Context(), ns, id, &rev, value)
-		if errors.Is(e, postgres.ErrRevisionConflict) {
-			if h.cache != nil {
-				_ = h.cache.Delete(r.Context(), ns, id)
-			}
-			continue
-		}
-		if e != nil {
-			writeError(w, 500, "workspace data write failed")
-			return
-		}
-		if h.cache != nil {
-			_ = h.cache.Set(r.Context(), saved)
-		}
-		writeJSON(w, 200, map[string]any{"value": in.Value, "revision": saved.Revision})
+	d, found, e := h.read(r, ns, id)
+	if e != nil {
+		writeError(w, 500, "workspace data read failed")
 		return
 	}
-	writeError(w, 409, "workspace data write conflict")
+	rev := int64(0)
+	if found {
+		rev = d.Revision
+	}
+	if in.ExpectedRevision != nil {
+		rev = *in.ExpectedRevision
+	}
+	value, _ := json.Marshal(in.Value)
+	saved, e := h.store.PutDocument(r.Context(), ns, id, &rev, value)
+	if errors.Is(e, postgres.ErrRevisionConflict) {
+		if h.cache != nil {
+			_ = h.cache.Delete(r.Context(), ns, id)
+		}
+		writeError(w, 409, "workspace data write conflict")
+		return
+	}
+	if e != nil {
+		writeError(w, 500, "workspace data write failed")
+		return
+	}
+	if h.cache != nil {
+		_ = h.cache.Set(r.Context(), saved)
+	}
+	writeJSON(w, 200, map[string]any{"value": in.Value, "revision": saved.Revision})
 }

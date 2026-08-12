@@ -23,13 +23,17 @@ describe("character asset portrait UI contracts", () => {
     expect(detail).not.toContain("服装描述");
     expect(detail).toContain("AssetBasicInfo");
     expect(detail).toContain("年龄");
-    expect(detail).toContain("性别");
+    expect(detail).not.toContain('label: "性别"');
     expect(detail).toContain("hidePreview");
+    expect(detail).toContain("adaptiveContrast");
     expect(detail).toContain("character-hero-image");
     expect(detail).toContain("AssetDetailImage");
     expect(detail).toContain("replaceOnly");
     expect(detail).toContain("character-preview__voice");
+    expect(detail).toContain("voice={voicePanel}");
     expect(upload).toContain("replaceOnly");
+    expect(upload).toContain("adaptiveContrast");
+    expect(upload).toContain("data-image-tone");
     expect(upload).toContain("asset-image-upload__select");
     expect(upload).toContain("asset-image-upload__clear");
     expect(readSrc("src/projects/assets/AssetBasicInfo.tsx")).toContain(

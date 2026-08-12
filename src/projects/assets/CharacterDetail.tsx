@@ -183,7 +183,7 @@ export function CharacterDetail({
   const voiceBound = Boolean(activeVoice.voiceId);
 
   const voicePanel = (
-    <div className="asset-controls__voice character-preview__voice">
+    <div className="character-preview__voice">
       <div className="asset-controls__voice-head">
         <span className="asset-controls__voice-title">
           {mediaIds.length > 1 ? "本图音色" : "音色"}
@@ -278,6 +278,7 @@ export function CharacterDetail({
           compact
           replaceOnly
           hidePreview
+          adaptiveContrast
           disabled={!canEdit}
           projectId={projectId}
           assetId={character.id}
@@ -300,53 +301,52 @@ export function CharacterDetail({
         />
       }
       previewContent={
-        <>
-          {voicePanel}
-          {mediaIds.length > 1 ? (
-            <div
-              className="ead-history-strip ead-history-strip--images ead-history-strip--compact"
-              data-testid="character-media-history"
-            >
-              {mediaIds.map((id) => {
-                const active = id === activeMediaId;
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    className={
-                      active
-                        ? "ead-history-thumb is-active"
-                        : "ead-history-thumb"
-                    }
-                    title={id}
-                    onClick={() => setSelectedMediaId(id)}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={getProjectAssetImageUrl(projectId, id, {
-                        revision: id,
-                      })}
-                      alt=""
-                    />
-                  </button>
-                );
-              })}
-              {activeMediaId &&
-              activeMediaId !==
-                (character.primaryMediaId?.trim() ||
-                  character.imageFileName?.trim()) ? (
+        mediaIds.length > 1 ? (
+          <div
+            className="ead-history-strip ead-history-strip--images ead-history-strip--compact"
+            data-testid="character-media-history"
+          >
+            {mediaIds.map((id) => {
+              const active = id === activeMediaId;
+
+              return (
                 <button
+                  key={id}
                   type="button"
-                  className="amw-btn"
-                  disabled={!canEdit}
-                  onClick={() => setPrimaryMedia(activeMediaId)}
+                  className={
+                    active
+                      ? "ead-history-thumb is-active"
+                      : "ead-history-thumb"
+                  }
+                  title={id}
+                  onClick={() => setSelectedMediaId(id)}
                 >
-                  设为主图
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={getProjectAssetImageUrl(projectId, id, {
+                      revision: id,
+                    })}
+                    alt=""
+                  />
                 </button>
-              ) : null}
-            </div>
-          ) : null}
-        </>
+              );
+            })}
+
+            {activeMediaId &&
+            activeMediaId !==
+              (character.primaryMediaId?.trim() ||
+                character.imageFileName?.trim()) ? (
+              <button
+                type="button"
+                className="amw-btn"
+                disabled={!canEdit}
+                onClick={() => setPrimaryMedia(activeMediaId)}
+              >
+                设为主图
+              </button>
+            ) : null}
+          </div>
+        ) : null
       }
       basicInfo={
         <AssetBasicInfo
@@ -372,13 +372,6 @@ export function CharacterDetail({
               onChange: (v) => patch({ role: v }),
             },
             {
-              key: "gender",
-              label: "性别",
-              value: character.gender,
-              disabled: !canEdit,
-              onChange: (v) => patch({ gender: v }),
-            },
-            {
               key: "age",
               label: "年龄",
               value: character.age,
@@ -399,6 +392,7 @@ export function CharacterDetail({
           />
         </div>
       }
+      voice={voicePanel}
       footer={note ? <p className="amw-note">{note}</p> : null}
     />
   );

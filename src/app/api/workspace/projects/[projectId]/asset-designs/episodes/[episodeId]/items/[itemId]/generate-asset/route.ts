@@ -4,7 +4,7 @@ import { getProjectRecord } from "@/projects/project-access";
 import { generateDesignAssetImage } from "@/projects/assets/episode-design/generate-design-asset-image";
 import { deleteProjectAssetImageFile } from "@/projects/assets/asset-image-storage";
 import {
-  appendGeneratedMediaGeneration,
+  appendGeneratedMediaGenerations,
   appendPromptHistory,
 } from "@/projects/assets/episode-design/generated-media-history";
 import { ensureWorkspaceInitialized } from "@/projects/workspace-sync/ensure-workspace-initialized";
@@ -19,10 +19,23 @@ import {
   reserveImageGenerationCredits,
   settleGenerationCredits,
 } from "@/credits/generation-billing";
+import { estimateAssetImageCredits } from "@/credits/generation-pricing";
+import {
+  DEFAULT_DESIGN_IMAGE_OPTIONS,
+  parseDesignImageGenerationOptions,
+} from "@/projects/assets/episode-design/image-generation-options";
 
 type RouteContext = {
   params: Promise<{ projectId: string; episodeId: string; itemId: string }>;
 };
+
+async function deleteBatchImages(projectId: string, mediaIds: string[]) {
+  await Promise.all(
+    mediaIds.map((mediaId) =>
+      deleteProjectAssetImageFile(projectId, mediaId).catch(() => undefined),
+    ),
+  );
+}
 
 async function post(request: Request, context: RouteContext) {
   const { projectId, episodeId, itemId } = await context.params;
@@ -52,6 +65,22 @@ async function post(request: Request, context: RouteContext) {
   if (!idempotencyKey) {
     return NextResponse.json(
       { error: "缺少 idempotencyKey", code: "IDEMPOTENCY_KEY_REQUIRED" },
+      { status: 400 },
+    );
+  }
+
+  const hasOptionFields =
+    raw != null &&
+    ("quality" in raw || "aspectRatio" in raw || "count" in raw);
+  const options = hasOptionFields
+    ? parseDesignImageGenerationOptions(raw)
+    : DEFAULT_DESIGN_IMAGE_OPTIONS;
+  if (!options) {
+    return NextResponse.json(
+      {
+        error: "画质、画面比例或生成张数无效（张数须为 1–4）",
+        code: "INVALID_IMAGE_OPTIONS",
+      },
       { status: 400 },
     );
   }
@@ -89,6 +118,7 @@ async function post(request: Request, context: RouteContext) {
     itemKey: `${episodeId}:${itemId}`,
     idempotencyKey,
     generatedMedia: item.generatedMedia,
+    count: options.count,
   });
   if (!reserved.ok) return reserved.response;
 
@@ -99,6 +129,9 @@ async function post(request: Request, context: RouteContext) {
       assetType: item.assetType,
       assetName: item.name,
       prompt,
+      quality: options.quality,
+      aspectRatio: options.aspectRatio,
+      count: options.count,
     });
   } catch (error) {
     await releaseGenerationCredits({
@@ -129,14 +162,18 @@ async function post(request: Request, context: RouteContext) {
     );
   }
 
+  const mediaIds = generated.images.map((image) => image.mediaId);
   const now = new Date().toISOString();
-  const generatedMedia = appendGeneratedMediaGeneration(item.generatedMedia, {
-    mediaId: generated.mediaId,
-    prompt,
-    generatedAt: now,
-    promptFingerprint: generated.promptFingerprint,
-    mimeType: generated.mimeType,
-  });
+  const generatedMedia = appendGeneratedMediaGenerations(
+    item.generatedMedia,
+    generated.images.map((image) => ({
+      mediaId: image.mediaId,
+      prompt,
+      generatedAt: now,
+      promptFingerprint: generated.promptFingerprint,
+      mimeType: image.mimeType,
+    })),
+  );
 
   const nextItems = detail.record.items.map((i) =>
     i.id === itemId
@@ -172,9 +209,7 @@ async function post(request: Request, context: RouteContext) {
       items: nextItems,
     });
   } catch (error) {
-    await deleteProjectAssetImageFile(projectId, generated.mediaId).catch(
-      () => undefined,
-    );
+    await deleteBatchImages(projectId, mediaIds);
     await releaseGenerationCredits({
       reservationId: reserved.reservationId,
       projectId,
@@ -183,9 +218,7 @@ async function post(request: Request, context: RouteContext) {
     throw error;
   }
   if (!saved.ok) {
-    await deleteProjectAssetImageFile(projectId, generated.mediaId).catch(
-      () => undefined,
-    );
+    await deleteBatchImages(projectId, mediaIds);
     await releaseGenerationCredits({
       reservationId: reserved.reservationId,
       projectId,
@@ -204,10 +237,14 @@ async function post(request: Request, context: RouteContext) {
     );
   }
 
+  const actualPoints = estimateAssetImageCredits(
+    item.generatedMedia,
+    generated.count,
+  ).points;
   const credit = await settleGenerationCredits({
     reservationId: reserved.reservationId,
     projectId,
-    actualPoints: reserved.points,
+    actualPoints,
     reason: "asset-image-generation-settle",
     knownBalance: reserved.balance,
   });
@@ -215,10 +252,14 @@ async function post(request: Request, context: RouteContext) {
   return NextResponse.json({
     mediaId: generated.mediaId,
     mimeType: generated.mimeType,
+    images: generated.images,
+    mediaIds,
     previewKind: "image",
     mode: generated.mode,
     notice: `${generated.notice}。生成后请点「人物校验」上传至 SD 审核资产库`,
     aspectRatio: generated.aspectRatio,
+    quality: generated.quality,
+    count: generated.count,
     resolution: generated.resolution,
     generatedMedia,
     credit: {

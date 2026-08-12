@@ -161,6 +161,13 @@ describe("generate-asset route credit billing", () => {
       mediaId: "media_new",
       promptFingerprint: "pf",
       mimeType: "image/png",
+      images: [{ mediaId: "media_new", mimeType: "image/png" }],
+      count: 1,
+      quality: "high",
+      aspectRatio: "16:9",
+      resolution: "4K",
+      notice: "ok",
+      mode: "mock",
     });
     mocks.saveItems.mockResolvedValue({
       ok: false,
@@ -211,5 +218,83 @@ describe("generate-asset route credit billing", () => {
     });
     expect(mocks.settle).toHaveBeenCalled();
     expect(mocks.release).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid count and settles actual multi-image credits", async () => {
+    mocks.getDetail.mockResolvedValue({
+      ok: true,
+      record: { revision: 1, items: [baseItem()] },
+      currentFingerprint: "fp",
+    });
+
+    const invalid = await POST(
+      new Request("http://localhost", {
+        method: "POST",
+        body: JSON.stringify({
+          prompt: "hello",
+          idempotencyKey: "k5",
+          quality: "high",
+          aspectRatio: "16:9",
+          count: 5,
+        }),
+      }),
+      { params: Promise.resolve({ projectId: "p1", episodeId: "ep1", itemId: "item_1" }) },
+    );
+    expect(invalid.status).toBe(400);
+    expect(mocks.generate).not.toHaveBeenCalled();
+
+    mocks.reserve.mockResolvedValue({
+      ok: true,
+      reservationId: "img_res_3",
+      points: 5,
+      firstGeneration: true,
+      balance: 95,
+    });
+    mocks.generate.mockResolvedValue({
+      mediaId: "m1",
+      promptFingerprint: "pf",
+      mimeType: "image/png",
+      images: [
+        { mediaId: "m1", mimeType: "image/png" },
+        { mediaId: "m2", mimeType: "image/png" },
+        { mediaId: "m3", mimeType: "image/png" },
+        { mediaId: "m4", mimeType: "image/png" },
+      ],
+      count: 4,
+      quality: "high",
+      aspectRatio: "16:9",
+      resolution: "4K",
+      notice: "已生成 4 张",
+      mode: "mock",
+    });
+    mocks.saveItems.mockResolvedValue({
+      ok: true,
+      record: { revision: 2, items: [baseItem()] },
+    });
+    mocks.settle.mockResolvedValue({ chargedPoints: 5, balance: 95 });
+
+    const ok = await POST(
+      new Request("http://localhost", {
+        method: "POST",
+        body: JSON.stringify({
+          prompt: "hello",
+          idempotencyKey: "k6",
+          quality: "high",
+          aspectRatio: "16:9",
+          count: 4,
+        }),
+      }),
+      { params: Promise.resolve({ projectId: "p1", episodeId: "ep1", itemId: "item_1" }) },
+    );
+    expect(ok.status).toBe(200);
+    expect(mocks.reserve).toHaveBeenCalledWith(
+      expect.objectContaining({ count: 4 }),
+    );
+    expect(mocks.settle).toHaveBeenCalledWith(
+      expect.objectContaining({ actualPoints: 5 }),
+    );
+    const body = await ok.json();
+    expect(body.mediaIds).toEqual(["m1", "m2", "m3", "m4"]);
+    expect(body.count).toBe(4);
   });
 });

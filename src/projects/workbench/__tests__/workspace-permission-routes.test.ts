@@ -137,12 +137,12 @@ describe("workspace permission route wiring", () => {
     );
   });
 
-  it("asset workspace hides start creation in workspace context", () => {
+  it("asset workspace no longer shows start creation button", () => {
     const source = readSrc(
       "src/projects/assets/AssetManagementWorkspace.tsx",
     );
     expect(source).toContain('context === "workspace"');
-    expect(source).toContain("!isWorkspace");
-    expect(source).toContain("开始创作");
+    expect(source).not.toContain("开始创作");
+    expect(source).not.toContain("handleStartCreation");
   });
 });

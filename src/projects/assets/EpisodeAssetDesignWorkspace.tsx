@@ -41,12 +41,12 @@ import { mergeGeneratedMediaState } from "@/projects/assets/episode-design/gener
 import {
   getDesignMediaVoiceBinding,
   isMediaVoiceBound,
-  withDesignMediaVoiceBinding,
 } from "@/projects/assets/episode-design/design-media-voice";
 import {
   itemFromCharacterDraft,
   mergePatchedDesignItem,
 } from "@/projects/assets/episode-design/character-design-item";
+import { shouldApplySavedDesignRecord } from "@/projects/assets/episode-design/update-media-voice";
 import {
   EPISODE_ASSET_DESIGN_STATUS_LABELS,
   type CharacterDesignItem,
@@ -888,7 +888,15 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
           error?: string;
         };
         if (!res.ok) throw new Error(payload.error ?? "保存失败");
-        if (payload.record) applyRecord(payload.record);
+        if (
+          payload.record &&
+          shouldApplySavedDesignRecord(
+            payload.record.revision,
+            revisionRef.current,
+          )
+        ) {
+          applyRecord(payload.record);
+        }
         if (!options?.silent) {
           setPageNote("已保存本集资产。");
         }
@@ -906,6 +914,69 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       }
     },
     [apiRoot, applyRecord, fingerprint, loadList, selectedId],
+  );
+
+  const bindMediaVoice = useCallback(
+    async (input: {
+      itemId: string;
+      mediaId: string;
+      voiceId: string;
+      voiceName: string | null;
+    }): Promise<boolean> => {
+      if (!selectedId) return false;
+
+      setSavingVoiceItemIds((prev) => new Set(prev).add(input.itemId));
+
+      try {
+        const res = await fetch(
+          `${apiRoot}/asset-designs/episodes/${encodeURIComponent(
+            selectedId,
+          )}/items/${encodeURIComponent(input.itemId)}/media-voice`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mediaId: input.mediaId,
+              voiceId: input.voiceId,
+              voiceName: input.voiceName,
+              voiceBound: true,
+            }),
+          },
+        );
+
+        const payload = (await res.json()) as {
+          record?: EpisodeAssetDesignRecord;
+          item?: EpisodeAssetDesignItem;
+          error?: string;
+        };
+        if (!res.ok || !payload.record) {
+          throw new Error(payload.error ?? "音色绑定失败");
+        }
+
+        applyRecord(payload.record);
+
+        setDesignModalItem((current) =>
+          current?.id === input.itemId
+            ? payload.record!.items.find((row) => row.id === input.itemId) ??
+              current
+            : current,
+        );
+
+        return true;
+      } catch (error) {
+        setPageNote(
+          error instanceof Error ? error.message : "音色绑定失败",
+        );
+        return false;
+      } finally {
+        setSavingVoiceItemIds((prev) => {
+          const next = new Set(prev);
+          next.delete(input.itemId);
+          return next;
+        });
+      }
+    },
+    [apiRoot, applyRecord, selectedId],
   );
 
   const markExtractStatus = useCallback(
@@ -1869,19 +1940,17 @@ const updateItem = useCallback(
                     取消生成
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  className="amw-btn"
-                  disabled={!selectedId || generating || saving || confirming}
-                  onClick={() => void saveItems(items)}
-                  data-testid="ead-save"
-                >
-                  {saving
-                    ? "保存中…"
-                    : isFullScriptDesign
-                      ? "保存全剧本资产"
-                      : "保存本集资产"}
-                </button>
+                {!isFullScriptDesign ? (
+                  <button
+                    type="button"
+                    className="amw-btn"
+                    disabled={!selectedId || generating || saving || confirming}
+                    onClick={() => void saveItems(items)}
+                    data-testid="ead-save"
+                  >
+                    {saving ? "保存中…" : "保存本集资产"}
+                  </button>
+                ) : null}
                 {surface === "workspace" ? (
                   <button
                     type="button"
@@ -2016,120 +2085,22 @@ const updateItem = useCallback(
                               confirming={confirmingItemId === item.id}
                               onConfirm={() => void handleConfirmItem(item.id)}
                               onChange={(patch) => updateItem(item.id, patch)}
-                              onVoiceSelect={(voice) => {
-                                if (item.assetType !== "character") return;
-                                if (savingVoiceItemIds.has(item.id)) return;
+                              onBindVoice={(binding) => {
                                 void (async () => {
-                                  const latest = itemsRef.current;
-                                  const current =
-                                    (latest.find(
-                                      (row) => row.id === item.id,
-                                    ) as CharacterDesignItem | undefined) ??
-                                    item;
-                                  if (current.assetType !== "character") return;
-                                  const mediaId =
-                                    current.generatedMedia?.currentId?.trim() ??
-                                    "";
-                                  if (!mediaId) {
-                                    setPageNote(
-                                      "请先生成图片，再为当前历史图选择音色",
-                                    );
-                                    return;
-                                  }
-                                  const patched = withDesignMediaVoiceBinding(
-                                    current,
-                                    mediaId,
-                                    {
-                                      voiceId: voice?.id ?? null,
-                                      voiceName: voice?.name ?? null,
-                                      voiceBound: false,
-                                    },
-                                  );
-                                  const next = latest.map((row) =>
-                                    row.id === item.id ? patched : row,
-                                  );
-                                  itemsRef.current = next;
-                                  setItems(next);
-                                  setSavingVoiceItemIds((prev) => {
-                                    const nextIds = new Set(prev);
-                                    nextIds.add(item.id);
-                                    return nextIds;
+                                  const ok = await bindMediaVoice({
+                                    itemId: item.id,
+                                    mediaId: binding.mediaId,
+                                    voiceId: binding.voiceId,
+                                    voiceName: binding.voiceName,
                                   });
-                                  try {
-                                    await saveItems(next, { silent: true });
-                                  } finally {
-                                    setSavingVoiceItemIds((prev) => {
-                                      const nextIds = new Set(prev);
-                                      nextIds.delete(item.id);
-                                      return nextIds;
-                                    });
-                                  }
-                                })();
-                              }}
-                              onBindVoice={() => {
-                                if (item.assetType !== "character") return;
-                                if (savingVoiceItemIds.has(item.id)) return;
-                                void (async () => {
-                                  const latest = itemsRef.current;
-                                  const current =
-                                    (latest.find(
-                                      (row) => row.id === item.id,
-                                    ) as CharacterDesignItem | undefined) ??
-                                    item;
-                                  if (current.assetType !== "character") return;
-                                  const mediaId =
-                                    current.generatedMedia?.currentId?.trim() ??
-                                    "";
-                                  if (!mediaId) {
+                                  if (ok) {
                                     setPageNote(
-                                      "请先生成图片，再为当前历史图绑定音色",
+                                      `已为「${item.name}」当前图绑定音色${
+                                        binding.voiceName
+                                          ? `：${binding.voiceName}`
+                                          : ""
+                                      }`,
                                     );
-                                    return;
-                                  }
-                                  const binding = getDesignMediaVoiceBinding(
-                                    current,
-                                    mediaId,
-                                  );
-                                  if (!binding.voiceId) {
-                                    setPageNote("请先选择音色再绑定");
-                                    return;
-                                  }
-                                  const patched = withDesignMediaVoiceBinding(
-                                    current,
-                                    mediaId,
-                                    {
-                                      voiceId: binding.voiceId,
-                                      voiceName: binding.voiceName,
-                                      voiceBound: true,
-                                    },
-                                  );
-                                  const next = latest.map((row) =>
-                                    row.id === item.id ? patched : row,
-                                  );
-                                  itemsRef.current = next;
-                                  setItems(next);
-                                  setSavingVoiceItemIds((prev) => {
-                                    const nextIds = new Set(prev);
-                                    nextIds.add(item.id);
-                                    return nextIds;
-                                  });
-                                  try {
-                                    const record = await saveItems(next);
-                                    if (record) {
-                                      setPageNote(
-                                        `已为「${current.name}」当前图绑定音色${
-                                          binding.voiceName
-                                            ? `：${binding.voiceName}`
-                                            : ""
-                                        }`,
-                                      );
-                                    }
-                                  } finally {
-                                    setSavingVoiceItemIds((prev) => {
-                                      const nextIds = new Set(prev);
-                                      nextIds.delete(item.id);
-                                      return nextIds;
-                                    });
                                   }
                                 })();
                               }}
@@ -2298,6 +2269,7 @@ const updateItem = useCallback(
           });
         }}
         onClose={() => setDesignModalItem(null)}
+        onBindMediaVoice={bindMediaVoice}
         onItemPatched={(itemId, incomingItem) => {
           setItems((prev) => {
             const next = prev.map((row) =>
@@ -2448,7 +2420,6 @@ function DesignItemCard({
   confirming,
   onConfirm,
   onChange,
-  onVoiceSelect,
   onBindVoice,
   onPersistNote,
   onDelete,
@@ -2471,14 +2442,22 @@ function DesignItemCard({
   confirming: boolean;
   onConfirm: () => void;
   onChange: (patch: Partial<EpisodeAssetDesignItem>) => void;
-  onVoiceSelect: (voice: VoiceOption | null) => void;
-  onBindVoice: () => void;
+  onBindVoice: (binding: {
+    mediaId: string;
+    voiceId: string;
+    voiceName: string | null;
+  }) => void;
   onPersistNote: (note: string) => void;
   onDelete: () => void;
   onDesign: () => void;
 }) {
   const [cardLightbox, setCardLightbox] = useState(false);
   const [voiceNote, setVoiceNote] = useState("");
+  const [voiceDraft, setVoiceDraft] = useState<{
+    mediaId: string;
+    voiceId: string | null;
+    voiceName: string | null;
+  } | null>(null);
 
   if (item.assetType === "audio") {
     return null;
@@ -2492,9 +2471,38 @@ function DesignItemCard({
     libraryAssets,
   );
   const currentMediaId = item.generatedMedia?.currentId?.trim() ?? "";
-  const mediaVoice =
+  const persistedVoice =
     item.assetType === "character"
       ? getDesignMediaVoiceBinding(item, currentMediaId)
+      : null;
+
+  useEffect(() => {
+    if (
+      !voiceDraft ||
+      voiceDraft.mediaId !== currentMediaId ||
+      !persistedVoice ||
+      !isMediaVoiceBound(persistedVoice) ||
+      persistedVoice.voiceId !== voiceDraft.voiceId
+    ) {
+      return;
+    }
+    setVoiceDraft(null);
+  }, [
+    currentMediaId,
+    persistedVoice?.voiceBound,
+    persistedVoice?.voiceId,
+    voiceDraft,
+  ]);
+
+  const mediaVoice =
+    item.assetType === "character"
+      ? voiceDraft?.mediaId === currentMediaId
+        ? {
+            voiceId: voiceDraft.voiceId,
+            voiceName: voiceDraft.voiceName,
+            voiceBound: false,
+          }
+        : persistedVoice
       : null;
   const libraryCharacter =
     item.assetType === "character" && item.libraryAssetId
@@ -2684,7 +2692,17 @@ function DesignItemCard({
                 value={characterVoiceId}
                 disabled={disabled || !currentMediaId}
                 projectVoices={projectVoices}
-                onChange={onVoiceSelect}
+                onChange={(voice) => {
+                  if (!currentMediaId) {
+                    setVoiceNote("请先生成图片，再为当前历史图选择音色");
+                    return;
+                  }
+                  setVoiceDraft({
+                    mediaId: currentMediaId,
+                    voiceId: voice?.id ?? null,
+                    voiceName: voice?.name ?? null,
+                  });
+                }}
               />
             )}
           </div>
@@ -2721,7 +2739,17 @@ function DesignItemCard({
                         ? "当前历史图音色已绑定"
                         : "将当前选择的音色绑定到当前历史图"
               }
-              onClick={onBindVoice}
+              onClick={() => {
+                if (!currentMediaId || !characterVoiceId) {
+                  setVoiceNote("请先选择音色再绑定");
+                  return;
+                }
+                onBindVoice({
+                  mediaId: currentMediaId,
+                  voiceId: characterVoiceId,
+                  voiceName: mediaVoice?.voiceName ?? null,
+                });
+              }}
             >
               {voiceLocked && !hasBoundVoice
                 ? "未绑定"

@@ -41,6 +41,8 @@ type Props = {
   compact?: boolean;
   /** Library replace mode: hide clear + filename, keep select-to-replace */
   replaceOnly?: boolean;
+  /** Adapt select-button text/chrome to image luminance */
+  adaptiveContrast?: boolean;
 };
 
 function revokeIfBlob(url: string | null | undefined) {
@@ -64,10 +66,12 @@ export function AssetImageUpload({
   hidePreview = false,
   compact = false,
   replaceOnly = false,
+  adaptiveContrast = false,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [imageTone, setImageTone] = useState<"light" | "dark">("dark");
   const valueRef = useRef(value);
 
   useEffect(() => {
@@ -87,6 +91,74 @@ export function AssetImageUpload({
     }
     return null;
   })();
+
+  useEffect(() => {
+    if (!adaptiveContrast || !previewSrc) {
+      setImageTone("dark");
+      return;
+    }
+
+    let cancelled = false;
+    const image = new Image();
+
+    if (!previewSrc.startsWith("blob:")) {
+      image.crossOrigin = "anonymous";
+    }
+
+    image.onload = () => {
+      if (cancelled) return;
+
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 16;
+        canvas.height = 16;
+
+        const context = canvas.getContext("2d", {
+          willReadFrequently: true,
+        });
+
+        if (!context) {
+          setImageTone("dark");
+          return;
+        }
+
+        context.drawImage(image, 0, 0, 16, 16);
+
+        const pixels = context.getImageData(0, 0, 16, 16).data;
+        let luminance = 0;
+        let count = 0;
+
+        for (let index = 0; index < pixels.length; index += 4) {
+          const alpha = pixels[index + 3] / 255;
+          if (alpha < 0.1) continue;
+
+          const red = pixels[index] / 255;
+          const green = pixels[index + 1] / 255;
+          const blue = pixels[index + 2] / 255;
+
+          luminance +=
+            (0.2126 * red + 0.7152 * green + 0.0722 * blue) * alpha;
+          count += alpha;
+        }
+
+        if (!cancelled && count > 0) {
+          setImageTone(luminance / count > 0.62 ? "light" : "dark");
+        }
+      } catch {
+        if (!cancelled) setImageTone("dark");
+      }
+    };
+
+    image.onerror = () => {
+      if (!cancelled) setImageTone("dark");
+    };
+
+    image.src = previewSrc;
+
+    return () => {
+      cancelled = true;
+    };
+  }, [adaptiveContrast, previewSrc]);
 
   const handleFile = (file: File | null) => {
     setError("");
@@ -225,6 +297,7 @@ export function AssetImageUpload({
           type="button"
           className="amw-btn asset-image-upload__select"
           data-testid={`${id}-select`}
+          data-image-tone={adaptiveContrast ? imageTone : undefined}
           disabled={disabled || busy}
           onClick={() => inputRef.current?.click()}
         >

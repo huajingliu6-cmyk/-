@@ -24,6 +24,7 @@ describe("Batch G1-UI episode asset design chrome", () => {
   it("keeps three core actions with unified save label", () => {
     expect(workspace).toContain("提取本集资产");
     expect(workspace).toContain("保存本集资产");
+    expect(workspace).not.toContain("保存全剧本资产");
     expect(workspace).toContain("确认本集资产");
     expect(workspace).toContain("提交审批素材");
     expect(workspace).toContain("ead-submit-approval");

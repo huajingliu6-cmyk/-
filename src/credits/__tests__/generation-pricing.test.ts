@@ -12,13 +12,19 @@ import {
 } from "@/credits/generation-pricing";
 
 describe("generation-pricing", () => {
-  it("charges 2 for first image and 1 for subsequent", () => {
+  it("charges 2 for first image and 1 for subsequent; scales by count", () => {
     expect(isFirstImageGeneration(null)).toBe(true);
     expect(isFirstImageGeneration({ currentId: null, historyIds: [], history: [] })).toBe(
       true,
     );
     expect(estimateAssetImageCredits(null)).toEqual({
       points: IMAGE_FIRST_GENERATION_CREDITS,
+      firstGeneration: true,
+    });
+    expect(estimateAssetImageCredits(null, 4)).toEqual({
+      points:
+        IMAGE_FIRST_GENERATION_CREDITS +
+        3 * IMAGE_SUBSEQUENT_GENERATION_CREDITS,
       firstGeneration: true,
     });
 
@@ -57,6 +63,19 @@ describe("generation-pricing", () => {
       }),
     ).toEqual({
       points: IMAGE_SUBSEQUENT_GENERATION_CREDITS,
+      firstGeneration: false,
+    });
+    expect(
+      estimateAssetImageCredits(
+        {
+          currentId: "media_1",
+          historyIds: ["media_1"],
+          history: [],
+        },
+        4,
+      ),
+    ).toEqual({
+      points: 4 * IMAGE_SUBSEQUENT_GENERATION_CREDITS,
       firstGeneration: false,
     });
   });
