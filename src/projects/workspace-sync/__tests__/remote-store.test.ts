@@ -21,7 +21,17 @@ vi.mock('@/persistence/remote-data-client', () => ({
     if (!namespace) return Response.json({ error: 'invalid kind' }, { status: 400 });
     const identity = `${namespace}/${projectId}`;
     if ((init.method ?? 'GET') === 'POST') {
-      const body = JSON.parse(String(init.body)) as { value: unknown };
+      const body = JSON.parse(String(init.body)) as {
+        value: unknown;
+        expectedRevision?: number;
+      };
+      const currentRevision = documents.get(identity)?.revision ?? 0;
+      if (body.expectedRevision !== currentRevision) {
+        return Response.json(
+          { error: 'workspace data write conflict' },
+          { status: 409 },
+        );
+      }
       for (let attempt = 0; attempt < 6; attempt += 1) {
         const snapshot = structuredClone(documents.get(identity));
         if (state.conflictsRemaining > 0) {
@@ -47,6 +57,7 @@ import { emptyEpisodeAssetDesignStore } from '@/projects/assets/episode-design/s
 import {
   loadWorkspaceLocalAssets,
   loadWorkspaceLocalEpisodeDesigns,
+  loadWorkspaceLocalEpisodeDesignsDocument,
   loadWorkspaceSnapshot,
   saveWorkspaceLocalAssets,
   saveWorkspaceLocalEpisodeDesigns,
@@ -152,5 +163,27 @@ describe('remote workspace stores', () => {
     state.conflictsRemaining = 2;
     await saveWorkspaceLocalAssets(emptyAssets('project_1'));
     expect(documents.get('workspace-assets/project_1')?.revision).toBe(1);
+  });
+
+  it('rejects an episode-design write carrying a stale remote revision', async () => {
+    const projectId = 'project_1';
+    await saveWorkspaceLocalEpisodeDesigns(
+      emptyEpisodeAssetDesignStore(projectId),
+    );
+    const stale = await loadWorkspaceLocalEpisodeDesignsDocument(projectId);
+
+    await saveWorkspaceLocalEpisodeDesigns({
+      ...stale.value,
+      updatedAt: '2026-08-12T01:00:00.000Z',
+    });
+
+    await expect(
+      saveWorkspaceLocalEpisodeDesigns(stale.value, {
+        expectedRemoteRevision: stale.remoteRevision ?? undefined,
+      }),
+    ).rejects.toThrow('REMOTE_WORKSPACE_REQUEST_FAILED:409');
+    expect(
+      documents.get('workspace-episode-asset-designs/project_1')?.revision,
+    ).toBe(2);
   });
 });

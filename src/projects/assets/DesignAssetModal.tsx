@@ -7,25 +7,19 @@ import type {
   EpisodeAssetDesignItem,
   GeneratedMediaState,
 } from "@/projects/assets/episode-design/types";
-import type { AudioAsset, VideoRefSafety, VoiceOption } from "@/projects/assets/types";
+import type { VideoRefSafety } from "@/projects/assets/types";
 import { formatDesignDraftSeedText } from "@/projects/assets/episode-design/format-design-draft-seed";
 import {
   designVideoRefSafetyBadge,
   isDesignMediaVideoRefLocked,
 } from "@/projects/assets/episode-design/design-media-video-ref-labels";
-import {
-  getDesignMediaVoiceBinding,
-  isMediaVoiceBound,
-  withDesignCurrentMediaAndVoiceMirror,
-} from "@/projects/assets/episode-design/design-media-voice";
+import { withDesignCurrentMediaAndVoiceMirror } from "@/projects/assets/episode-design/design-media-voice";
 import {
   appendPromptHistory,
   mergeMediaIdLists,
 } from "@/projects/assets/episode-design/generated-media-history";
 import { getProjectAssetImageUrl } from "@/projects/assets/asset-image-url";
 import { DesignImageLightbox } from "@/projects/assets/DesignImageLightbox";
-import { VoiceSelector } from "@/projects/assets/VoiceSelector";
-import { VoicePreviewButton } from "@/projects/assets/VoicePreviewButton";
 import { useGenerationBusy } from "@/shell/GenerationBusyGuard";
 import { safeRandomUUID } from "@/lib/safe-random-id";
 import type { AssetGenerationProgress } from "@/projects/assets/DesignGenerationOverlay";
@@ -39,6 +33,39 @@ import {
   formatDesignImagePreviewTitle,
   type DesignImageGenerationOptions,
 } from "@/projects/assets/episode-design/image-generation-options";
+import {
+  DEFAULT_DESIGN_PROMPT_MODEL_ID,
+  DESIGN_PROMPT_MODELS,
+  type DesignPromptModelId,
+} from "@/projects/assets/episode-design/design-prompt-models";
+import {
+  GlassSelect,
+  type GlassSelectOption,
+} from "@/shell/glass-select";
+
+const DESIGN_IMAGE_QUALITY_OPTIONS: GlassSelectOption[] =
+  DESIGN_IMAGE_QUALITIES.map((value) => ({
+    id: value,
+    label: DESIGN_IMAGE_QUALITY_LABELS[value],
+  }));
+
+const DESIGN_IMAGE_RATIO_OPTIONS: GlassSelectOption[] =
+  DESIGN_IMAGE_ASPECT_RATIOS.map((value) => ({
+    id: value,
+    label: DESIGN_IMAGE_ASPECT_RATIO_LABELS[value],
+  }));
+
+const DESIGN_IMAGE_COUNT_OPTIONS: GlassSelectOption[] =
+  DESIGN_IMAGE_COUNTS.map((value) => ({
+    id: String(value),
+    label: `${value}张`,
+  }));
+
+const DESIGN_PROMPT_MODEL_OPTIONS: GlassSelectOption[] =
+  DESIGN_PROMPT_MODELS.map((model) => ({
+    id: model.id,
+    label: model.label,
+  }));
 
 export type DesignAssetModalProps = {
   open: boolean;
@@ -47,8 +74,6 @@ export type DesignAssetModalProps = {
   episodeId: string;
   /** management | workspace — selects API base path */
   surface: "project_management" | "workspace";
-  projectVoices?: VoiceOption[];
-  audios?: AudioAsset[];
   /** Parent-owned in-flight flag so remount / other actions keep「生成中」. */
   isGeneratingAsset?: boolean;
   onGeneratingAssetChange?: (itemId: string, generating: boolean) => void;
@@ -65,15 +90,8 @@ export type DesignAssetModalProps = {
     itemId: string,
     media?: GeneratedMediaState | null,
   ) => void;
-  /** Persist voice / media patches from the modal (per history image). */
+  /** Persist media current selection patches from the modal (per history image). */
   onItemPatched?: (itemId: string, next: EpisodeAssetDesignItem) => void;
-  /** Atomically bind voice for one media image (server PATCH). */
-  onBindMediaVoice?: (input: {
-    itemId: string;
-    mediaId: string;
-    voiceId: string;
-    voiceName: string | null;
-  }) => Promise<boolean>;
   /** Temporary UI progress for card overlay; null clears it. */
   onGenerationProgress?: (
     itemId: string,
@@ -142,15 +160,12 @@ function DesignAssetModalBody({
   projectId,
   episodeId,
   surface,
-  projectVoices = [],
-  audios = [],
   isGeneratingAsset = false,
   onGeneratingAssetChange,
   onClose,
   onPromptUpdated,
   onAssetGenerated,
   onItemPatched,
-  onBindMediaVoice,
   onGenerationProgress,
 }: DesignAssetModalBodyProps) {
   const titleId = useId();
@@ -160,6 +175,9 @@ function DesignAssetModalBody({
     Boolean(seed.trim()) && !(item.designPrompt?.text?.trim());
 
   const [promptText, setPromptText] = useState(seed);
+  const [promptModelId, setPromptModelId] = useState<DesignPromptModelId>(
+    DEFAULT_DESIGN_PROMPT_MODEL_ID,
+  );
   const [promptHistory, setPromptHistory] =
     useState<AssetDesignPromptHistoryEntry[]>(initialHistory);
   const [loadingPrompt, setLoadingPrompt] = useState(false);
@@ -177,13 +195,6 @@ function DesignAssetModalBody({
   const [copyNote, setCopyNote] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [voiceNote, setVoiceNote] = useState("");
-  const [voiceSaving, setVoiceSaving] = useState(false);
-  const [voiceDraft, setVoiceDraft] = useState<{
-    mediaId: string;
-    voiceId: string | null;
-    voiceName: string | null;
-  } | null>(null);
   const [imageOptions, setImageOptions] = useState<DesignImageGenerationOptions>(
     DEFAULT_DESIGN_IMAGE_OPTIONS,
   );
@@ -378,11 +389,15 @@ function DesignAssetModalBody({
           body: JSON.stringify({
             idempotencyKey: `prompt-${item.id}-${Date.now()}`,
             userRequirement,
+            promptModelId,
           }),
         });
         const payload = (await res.json()) as {
           error?: string;
           prompt?: string;
+          promptModelId?: string;
+          displayModelName?: string;
+          providerModelId?: string;
           designPrompt?: {
             text?: string;
             status?: string;
@@ -422,7 +437,7 @@ function DesignAssetModalBody({
         setLoadingPrompt(false);
       }
     },
-    [item, surface, projectId, episodeId, promptHistory],
+    [item, surface, projectId, episodeId, promptHistory, promptModelId],
   );
 
   const openRequirementDialog = useCallback(() => {
@@ -682,20 +697,6 @@ function DesignAssetModalBody({
   const safetyBadge = designVideoRefSafetyBadge(safetyForPreview);
   const precheckLocked = isDesignMediaVideoRefLocked(safetyForPreview);
 
-  const persistedVoice =
-    item.assetType === "character"
-      ? getDesignMediaVoiceBinding(item, currentMediaId)
-      : null;
-  const mediaVoice =
-    voiceDraft?.mediaId === currentMediaId
-      ? {
-          voiceId: voiceDraft.voiceId,
-          voiceName: voiceDraft.voiceName,
-          voiceBound: false,
-        }
-      : persistedVoice;
-  const mediaVoiceBound = mediaVoice ? isMediaVoiceBound(mediaVoice) : false;
-
   return (
     <>
       <div
@@ -791,6 +792,45 @@ function DesignAssetModalBody({
                   }}
                 />
               </label>
+              <div
+                className="ead-prompt-actions"
+                data-testid="design-prompt-actions"
+              >
+                <button
+                  type="button"
+                  className="amw-btn ead-prompt-actions__regenerate"
+                  data-testid="design-regenerate-prompt"
+                  disabled={loadingPrompt || generateBusy}
+                  onClick={openRequirementDialog}
+                >
+                  {loadingPrompt ? "生成中…" : "重新生成提示词"}
+                </button>
+
+                <div
+                  className="ead-prompt-actions__model"
+                  data-testid="design-prompt-model"
+                >
+                  <GlassSelect
+                    label="提示词模型"
+                    hideLabel
+                    value={promptModelId}
+                    options={DESIGN_PROMPT_MODEL_OPTIONS}
+                    disabled={loadingPrompt || generateBusy}
+                    menuPortal
+                    menuSideOffset={6}
+                    menuCollisionPadding={12}
+                    onChange={(value) => {
+                      if (
+                        DESIGN_PROMPT_MODELS.some(
+                          (model) => model.id === value,
+                        )
+                      ) {
+                        setPromptModelId(value as DesignPromptModelId);
+                      }
+                    }}
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="ead-modal__col">
@@ -864,73 +904,81 @@ function DesignAssetModalBody({
                   className="ead-generation-options"
                   data-testid="design-image-generation-options"
                 >
-                  <label className="ead-generation-option">
-                    <span className="ead-generation-option__label">画质</span>
-                    <select
-                      className="ead-generation-option__select"
-                      data-testid="design-image-quality"
-                      disabled={generateBusy}
+                  <div
+                    className="ead-generation-option"
+                    data-testid="design-image-quality"
+                  >
+                    <GlassSelect
+                      label="画质"
                       value={imageOptions.quality}
-                      onChange={(e) =>
+                      disabled={generateBusy}
+                      options={DESIGN_IMAGE_QUALITY_OPTIONS}
+                      menuPortal
+                      menuSideOffset={6}
+                      menuCollisionPadding={12}
+                      onChange={(value) => {
                         setImageOptions((prev) => ({
                           ...prev,
-                          quality: e.target
-                            .value as DesignImageGenerationOptions["quality"],
-                        }))
-                      }
-                    >
-                      {DESIGN_IMAGE_QUALITIES.map((value) => (
-                        <option key={value} value={value}>
-                          {DESIGN_IMAGE_QUALITY_LABELS[value]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="ead-generation-option">
-                    <span className="ead-generation-option__label">比例</span>
-                    <select
-                      className="ead-generation-option__select"
-                      data-testid="design-image-aspect-ratio"
-                      disabled={generateBusy}
+                          quality:
+                            value as DesignImageGenerationOptions["quality"],
+                        }));
+                      }}
+                    />
+                  </div>
+
+                  <div
+                    className="ead-generation-option"
+                    data-testid="design-image-aspect-ratio"
+                  >
+                    <GlassSelect
+                      label="比例"
                       value={imageOptions.aspectRatio}
-                      onChange={(e) =>
-                        setImageOptions((prev) => ({
-                          ...prev,
-                          aspectRatio: e.target
-                            .value as DesignImageGenerationOptions["aspectRatio"],
-                        }))
-                      }
-                    >
-                      {DESIGN_IMAGE_ASPECT_RATIOS.map((value) => (
-                        <option key={value} value={value}>
-                          {DESIGN_IMAGE_ASPECT_RATIO_LABELS[value]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="ead-generation-option">
-                    <span className="ead-generation-option__label">张数</span>
-                    <select
-                      className="ead-generation-option__select"
-                      data-testid="design-image-count"
                       disabled={generateBusy}
-                      value={imageOptions.count}
-                      onChange={(e) =>
+                      options={DESIGN_IMAGE_RATIO_OPTIONS}
+                      menuPortal
+                      menuSideOffset={6}
+                      menuCollisionPadding={12}
+                      onChange={(value) => {
                         setImageOptions((prev) => ({
                           ...prev,
-                          count: Number(
-                            e.target.value,
-                          ) as DesignImageGenerationOptions["count"],
-                        }))
-                      }
-                    >
-                      {DESIGN_IMAGE_COUNTS.map((value) => (
-                        <option key={value} value={value}>
-                          {value}张
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                          aspectRatio:
+                            value as DesignImageGenerationOptions["aspectRatio"],
+                        }));
+                      }}
+                    />
+                  </div>
+
+                  <div
+                    className="ead-generation-option"
+                    data-testid="design-image-count"
+                  >
+                    <GlassSelect
+                      label="张数"
+                      value={String(imageOptions.count)}
+                      disabled={generateBusy}
+                      options={DESIGN_IMAGE_COUNT_OPTIONS}
+                      menuPortal
+                      menuSideOffset={6}
+                      menuCollisionPadding={12}
+                      onChange={(value) => {
+                        const count = Number(value);
+
+                        if (
+                          !DESIGN_IMAGE_COUNTS.includes(
+                            count as DesignImageGenerationOptions["count"],
+                          )
+                        ) {
+                          return;
+                        }
+
+                        setImageOptions((prev) => ({
+                          ...prev,
+                          count:
+                            count as DesignImageGenerationOptions["count"],
+                        }));
+                      }}
+                    />
+                  </div>
                 </div>
               ) : null}
               <div
@@ -992,106 +1040,6 @@ function DesignAssetModalBody({
                     : ""}
                 </p>
               ) : null}
-              {item.assetType === "character" && currentMediaId ? (
-                <div
-                  className="ead-modal__voice-row"
-                  data-testid="design-media-voice"
-                >
-                  <p className="ead-muted ead-modal__voice-hint">
-                    当前历史图需单独绑定音色；切换图片后请重新选择并绑定。
-                  </p>
-                  <div className="ead-card__voice-row">
-                    <div className="ead-card__voice-select">
-                      <VoiceSelector
-                        label="本图音色"
-                        value={mediaVoice?.voiceId ?? null}
-                        disabled={generateBusy || voiceSaving}
-                        projectVoices={projectVoices}
-                        onChange={(voice) => {
-                          if (!currentMediaId) return;
-                          setVoiceDraft({
-                            mediaId: currentMediaId,
-                            voiceId: voice?.id ?? null,
-                            voiceName: voice?.name ?? null,
-                          });
-                        }}
-                      />
-                    </div>
-                    <div className="ead-card__voice-actions">
-                      <VoicePreviewButton
-                        projectId={projectId}
-                        voiceId={mediaVoice?.voiceId ?? null}
-                        audios={audios}
-                        className="amw-btn ead-card__voice-preview"
-                        testId="design-media-voice-preview"
-                        onStatus={setVoiceNote}
-                      />
-                      <button
-                        type="button"
-                        className={`amw-btn ead-card__voice-bind${
-                          mediaVoiceBound ? " is-bound" : ""
-                        }`}
-                        data-testid="design-media-voice-bind"
-                        disabled={
-                          generateBusy ||
-                          voiceSaving ||
-                          !currentMediaId ||
-                          !mediaVoice?.voiceId ||
-                          mediaVoiceBound ||
-                          !onBindMediaVoice
-                        }
-                        title={
-                          mediaVoiceBound
-                            ? "本图音色已绑定"
-                            : "将当前选择的音色绑定到本张历史图"
-                        }
-                        onClick={() => {
-                          const bindVoiceId = mediaVoice?.voiceId ?? null;
-                          if (
-                            !currentMediaId ||
-                            !bindVoiceId ||
-                            voiceSaving ||
-                            !onBindMediaVoice
-                          ) {
-                            setVoiceNote("请先选择音色再绑定");
-                            return;
-                          }
-                          void (async () => {
-                            setVoiceSaving(true);
-                            try {
-                              const ok = await onBindMediaVoice({
-                                itemId: item.id,
-                                mediaId: currentMediaId,
-                                voiceId: bindVoiceId,
-                                voiceName: mediaVoice?.voiceName ?? null,
-                              });
-                              if (ok) {
-                                setVoiceDraft(null);
-                                setNotice("本图音色已绑定");
-                              }
-                            } finally {
-                              setVoiceSaving(false);
-                            }
-                          })();
-                        }}
-                      >
-                        {voiceSaving
-                          ? "绑定中…"
-                          : mediaVoiceBound
-                            ? "本图已绑定"
-                            : "绑定音色"}
-                      </button>
-                    </div>
-                  </div>
-                  {voiceNote ? (
-                    <p className="ead-muted ead-card__voice-note">{voiceNote}</p>
-                  ) : null}
-                </div>
-              ) : item.assetType === "character" ? (
-                <p className="ead-muted" data-testid="design-media-voice-empty">
-                  请先生成图片，再为该历史图绑定音色。
-                </p>
-              ) : null}
               {showImageHistory ? (
                 <div
                   className="ead-history-strip ead-history-strip--images"
@@ -1118,7 +1066,6 @@ function DesignAssetModalBody({
                                 (h) => h.mediaId === id,
                               )?.videoRefSafety ?? null;
                             setVideoRefSafety(fromHistory);
-                            setVoiceNote("");
                             if (
                               item.assetType === "character" &&
                               onItemPatched
@@ -1181,19 +1128,10 @@ function DesignAssetModalBody({
           <footer className="ead-modal__foot">
             <button
               type="button"
-              className="amw-btn"
-              data-testid="design-regenerate-prompt"
-              disabled={loadingPrompt || generateBusy || voiceSaving}
-              onClick={openRequirementDialog}
-            >
-              {loadingPrompt ? "生成中…" : "重新生成提示词"}
-            </button>
-            <button
-              type="button"
               className="amw-btn amw-btn-primary"
               data-testid="design-copy"
               disabled={
-                !promptText.trim() || loadingPrompt || generateBusy || voiceSaving
+                !promptText.trim() || loadingPrompt || generateBusy
               }
               onClick={() => void handleCopy()}
             >
@@ -1206,7 +1144,6 @@ function DesignAssetModalBody({
               disabled={
                 loadingPrompt ||
                 generateBusy ||
-                voiceSaving ||
                 !promptText.trim() ||
                 audioDisabled
               }

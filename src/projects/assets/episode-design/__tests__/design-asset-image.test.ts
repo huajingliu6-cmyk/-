@@ -125,6 +125,12 @@ describe("design asset image generation contract", () => {
     expect(modal).toContain("design-image-quality");
     expect(modal).toContain("design-image-aspect-ratio");
     expect(modal).toContain("design-image-count");
+    expect(modal).toContain("GlassSelect");
+    expect(modal).toContain("menuPortal");
+    expect(modal).not.toContain(
+      'className="ead-generation-option__select"',
+    );
+    expect(modal).not.toMatch(/<select[\s\S]*design-image-quality/);
     expect(modal).toContain("quality: imageOptions.quality");
     expect(modal).toContain("aspectRatio: imageOptions.aspectRatio");
     expect(modal).toContain("count: imageOptions.count");

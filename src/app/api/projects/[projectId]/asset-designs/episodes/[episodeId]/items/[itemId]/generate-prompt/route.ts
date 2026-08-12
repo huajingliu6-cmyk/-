@@ -4,6 +4,11 @@ import { requireProjectManagementProjectAccess } from "@/auth/require-access";
 import { getProjectRecord } from "@/projects/project-access";
 import { isEpisodeAssetExtractReady, normalizeUserRequirement } from "@/projects/assets/episode-design/design-conversation";
 import {
+  getDesignPromptModel,
+  isDesignPromptModelId,
+  type DesignPromptModelId,
+} from "@/projects/assets/episode-design/design-prompt-models";
+import {
   getEpisodeAssetDesignDetail,
   saveEpisodeAssetDesignItems,
 } from "@/projects/assets/episode-design/episode-design-api";
@@ -29,16 +34,38 @@ async function post(request: Request, context: RouteContext) {
   }
 
   let userRequirement = "";
+  let promptModelId: DesignPromptModelId | null = null;
   try {
-    const body = (await request.json()) as { userRequirement?: unknown };
+    const body = (await request.json()) as {
+      userRequirement?: unknown;
+      promptModelId?: unknown;
+    };
     const normalized = normalizeUserRequirement(body?.userRequirement);
     if (!normalized.ok) {
       return NextResponse.json({ error: normalized.error }, { status: 400 });
     }
     userRequirement = normalized.value;
+    if (!isDesignPromptModelId(body?.promptModelId)) {
+      return NextResponse.json(
+        {
+          error: "提示词模型无效",
+          code: "INVALID_PROMPT_MODEL",
+        },
+        { status: 400 },
+      );
+    }
+    promptModelId = body.promptModelId;
   } catch {
-    // empty body is fine — regenerate without extra requirement
+    return NextResponse.json(
+      {
+        error: "提示词模型无效",
+        code: "INVALID_PROMPT_MODEL",
+      },
+      { status: 400 },
+    );
   }
+
+  const selectedModel = getDesignPromptModel(promptModelId);
 
   const detail = await getEpisodeAssetDesignDetail(projectId, episodeId);
   if (!detail.ok) {
@@ -79,6 +106,9 @@ async function post(request: Request, context: RouteContext) {
   let text = "";
   let nextConversation = conversation;
   let redesignCue = "";
+  let resultPromptModelId = selectedModel.id;
+  let resultDisplayModelName: string = selectedModel.label;
+  let resultProviderModelId: string = selectedModel.providerModelId;
   let failedMessage: string | null = null;
   try {
     const result = await streamRedesignPromptInConversation({
@@ -87,10 +117,14 @@ async function post(request: Request, context: RouteContext) {
       item,
       conversation,
       userRequirement,
+      promptModelId,
     });
     text = result.text;
     nextConversation = result.nextConversation;
     redesignCue = result.redesignCue;
+    resultPromptModelId = result.promptModelId;
+    resultDisplayModelName = result.displayModelName;
+    resultProviderModelId = result.providerModelId;
   } catch (error) {
     failedMessage =
       error instanceof Error ? error.message : "素材提示词生成失败";
@@ -108,9 +142,9 @@ async function post(request: Request, context: RouteContext) {
     projectId,
     userId: gated.user.id,
     outputKind: "asset_design_prompt",
-    modelKey: "episode-asset-design-text",
-    displayModelName: "本集资产设计对话",
-    providerModelId: "episode-asset-design-text",
+    modelKey: resultPromptModelId,
+    displayModelName: resultDisplayModelName,
+    providerModelId: resultProviderModelId,
     brief: redesignCue || `【资产】${item.assetType} · ${item.name}`,
     targetChars: 800,
     status: failedMessage ? "failed" : "completed",
@@ -189,6 +223,9 @@ async function post(request: Request, context: RouteContext) {
   return NextResponse.json({
     prompt: text,
     redesignCue,
+    promptModelId: resultPromptModelId,
+    displayModelName: resultDisplayModelName,
+    providerModelId: resultProviderModelId,
     designPrompt: {
       status: "ready",
       text,

@@ -57,6 +57,22 @@ function buildRegistry(): TextModelInternal[] {
       pointsPer1kInput: inputPts,
       pointsPer1kOutput: outputPts,
     },
+    {
+      publicKey: "deepseek-v4-pro",
+      displayName: "Deepseek V4 Pro",
+      description: "剧集资产提取与提示词生成",
+      qualityTier: "quality",
+      recommended: false,
+      supportsStreaming: true,
+      maxInputChars: 120_000,
+      provider,
+      providerModelId: "deepseek-v4-pro",
+      enabled: true,
+      maxOutputTokensCap: 30000,
+      charsToOutputTokensFactor: 1.35,
+      pointsPer1kInput: inputPts,
+      pointsPer1kOutput: outputPts,
+    },
   ];
 }
 

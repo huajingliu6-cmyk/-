@@ -28,8 +28,25 @@ function loadRemoteDocument(kind: WorkspaceKind, projectId: string) {
   );
 }
 
-async function saveRemoteValue<T>(kind: WorkspaceKind, projectId: string, value: T): Promise<T> {
-  const current = await requestWorkspaceData<T>(kind, projectId);
+export const REMOTE_WORKSPACE_DATA_CONFLICT =
+  "REMOTE_WORKSPACE_REQUEST_FAILED:409";
+
+export function isRemoteWorkspaceDataConflict(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.message === REMOTE_WORKSPACE_DATA_CONFLICT ||
+      error.message.startsWith("REMOTE_WORKSPACE_REQUEST_FAILED:409"))
+  );
+}
+
+async function saveRemoteValue<T>(
+  kind: WorkspaceKind,
+  projectId: string,
+  value: T,
+  expectedRevision?: number,
+): Promise<T> {
+  const revision =
+    expectedRevision ?? (await requestWorkspaceData<T>(kind, projectId)).revision;
   const response = await requestRemoteData(
     `${ENDPOINT}?kind=${encodeURIComponent(kind)}&projectId=${encodeURIComponent(projectId)}`,
     {
@@ -37,12 +54,12 @@ async function saveRemoteValue<T>(kind: WorkspaceKind, projectId: string, value:
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         value,
-        expectedRevision: current.revision,
+        expectedRevision: revision,
       }),
     },
   );
   if (response.status === 409) {
-    throw new Error("REMOTE_WORKSPACE_REQUEST_FAILED:409");
+    throw new Error(REMOTE_WORKSPACE_DATA_CONFLICT);
   }
   if (!response.ok) {
     throw new Error(`REMOTE_WORKSPACE_REQUEST_FAILED:${response.status}`);
@@ -61,4 +78,8 @@ export const saveWorkspaceAssetsRemote = <T>(projectId: string, value: T) => sav
 export const loadWorkspaceEpisodeDesignsRemoteValue = (projectId: string) => loadRemoteValue("episode-designs", projectId);
 export const loadWorkspaceEpisodeDesignsRemoteDocument = (projectId: string) => loadRemoteDocument("episode-designs", projectId);
 export const workspaceEpisodeDesignsRemoteIdentity = (projectId: string) => ({ namespace: "workspace-episode-asset-designs", key: projectId });
-export const saveWorkspaceEpisodeDesignsRemote = <T>(projectId: string, value: T) => saveRemoteValue("episode-designs", projectId, value);
+export const saveWorkspaceEpisodeDesignsRemote = <T>(
+  projectId: string,
+  value: T,
+  expectedRevision?: number,
+) => saveRemoteValue("episode-designs", projectId, value, expectedRevision);

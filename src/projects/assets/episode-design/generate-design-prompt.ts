@@ -4,6 +4,11 @@ import {
   appendConversationMessage,
   buildRedesignUserMessage,
 } from "@/projects/assets/episode-design/design-conversation";
+import {
+  DEFAULT_DESIGN_PROMPT_MODEL_ID,
+  getDesignPromptModel,
+  type DesignPromptModelId,
+} from "@/projects/assets/episode-design/design-prompt-models";
 import type {
   EpisodeAssetDesignItem,
   EpisodeDesignConversationMessage,
@@ -20,6 +25,7 @@ export {
 function createProviderFromResolved(
   resolved: Awaited<ReturnType<typeof resolveCapabilityForOutputKind>>,
   fallbackModelId: string,
+  selectedProviderModelId?: string,
 ): TextGenerationProvider {
   if (resolved.profile.provider === "mock") {
     return new MockTextProvider();
@@ -28,7 +34,9 @@ function createProviderFromResolved(
     return new HttpCompatibleTextProvider(
       resolved.secret,
       resolved.profile.apiUrl,
-      resolved.profile.model || fallbackModelId,
+      selectedProviderModelId ||
+        resolved.profile.model ||
+        fallbackModelId,
     );
   }
   throw new AiConfigError(
@@ -58,7 +66,7 @@ function assertTextModality(resolved: {
 
 /**
  * Continue the episode extract conversation with「{name}重新设计」(+ optional requirement).
- * Uses the same text model as「提取本集资产」(episode_asset_design).
+ * Uses the same text capability binding as「提取本集资产」, with a selectable provider model id.
  */
 export async function streamRedesignPromptInConversation(input: {
   projectId: string;
@@ -67,14 +75,22 @@ export async function streamRedesignPromptInConversation(input: {
   conversation: EpisodeDesignConversationMessage[];
   /** Owner-provided material requirements appended to the redesign cue. */
   userRequirement?: string | null;
+  promptModelId?: DesignPromptModelId;
 }): Promise<{
   text: string;
   nextConversation: EpisodeDesignConversationMessage[];
   redesignCue: string;
+  promptModelId: DesignPromptModelId;
+  displayModelName: string;
+  providerModelId: string;
 }> {
   if (!input.conversation.length) {
     throw new Error("本集尚无提取对话，请先点击「提取本集资产」。");
   }
+
+  const selectedModel = getDesignPromptModel(
+    input.promptModelId ?? DEFAULT_DESIGN_PROMPT_MODEL_ID,
+  );
 
   const redesignCue = buildRedesignUserMessage(
     input.item.name,
@@ -86,15 +102,15 @@ export async function streamRedesignPromptInConversation(input: {
     at: new Date().toISOString(),
   });
 
-  // Same capability/model as extract — keep one continuous episode chat.
+  // Same capability as extract — keep one continuous episode chat; model id is selectable.
   const resolved = await resolveCapabilityForOutputKind("episode_asset_design");
   assertTextModality(resolved);
 
   const provider = createProviderFromResolved(
     resolved,
-    "mock-episode-asset-design",
+    selectedModel.providerModelId,
+    selectedModel.providerModelId,
   );
-  const providerModelId = resolved.profile.model || "mock-episode-asset-design";
   const systemPrompt =
     withUser.find((m) => m.role === "system")?.content ??
     "你是影视资产设计助手。";
@@ -103,7 +119,7 @@ export async function streamRedesignPromptInConversation(input: {
   for await (const ev of provider.streamText({
     systemPrompt,
     userPrompt: redesignCue,
-    providerModelId,
+    providerModelId: selectedModel.providerModelId,
     maxOutputTokens: 8192,
     enableThinking: true,
     messages: withUser.map(({ role, content }) => ({ role, content })),
@@ -134,7 +150,14 @@ export async function streamRedesignPromptInConversation(input: {
     at: new Date().toISOString(),
   });
 
-  return { text: finalText, nextConversation, redesignCue };
+  return {
+    text: finalText,
+    nextConversation,
+    redesignCue,
+    promptModelId: selectedModel.id,
+    displayModelName: selectedModel.label,
+    providerModelId: selectedModel.providerModelId,
+  };
 }
 
 /** @deprecated Prefer streamRedesignPromptInConversation for episode continuity. */
@@ -144,10 +167,14 @@ export async function streamDesignPromptText(input: {
   item: EpisodeAssetDesignItem;
   episodeText: string;
   conversation?: EpisodeDesignConversationMessage[];
+  promptModelId?: DesignPromptModelId;
 }): Promise<{
   text: string;
   nextConversation?: EpisodeDesignConversationMessage[];
   redesignCue?: string;
+  promptModelId?: DesignPromptModelId;
+  displayModelName?: string;
+  providerModelId?: string;
 }> {
   if (input.conversation && input.conversation.length > 0) {
     return streamRedesignPromptInConversation({
@@ -155,6 +182,7 @@ export async function streamDesignPromptText(input: {
       userId: input.userId,
       item: input.item,
       conversation: input.conversation,
+      promptModelId: input.promptModelId,
     });
   }
   throw new Error("本集尚无提取对话，请先点击「提取本集资产」。");

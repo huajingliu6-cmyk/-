@@ -80,6 +80,24 @@ export function findVoiceOption(
   );
 }
 
+/** Keep a persisted local selection visible before the lazy local library loads. */
+export function withSelectedLocalVoice(
+  voiceId: string | null,
+  projectVoices: VoiceOption[] = [],
+  localVoices: VoiceOption[] = [],
+): VoiceOption[] {
+  if (
+    !voiceId ||
+    !isLocalVoiceId(voiceId) ||
+    localVoices.some((voice) => voice.id === voiceId)
+  ) {
+    return localVoices;
+  }
+
+  const selected = findVoiceOption(voiceId, projectVoices, localVoices);
+  return selected ? [selected, ...localVoices] : localVoices;
+}
+
 /** 系统目录占位音色（无本地文件），视频生成阶段不可绑定真实参考音频 */
 export function isSystemCatalogVoiceId(voiceId: string | null | undefined): boolean {
   return typeof voiceId === "string" && voiceId.startsWith("voice_");

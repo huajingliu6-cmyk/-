@@ -12,6 +12,7 @@ import {
 import {
   GlassSelect,
   type GlassSelectGroup,
+  type GlassSelectOption,
 } from "@/shell/glass-select";
 import { useGenerationBusy } from "@/shell/GenerationBusyGuard";
 import { safeRandomUUID } from "@/lib/safe-random-id";
@@ -270,18 +271,47 @@ function formatMetaTime(value: string | null | undefined): string | null {
   return date.toLocaleString("zh-CN");
 }
 
+const ASSET_EXTRACTION_MODEL_OPTIONS: GlassSelectOption[] = [
+  {
+    id: "deepseek-v4-pro",
+    label: "Deepseek V4 Pro",
+  },
+];
+
+type AssetSummaryPanel = "extracted" | "library" | "generated" | null;
+
+function AssetSummaryButton({
+  label,
+  count,
+  active,
+  testId,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  testId: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`ead-summary-button${active ? " is-active" : ""}`}
+      data-testid={testId}
+      aria-expanded={active}
+      onClick={onClick}
+    >
+      <strong>{count}</strong>
+      <span>{label}</span>
+    </button>
+  );
+}
+
 function statusBadgeClass(status: EpisodeAssetDesignStatus): string {
   if (status === "confirmed") return "ead-badge is-ok";
   if (status === "stale" || status === "failed") return "ead-badge is-warn";
   if (status === "generating") return "ead-badge is-busy";
   return "ead-badge";
-}
-
-function countByStatus(
-  items: EpisodeListItem[],
-  status: EpisodeAssetDesignStatus,
-): number {
-  return items.filter((item) => item.designStatus === status).length;
 }
 
 export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
@@ -345,6 +375,12 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   const [modelKey, setModelKey] = useState(
     STORY_TEXT_MODELS[0]?.id ?? "balanced-default",
   );
+  const [assetExtractionModel, setAssetExtractionModel] = useState(
+    "deepseek-v4-pro",
+  );
+  const [assetSummaryPanel, setAssetSummaryPanel] =
+    useState<AssetSummaryPanel>(null);
+  const summaryRef = useRef<HTMLDivElement | null>(null);
   const [createDialogType, setCreateDialogType] =
     useState<EpisodeAssetDesignAssetType | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -463,27 +499,6 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     [bundle.audios],
   );
 
-  const progress = useMemo(() => {
-    const total = episodes.length;
-    const confirmed = countByStatus(episodes, "confirmed");
-    return {
-      total,
-      confirmed,
-      notStarted: countByStatus(episodes, "not_started"),
-      review: countByStatus(episodes, "review"),
-      stale: countByStatus(episodes, "stale"),
-    };
-  }, [episodes]);
-  const pendingExtractionCount = useMemo(
-    () =>
-      episodes.filter(
-        (episode) =>
-          episode.designStatus === "not_started" ||
-          episode.designStatus === "failed" ||
-          episode.designStatus === "stale",
-      ).length,
-    [episodes],
-  );
   const pendingEpisodes = useMemo(
     () =>
       episodes.filter(
@@ -539,6 +554,60 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         ? "选择剧集确认"
         : "选择剧集复核";
   const isFullScriptDesign = selectedId === SCRIPT_ASSET_DESIGN_ID;
+
+  const extractedAssets = items;
+  const ungeneratedAssets = useMemo(
+    () =>
+      items.filter(
+        (item) =>
+          item.assetType !== "audio" &&
+          !item.generatedMedia?.currentId?.trim(),
+      ),
+    [items],
+  );
+  const libraryAssets = useMemo(
+    () => items.filter((item) => isApprovedEpisodeDesignItem(item)),
+    [items],
+  );
+  const generatedAssets = useMemo(
+    () =>
+      items.filter(
+        (item) =>
+          item.assetType !== "audio" &&
+          Boolean(item.generatedMedia?.currentId?.trim()),
+      ),
+    [items],
+  );
+  const summaryItems =
+    assetSummaryPanel === "extracted"
+      ? ungeneratedAssets
+      : assetSummaryPanel === "library"
+        ? libraryAssets
+        : generatedAssets;
+  const summaryTitle =
+    assetSummaryPanel === "extracted"
+      ? "待生成图片"
+      : assetSummaryPanel === "library"
+        ? "已入库资产"
+        : "已提取资产";
+
+  useEffect(() => {
+    if (!assetSummaryPanel) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAssetSummaryPanel(null);
+    };
+    const onPointerDown = (event: MouseEvent) => {
+      if (!summaryRef.current?.contains(event.target as Node)) {
+        setAssetSummaryPanel(null);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("mousedown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, [assetSummaryPanel]);
 
   const loadList = useCallback(async () => {
     setListLoading(true);
@@ -702,7 +771,10 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
               const fixed = (await res.json()) as {
                 record?: EpisodeAssetDesignRecord;
               };
-              if (fixed.record) {
+              if (
+                fixed.record &&
+                fixed.record.revision >= revisionRef.current
+              ) {
                 setItems(fixed.record.items);
                 itemsRef.current = fixed.record.items;
                 setRevision(fixed.record.revision);
@@ -835,7 +907,9 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     return () => window.clearTimeout(timer);
   }, [loadDetail, selectedId]);
 
-    const applyRecord = useCallback((record: EpisodeAssetDesignRecord) => {
+  const applyRecord = useCallback((record: EpisodeAssetDesignRecord) => {
+    if (record.revision < revisionRef.current) return;
+
     setItems(record.items);
     itemsRef.current = record.items;
     setRevision(record.revision);
@@ -1132,7 +1206,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       const result = await streamStoryGeneration({
         projectId,
         brief: "",
-        modelKey,
+        modelKey: assetExtractionModel,
         targetChars: 20_000,
         idempotencyKey: createEpisodeAssetDesignIdempotencyKey(),
         outputKind: "script_asset_design",
@@ -1186,11 +1260,11 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   }, [
     apiRoot,
     applyRecord,
+    assetExtractionModel,
     batchExtracting,
     confirming,
     generating,
     loadDetail,
-    modelKey,
     projectId,
     saving,
   ]);
@@ -1730,50 +1804,137 @@ const updateItem = useCallback(
         <section className="ead-overview amw-panel" aria-labelledby="ead-overview-title">
           <div className="ead-overview__main">
             <div className="ead-overview__copy">
-              <span className="ead-overview__eyebrow">AI 全剧本资产提取</span>
               <div className="ead-overview__title-row">
-                <h2 id="ead-overview-title">全剧本资产提取</h2>
-                <button
-                  type="button"
-                  className="amw-btn amw-btn-primary ead-extract-all-btn"
-                  disabled={
-                    generating ||
-                    batchExtracting ||
-                    saving ||
-                    confirming
-                  }
-                  onClick={() => void handleExtractAll()}
-                  data-testid="ead-extract-all"
-                >
-                  {batchExtracting
-                    ? "提取中…"
-                    : items.length > 0 && isFullScriptDesign
-                      ? "重新提取"
-                      : "一键提取"}
-                </button>
+                <h2 id="ead-overview-title">资产提取</h2>
+
+                <div className="ead-overview__extract-actions">
+                  <button
+                    type="button"
+                    className="amw-btn amw-btn-primary ead-extract-all-btn"
+                    disabled={
+                      generating ||
+                      batchExtracting ||
+                      saving ||
+                      confirming
+                    }
+                    onClick={() => void handleExtractAll()}
+                    data-testid="ead-extract-all"
+                  >
+                    {batchExtracting ? "提取中…" : "一键提取基本资产"}
+                  </button>
+
+                  <div
+                    className="ead-extract-model-select"
+                    data-testid="ead-extract-model"
+                  >
+                    <GlassSelect
+                      label="提取模型"
+                      hideLabel
+                      value={assetExtractionModel}
+                      options={ASSET_EXTRACTION_MODEL_OPTIONS}
+                      disabled={
+                        generating || batchExtracting || saving || confirming
+                      }
+                      menuPortal
+                      menuSideOffset={6}
+                      menuCollisionPadding={12}
+                      onChange={setAssetExtractionModel}
+                    />
+                  </div>
+                </div>
               </div>
-              <p>系统将扫描完整剧本，提取角色、场景与道具。</p>
+            </div>
+
+            <div className="ead-overview__summary" ref={summaryRef}>
+              <div className="ead-overview__summary-actions">
+                <AssetSummaryButton
+                  label="提取到的资产"
+                  count={extractedAssets.length}
+                  active={assetSummaryPanel === "extracted"}
+                  testId="ead-summary-extracted"
+                  onClick={() =>
+                    setAssetSummaryPanel((prev) =>
+                      prev === "extracted" ? null : "extracted",
+                    )
+                  }
+                />
+                <AssetSummaryButton
+                  label="已入库"
+                  count={libraryAssets.length}
+                  active={assetSummaryPanel === "library"}
+                  testId="ead-summary-library"
+                  onClick={() =>
+                    setAssetSummaryPanel((prev) =>
+                      prev === "library" ? null : "library",
+                    )
+                  }
+                />
+                <AssetSummaryButton
+                  label="已提取"
+                  count={generatedAssets.length}
+                  active={assetSummaryPanel === "generated"}
+                  testId="ead-summary-generated"
+                  onClick={() =>
+                    setAssetSummaryPanel((prev) =>
+                      prev === "generated" ? null : "generated",
+                    )
+                  }
+                />
+              </div>
+
+              {assetSummaryPanel ? (
+                <div
+                  className="ead-summary-popover"
+                  role="dialog"
+                  aria-label="资产统计"
+                  data-testid="ead-summary-popover"
+                >
+                  <div className="ead-summary-popover__head">
+                    <strong>{summaryTitle}</strong>
+                    <button
+                      type="button"
+                      className="ead-summary-popover__close"
+                      aria-label="关闭"
+                      title="关闭"
+                      onClick={() => setAssetSummaryPanel(null)}
+                    >
+                      <X size={15} aria-hidden />
+                    </button>
+                  </div>
+
+                  <div className="ead-summary-popover__list">
+                    {summaryItems.length === 0 ? (
+                      <p className="ead-muted">暂无资产</p>
+                    ) : (
+                      summaryItems.map((item) => {
+                        const disabled = assetSummaryPanel === "library";
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className="ead-summary-popover__item"
+                            disabled={disabled}
+                            onClick={() => {
+                              if (disabled) return;
+                              setDesignModalItem(item);
+                              setAssetSummaryPanel(null);
+                            }}
+                          >
+                            {item.name}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
-          <div className="ead-progress" aria-label="全剧本资产状态">
-            <span>
-              <strong>{isFullScriptDesign ? items.length : fullScriptAssetCount}</strong>
-              全剧本资产
-            </span>
-            <span>
-              <strong>{progress.review}</strong>
-              待复核
-            </span>
-            <span>
-              <strong>{pendingExtractionCount}</strong>
-              可补提取
-            </span>
-          </div>
+
           {fullScriptPending && !isFullScriptDesign ? (
             <div className="ead-full-script-pending" data-testid="ead-full-script-pending">
               <div>
-                <strong>全剧本资产尚未提取</strong>
-                <p>建议先完成全剧本提取；按集补提取仅用于遗漏修复与复核。</p>
+                <strong>尚未提取资产</strong>
               </div>
               <button
                 type="button"
@@ -1785,6 +1946,7 @@ const updateItem = useCallback(
               </button>
             </div>
           ) : null}
+
           <div className="ead-episode-tool">
             <div className="ead-episode-tool__copy">
               <strong>
@@ -1819,6 +1981,9 @@ const updateItem = useCallback(
                   }
                   placeholder={episodeSelectPlaceholder}
                   groups={episodeSelectGroups}
+                  menuPortal
+                  menuSideOffset={6}
+                  menuCollisionPadding={12}
                   onChange={(id) => setSelectedId(id || SCRIPT_ASSET_DESIGN_ID)}
                 />
               </div>
@@ -1834,11 +1999,7 @@ const updateItem = useCallback(
             <div className="amw-empty">加载资产设计…</div>
           ) : isAwaitingFullScriptExtraction ? (
             <div className="ead-pending-assets" data-testid="ead-pending-assets">
-              <span className="ead-overview__eyebrow">待提取资产</span>
-              <h2>尚未完成全剧本一键提取</h2>
-              <p>
-                「全剧本资产」只统计上方一键提取的结果。按集提取或已进资产库的条目不会出现在这里，并不代表资产丢失。
-              </p>
+              <h2>尚未提取资产</h2>
               {extractedEpisodes.length > 0 ? (
                 <div className="ead-pending-assets__recover">
                   <p>
@@ -1862,9 +2023,7 @@ const updateItem = useCallback(
                     查看第{extractedEpisodes[0]?.episodeNumber}集提取结果
                   </button>
                 </div>
-              ) : (
-                <p>点击上方「一键提取」，系统将识别角色、场景与道具。</p>
-              )}
+              ) : null}
             </div>
           ) : (
             <div className="ead-detail__inner amw-detail">
@@ -2243,8 +2402,6 @@ const updateItem = useCallback(
         projectId={projectId}
         episodeId={selectedId ?? ""}
         surface={surface}
-        projectVoices={projectVoices}
-        audios={bundle.audios}
         isGeneratingAsset={
           designModalItem
             ? generatingAssetIds.has(designModalItem.id)
@@ -2269,7 +2426,6 @@ const updateItem = useCallback(
           });
         }}
         onClose={() => setDesignModalItem(null)}
-        onBindMediaVoice={bindMediaVoice}
         onItemPatched={(itemId, incomingItem) => {
           setItems((prev) => {
             const next = prev.map((row) =>
@@ -2476,30 +2632,22 @@ function DesignItemCard({
       ? getDesignMediaVoiceBinding(item, currentMediaId)
       : null;
 
-  useEffect(() => {
-    if (
-      !voiceDraft ||
-      voiceDraft.mediaId !== currentMediaId ||
-      !persistedVoice ||
-      !isMediaVoiceBound(persistedVoice) ||
-      persistedVoice.voiceId !== voiceDraft.voiceId
-    ) {
-      return;
-    }
-    setVoiceDraft(null);
-  }, [
-    currentMediaId,
-    persistedVoice?.voiceBound,
-    persistedVoice?.voiceId,
-    voiceDraft,
-  ]);
+  const pendingVoiceDraft =
+    voiceDraft?.mediaId === currentMediaId &&
+    !(
+      persistedVoice &&
+      isMediaVoiceBound(persistedVoice) &&
+      persistedVoice.voiceId === voiceDraft.voiceId
+    )
+      ? voiceDraft
+      : null;
 
   const mediaVoice =
     item.assetType === "character"
-      ? voiceDraft?.mediaId === currentMediaId
+      ? pendingVoiceDraft
         ? {
-            voiceId: voiceDraft.voiceId,
-            voiceName: voiceDraft.voiceName,
+            voiceId: pendingVoiceDraft.voiceId,
+            voiceName: pendingVoiceDraft.voiceName,
             voiceBound: false,
           }
         : persistedVoice

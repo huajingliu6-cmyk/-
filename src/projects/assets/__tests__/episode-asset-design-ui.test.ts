@@ -55,14 +55,36 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain("<pre");
   });
 
-  it("uses full-width extraction-first layout contract", () => {
-    expect(workspace).toContain("AI 全剧本资产提取");
-    expect(workspace).toContain("全剧本资产提取");
-    expect(workspace).toContain("系统将扫描完整剧本");
+  it("uses compact extraction-first overview with GlassSelect model and summary actions", () => {
+    expect(workspace).not.toContain("AI 全剧本资产提取");
+    expect(workspace).not.toContain("系统将扫描完整剧本");
     expect(workspace).not.toContain("一次识别完整剧本中的全部资产");
     expect(workspace).not.toContain("大模型将自动");
-    expect(workspace).toContain("ead-overview");
+    expect(workspace).toContain(">资产提取</h2>");
+    expect(workspace).toContain("一键提取基本资产");
+    expect(workspace).toContain("ASSET_EXTRACTION_MODEL_OPTIONS");
+    expect(workspace).toContain("deepseek-v4-pro");
+    expect(workspace).toContain("Deepseek V4 Pro");
+    expect(workspace).toContain("assetExtractionModel");
+    expect(workspace).toContain("modelKey: assetExtractionModel");
+    expect(workspace).toContain('data-testid="ead-extract-model"');
+    expect(workspace).toContain('testId="ead-summary-extracted"');
+    expect(workspace).toContain('testId="ead-summary-library"');
+    expect(workspace).toContain('testId="ead-summary-generated"');
+    expect(workspace).toContain("data-testid={testId}");
+    expect(workspace).toContain("ead-summary-popover");
+    expect(workspace).toContain("setDesignModalItem(item)");
+    expect(workspace).toContain('assetSummaryPanel === "library"');
+    expect(workspace).toContain("disabled={disabled}");
+    expect(workspace).toContain("ungeneratedAssets");
+    expect(workspace).toContain("generatedAssets");
+    expect(workspace).toContain("libraryAssets");
+    expect(workspace).not.toMatch(
+      /ead-summary-popover[\s\S]{0,800}<img/,
+    );    expect(workspace).toContain("ead-overview");
     expect(workspace).toContain("ead-episode-select");
+    expect(css).toContain("width: min(140px, 100%)");
+    expect(css).toContain("flex: 0 0 140px");
     expect(css).not.toContain("clamp(230px, 21vw, 280px)");
     expect(css).toContain("minmax(0, 1fr)");
     expect(css).toMatch(/\.ead-layout[\s\S]*grid-template-columns/);
@@ -96,6 +118,8 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain("episodeSelectGroups");
     expect(workspace).toContain("ead-episode-tool__eyebrow");
     expect(css).toContain("grid-template-columns: auto minmax(240px, 1fr)");
+    expect(css).toContain("width: min(140px, 100%)");
+    expect(workspace).toContain("menuPortal");
     expect(workspace).toContain("ead-back-full-script");
     expect(workspace).toContain("返回全剧本资产");
     expect(workspace).not.toContain("ead-ep-list");
@@ -105,12 +129,12 @@ describe("Batch G1-UI episode asset design chrome", () => {
   it("uses the original unsplit script as the default one-call extraction flow", () => {
     expect(workspace).toContain('outputKind: "script_asset_design"');
     expect(workspace).toContain("SCRIPT_ASSET_DESIGN_ID");
-    expect(workspace).toContain("一键提取");
+    expect(workspace).toContain("一键提取基本资产");
     expect(workspace).toContain("fullScriptAssetCount");
     expect(workspace).toContain("ead-layout${isAwaitingFullScriptExtraction");
-    expect(workspace).toContain("待提取资产");
-    expect(workspace).toContain("尚未完成全剧本一键提取");
-    expect(workspace).toContain("并不代表资产丢失");
+    expect(workspace).toContain("尚未提取资产");
+    expect(workspace).not.toContain("尚未完成全剧本一键提取");
+    expect(workspace).not.toContain("并不代表资产丢失");
     expect(workspace).toContain('data-testid="ead-pending-assets"');
     expect(workspace).toContain('data-testid="ead-open-extracted-episode"');
     expect(workspace).toContain("extractedEpisodes");

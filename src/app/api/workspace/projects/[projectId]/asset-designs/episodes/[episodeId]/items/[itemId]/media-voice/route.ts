@@ -6,7 +6,7 @@ import { updateDesignMediaVoice } from "@/projects/assets/episode-design/update-
 import { ensureWorkspaceInitialized } from "@/projects/workspace-sync/ensure-workspace-initialized";
 import { getWorkspaceEpisodeAssetDesignDetail } from "@/projects/workspace-sync/workspace-episode-design-api";
 import {
-  loadWorkspaceLocalEpisodeDesigns,
+  loadWorkspaceLocalEpisodeDesignsDocument,
   saveWorkspaceLocalEpisodeDesigns,
 } from "@/projects/workspace-sync/store";
 import { guardWorkspaceRemoteData } from "@/projects/workspace-sync/route-remote-guard";
@@ -81,9 +81,20 @@ async function patch(request: Request, context: RouteContext) {
       );
     }
 
+    const storeDocument = await loadWorkspaceLocalEpisodeDesignsDocument(
+      projectId,
+    );
+    const latest = storeDocument.value.records.find(
+      (record) => record.episodeId === episodeId,
+    );
+    const baseRecord =
+      latest && latest.revision >= detail.record.revision
+        ? latest
+        : detail.record;
+
     let nextRecord;
     try {
-      nextRecord = updateDesignMediaVoice(detail.record, {
+      nextRecord = updateDesignMediaVoice(baseRecord, {
         itemId,
         mediaId,
         voiceId,
@@ -110,28 +121,13 @@ async function patch(request: Request, context: RouteContext) {
       return NextResponse.json({ error: message, code }, { status });
     }
 
-    const store = await loadWorkspaceLocalEpisodeDesigns(projectId);
-    const latest = store.records.find(
-      (record) => record.episodeId === episodeId,
-    );
-    if (latest && latest.revision > detail.record.revision) {
-      try {
-        nextRecord = updateDesignMediaVoice(latest, {
-          itemId,
-          mediaId,
-          voiceId,
-          voiceName,
-          voiceBound,
-        });
-      } catch (error) {
-        lastError = error;
-        continue;
-      }
-    }
-
-    const nextStore = upsertEpisodeRecord(store, nextRecord);
+    const nextStore = upsertEpisodeRecord(storeDocument.value, nextRecord);
     try {
-      await saveWorkspaceLocalEpisodeDesigns(nextStore);
+      await saveWorkspaceLocalEpisodeDesigns(nextStore, {
+        ...(storeDocument.remoteRevision !== null
+          ? { expectedRemoteRevision: storeDocument.remoteRevision }
+          : {}),
+      });
       const item = nextRecord.items.find(
         (candidate) => candidate.id === itemId,
       );

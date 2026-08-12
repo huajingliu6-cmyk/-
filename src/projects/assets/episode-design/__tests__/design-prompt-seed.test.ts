@@ -73,9 +73,21 @@ describe("DesignAssetModal seeds extraction text", () => {
     expect(modal).toContain("重新生成提示词");
     expect(modal).toContain("输入素材要求");
     expect(modal).toContain("userRequirement");
+    expect(modal).toContain("promptModelId");
+    expect(modal).toContain("design-prompt-actions");
     expect(modal).toContain("design-regenerate-requirement-input");
     expect(modal).not.toContain("近景头像＋三视图");
     expect(modal).not.toMatch(/needsAuto/);
     expect(modal).not.toContain("generate-design-prompt");
+
+    const textareaIdx = modal.indexOf('data-testid="design-prompt-textarea"');
+    const regenerateIdx = modal.indexOf('data-testid="design-regenerate-prompt"');
+    const footIdx = modal.indexOf('className="ead-modal__foot"');
+    expect(textareaIdx).toBeGreaterThan(-1);
+    expect(regenerateIdx).toBeGreaterThan(textareaIdx);
+    expect(regenerateIdx).toBeLessThan(footIdx);
+    expect(modal.match(/data-testid="design-regenerate-prompt"/g)).toHaveLength(
+      1,
+    );
   });
 });

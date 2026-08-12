@@ -437,17 +437,25 @@ export async function* runTextGenerationStream(
   try {
     const resolved = await resolveCapabilityForOutputKind(input.outputKind);
     profileSlotId = resolved.profile.id;
-    displayModelName = resolved.profile.model
-      ? `${resolved.profile.label}（${resolved.profile.model}）`
-      : resolved.profile.label;
-    providerModelId = resolved.profile.model || model.providerModelId;
+    const preferSelectedProviderModel =
+      model.publicKey === "deepseek-v4-pro" ||
+      model.providerModelId.trim().toLowerCase() === "deepseek-v4-pro";
+    const effectiveProviderModelId = preferSelectedProviderModel
+      ? model.providerModelId
+      : resolved.profile.model || model.providerModelId;
+    displayModelName = preferSelectedProviderModel
+      ? model.displayName
+      : resolved.profile.model
+        ? `${resolved.profile.label}（${resolved.profile.model}）`
+        : resolved.profile.label;
+    providerModelId = effectiveProviderModelId;
     if (resolved.profile.provider === "mock") {
       resolvedProvider = new MockTextProvider();
     } else if (resolved.profile.provider === "http" && resolved.secret) {
       resolvedProvider = new HttpCompatibleTextProvider(
         resolved.secret,
         resolved.profile.apiUrl,
-        resolved.profile.model || model.providerModelId,
+        effectiveProviderModelId,
       );
     } else {
       yield sseEncode({

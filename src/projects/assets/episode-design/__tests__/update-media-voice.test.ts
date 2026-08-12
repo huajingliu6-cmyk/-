@@ -218,7 +218,7 @@ describe("atomic media-voice route contracts", () => {
     expect(workspace).toContain("updateDesignMediaVoice");
   });
 
-  it("UI selects voice locally and binds via PATCH only", async () => {
+  it("UI binds voice via PATCH on design cards; design modal has no voice controls", async () => {
     const { readFileSync } = await import("fs");
     const { join } = await import("path");
     const root = process.cwd();
@@ -230,9 +230,13 @@ describe("atomic media-voice route contracts", () => {
       join(root, "src/projects/assets/EpisodeAssetDesignWorkspace.tsx"),
       "utf-8",
     );
-    expect(modal).toContain("voiceDraft");
-    expect(modal).toContain("onBindMediaVoice");
+    expect(modal).not.toContain("VoiceSelector");
+    expect(modal).not.toContain("onBindMediaVoice");
+    expect(modal).not.toContain('data-testid="design-media-voice"');
+    expect(modal).not.toContain("voiceDraft");
     expect(modal).not.toContain("patchCharacterVoice");
+    expect(modal).not.toContain("绑定音色");
+    expect(modal).not.toContain("本图音色");
     expect(workspace).toContain("bindMediaVoice");
     expect(workspace).toContain("/media-voice");
     expect(workspace).toContain('method: "PATCH"');

@@ -44,6 +44,19 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(modal).toContain("design-download");
     expect(modal).toContain("DesignImageLightbox");
     expect(modal).toContain("点击放大");
+    expect(modal).toContain("GlassSelect");
+    expect(modal).not.toContain(
+      'className="ead-generation-option__select"',
+    );
+    expect(modal).toContain("design-prompt-actions");
+    expect(modal).toContain("design-prompt-model");
+    expect(modal).toContain("promptModelId");
+    expect(modal.match(/data-testid="design-regenerate-prompt"/g)).toHaveLength(
+      1,
+    );
+    const footIdx = modal.indexOf('className="ead-modal__foot"');
+    expect(footIdx).toBeGreaterThan(-1);
+    expect(modal.slice(footIdx)).not.toContain("design-regenerate-prompt");
   });
 
   it("includes card and modal layout styles", () => {
