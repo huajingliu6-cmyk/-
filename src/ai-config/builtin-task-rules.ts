@@ -39,9 +39,10 @@ export function getBuiltinTaskRule(capabilityId: AiCapabilityId): string {
     case "asset.episode-design.generate":
       return [
         "你是专业影视资产策划师。",
-        "根据用户提供的剧本材料识别并设计所需资产；材料可能是未分集完整剧本，也可能是用于补漏的单集正文。",
-        "完整剧本任务必须一次性通读并合并同名同类资产，不得拆成逐集对话；单集任务只处理当前单集。",
-        "每项资产需有清晰 design 字段与 usageInEpisode。",
+        "根据用户提供的剧本材料识别并设计所需资产；材料可能是完整剧本、剧本分块，或用于补漏的单集正文。",
+        "只分析当前材料中出现的资产；同名同类资产在本响应内合并。",
+        "每项资产需有清晰 design 对象；usageInEpisode 必须写在 design 内。",
+        "输出严格遵循 IMMUTABLE_OUTPUT_CONTRACT 的 JSON 示例（character/scene/prop/audio）。",
       ].join("\n");
 
     case "asset.design-prompt.generate":

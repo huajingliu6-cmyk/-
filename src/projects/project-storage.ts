@@ -12,6 +12,7 @@ import type {
   ProjectPublic,
   ProjectRecord,
 } from "@/projects/types";
+import { parseProjectVisualStyleId } from "@/projects/project-visual-style";
 import { LEGACY_FILE_REPOSITORY_NOTE } from "@/persistence/legacy/LegacyFileRepository";
 import { resolveAppDataPath } from "@/persistence/data-root";
 import {
@@ -53,6 +54,7 @@ function toPublic(record: ProjectRecord): ProjectPublic {
     projectMode: record.projectMode,
     status: record.status,
     highlights: record.highlights,
+    visualStyle: record.visualStyle,
     passwordEnabled: record.passwordEnabled,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -61,7 +63,7 @@ function toPublic(record: ProjectRecord): ProjectPublic {
 
 function normalizeRecord(raw: unknown): ProjectRecord | null {
   if (!raw || typeof raw !== "object") return null;
-  const r = raw as Partial<ProjectRecord>;
+  const r = raw as Partial<ProjectRecord> & Record<string, unknown>;
   if (
     typeof r.projectId !== "string" ||
     typeof r.name !== "string" ||
@@ -80,6 +82,7 @@ function normalizeRecord(raw: unknown): ProjectRecord | null {
     projectMode: r.projectMode === "full-stack" ? "full-stack" : "canvas",
     status: "draft",
     highlights: typeof r.highlights === "string" ? r.highlights : "",
+    visualStyle: parseProjectVisualStyleId(r.visualStyle),
     passwordEnabled: Boolean(r.passwordEnabled),
     passwordHash:
       typeof r.passwordHash === "string" ? r.passwordHash : null,
@@ -207,6 +210,7 @@ export async function createProjectRecord(
     projectMode: input.projectMode,
     status: "draft",
     highlights: (input.highlights ?? "").trim(),
+    visualStyle: input.visualStyle,
     passwordEnabled: input.passwordEnabled,
     passwordHash,
     passwordSalt,
@@ -249,6 +253,26 @@ export async function updateProjectHighlights(
   const next: ProjectRecord = {
     ...record,
     highlights: highlights.trim(),
+    updatedAt: new Date().toISOString(),
+  };
+  const target = metaFilePath(projectId);
+  const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(temp, JSON.stringify(next, null, 2), "utf-8");
+  await fs.rename(temp, target);
+  return toPublic(next);
+}
+
+export async function updateProjectVisualStyle(
+  projectId: string,
+  visualStyle: import("@/projects/project-visual-style").ProjectVisualStyleId,
+): Promise<ProjectPublic> {
+  const record = await getProjectRecord(projectId);
+  if (!record) {
+    throw new ProjectNotFoundError();
+  }
+  const next: ProjectRecord = {
+    ...record,
+    visualStyle,
     updatedAt: new Date().toISOString(),
   };
   const target = metaFilePath(projectId);

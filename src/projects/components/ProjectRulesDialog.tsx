@@ -4,6 +4,13 @@ import { useEffect, useId, useState } from "react";
 import { X } from "lucide-react";
 import type { ProjectPublic } from "@/projects/types";
 import { PROJECT_HIGHLIGHTS_MAX_LENGTH } from "@/projects/validate-create-project";
+import {
+  PROJECT_VISUAL_STYLES,
+  isProjectVisualStyleId,
+  labelForProjectVisualStyle,
+  type ProjectVisualStyleId,
+} from "@/projects/project-visual-style";
+import { GlassSelect } from "@/shell/glass-select";
 
 type Props = {
   open: boolean;
@@ -22,6 +29,12 @@ export function ProjectRulesDialog({
 }: Props) {
   const highlightsId = useId();
   const [highlights, setHighlights] = useState("");
+  const [visualStyle, setVisualStyle] = useState<ProjectVisualStyleId | null>(
+    null,
+  );
+  const [initialVisualStyle, setInitialVisualStyle] =
+    useState<ProjectVisualStyleId | null>(null);
+  const [initialHighlights, setInitialHighlights] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -32,6 +45,9 @@ export function ProjectRulesDialog({
     const timer = window.setTimeout(() => {
       if (cancelled) return;
       setHighlights("");
+      setVisualStyle(null);
+      setInitialVisualStyle(null);
+      setInitialHighlights("");
       setError("");
       setLoading(true);
       void fetch(`/api/projects/${encodeURIComponent(projectId)}`, {
@@ -44,7 +60,16 @@ export function ProjectRulesDialog({
             error?: string;
           };
           if (!response.ok) throw new Error(payload.error ?? "加载项目规则失败");
-          if (!cancelled) setHighlights(payload.project?.highlights ?? "");
+          if (!cancelled) {
+            const nextHighlights = payload.project?.highlights ?? "";
+            const nextStyle = isProjectVisualStyleId(payload.project?.visualStyle)
+              ? payload.project!.visualStyle
+              : null;
+            setHighlights(nextHighlights);
+            setInitialHighlights(nextHighlights);
+            setVisualStyle(nextStyle);
+            setInitialVisualStyle(nextStyle);
+          }
         })
         .catch((reason: unknown) => {
           if (!cancelled) {
@@ -74,6 +99,10 @@ export function ProjectRulesDialog({
 
   const save = async () => {
     if (saving || loading) return;
+    if (!visualStyle) {
+      setError("请选择项目生成风格");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -83,7 +112,7 @@ export function ProjectRulesDialog({
           method: "PATCH",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ highlights }),
+          body: JSON.stringify({ highlights, visualStyle }),
         },
       );
       const payload = (await response.json()) as {
@@ -96,6 +125,8 @@ export function ProjectRulesDialog({
       onSaved(payload.project);
       onClose();
     } catch (reason: unknown) {
+      setVisualStyle(initialVisualStyle);
+      setHighlights(initialHighlights);
       setError(reason instanceof Error ? reason.message : "保存项目规则失败");
     } finally {
       setSaving(false);
@@ -133,9 +164,40 @@ export function ProjectRulesDialog({
             <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
+
+        <label className="wb-rules-label" htmlFor="wb-rules-visual-style">
+          生成风格
+          <span>
+            {visualStyle
+              ? `当前：${labelForProjectVisualStyle(visualStyle)}`
+              : "旧项目可在此补选风格"}
+          </span>
+        </label>
+        <div data-testid="project-rules-visual-style">
+          <GlassSelect
+            id="wb-rules-visual-style"
+            label="生成风格"
+            hideLabel
+            menuPortal
+            placeholder="请选择项目生成风格"
+            value={visualStyle ?? ""}
+            options={PROJECT_VISUAL_STYLES.map((style) => ({
+              id: style.id,
+              label: style.label,
+            }))}
+            onChange={(id) =>
+              setVisualStyle(isProjectVisualStyleId(id) ? id : null)
+            }
+            disabled={loading || saving}
+          />
+        </div>
+        <p className="wb-rules-hint" data-testid="project-rules-style-note">
+          修改后仅影响后续生成，已生成的资产和分镜不会自动重做。
+        </p>
+
         <label className="wb-rules-label" htmlFor={highlightsId}>
           项目要点
-          <span>故事方向、人物关系、视觉风格、制作要求等</span>
+          <span>故事方向、人物关系、制作要求等</span>
         </label>
         <textarea
           id={highlightsId}

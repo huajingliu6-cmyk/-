@@ -10,11 +10,13 @@ import {
   ProjectNotFoundError,
   updateProjectHighlights,
   updateProjectName,
+  updateProjectVisualStyle,
 } from "@/projects/project-access";
 import {
   PROJECT_HIGHLIGHTS_MAX_LENGTH,
   PROJECT_NAME_MAX_LENGTH,
 } from "@/projects/validate-create-project";
+import { isProjectVisualStyleId } from "@/projects/project-visual-style";
 import { isRemoteDataServiceError } from "@/persistence/remote-data-client";
 
 type RouteContext = {
@@ -30,6 +32,7 @@ function toProjectJson(record: {
   projectMode: string;
   status: string;
   highlights: string;
+  visualStyle: string | null;
   passwordEnabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -43,6 +46,7 @@ function toProjectJson(record: {
     projectMode: record.projectMode,
     status: record.status,
     highlights: record.highlights,
+    visualStyle: record.visualStyle,
     passwordEnabled: record.passwordEnabled,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -140,9 +144,20 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   const hasName = typeof raw.name === "string";
   const hasHighlights = typeof raw.highlights === "string";
-  if (!hasName && !hasHighlights) {
+  const hasVisualStyle = "visualStyle" in raw;
+  if (
+    "stylePrompt" in raw ||
+    "promptDirective" in raw ||
+    "styleDirective" in raw
+  ) {
     return NextResponse.json(
-      { error: "请提供 name 或 highlights" },
+      { error: "不允许客户端覆盖项目视觉风格指令" },
+      { status: 400 },
+    );
+  }
+  if (!hasName && !hasHighlights && !hasVisualStyle) {
+    return NextResponse.json(
+      { error: "请提供 name、highlights 或 visualStyle" },
       { status: 400 },
     );
   }
@@ -163,6 +178,17 @@ export async function PATCH(request: Request, context: RouteContext) {
       }
       updated = toProjectJson(
         await updateProjectHighlights(projectId, highlights),
+      );
+    }
+    if (hasVisualStyle) {
+      if (!isProjectVisualStyleId(raw.visualStyle)) {
+        return NextResponse.json(
+          { error: "请选择项目生成风格" },
+          { status: 400 },
+        );
+      }
+      updated = toProjectJson(
+        await updateProjectVisualStyle(projectId, raw.visualStyle),
       );
     }
     return NextResponse.json({ project: updated });

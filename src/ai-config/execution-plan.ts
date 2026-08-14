@@ -24,6 +24,11 @@ import {
   getEffectivePublishedRule,
   type EffectivePublishedRule,
 } from "@/ai-config/task-rules-store";
+import {
+  AI_TASK_RULE_CONTRACT_CONFLICT_USER_MESSAGE,
+  findTaskRuleOutputContractConflict,
+} from "@/ai-config/task-rule-contract-guard";
+import { migrateMisboundEpisodeDesignTaskRules } from "@/ai-config/migrate-misbound-episode-design-rules";
 import { toPublicConfig } from "@/auth/api-config";
 import { listConnectionsPublic } from "@/ai-config/model-connections";
 
@@ -136,6 +141,17 @@ export async function resolveAiExecutionPlan(
     throwConfig("AI_MODEL_SECRET_MISSING");
   }
 
+  if (input.capabilityId === "asset.episode-design.generate") {
+    try {
+      await migrateMisboundEpisodeDesignTaskRules();
+    } catch (err) {
+      console.warn(
+        "[ai-task-rule-migration] episode-design repair failed",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
   let taskRule: EffectivePublishedRule;
   try {
     taskRule = await getEffectivePublishedRule(input.capabilityId);
@@ -144,6 +160,30 @@ export async function resolveAiExecutionPlan(
       throw err;
     }
     throwConfig("AI_TASK_RULE_CONFIG_INVALID");
+  }
+
+  const contractConflict = findTaskRuleOutputContractConflict(
+    input.capabilityId,
+    taskRule.content,
+  );
+  if (contractConflict) {
+    console.warn(
+      JSON.stringify({
+        event: "AI_TASK_RULE_CONTRACT_CONFLICT",
+        capabilityId: input.capabilityId,
+        bindingProfileSlotId: binding.profileSlotId,
+        taskRuleSource: taskRule.source,
+        taskRuleId: `${input.capabilityId}:${taskRule.version ?? "builtin"}`,
+        taskRuleVersion: taskRule.version,
+        taskRuleHash: taskRule.contentHash.slice(0, 16),
+        generationId: null,
+        conflictPatterns: contractConflict.patterns,
+      }),
+    );
+    throw new AiConfigError(
+      "AI_TASK_RULE_CONTRACT_CONFLICT",
+      AI_TASK_RULE_CONTRACT_CONFLICT_USER_MESSAGE,
+    );
   }
 
   const systemPolicy = buildPlatformSystemPolicy(input.capabilityId);

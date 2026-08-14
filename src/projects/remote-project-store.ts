@@ -10,6 +10,7 @@ import type {
   ProjectPublic,
   ProjectRecord,
 } from "@/projects/types";
+import { parseProjectVisualStyleId } from "@/projects/project-visual-style";
 import type { WorkflowProjectSummary } from "@/workflow/lib/workflow-storage";
 
 type ProjectListResponse = {
@@ -20,6 +21,28 @@ type ProjectListResponse = {
 type ProjectResponse<T> = {
   project: T;
 };
+
+function normalizeRemoteProjectRecord(
+  record: ProjectRecord | null | undefined,
+): ProjectRecord | null {
+  if (!record) return null;
+  return {
+    ...record,
+    highlights: typeof record.highlights === "string" ? record.highlights : "",
+    visualStyle: parseProjectVisualStyleId(record.visualStyle),
+  };
+}
+
+function normalizeRemoteProjectPublic(
+  project: ProjectPublic | null | undefined,
+): ProjectPublic | null {
+  if (!project) return null;
+  return {
+    ...project,
+    highlights: typeof project.highlights === "string" ? project.highlights : "",
+    visualStyle: parseProjectVisualStyleId(project.visualStyle),
+  };
+}
 
 async function projectRequest<T>(
   path: string,
@@ -41,9 +64,10 @@ async function projectRequest<T>(
 
 export async function listProjectRecordsRemote(): Promise<ProjectRecord[]> {
   const result = await projectRequest<ProjectListResponse>("/v1/projects");
-  return [...(result?.projects ?? [])].sort((left, right) =>
-    right.updatedAt.localeCompare(left.updatedAt),
-  );
+  return [...(result?.projects ?? [])]
+    .map((project) => normalizeRemoteProjectRecord(project)!)
+    .filter(Boolean)
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
 export async function listProjectSummariesRemote(): Promise<
@@ -60,8 +84,9 @@ export async function listProjectSummariesRemote(): Promise<
       revision,
       nodeCount: 0,
       videoShotCount: 0,
-      status: "draft",
+      status: "draft" as const,
       generationProgress: null,
+      visualStyle: parseProjectVisualStyleId(project.visualStyle),
     }));
 }
 
@@ -71,7 +96,7 @@ export async function getProjectRecordRemote(
   const result = await projectRequest<ProjectResponse<ProjectRecord>>(
     `/v1/projects/${encodeURIComponent(projectId)}`,
   );
-  return result?.project ?? null;
+  return normalizeRemoteProjectRecord(result?.project);
 }
 
 export async function getProjectPublicRemote(
@@ -88,6 +113,7 @@ export async function getProjectPublicRemote(
     projectMode: record.projectMode,
     status: record.status,
     highlights: record.highlights,
+    visualStyle: record.visualStyle ?? null,
     passwordEnabled: record.passwordEnabled,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -102,7 +128,7 @@ export async function findProjectByIdempotencyRemote(
     `/v1/projects/by-idempotency/${encodeURIComponent(idempotencyKey)}`,
     { headers: { "x-actor-id": ownerId } },
   );
-  return result?.project ?? null;
+  return normalizeRemoteProjectPublic(result?.project);
 }
 
 export async function createProjectRecordRemote(
@@ -121,7 +147,7 @@ export async function createProjectRecordRemote(
     },
   );
   if (!result) throw new Error("REMOTE_PROJECT_CREATE_EMPTY");
-  return result.project;
+  return normalizeRemoteProjectPublic(result.project)!;
 }
 
 export async function updateProjectHighlightsRemote(
@@ -137,7 +163,23 @@ export async function updateProjectHighlightsRemote(
     },
   );
   if (!result) throw new ProjectNotFoundError();
-  return result.project;
+  return normalizeRemoteProjectPublic(result.project)!;
+}
+
+export async function updateProjectVisualStyleRemote(
+  projectId: string,
+  visualStyle: import("@/projects/project-visual-style").ProjectVisualStyleId,
+): Promise<ProjectPublic> {
+  const result = await projectRequest<ProjectResponse<ProjectPublic>>(
+    `/v1/projects/${encodeURIComponent(projectId)}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ visualStyle }),
+    },
+  );
+  if (!result) throw new ProjectNotFoundError();
+  return normalizeRemoteProjectPublic(result.project)!;
 }
 
 export async function updateProjectNameRemote(
@@ -153,7 +195,7 @@ export async function updateProjectNameRemote(
     },
   );
   if (!result) throw new ProjectNotFoundError();
-  return result.project;
+  return normalizeRemoteProjectPublic(result.project)!;
 }
 
 export async function updateProjectOwnerIdRemote(
@@ -169,7 +211,7 @@ export async function updateProjectOwnerIdRemote(
     },
   );
   if (!result) throw new ProjectNotFoundError();
-  return result.project;
+  return normalizeRemoteProjectPublic(result.project)!;
 }
 
 export async function deleteProjectRecordRemote(

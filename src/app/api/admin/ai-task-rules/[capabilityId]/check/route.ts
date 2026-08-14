@@ -28,7 +28,7 @@ export async function POST(request: Request, context: RouteContext) {
       const record = await getRuleRecord(capabilityId);
       content = record.draft?.content ?? "";
     }
-    const result = checkRule(content);
+    const result = checkRule(content, capabilityId);
     return NextResponse.json(result);
   } catch (err) {
     return aiConfigErrorResponse(err);

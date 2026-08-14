@@ -107,6 +107,7 @@ describe("GET/POST /api/projects auth gates", () => {
       projectMode: "canvas",
       status: "draft",
       highlights: "",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
       createdAt: "t",
       updatedAt: "t",
@@ -120,6 +121,7 @@ describe("GET/POST /api/projects auth gates", () => {
           creationSource: "story",
           projectMode: "canvas",
           passwordEnabled: false,
+          visualStyle: "live_action_cinematic",
         }),
       }),
     );
@@ -166,6 +168,7 @@ describe("GET/POST /api/projects auth gates", () => {
       projectMode: "canvas",
       status: "draft",
       highlights: "",
+      visualStyle: "three_d_animation",
       passwordEnabled: false,
       createdAt: "t",
       updatedAt: "t",
@@ -179,6 +182,7 @@ describe("GET/POST /api/projects auth gates", () => {
           creationSource: "story",
           projectMode: "canvas",
           passwordEnabled: false,
+          visualStyle: "three_d_animation",
         }),
       }),
     );

@@ -16,6 +16,7 @@ import {
   updateProjectHighlights as updateProjectHighlightsLocal,
   updateProjectName as updateProjectNameLocal,
   updateProjectOwnerId as updateProjectOwnerIdLocal,
+  updateProjectVisualStyle as updateProjectVisualStyleLocal,
   deleteProjectRecord as deleteProjectRecordLocal,
 } from "@/projects/project-storage";
 import {
@@ -28,8 +29,10 @@ import {
   updateProjectHighlightsRemote,
   updateProjectNameRemote,
   updateProjectOwnerIdRemote,
+  updateProjectVisualStyleRemote,
   deleteProjectRecordRemote,
 } from "@/projects/remote-project-store";
+import type { ProjectVisualStyleId } from "@/projects/project-visual-style";
 
 export {
   ProjectNameConflictError,
@@ -85,6 +88,15 @@ export function updateProjectHighlights(
     : updateProjectHighlightsLocal(projectId, highlights);
 }
 
+export function updateProjectVisualStyle(
+  projectId: string,
+  visualStyle: ProjectVisualStyleId,
+): Promise<ProjectPublic> {
+  return isRemoteDataOnly()
+    ? updateProjectVisualStyleRemote(projectId, visualStyle)
+    : updateProjectVisualStyleLocal(projectId, visualStyle);
+}
+
 export function updateProjectName(
   projectId: string,
   name: string,
@@ -132,6 +144,7 @@ export async function listProjectListItems(): Promise<{
       videoShotCount: 0,
       status: "draft" as const,
       generationProgress: null,
+      visualStyle: project.visualStyle,
     }));
   return { projects };
 }

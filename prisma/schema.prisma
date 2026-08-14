@@ -206,6 +206,8 @@ model Project {
   passwordHash           String?
   passwordSalt           String?
   highlights             String                 @default("")
+  /// Canonical project visual style id; null for legacy projects
+  visualStyle            String?                @map("visual_style")
   creationSource         ProjectCreationSource
   projectMode            ProjectMode
   status                 ProjectLifecycleStatus @default(draft)

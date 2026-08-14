@@ -64,6 +64,7 @@ describe("project storage + password safety", () => {
       name: "无密项目",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
       projectPassword: null,
     });
@@ -77,6 +78,7 @@ describe("project storage + password safety", () => {
       name: "同名",
       creationSource: "story",
       projectMode: "canvas",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await expect(
@@ -84,7 +86,8 @@ describe("project storage + password safety", () => {
         name: "同名",
         creationSource: "story",
         projectMode: "canvas",
-        passwordEnabled: false,
+        visualStyle: "live_action_cinematic",
+      passwordEnabled: false,
       }),
     ).resolves.toMatchObject({ ownerId: "owner-2", name: "同名" });
   });
@@ -94,6 +97,7 @@ describe("project storage + password safety", () => {
       name: "同一账号重名",
       creationSource: "story",
       projectMode: "canvas",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await expect(
@@ -101,7 +105,8 @@ describe("project storage + password safety", () => {
         name: "同一账号重名",
         creationSource: "story",
         projectMode: "canvas",
-        passwordEnabled: false,
+        visualStyle: "live_action_cinematic",
+      passwordEnabled: false,
       }),
     ).rejects.toBeInstanceOf(ProjectNameConflictError);
   });
@@ -112,6 +117,7 @@ describe("project storage + password safety", () => {
       creationSource: "story",
       projectMode: "canvas",
       highlights: "旧",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
 

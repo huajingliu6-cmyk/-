@@ -96,6 +96,7 @@ export type CreateProjectInput = {
   projectMode: "canvas" | "full_stack";
   currentStage: "story_creation" | "script_processing" | "asset_management" | "storyboard" | "workspace";
   highlights?: string;
+  visualStyle?: string | null;
   passwordEnabled?: boolean;
   passwordHash?: string | null;
   passwordSalt?: string | null;
@@ -124,6 +125,7 @@ export class ProjectRepository {
           projectMode: input.projectMode,
           currentStage: input.currentStage,
           highlights: input.highlights ?? "",
+          visualStyle: input.visualStyle ?? null,
           passwordEnabled: input.passwordEnabled ?? false,
           passwordHash: input.passwordHash ?? null,
           passwordSalt: input.passwordSalt ?? null,
@@ -176,6 +178,17 @@ export class ProjectRepository {
       where: { id },
       data: {
         highlights,
+        updatedAt: new Date(),
+        revision: { increment: 1 },
+      },
+    });
+  }
+
+  async updateVisualStyle(id: string, visualStyle: string) {
+    return this.db.project.update({
+      where: { id },
+      data: {
+        visualStyle,
         updatedAt: new Date(),
         revision: { increment: 1 },
       },

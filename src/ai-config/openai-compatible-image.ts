@@ -359,7 +359,7 @@ export async function generateOpenAiCompatibleImages(
       const message = parsed.error?.message ?? "";
       if (code === "model_not_allowed" || /无权调用模型/.test(message)) {
         throw new Error(
-          `${message || "当前 API Key 无权调用该图片模型"}。请到「管理 API」→「角色外貌生成」更换有权限的模型名，或更换可用的 API Key。`,
+          `${message || "当前 API Key 无权调用该图片模型"}。请到「系统管理 → API 接口」→「角色外貌生成」更换有权限的模型名，或更换可用的 API Key。`,
         );
       }
       if (
@@ -397,7 +397,7 @@ export async function generateOpenAiCompatibleImages(
         detail = message;
       }
     } catch (e) {
-      if (e instanceof Error && e.message.includes("管理 API")) throw e;
+      if (e instanceof Error && (e.message.includes("系统管理") || e.message.includes("管理 API"))) throw e;
     }
     throw new Error(
       `文生图服务返回错误（${res.status}）：${detail}（请求 ${resolvedUrl}）`,
