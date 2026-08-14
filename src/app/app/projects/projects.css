@@ -439,6 +439,18 @@
   background: rgba(196, 92, 92, 0.22);
 }
 
+.wb-context-menu__item:disabled,
+.wb-context-menu__item.is-disabled {
+  opacity: 0.45;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: not-allowed;
+}
+
+.wb-context-menu__item:disabled:hover,
+.wb-context-menu__item.is-disabled:hover {
+  background: transparent;
+}
+
 .wb-rename-overlay {
   position: fixed;
   inset: 0;
@@ -551,6 +563,13 @@
   color: rgba(255, 255, 255, 0.48);
   font-size: 0.78rem;
   font-weight: 400;
+}
+
+.wb-rules-hint {
+  margin: 0.35rem 0 0.85rem;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.78rem;
+  line-height: 1.45;
 }
 
 .wb-rules-textarea {

@@ -1,4 +1,5 @@
 import {
+  APP_ADMIN_PATH,
   APP_PROJECTS_PATH,
   APP_SHELL_ROOT,
   APP_WORKBENCH_PATH,
@@ -61,6 +62,10 @@ export function resolveBackTarget(pathname: string): BackTarget {
     return { kind: "href", href: APP_PROJECTS_PATH };
   }
 
+  if (pathname.startsWith(`${APP_ADMIN_PATH}/`)) {
+    return { kind: "href", href: APP_ADMIN_PATH };
+  }
+
   // 一级模块 → 门户根
   const moduleRoots = [
     APP_PROJECTS_PATH,
@@ -69,6 +74,7 @@ export function resolveBackTarget(pathname: string): BackTarget {
     "/app/showcase",
     "/app/guide",
     "/app/team",
+    APP_ADMIN_PATH,
   ];
   if (moduleRoots.includes(pathname)) {
     return { kind: "href", href: APP_SHELL_ROOT };

@@ -79,9 +79,13 @@ describe("resolveBackTarget", () => {
       kind: "href",
       href: "/app",
     });
-    expect(resolveBackTarget("/app/projects")).toEqual({
+    expect(resolveBackTarget("/app/admin")).toEqual({
       kind: "href",
       href: "/app",
+    });
+    expect(resolveBackTarget("/app/admin/apis")).toEqual({
+      kind: "href",
+      href: "/app/admin",
     });
   });
 

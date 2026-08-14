@@ -1,0 +1,674 @@
+.admin-ov {
+  --admin-ov-bg: #0b0e14;
+  --admin-ov-surface: #11151d;
+  --admin-ov-surface-2: #151a23;
+  --admin-ov-border: rgba(255, 255, 255, 0.1);
+  --admin-ov-border-strong: rgba(255, 255, 255, 0.16);
+  --admin-ov-text: #f3f5f8;
+  --admin-ov-muted: #9299a6;
+  --admin-ov-subtle: #656d7a;
+  --admin-ov-violet: #a78bfa;
+  --admin-ov-cyan: #22d3ee;
+  --admin-ov-green: #34d399;
+  --admin-ov-amber: #fbbf24;
+  --admin-ov-rose: #fb7185;
+  width: 100%;
+  color: var(--admin-ov-text);
+}
+
+.admin-ov *,
+.admin-ov *::before,
+.admin-ov *::after {
+  box-sizing: border-box;
+  letter-spacing: 0;
+}
+
+.admin-ov-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+.admin-ov-header > div:first-child {
+  min-width: 0;
+}
+
+.admin-ov-eyebrow {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--admin-ov-violet);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.admin-ov-header h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 680;
+  line-height: 1.2;
+}
+
+.admin-ov-header p {
+  margin: 7px 0 0;
+  color: var(--admin-ov-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.admin-ov-header__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-ov-updated {
+  color: var(--admin-ov-subtle);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-ov-refresh {
+  display: inline-flex;
+  min-width: 82px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--admin-ov-border-strong);
+  border-radius: 7px;
+  background: var(--admin-ov-surface-2);
+  color: #dce0e7;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.admin-ov-refresh:hover:not(:disabled) {
+  border-color: rgba(167, 139, 250, 0.5);
+  background: #1b202b;
+}
+
+.admin-ov-refresh:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.admin-ov-refresh svg {
+  width: 14px;
+  height: 14px;
+}
+
+.admin-ov-refresh svg.is-spinning {
+  animation: admin-ov-spin 0.85s linear infinite;
+}
+
+.admin-ov-notice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  border-radius: 7px;
+  background: rgba(146, 97, 10, 0.13);
+  padding: 9px 11px;
+  color: #f8d887;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.admin-ov-notice svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+.admin-ov-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.admin-ov-metric {
+  display: flex;
+  min-width: 0;
+  min-height: 114px;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid var(--admin-ov-border);
+  border-radius: 8px;
+  background: var(--admin-ov-surface);
+  padding: 16px;
+}
+
+.admin-ov-metric__icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(167, 139, 250, 0.12);
+  color: var(--admin-ov-violet);
+}
+
+.admin-ov-metric.is-positive .admin-ov-metric__icon {
+  background: rgba(52, 211, 153, 0.11);
+  color: var(--admin-ov-green);
+}
+
+.admin-ov-metric.is-warning .admin-ov-metric__icon {
+  background: rgba(251, 191, 36, 0.11);
+  color: var(--admin-ov-amber);
+}
+
+.admin-ov-metric.is-negative .admin-ov-metric__icon {
+  background: rgba(251, 113, 133, 0.11);
+  color: var(--admin-ov-rose);
+}
+
+.admin-ov-metric__icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.admin-ov-metric__copy {
+  min-width: 0;
+}
+
+.admin-ov-metric__copy > span {
+  display: block;
+  color: var(--admin-ov-muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.admin-ov-metric__copy strong {
+  display: block;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+  color: var(--admin-ov-text);
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.admin-ov-metric__copy small {
+  display: block;
+  margin-top: 7px;
+  color: var(--admin-ov-subtle);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.admin-ov-primary-grid,
+.admin-ov-secondary-grid {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.admin-ov-primary-grid {
+  grid-template-columns: minmax(0, 1.65fr) minmax(300px, 0.85fr);
+}
+
+.admin-ov-secondary-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-ov-panel {
+  min-width: 0;
+  border: 1px solid var(--admin-ov-border);
+  border-radius: 8px;
+  background: var(--admin-ov-surface);
+  padding: 16px;
+}
+
+.admin-ov-panel__head {
+  display: flex;
+  min-height: 38px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.admin-ov-panel__head > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-ov-panel__head h3 {
+  margin: 0;
+  color: #edf0f5;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.admin-ov-panel__head p {
+  margin: 3px 0 0;
+  color: var(--admin-ov-subtle);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.admin-ov-panel__head > strong {
+  color: #d8dce3;
+  font-size: 19px;
+  font-weight: 680;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-ov-panel__icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(167, 139, 250, 0.11);
+  color: var(--admin-ov-violet);
+}
+
+.admin-ov-panel__icon.is-cyan {
+  background: rgba(34, 211, 238, 0.1);
+  color: var(--admin-ov-cyan);
+}
+
+.admin-ov-panel__icon.is-amber {
+  background: rgba(251, 191, 36, 0.1);
+  color: var(--admin-ov-amber);
+}
+
+.admin-ov-panel__icon.is-rose {
+  background: rgba(251, 113, 133, 0.1);
+  color: var(--admin-ov-rose);
+}
+
+.admin-ov-panel__icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.admin-ov-chart-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.admin-ov-activity-chart {
+  display: block;
+  width: 100%;
+  min-width: 540px;
+  aspect-ratio: 640 / 194;
+  overflow: visible;
+}
+
+.admin-ov-chart-grid {
+  stroke: rgba(255, 255, 255, 0.075);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.admin-ov-chart-axis {
+  fill: #69717f;
+  font-family: inherit;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-ov-chart-area {
+  fill: rgba(167, 139, 250, 0.08);
+}
+
+.admin-ov-chart-line {
+  fill: none;
+  stroke: var(--admin-ov-violet);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.admin-ov-chart-point {
+  fill: var(--admin-ov-surface);
+  stroke: var(--admin-ov-violet);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.admin-ov-status-layout {
+  display: grid;
+  grid-template-columns: minmax(142px, 0.9fr) minmax(130px, 1.1fr);
+  min-height: 190px;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-ov-status-ring {
+  position: relative;
+  width: 150px;
+  height: 150px;
+  max-width: 100%;
+  justify-self: center;
+}
+
+.admin-ov-status-ring svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.admin-ov-ring-track,
+.admin-ov-ring-segment {
+  fill: none;
+  stroke-width: 16;
+}
+
+.admin-ov-ring-track {
+  stroke: rgba(255, 255, 255, 0.07);
+}
+
+.admin-ov-ring-segment {
+  stroke-linecap: butt;
+}
+
+.admin-ov-status-ring__value {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  pointer-events: none;
+}
+
+.admin-ov-status-ring__value strong {
+  color: #f5f7fa;
+  font-size: 25px;
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.admin-ov-status-ring__value span {
+  margin-top: 6px;
+  color: var(--admin-ov-subtle);
+  font-size: 9px;
+}
+
+.admin-ov-status-legend {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-ov-status-legend li {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  color: var(--admin-ov-muted);
+  font-size: 10px;
+}
+
+.admin-ov-status-legend strong {
+  color: #d8dce3;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-ov-legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.admin-ov-coverage {
+  display: grid;
+  gap: 15px;
+  min-height: 220px;
+  align-content: center;
+}
+
+.admin-ov-coverage__row {
+  display: grid;
+  grid-template-columns: 72px minmax(100px, 1fr) 86px;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-ov-coverage__label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: #cbd0d8;
+  font-size: 11px;
+}
+
+.admin-ov-coverage__label strong {
+  color: #7c8491;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-ov-coverage__track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.065);
+}
+
+.admin-ov-coverage__track span {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  transition: width 0.28s ease;
+}
+
+.admin-ov-coverage__row small {
+  color: var(--admin-ov-subtle);
+  font-size: 9px;
+  text-align: right;
+}
+
+.admin-ov-attention-list {
+  display: grid;
+  gap: 0;
+  min-height: 220px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-ov-attention-list li {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  padding: 8px 0;
+}
+
+.admin-ov-attention-list li:last-child {
+  border-bottom: 0;
+}
+
+.admin-ov-attention-list__icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 6px;
+  background: rgba(113, 113, 122, 0.12);
+  color: #a1a1aa;
+}
+
+.admin-ov-attention-list li.is-warning .admin-ov-attention-list__icon {
+  background: rgba(251, 191, 36, 0.1);
+  color: var(--admin-ov-amber);
+}
+
+.admin-ov-attention-list li.is-negative .admin-ov-attention-list__icon {
+  background: rgba(251, 113, 133, 0.1);
+  color: var(--admin-ov-rose);
+}
+
+.admin-ov-attention-list__icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.admin-ov-attention-list li > div {
+  min-width: 0;
+}
+
+.admin-ov-attention-list__link {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: inherit;
+  color: inherit;
+  text-decoration: none;
+}
+
+.admin-ov-attention-list__link:hover strong {
+  color: #fff;
+}
+
+.admin-ov-attention-list strong,
+.admin-ov-attention-list span {
+  display: block;
+}
+
+.admin-ov-attention-list strong {
+  overflow: hidden;
+  color: #daddE3;
+  font-size: 10px;
+  font-weight: 620;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-ov-attention-list li > div > span {
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--admin-ov-subtle);
+  font-size: 9px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-ov-all-clear {
+  display: flex;
+  min-height: 220px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--admin-ov-green);
+}
+
+.admin-ov-all-clear > svg {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+}
+
+.admin-ov-all-clear strong,
+.admin-ov-all-clear span {
+  display: block;
+}
+
+.admin-ov-all-clear strong {
+  color: #dce6e2;
+  font-size: 12px;
+}
+
+.admin-ov-all-clear span {
+  margin-top: 4px;
+  color: var(--admin-ov-subtle);
+  font-size: 10px;
+}
+
+@keyframes admin-ov-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 1100px) {
+  .admin-ov-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-ov-primary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-ov-status-layout {
+    grid-template-columns: 170px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .admin-ov-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .admin-ov-header__actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .admin-ov-metrics,
+  .admin-ov-secondary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-ov-metric {
+    min-height: 100px;
+  }
+
+  .admin-ov-status-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-ov-status-legend {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-ov-coverage__row {
+    grid-template-columns: 64px minmax(80px, 1fr);
+  }
+
+  .admin-ov-coverage__row small {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-ov-refresh svg.is-spinning {
+    animation: none;
+  }
+
+  .admin-ov-coverage__track span {
+    transition: none;
+  }
+}

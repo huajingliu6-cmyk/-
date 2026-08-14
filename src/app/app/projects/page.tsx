@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Search, X } from "lucide-react";
 import { canCreateProject } from "@/auth/capabilities";
@@ -8,7 +9,6 @@ import { getSystemRole } from "@/auth/roles";
 import { useAuthUser } from "@/shell/useAuthUser";
 import { projectWorkbenchPath } from "@/shell/nav";
 import { CreateProjectWizardDialog } from "@/projects/components/CreateProjectWizardDialog";
-import { ProjectRulesDialog } from "@/projects/components/ProjectRulesDialog";
 import {
   WorkbenchProjectContextMenu,
   type WorkbenchProjectContextAction,
@@ -18,13 +18,16 @@ import {
   PersonalBlankContextMenu,
   type PersonalBlankContextMenuState,
 } from "@/projects/workbench/PersonalBlankContextMenu";
-import type { WorkflowProjectSummary } from "@/workflow/lib/workflow-storage";
-import "./projects.css";
+import {
+  shouldOpenPersonalBlankContextMenu,
+} from "@/projects/workbench/personal-blank-context";
 import {
   ACTIVE_ENTERPRISE_EVENT,
   readActiveSpace,
   type ActiveSpace,
 } from "@/enterprise/client-space";
+import type { WorkflowProjectSummary } from "@/workflow/lib/workflow-storage";
+import "./projects.css";
 
 type StatusFilter = "all" | WorkflowProjectSummary["status"];
 
@@ -79,28 +82,21 @@ export default function ProjectsPage() {
     useState<WorkbenchProjectContextMenuState | null>(null);
   const [blankContextMenu, setBlankContextMenu] =
     useState<PersonalBlankContextMenuState | null>(null);
+  const [activeSpace, setActiveSpace] = useState<ActiveSpace>(() =>
+    readActiveSpace(),
+  );
   const [renaming, setRenaming] = useState<{
     projectId: string;
     name: string;
   } | null>(null);
-  const [rulesProject, setRulesProject] = useState<{
-    projectId: string;
-    projectName: string;
-  } | null>(null);
   const [renameBusy, setRenameBusy] = useState(false);
-  const [activeSpace, setActiveSpace] = useState<ActiveSpace>(() =>
-    readActiveSpace(),
-  );
 
   const allowedBySession =
     auth.status === "authenticated" && canCreateProject(auth.user);
-  const canCreate =
-    activeSpace.kind === "personal"
-      ? allowedBySession
-      : auth.status === "authenticated" &&
-        getSystemRole(auth.user) === "SYSTEM_ADMIN" &&
-        apiCanCreate !== false;
-  const canEditRules = auth.status === "authenticated";
+  const canCreate = apiCanCreate ?? allowedBySession;
+  const canEditRules =
+    auth.status === "authenticated" &&
+    getSystemRole(auth.user) === "SYSTEM_ADMIN";
 
   const reloadProjects = useCallback(async () => {
     setLoading(true);
@@ -110,9 +106,6 @@ export default function ProjectsPage() {
         page: "1",
         pageSize: "50",
       });
-      if (activeSpace.kind === "enterprise") {
-        params.set("enterpriseId", activeSpace.enterpriseId);
-      }
       if (debouncedQuery.trim()) {
         params.set("q", debouncedQuery.trim());
         params.set("pageSize", "100");
@@ -137,16 +130,7 @@ export default function ProjectsPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeSpace, debouncedQuery]);
-
-  useEffect(() => {
-    const onSpaceChanged = (event: Event) => {
-      const detail = (event as CustomEvent<ActiveSpace>).detail;
-      setActiveSpace(detail ?? readActiveSpace());
-    };
-    window.addEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
-    return () => window.removeEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
-  }, []);
+  }, [debouncedQuery]);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
@@ -165,6 +149,17 @@ export default function ProjectsPage() {
     };
   }, [reloadProjects]);
 
+  useEffect(() => {
+    const onSpaceChanged = (event: Event) => {
+      const detail = (event as CustomEvent<ActiveSpace>).detail;
+      setActiveSpace(detail ?? readActiveSpace());
+      setBlankContextMenu(null);
+    };
+    window.addEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
+    return () =>
+      window.removeEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
+  }, []);
+
   const filtered = useMemo(() => {
     return projects.filter((p) => {
       if (filter !== "all" && p.status !== filter) return false;
@@ -178,30 +173,10 @@ export default function ProjectsPage() {
   }, [projects, filter, debouncedQuery]);
 
   const openProject = useCallback(
-    async (projectId: string) => {
-      setNote("");
-      if (activeSpace.kind === "enterprise") {
-        router.push(projectWorkbenchPath(projectId));
-        return;
-      }
-      try {
-        const response = await fetch(
-          `/api/projects/${encodeURIComponent(projectId)}/entry`,
-          { credentials: "include", cache: "no-store" },
-        );
-        const payload = (await response.json()) as {
-          path?: string;
-          error?: string;
-        };
-        if (!response.ok || !payload.path) {
-          throw new Error(payload.error ?? "无法判断项目进度");
-        }
-        router.push(payload.path);
-      } catch (error) {
-        setNote(error instanceof Error ? error.message : "无法打开项目");
-      }
+    (projectId: string) => {
+      router.push(projectWorkbenchPath(projectId));
     },
-    [activeSpace, router],
+    [router],
   );
 
   const handleContextAction = useCallback(
@@ -210,11 +185,11 @@ export default function ProjectsPage() {
       if (!project) return;
       setNote("");
       if (action === "open") {
-        await openProject(projectId);
+        openProject(projectId);
         return;
       }
       if (action === "rules") {
-        setRulesProject({ projectId, projectName: project.name });
+        router.push("/app/admin?view=rules");
         return;
       }
       if (action === "rename") {
@@ -242,7 +217,7 @@ export default function ProjectsPage() {
         }
       }
     },
-    [openProject, projects],
+    [openProject, projects, router],
   );
 
   const submitRename = useCallback(async () => {
@@ -288,36 +263,37 @@ export default function ProjectsPage() {
 
   const onNewClick = () => {
     if (!canCreate) return;
+    setBlankContextMenu(null);
     setWizardOpen(true);
   };
 
+  const handleBlankContextMenu = (
+    event: ReactMouseEvent<HTMLDivElement>,
+  ) => {
+    if (
+      !shouldOpenPersonalBlankContextMenu({
+        spaceKind: activeSpace.kind,
+        target: event.target instanceof Element ? event.target : null,
+      })
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    setContextMenu(null);
+    setBlankContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+    });
+  };
+
   return (
-    <div
-      className="pm-page"
-      onContextMenu={(event) => {
-        if (activeSpace.kind !== "personal") return;
-        const target = event.target as Element | null;
-        if (
-          target?.closest(
-            "button, input, textarea, select, a, [role='tab'], [data-testid='project-management-card']",
-          )
-        ) {
-          return;
-        }
-        event.preventDefault();
-        setContextMenu(null);
-        setBlankContextMenu({ x: event.clientX, y: event.clientY });
-      }}
-    >
+    <div className="pm-page" onContextMenu={handleBlankContextMenu}>
       <div className="pm-inner">
         <div className="pm-hero">
           <div>
-            <h1>{activeSpace.kind === "enterprise" ? "企业项目" : "我的项目"}</h1>
-            <p>
-              {activeSpace.kind === "enterprise"
-                ? "查看当前企业空间内的项目与创作进度。"
-                : "管理个人项目、查看生成进度并继续上次创作。"}
-            </p>
+            <h1>项目管理</h1>
+            <p>管理项目、查看生成进度并继续上次创作。</p>
           </div>
           <button
             ref={newBtnRef}
@@ -326,7 +302,7 @@ export default function ProjectsPage() {
             onClick={onNewClick}
             aria-disabled={!canCreate}
             title={
-              canCreate ? "新建项目" : "仅企业管理员可以新建企业项目"
+              canCreate ? "新建项目" : "仅项目主理人可以新建项目"
             }
           >
             <Plus className="h-4 w-4" aria-hidden />
@@ -334,7 +310,7 @@ export default function ProjectsPage() {
           </button>
         </div>
         {!canCreate && auth.status === "authenticated" ? (
-          <p className="pm-perm-hint">仅企业管理员可以新建企业项目</p>
+          <p className="pm-perm-hint">仅项目主理人可以新建项目</p>
         ) : null}
 
         <div className="pm-toolbar">
@@ -413,9 +389,10 @@ export default function ProjectsPage() {
                 type="button"
                 className="pm-card"
                 data-testid="project-management-card"
-                onClick={() => void openProject(project.projectId)}
+                onClick={() => openProject(project.projectId)}
                 onContextMenu={(event) => {
                   event.preventDefault();
+                  setBlankContextMenu(null);
                   setContextMenu({
                     projectId: project.projectId,
                     projectName: project.name,
@@ -479,14 +456,6 @@ export default function ProjectsPage() {
         canCreate={canCreate}
         onClose={() => setBlankContextMenu(null)}
         onCreate={onNewClick}
-      />
-
-      <ProjectRulesDialog
-        open={rulesProject !== null}
-        projectId={rulesProject?.projectId ?? null}
-        projectName={rulesProject?.projectName ?? ""}
-        onClose={() => setRulesProject(null)}
-        onSaved={() => setNote("项目规则已保存")}
       />
 
       {renaming ? (

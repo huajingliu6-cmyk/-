@@ -46,6 +46,7 @@ describe("enterprise owner project principal powers", () => {
       name: `ent-proj-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await assignEnterpriseProjects({
@@ -77,6 +78,7 @@ describe("enterprise owner project principal powers", () => {
       name: `personal-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
 

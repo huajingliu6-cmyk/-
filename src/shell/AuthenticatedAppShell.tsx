@@ -44,6 +44,8 @@ export function AuthenticatedAppShell({
   const router = useRouter();
   const pathname = usePathname();
   const [activeSpace, setActiveSpace] = useState<ActiveSpace>(() => readActiveSpace());
+  const isAdminConsole =
+    pathname === "/app/admin" || pathname.startsWith("/app/admin/");
 
   useEffect(() => {
     const onSpaceChanged = (event: Event) => {
@@ -86,8 +88,8 @@ export function AuthenticatedAppShell({
     <div className="shell-app flex h-full min-h-full flex-col overflow-hidden bg-[#070811]">
       {auth.status === "authenticated" ? (
         <>
-          <AuthenticatedHeader user={auth.user} />
-          <GenerationBusyGuard />
+          {isAdminConsole ? null : <AuthenticatedHeader user={auth.user} />}
+          {isAdminConsole ? null : <GenerationBusyGuard />}
         </>
       ) : (
         <ShellHeaderPlaceholder />

@@ -16,6 +16,9 @@ export const APP_PROJECTS_PATH = "/app/projects";
 /** 视频制作画布（React Flow / WorkflowEditor） */
 export const WORKFLOW_EDITOR_PATH = "/workflow";
 
+/** 系统管理员独立页（平台级 AI / API 配置） */
+export const APP_ADMIN_PATH = "/app/admin";
+
 /** 登录后业务导航 → /app 子路由（完整列表；实际展示由权限过滤） */
 export const AUTH_NAV_ITEMS: ShellNavItem[] = [
   { id: "projects", label: "项目管理", href: APP_PROJECTS_PATH },
@@ -28,6 +31,7 @@ export const AUTH_NAV_ITEMS: ShellNavItem[] = [
   { id: "showcase", label: "作品展示", href: "/app/showcase" },
   { id: "guide", label: "创作指引", href: "/app/guide" },
   { id: "team", label: "团队管理", href: "/app/team" },
+  { id: "admin", label: "系统管理", href: APP_ADMIN_PATH },
 ];
 
 /** 抽卡工程师仅可见工作台 */
