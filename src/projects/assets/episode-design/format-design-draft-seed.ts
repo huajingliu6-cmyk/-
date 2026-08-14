@@ -18,11 +18,13 @@ const DESIGN_DRAFT_FIELD_LABELS: Record<
     { label: "地点", key: "location" },
     { label: "风格", key: "style" },
     { label: "本集用途", key: "usageInEpisode" },
+    { label: "剧情依据", key: "evidence" },
   ],
   prop: [
     { label: "道具类型", key: "propType" },
     { label: "用途", key: "usage" },
     { label: "本集用途", key: "usageInEpisode" },
+    { label: "剧情依据", key: "evidence" },
   ],
   audio: [
     { label: "音频描述", key: "description" },
@@ -32,9 +34,29 @@ const DESIGN_DRAFT_FIELD_LABELS: Record<
   ],
 };
 
+/** High-confidence extract-field markers across asset types (incl. aliases). */
+const EXTRACT_FIELD_MARKERS = [
+  "角色描述",
+  "外貌",
+  "服装",
+  "身份/角色",
+  "角色定位",
+  "年龄",
+  "本集用途",
+  "依据",
+  "剧情依据",
+  "时间",
+  "地点",
+  "风格",
+  "道具类型",
+  "用途",
+  "音频描述",
+  "音频种类",
+] as const;
+
 /**
- * Seed text for the design modal input: extracted draft fields only
- * (no episode excerpt / LLM instruction). Client-safe — no Node imports.
+ * Extracted draft fields only (no episode excerpt / LLM style instructions).
+ * Client-safe — no Node imports.
  */
 export function formatDesignDraftSeedText(item: EpisodeAssetDesignItem): string {
   const draft = item.draft as Record<string, unknown>;
@@ -48,9 +70,76 @@ export function formatDesignDraftSeedText(item: EpisodeAssetDesignItem): string 
   return lines.join("\n");
 }
 
+export function normalizePromptCompareText(text: string): string {
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t\u3000]+/g, " ")
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+}
+
+/** True when text is clearly an extract-draft dump, not a final design prompt. */
+export function looksLikeExtractDraftPrompt(
+  text: string,
+  item?: EpisodeAssetDesignItem,
+): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  if (item) {
+    const seed = formatDesignDraftSeedText(item);
+    if (
+      seed &&
+      normalizePromptCompareText(seed) === normalizePromptCompareText(trimmed)
+    ) {
+      return true;
+    }
+  }
+
+  let hits = 0;
+  for (const label of EXTRACT_FIELD_MARKERS) {
+    if (trimmed.includes(`【${label}】`)) hits += 1;
+  }
+  return hits >= 2;
+}
+
+/**
+ * Formal prompt for UI: never show extract seed / extract-sourced dirty data
+ * as the ready design prompt.
+ */
+export function resolveFormalDesignPromptText(
+  item: EpisodeAssetDesignItem,
+): string {
+  const state = item.designPrompt;
+  const text = state?.text?.trim() ?? "";
+  if (!text) return "";
+
+  if (looksLikeExtractDraftPrompt(text, item)) {
+    return "";
+  }
+
+  const generationId = state?.generationId?.trim() ?? "";
+  if (!generationId) {
+    const history = state?.history ?? [];
+    const last = history[history.length - 1];
+    if (last?.source === "extract") return "";
+    // Legacy dirty rows: extract seed written as ready without generationId.
+    if (history.length === 0 && looksLikeExtractDraftPrompt(text, item)) {
+      return "";
+    }
+  }
+
+  return text;
+}
+
+/**
+ * Factual brief for asset.design-prompt.generate user data.
+ * Style / framing come from admin task rules + platform policy.
+ */
 export function buildDesignPromptBrief(
   item: EpisodeAssetDesignItem,
   episodeText: string,
+  userRequirement?: string | null,
 ): string {
   const lines: string[] = [
     `【资产类型】${item.assetType}`,
@@ -60,27 +149,14 @@ export function buildDesignPromptBrief(
   const seed = formatDesignDraftSeedText(item);
   if (seed) lines.push(seed);
 
-  lines.push("【本集正文摘录】", episodeText.slice(0, 2400), "");
-  if (item.assetType === "character") {
-    lines.push(
-      "请据此撰写可用于生成人物设定图/插画参考图的完整中文提示词，包含人物外貌、服装、气质与构图；避免写实真人照片与电影剧照质感，不要输出解释。",
-    );
-  } else if (item.assetType === "audio") {
-    lines.push(
-      "请据此撰写可用于生成音频素材的完整中文提示词，包含听感、节奏与使用场景，不要输出解释。",
-    );
-  } else if (item.assetType === "scene") {
-    lines.push(
-      "请据此撰写可用于生成场景设定图参考的完整中文提示词，包含空间、光影与气氛；避免写实真人面孔，不要输出冗长剧本摘录与解释。",
-    );
-  } else if (item.assetType === "prop") {
-    lines.push(
-      "请据此撰写可用于生成道具设定图参考的完整中文提示词，包含材质、细节与光影，不要输出解释。",
-    );
-  } else {
-    lines.push(
-      "请据此撰写可用于生成素材的完整中文提示词，包含主体、风格、构图要点，不要输出解释。",
-    );
+  const excerpt = episodeText.trim().slice(0, 2400);
+  if (excerpt) {
+    lines.push("【本集正文摘录】", excerpt);
+  }
+
+  const requirement = (userRequirement ?? "").trim();
+  if (requirement) {
+    lines.push("【用户素材要求】", requirement);
   }
 
   return lines.filter(Boolean).join("\n");

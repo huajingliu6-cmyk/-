@@ -113,6 +113,21 @@ async function post(request: Request, context: RouteContext) {
   let resultPromptModelId = selectedModel.id;
   let resultDisplayModelName: string = selectedModel.label;
   let resultProviderModelId: string = selectedModel.providerModelId;
+  let executionMeta: {
+    capabilityId?: string;
+    taskRuleSource?: "builtin" | "custom";
+    taskRuleVersion?: number | null;
+    taskRuleHash?: string;
+    modelConnectionId?: string | null;
+    systemPolicyVersion?: string;
+    outputContractVersion?: string;
+    inputFingerprint?: string;
+    systemPromptHash?: string;
+    userPromptHash?: string;
+    messageRoles?: string;
+    enableThinking?: boolean;
+    maxOutputTokens?: number;
+  } = {};
   let failedMessage: string | null = null;
   try {
     const result = await streamRedesignPromptInConversation({
@@ -120,6 +135,7 @@ async function post(request: Request, context: RouteContext) {
       userId: gated.user.id,
       item,
       conversation,
+      episodeText: detail.episode.content ?? "",
       userRequirement,
       promptModelId,
     });
@@ -129,12 +145,42 @@ async function post(request: Request, context: RouteContext) {
     resultPromptModelId = result.promptModelId;
     resultDisplayModelName = result.displayModelName;
     resultProviderModelId = result.providerModelId;
+    executionMeta = {
+      capabilityId: result.capabilityId,
+      taskRuleSource: result.taskRuleSource,
+      taskRuleVersion: result.taskRuleVersion,
+      taskRuleHash: result.taskRuleHash,
+      modelConnectionId: result.modelConnectionId,
+      systemPolicyVersion: result.systemPolicyVersion,
+      outputContractVersion: result.outputContractVersion,
+      inputFingerprint: result.inputFingerprint,
+      systemPromptHash: result.systemPromptHash,
+      userPromptHash: result.userPromptHash,
+      messageRoles: result.messageRoles,
+      enableThinking: result.enableThinking,
+      maxOutputTokens: result.maxOutputTokens,
+    };
   } catch (error) {
     failedMessage =
       error instanceof Error ? error.message : "素材提示词生成失败";
+    const errorCode =
+      error instanceof AiConfigError
+        ? error.code
+        : error &&
+            typeof error === "object" &&
+            "code" in error &&
+            typeof (error as { code?: unknown }).code === "string"
+          ? String((error as { code: string }).code)
+          : null;
     if (error instanceof AiConfigError) {
       return NextResponse.json(
         { error: failedMessage, code: error.code },
+        { status: 500 },
+      );
+    }
+    if (errorCode === "AI_DESIGN_PROMPT_FORMAT_INVALID") {
+      return NextResponse.json(
+        { error: failedMessage, code: errorCode },
         { status: 500 },
       );
     }
@@ -150,7 +196,7 @@ async function post(request: Request, context: RouteContext) {
     displayModelName: resultDisplayModelName,
     providerModelId: resultProviderModelId,
     brief: redesignCue || `【资产】${item.assetType} · ${item.name}`,
-    targetChars: 800,
+    targetChars: 1200,
     status: failedMessage ? "failed" : "completed",
     content: text,
     actualChars: text.trim().length,
@@ -164,12 +210,16 @@ async function post(request: Request, context: RouteContext) {
     errorMessage: failedMessage,
     createdAt: startedAt,
     updatedAt: finishedAt,
-    capabilityId: "asset.episode-design.generate",
+    capabilityId: "asset.design-prompt.generate",
+    ...executionMeta,
   };
   await saveTextJob(historyJob);
 
   if (failedMessage) {
-    return NextResponse.json({ error: failedMessage }, { status: 500 });
+    return NextResponse.json(
+      { error: failedMessage, code: "PROMPT_GENERATE_FAILED" },
+      { status: 500 },
+    );
   }
 
   const now = finishedAt;

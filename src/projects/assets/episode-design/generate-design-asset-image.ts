@@ -11,6 +11,8 @@ import {
   type ProjectAssetImageMime,
 } from "@/projects/assets/asset-image-storage";
 import type { EpisodeAssetDesignAssetType } from "@/projects/assets/episode-design/types";
+import { getProjectRecord } from "@/projects/project-access";
+import { requireProjectVisualStyleDirective } from "@/projects/project-visual-style";
 import {
   DEFAULT_DESIGN_IMAGE_OPTIONS,
   DESIGN_IMAGE_QUALITY_LABELS,
@@ -139,9 +141,21 @@ export async function generateDesignAssetImage(input: {
     });
   }
 
+  const project = await getProjectRecord(input.projectId);
+  const styleResolved = requireProjectVisualStyleDirective({
+    visualStyle: project?.visualStyle,
+    highlights: project?.highlights,
+  });
+  if (!styleResolved.ok) {
+    throw Object.assign(new Error(styleResolved.error), {
+      code: "PROJECT_VISUAL_STYLE_REQUIRED",
+      status: 400,
+    });
+  }
+
   const assembled = await buildAssembledImagePrompt({
     capabilityId,
-    userPrompt: input.prompt,
+    userPrompt: `${styleResolved.directive}\n\n${input.prompt}`,
     platformRule: designAssetPlatformRule(
       input.assetType,
       aspectRatio,
@@ -162,7 +176,7 @@ export async function generateDesignAssetImage(input: {
   if (config.provider === "http") {
     if (!endpoint) {
       throw new Error(
-        "未配置文生图 API 地址，请管理员在「管理 API」中接入对应图片模型",
+        "未配置文生图 API 地址，请管理员在「系统管理 → API 接口」中接入对应图片模型",
       );
     }
     const generated = await generateOpenAiCompatibleImages({
@@ -189,7 +203,7 @@ export async function generateDesignAssetImage(input: {
     }));
     mode = "mock";
     notice =
-      "当前为本地演示图（未连接真实文生图）。管理员可在「管理 API」接入角色/场景/道具图片模型。";
+      "当前为本地演示图（未连接真实文生图）。管理员可在「系统管理 → API 接口」接入角色/场景/道具图片模型。";
   }
 
   if (rawImages.length === 0) {

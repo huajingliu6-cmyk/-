@@ -154,7 +154,7 @@ function CharacterCreateDialogInner({
           <AssetImageUpload
             id={`${formId}-image`}
             label="上传角色图片"
-            tip="上传角色图片推荐插画/设定图风格（避免写实真人，以免视频参考被拒）"
+            tip="允许超写实真人影视风格的虚构角色图；禁止上传现实可识别个人肖像。部分视频平台可能拒识写实人脸参考。"
             value={{
               fileName: draft.imageFileName,
               objectUrl: draft.imageObjectUrl,

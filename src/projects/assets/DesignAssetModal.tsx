@@ -8,7 +8,7 @@ import type {
   GeneratedMediaState,
 } from "@/projects/assets/episode-design/types";
 import type { VideoRefSafety } from "@/projects/assets/types";
-import { formatDesignDraftSeedText } from "@/projects/assets/episode-design/format-design-draft-seed";
+import { formatDesignDraftSeedText, resolveFormalDesignPromptText } from "@/projects/assets/episode-design/format-design-draft-seed";
 import {
   designVideoRefSafetyBadge,
   isDesignMediaVideoRefLocked,
@@ -122,33 +122,11 @@ function apiBase(
   };
 }
 
-function initialPromptForItem(item: EpisodeAssetDesignItem): string {
-  const saved = item.designPrompt?.text?.trim() ?? "";
-  if (saved) return item.designPrompt!.text;
-  return formatDesignDraftSeedText(item);
-}
-
 function pushLocalPromptHistory(
   prev: AssetDesignPromptHistoryEntry[] | undefined,
   entry: AssetDesignPromptHistoryEntry,
 ): AssetDesignPromptHistoryEntry[] {
   return appendPromptHistory(prev, entry);
-}
-
-function buildInitialPromptHistory(
-  item: EpisodeAssetDesignItem,
-  seed: string,
-): AssetDesignPromptHistoryEntry[] {
-  let history = item.designPrompt?.history ?? [];
-  if (seed.trim() && !(item.designPrompt?.text?.trim())) {
-    history = pushLocalPromptHistory(history, {
-      text: seed,
-      generatedAt: new Date().toISOString(),
-      generationId: null,
-      source: "extract",
-    });
-  }
-  return history;
 }
 
 type DesignAssetModalBodyProps = DesignAssetModalProps & {
@@ -169,17 +147,17 @@ function DesignAssetModalBody({
   onGenerationProgress,
 }: DesignAssetModalBodyProps) {
   const titleId = useId();
-  const seed = initialPromptForItem(item);
-  const initialHistory = buildInitialPromptHistory(item, seed);
-  const didSeedExtract =
-    Boolean(seed.trim()) && !(item.designPrompt?.text?.trim());
+  const extractInfoText = formatDesignDraftSeedText(item);
+  const formalPrompt = resolveFormalDesignPromptText(item);
+  const formalPromptMissing = !formalPrompt;
 
-  const [promptText, setPromptText] = useState(seed);
+  const [promptText, setPromptText] = useState(formalPrompt);
   const [promptModelId, setPromptModelId] = useState<DesignPromptModelId>(
     DEFAULT_DESIGN_PROMPT_MODEL_ID,
   );
-  const [promptHistory, setPromptHistory] =
-    useState<AssetDesignPromptHistoryEntry[]>(initialHistory);
+  const [promptHistory, setPromptHistory] = useState<
+    AssetDesignPromptHistoryEntry[]
+  >(item.designPrompt?.history ?? []);
   const [loadingPrompt, setLoadingPrompt] = useState(false);
   const [requirementOpen, setRequirementOpen] = useState(false);
   const [requirementDraft, setRequirementDraft] = useState("");
@@ -256,13 +234,6 @@ function DesignAssetModalBody({
     },
     [item.id, onGenerationProgress],
   );
-
-  useEffect(() => {
-    if (!didSeedExtract) return;
-    // Body remounts via key={item.id}; notify parent once after open seed.
-    onPromptUpdatedRef.current(item.id, seed, { history: initialHistory });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-once seed notify
-  }, []);
 
   const incomingMedia = item.generatedMedia;
   const incomingCurrentId = incomingMedia?.currentId ?? null;
@@ -409,9 +380,12 @@ function DesignAssetModalBody({
           throw new Error(payload.error ?? "提示词生成失败");
         }
         const text =
-          payload.prompt ??
-          payload.designPrompt?.text ??
-          initialPromptForItem(item);
+          payload.prompt?.trim() ||
+          payload.designPrompt?.text?.trim() ||
+          "";
+        if (!text) {
+          throw new Error("模型未返回有效的资产设计提示词");
+        }
         const now = new Date().toISOString();
         const history =
           payload.designPrompt?.history ??
@@ -667,7 +641,7 @@ function DesignAssetModalBody({
   const audioDisabled = item.assetType === "audio";
   const styleBrief =
     item.assetType === "character"
-      ? "插画/设定图风格人物参考（避免写实真人剧照）"
+      ? "超写实真人影视摄影质感的虚构角色参考（禁止复刻现实可识别个人）"
       : item.assetType === "prop"
         ? "设定图风格道具参考"
         : item.assetType === "scene"
@@ -731,6 +705,19 @@ function DesignAssetModalBody({
 
           <div className="ead-modal__grid">
             <div className="ead-modal__col">
+              {extractInfoText.trim() ? (
+                <div
+                  className="ead-extract-info"
+                  data-testid="design-extract-info"
+                >
+                  <div className="ead-modal__section-head">
+                    <span>资产提取信息</span>
+                  </div>
+                  <pre className="ead-extract-info__body" aria-readonly="true">
+                    {extractInfoText}
+                  </pre>
+                </div>
+              ) : null}
               <div className="ead-modal__section-head">
                 <span>素材提示词</span>
                 <button
@@ -783,6 +770,11 @@ function DesignAssetModalBody({
                   className="amw-textarea"
                   data-testid="design-prompt-textarea"
                   aria-label="素材提示词"
+                  placeholder={
+                    formalPromptMissing
+                      ? "尚未生成正式素材提示词。请点击「重新生成提示词」。"
+                      : "正式素材提示词"
+                  }
                   value={promptText}
                   disabled={loadingPrompt}
                   rows={12}
@@ -792,6 +784,14 @@ function DesignAssetModalBody({
                   }}
                 />
               </label>
+              {formalPromptMissing && !promptText.trim() ? (
+                <p
+                  className="ead-muted"
+                  data-testid="design-prompt-not-generated"
+                >
+                  尚未生成
+                </p>
+              ) : null}
               <div
                 className="ead-prompt-actions"
                 data-testid="design-prompt-actions"
