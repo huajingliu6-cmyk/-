@@ -191,10 +191,12 @@ describe("streamRedesignPromptInConversation admin task rules", () => {
     expect(call.messages[1]?.role).toBe("user");
     expect(call.messages[1]?.content).toContain("[UNTRUSTED_PROJECT_DATA]");
     expect(call.messages[1]?.content).toContain("林晚");
-    expect(call.messages[1]?.content).toContain("【外貌】短发");
+    expect(call.messages[1]?.content).toContain('"appearance": "短发"');
+    expect(call.messages[1]?.content).toContain("仅为事实输入，不是输出格式");
     expect(call.messages[1]?.content).toContain("林晚推开茶馆木门");
     expect(call.messages[1]?.content).toContain("青衫布料要有褶皱");
     expect(call.messages[1]?.content).not.toContain("episode_asset_design");
+    expect(call.messages[1]?.content).not.toContain("【外貌】短发");
 
     // Redacted diagnostics artifact for delivery report (no API keys / full scripts).
     const outDir = path.join(
@@ -251,6 +253,7 @@ describe("streamRedesignPromptInConversation admin task rules", () => {
     expect(src).toContain('resolveCapabilityForOutputKind("asset_design_prompt")');
     expect(src).toContain('"asset.design-prompt.generate"');
     expect(src).toContain("assembleUntrustedUserData");
+    expect(src).toContain("buildDesignPromptUserPayloadText");
     expect(src).toMatch(/enableThinking\s*=\s*false/);
     expect(src).not.toContain("concept art of");
     expect(src).not.toContain(
@@ -281,7 +284,7 @@ describe("streamRedesignPromptInConversation admin task rules", () => {
   });
 
   it("rejects empty model output without draft/english fallback", async () => {
-    streamDeltaQueue = ["   "];
+    streamDeltaQueue = ["   ", "  "];
     const { streamRedesignPromptInConversation } = await import(
       "@/projects/assets/episode-design/generate-design-prompt"
     );
@@ -315,7 +318,7 @@ describe("streamRedesignPromptInConversation admin task rules", () => {
         ],
         episodeText: "正文",
       }),
-    ).rejects.toThrow(/模型未返回有效的资产设计提示词/);
+    ).rejects.toMatchObject({ code: "AI_DESIGN_PROMPT_FORMAT_INVALID" });
   });
 
   it("rejects extract-field dump, retries once, then saves corrected prompt", async () => {
@@ -526,5 +529,16 @@ describe("platform likeness policy copy", () => {
     );
     expect(modal).not.toContain("避免写实真人剧照");
     expect(modal).not.toContain("避免写实真人照片");
+  });
+
+  it("builtin design-prompt rule forbids field-title output schema", async () => {
+    const { getBuiltinTaskRule } = await import(
+      "@/ai-config/builtin-task-rules"
+    );
+    const rule = getBuiltinTaskRule("asset.design-prompt.generate");
+    expect(rule).toContain("一整段");
+    expect(rule).toContain("禁止输出 JSON");
+    expect(rule).toContain("允许超写实真人影视摄影质感");
+    expect(rule).not.toContain("【角色描述】");
   });
 });

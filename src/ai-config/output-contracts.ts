@@ -49,8 +49,9 @@ export function buildImmutableOutputContract(
       return [
         "[IMMUTABLE_OUTPUT_CONTRACT]",
         `version: ${OUTPUT_CONTRACT_VERSION}`,
-        "Return only the final design prompt text in Chinese.",
-        "No explanations, markdown fences, or meta commentary.",
+        "Return only one continuous Chinese design-prompt paragraph.",
+        "Do not output JSON, Markdown, field titles like 【角色描述】【外貌】【服装】, lists, or analysis.",
+        "Do not echo extract seed or English concept art fallbacks.",
       ].join("\n");
 
     case "text.storyboard-prompt.generate":

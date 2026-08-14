@@ -1,73 +1,107 @@
 import type { EpisodeAssetDesignItem } from "@/projects/assets/episode-design/types";
 
-const DESIGN_DRAFT_FIELD_LABELS: Record<
+/** Fact keys kept as internal extract fields (never rendered as prompt titles). */
+const FACT_KEYS_BY_TYPE: Record<
   EpisodeAssetDesignItem["assetType"],
-  Array<{ label: string; key: string }>
+  readonly string[]
 > = {
   character: [
-    { label: "角色描述", key: "description" },
-    { label: "外貌", key: "appearance" },
-    { label: "服装", key: "clothing" },
-    { label: "身份/角色", key: "role" },
-    { label: "年龄", key: "age" },
-    { label: "本集用途", key: "usageInEpisode" },
-    { label: "剧情依据", key: "evidence" },
+    "description",
+    "appearance",
+    "clothing",
+    "role",
+    "age",
+    "usageInEpisode",
+    "evidence",
   ],
-  scene: [
-    { label: "时间", key: "timeOfDay" },
-    { label: "地点", key: "location" },
-    { label: "风格", key: "style" },
-    { label: "本集用途", key: "usageInEpisode" },
-    { label: "剧情依据", key: "evidence" },
-  ],
-  prop: [
-    { label: "道具类型", key: "propType" },
-    { label: "用途", key: "usage" },
-    { label: "本集用途", key: "usageInEpisode" },
-    { label: "剧情依据", key: "evidence" },
-  ],
-  audio: [
-    { label: "音频描述", key: "description" },
-    { label: "音频种类", key: "audioKind" },
-    { label: "本集用途", key: "usageInEpisode" },
-    { label: "剧情依据", key: "evidence" },
-  ],
+  scene: ["timeOfDay", "location", "style", "usageInEpisode", "evidence"],
+  prop: ["propType", "usage", "usageInEpisode", "evidence"],
+  audio: ["description", "audioKind", "usageInEpisode", "evidence"],
 };
 
-/** High-confidence extract-field markers across asset types (incl. aliases). */
-const EXTRACT_FIELD_MARKERS = [
-  "角色描述",
-  "外貌",
-  "服装",
-  "身份/角色",
-  "角色定位",
-  "年龄",
-  "本集用途",
-  "依据",
-  "剧情依据",
-  "时间",
-  "地点",
-  "风格",
-  "道具类型",
-  "用途",
-  "音频描述",
-  "音频种类",
+/** Any of these field-title markers invalidates a formal prompt. */
+export const FORBIDDEN_EXTRACT_FIELD_TAGS = [
+  "【角色描述】",
+  "【外貌】",
+  "【服装】",
+  "【衣服】",
+  "【角色定位】",
+  "【身份/角色】",
+  "【年龄】",
+  "【本集用途】",
+  "【依据】",
+  "【剧情依据】",
+  "【时间】",
+  "【地点】",
+  "【风格】",
+  "【道具类型】",
+  "【用途】",
+  "【音频描述】",
+  "【音频种类】",
 ] as const;
 
-/**
- * Extracted draft fields only (no episode excerpt / LLM style instructions).
- * Client-safe — no Node imports.
- */
-export function formatDesignDraftSeedText(item: EpisodeAssetDesignItem): string {
+export type DesignPromptAssetFacts = {
+  assetType: EpisodeAssetDesignItem["assetType"];
+  assetName: string;
+  facts: Record<string, string>;
+  episodeText: string;
+  userRequirement: string;
+  projectVisualStyle?: string;
+};
+
+export function extractAssetFacts(
+  item: EpisodeAssetDesignItem,
+): Record<string, string> {
   const draft = item.draft as Record<string, unknown>;
-  const lines: string[] = [];
-  for (const { label, key } of DESIGN_DRAFT_FIELD_LABELS[item.assetType]) {
+  const facts: Record<string, string> = {};
+  for (const key of FACT_KEYS_BY_TYPE[item.assetType]) {
     const value = draft[key];
     if (typeof value === "string" && value.trim()) {
+      facts[key] = value.trim();
+    }
+  }
+  return facts;
+}
+
+/**
+ * Legacy labeled seed — only for detecting dirty historical designPrompt.text.
+ * Never display or send this format to the model as the desired output shape.
+ */
+export function legacyExtractSeedTextForCompare(
+  item: EpisodeAssetDesignItem,
+): string {
+  const draft = item.draft as Record<string, unknown>;
+  const labelMap: Record<string, string> = {
+    description: item.assetType === "audio" ? "音频描述" : "角色描述",
+    appearance: "外貌",
+    clothing: "服装",
+    role: "角色定位",
+    age: "年龄",
+    usageInEpisode: "本集用途",
+    evidence: "依据",
+    timeOfDay: "时间",
+    location: "地点",
+    style: "风格",
+    propType: "道具类型",
+    usage: "用途",
+    audioKind: "音频种类",
+  };
+  const lines: string[] = [];
+  for (const key of FACT_KEYS_BY_TYPE[item.assetType]) {
+    const value = draft[key];
+    if (typeof value === "string" && value.trim()) {
+      const label = labelMap[key] ?? key;
       lines.push(`【${label}】${value.trim()}`);
     }
   }
   return lines.join("\n");
+}
+
+/** @deprecated Use legacyExtractSeedTextForCompare / extractAssetFacts. */
+export function formatDesignDraftSeedText(
+  item: EpisodeAssetDesignItem,
+): string {
+  return legacyExtractSeedTextForCompare(item);
 }
 
 export function normalizePromptCompareText(text: string): string {
@@ -78,6 +112,25 @@ export function normalizePromptCompareText(text: string): string {
     .trim();
 }
 
+/** Normalize model output toward a single continuous paragraph. */
+export function sanitizeFormalDesignPromptCandidate(text: string): string {
+  let next = text.replace(/\r\n/g, "\n").trim();
+  next = next.replace(/^```(?:json|text|markdown)?\s*/i, "");
+  next = next.replace(/\s*```$/i, "");
+  next = next
+    .split("\n")
+    .map((line) => line.replace(/^\s*([-*•]|\d+[.)])\s+/, "").trim())
+    .filter(Boolean)
+    .join("\n");
+  next = next.replace(/\n+/g, " ");
+  next = next.replace(/[ \t\u3000]{2,}/g, " ").trim();
+  return next;
+}
+
+export function containsForbiddenExtractFieldTags(text: string): boolean {
+  return FORBIDDEN_EXTRACT_FIELD_TAGS.some((tag) => text.includes(tag));
+}
+
 /** True when text is clearly an extract-draft dump, not a final design prompt. */
 export function looksLikeExtractDraftPrompt(
   text: string,
@@ -86,8 +139,12 @@ export function looksLikeExtractDraftPrompt(
   const trimmed = text.trim();
   if (!trimmed) return false;
 
+  if (containsForbiddenExtractFieldTags(trimmed)) {
+    return true;
+  }
+
   if (item) {
-    const seed = formatDesignDraftSeedText(item);
+    const seed = legacyExtractSeedTextForCompare(item);
     if (
       seed &&
       normalizePromptCompareText(seed) === normalizePromptCompareText(trimmed)
@@ -96,16 +153,11 @@ export function looksLikeExtractDraftPrompt(
     }
   }
 
-  let hits = 0;
-  for (const label of EXTRACT_FIELD_MARKERS) {
-    if (trimmed.includes(`【${label}】`)) hits += 1;
-  }
-  return hits >= 2;
+  return false;
 }
 
 /**
- * Formal prompt for UI: never show extract seed / extract-sourced dirty data
- * as the ready design prompt.
+ * Formal prompt for UI: never show extract seed / extract-sourced dirty data.
  */
 export function resolveFormalDesignPromptText(
   item: EpisodeAssetDesignItem,
@@ -123,7 +175,6 @@ export function resolveFormalDesignPromptText(
     const history = state?.history ?? [];
     const last = history[history.length - 1];
     if (last?.source === "extract") return "";
-    // Legacy dirty rows: extract seed written as ready without generationId.
     if (history.length === 0 && looksLikeExtractDraftPrompt(text, item)) {
       return "";
     }
@@ -133,31 +184,63 @@ export function resolveFormalDesignPromptText(
 }
 
 /**
- * Factual brief for asset.design-prompt.generate user data.
- * Style / framing come from admin task rules + platform policy.
+ * Structured facts payload for asset.design-prompt.generate user data.
+ * Facts are inputs only — never an output schema.
  */
+export function buildDesignPromptFactsPayload(
+  item: EpisodeAssetDesignItem,
+  episodeText: string,
+  userRequirement?: string | null,
+  projectVisualStyle?: string | null,
+): DesignPromptAssetFacts {
+  return {
+    assetType: item.assetType,
+    assetName: item.name,
+    facts: extractAssetFacts(item),
+    episodeText: episodeText.trim().slice(0, 2400),
+    userRequirement: (userRequirement ?? "").trim(),
+    ...(projectVisualStyle?.trim()
+      ? { projectVisualStyle: projectVisualStyle.trim() }
+      : {}),
+  };
+}
+
+export function buildDesignPromptUserPayloadText(
+  item: EpisodeAssetDesignItem,
+  episodeText: string,
+  userRequirement?: string | null,
+  projectVisualStyle?: string | null,
+): string {
+  const payload = buildDesignPromptFactsPayload(
+    item,
+    episodeText,
+    userRequirement,
+    projectVisualStyle,
+  );
+  const instructions = [
+    "以下 JSON 仅为事实输入，不是输出格式。",
+    "请只返回一整段完整、连贯、可直接用于素材生成的中文提示词正文。",
+    "不得输出 JSON、Markdown、字段标题（例如【角色描述】【外貌】【服装】）、分析过程、规则说明、项目符号或分段摘要。",
+    "不得回退为提取摘要或英文 concept art。",
+  ].join("\n");
+  return `${instructions}\n\n${JSON.stringify(payload, null, 2)}`;
+}
+
+/** @deprecated Prefer buildDesignPromptUserPayloadText. */
 export function buildDesignPromptBrief(
   item: EpisodeAssetDesignItem,
   episodeText: string,
   userRequirement?: string | null,
 ): string {
-  const lines: string[] = [
-    `【资产类型】${item.assetType}`,
-    `【资产名称】${item.name}`,
-  ];
+  return buildDesignPromptUserPayloadText(item, episodeText, userRequirement);
+}
 
-  const seed = formatDesignDraftSeedText(item);
-  if (seed) lines.push(seed);
-
-  const excerpt = episodeText.trim().slice(0, 2400);
-  if (excerpt) {
-    lines.push("【本集正文摘录】", excerpt);
-  }
-
-  const requirement = (userRequirement ?? "").trim();
-  if (requirement) {
-    lines.push("【用户素材要求】", requirement);
-  }
-
-  return lines.filter(Boolean).join("\n");
+export function designPromptContentFingerprint(
+  item: EpisodeAssetDesignItem,
+): string {
+  return JSON.stringify({
+    assetType: item.assetType,
+    name: item.name,
+    facts: extractAssetFacts(item),
+  });
 }

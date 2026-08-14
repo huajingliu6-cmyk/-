@@ -8,7 +8,11 @@ import type {
   GeneratedMediaState,
 } from "@/projects/assets/episode-design/types";
 import type { VideoRefSafety } from "@/projects/assets/types";
-import { formatDesignDraftSeedText, resolveFormalDesignPromptText } from "@/projects/assets/episode-design/format-design-draft-seed";
+import { resolveFormalDesignPromptText } from "@/projects/assets/episode-design/format-design-draft-seed";
+import {
+  designPromptAutoGenKey,
+  requestFormalDesignPromptGenerate,
+} from "@/projects/assets/episode-design/auto-generate-design-prompts";
 import {
   designVideoRefSafetyBadge,
   isDesignMediaVideoRefLocked,
@@ -147,11 +151,20 @@ function DesignAssetModalBody({
   onGenerationProgress,
 }: DesignAssetModalBodyProps) {
   const titleId = useId();
-  const extractInfoText = formatDesignDraftSeedText(item);
   const formalPrompt = resolveFormalDesignPromptText(item);
   const formalPromptMissing = !formalPrompt;
+  const serverPromptGenerating = item.designPrompt?.status === "generating";
 
   const [promptText, setPromptText] = useState(formalPrompt);
+  const syncedFormalPromptRef = useRef(formalPrompt);
+  if (formalPrompt !== syncedFormalPromptRef.current) {
+    syncedFormalPromptRef.current = formalPrompt;
+    if (formalPrompt) {
+      setPromptText(formalPrompt);
+    } else if (!serverPromptGenerating) {
+      setPromptText("");
+    }
+  }
   const [promptModelId, setPromptModelId] = useState<DesignPromptModelId>(
     DEFAULT_DESIGN_PROMPT_MODEL_ID,
   );
@@ -159,16 +172,18 @@ function DesignAssetModalBody({
     AssetDesignPromptHistoryEntry[]
   >(item.designPrompt?.history ?? []);
   const [loadingPrompt, setLoadingPrompt] = useState(false);
+  const promptBusy = loadingPrompt || serverPromptGenerating;
   const [requirementOpen, setRequirementOpen] = useState(false);
   const [requirementDraft, setRequirementDraft] = useState("");
   const [requirementError, setRequirementError] = useState("");
   const requirementFieldId = useId();
   const [generatingAsset, setGeneratingAsset] = useState(false);
   const generateBusy = generatingAsset || isGeneratingAsset;
+  const autoPromptKeyRef = useRef<string | null>(null);
   useGenerationBusy(
-    generateBusy || loadingPrompt,
+    generateBusy || promptBusy,
     `design-modal-${item.id}`,
-    loadingPrompt ? "资产提示词生成" : "资产图生成",
+    promptBusy ? "资产提示词生成" : "资产图生成",
   );
   const [copyNote, setCopyNote] = useState("");
   const [error, setError] = useState("");
@@ -352,73 +367,113 @@ function DesignAssetModalBody({
       setError("");
       setCopyNote("");
       setRequirementError("");
+      onItemPatched?.(item.id, {
+        ...item,
+        designPrompt: {
+          status: "generating",
+          text: resolveFormalDesignPromptText(item) || "",
+          generationId: item.designPrompt?.generationId ?? null,
+          sourceFingerprint: item.designPrompt?.sourceFingerprint ?? null,
+          generatedAt: item.designPrompt?.generatedAt ?? null,
+          updatedAt: new Date().toISOString(),
+          errorMessage: null,
+          history: item.designPrompt?.history ?? promptHistory,
+        },
+      });
       try {
-        const urls = apiBase(surface, projectId, episodeId, item.id);
-        const res = await fetch(urls.prompt, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            idempotencyKey: `prompt-${item.id}-${Date.now()}`,
-            userRequirement,
-            promptModelId,
-          }),
+        const result = await requestFormalDesignPromptGenerate({
+          surface,
+          projectId,
+          episodeId,
+          item,
+          userRequirement,
+          promptModelId,
         });
-        const payload = (await res.json()) as {
-          error?: string;
-          prompt?: string;
-          promptModelId?: string;
-          displayModelName?: string;
-          providerModelId?: string;
-          designPrompt?: {
-            text?: string;
-            status?: string;
-            history?: AssetDesignPromptHistoryEntry[];
-            generationId?: string | null;
-          };
-        };
-        if (!res.ok) {
-          throw new Error(payload.error ?? "提示词生成失败");
-        }
-        const text =
-          payload.prompt?.trim() ||
-          payload.designPrompt?.text?.trim() ||
-          "";
-        if (!text) {
-          throw new Error("模型未返回有效的资产设计提示词");
-        }
         const now = new Date().toISOString();
         const history =
-          payload.designPrompt?.history ??
-          pushLocalPromptHistory(promptHistory, {
-            text,
-            generatedAt: now,
-            generationId: payload.designPrompt?.generationId ?? null,
-            source: "regenerate",
-          });
-        setPromptText(text);
+          result.history.length > 0
+            ? result.history
+            : pushLocalPromptHistory(promptHistory, {
+                text: result.text,
+                generatedAt: now,
+                generationId: result.generationId,
+                source: "regenerate",
+              });
+        setPromptText(result.text);
         setPromptHistory(history);
         setSyncedPromptHistoryLen(history.length);
         setStaleHint(false);
         setRequirementOpen(false);
         setRequirementDraft("");
-        onPromptUpdatedRef.current(item.id, text, {
+        onPromptUpdatedRef.current(item.id, result.text, {
           history,
-          generationId: payload.designPrompt?.generationId ?? null,
+          generationId: result.generationId,
         });
       } catch (e) {
         setError(e instanceof Error ? e.message : "提示词生成失败");
+        onItemPatched?.(item.id, {
+          ...item,
+          designPrompt: {
+            status: "failed",
+            text: resolveFormalDesignPromptText(item) || "",
+            generationId: item.designPrompt?.generationId ?? null,
+            sourceFingerprint: item.designPrompt?.sourceFingerprint ?? null,
+            generatedAt: item.designPrompt?.generatedAt ?? null,
+            updatedAt: new Date().toISOString(),
+            errorMessage: e instanceof Error ? e.message : "提示词生成失败",
+            history: item.designPrompt?.history ?? promptHistory,
+          },
+        });
       } finally {
         setLoadingPrompt(false);
       }
     },
-    [item, surface, projectId, episodeId, promptHistory, promptModelId],
+    [
+      item,
+      surface,
+      projectId,
+      episodeId,
+      promptHistory,
+      promptModelId,
+      onItemPatched,
+    ],
   );
+
+  const regeneratePromptRef = useRef(regeneratePrompt);
+  useEffect(() => {
+    regeneratePromptRef.current = regeneratePrompt;
+  }, [regeneratePrompt]);
+
+  /** Missing formal prompt: auto-generate once per item+fingerprint+model. */
+  useEffect(() => {
+    if (!formalPromptMissing) return;
+    if (promptText.trim()) return;
+    const key = designPromptAutoGenKey(item, promptModelId);
+    if (autoPromptKeyRef.current === key) return;
+    autoPromptKeyRef.current = key;
+    if (serverPromptGenerating) return;
+    void regeneratePromptRef.current("");
+  }, [
+    formalPromptMissing,
+    promptText,
+    item,
+    promptModelId,
+    serverPromptGenerating,
+  ]);
 
   const openRequirementDialog = useCallback(() => {
     setRequirementDraft("");
     setRequirementError("");
     setRequirementOpen(true);
   }, []);
+
+  const handlePromptGenerateClick = useCallback(() => {
+    if (formalPromptMissing) {
+      void regeneratePrompt("");
+      return;
+    }
+    openRequirementDialog();
+  }, [formalPromptMissing, regeneratePrompt, openRequirementDialog]);
 
   const submitRequirement = useCallback(() => {
     const trimmed = requirementDraft.trim();
@@ -697,7 +752,7 @@ function DesignAssetModalBody({
               该提示词基于旧剧本或旧资产描述，可继续编辑或重新生成。
             </p>
           ) : null}
-          {loadingPrompt ? (
+          {promptBusy ? (
             <p className="ead-muted" data-testid="design-prompt-loading">
               正在生成提示词…
             </p>
@@ -705,19 +760,6 @@ function DesignAssetModalBody({
 
           <div className="ead-modal__grid">
             <div className="ead-modal__col">
-              {extractInfoText.trim() ? (
-                <div
-                  className="ead-extract-info"
-                  data-testid="design-extract-info"
-                >
-                  <div className="ead-modal__section-head">
-                    <span>资产提取信息</span>
-                  </div>
-                  <pre className="ead-extract-info__body" aria-readonly="true">
-                    {extractInfoText}
-                  </pre>
-                </div>
-              ) : null}
               <div className="ead-modal__section-head">
                 <span>素材提示词</span>
                 <button
@@ -771,12 +813,14 @@ function DesignAssetModalBody({
                   data-testid="design-prompt-textarea"
                   aria-label="素材提示词"
                   placeholder={
-                    formalPromptMissing
-                      ? "尚未生成正式素材提示词。请点击「重新生成提示词」。"
-                      : "正式素材提示词"
+                    promptBusy
+                      ? "正在生成提示词…"
+                      : formalPromptMissing
+                        ? "尚未生成"
+                        : "正式素材提示词"
                   }
                   value={promptText}
-                  disabled={loadingPrompt}
+                  disabled={promptBusy}
                   rows={12}
                   onChange={(e) => {
                     setPromptText(e.target.value);
@@ -784,7 +828,7 @@ function DesignAssetModalBody({
                   }}
                 />
               </label>
-              {formalPromptMissing && !promptText.trim() ? (
+              {formalPromptMissing && !promptText.trim() && !promptBusy ? (
                 <p
                   className="ead-muted"
                   data-testid="design-prompt-not-generated"
@@ -800,10 +844,14 @@ function DesignAssetModalBody({
                   type="button"
                   className="amw-btn ead-prompt-actions__regenerate"
                   data-testid="design-regenerate-prompt"
-                  disabled={loadingPrompt || generateBusy}
-                  onClick={openRequirementDialog}
+                  disabled={promptBusy || generateBusy}
+                  onClick={handlePromptGenerateClick}
                 >
-                  {loadingPrompt ? "生成中…" : "重新生成提示词"}
+                  {promptBusy
+                    ? "生成中…"
+                    : formalPromptMissing
+                      ? "生成提示词"
+                      : "重新生成提示词"}
                 </button>
 
                 <div
@@ -815,7 +863,7 @@ function DesignAssetModalBody({
                     hideLabel
                     value={promptModelId}
                     options={DESIGN_PROMPT_MODEL_OPTIONS}
-                    disabled={loadingPrompt || generateBusy}
+                    disabled={promptBusy || generateBusy}
                     menuPortal
                     menuSideOffset={6}
                     menuCollisionPadding={12}
@@ -1131,7 +1179,7 @@ function DesignAssetModalBody({
               className="amw-btn amw-btn-primary"
               data-testid="design-copy"
               disabled={
-                !promptText.trim() || loadingPrompt || generateBusy
+                !promptText.trim() || promptBusy || generateBusy
               }
               onClick={() => void handleCopy()}
             >
@@ -1142,7 +1190,7 @@ function DesignAssetModalBody({
               className="amw-btn amw-btn-primary"
               data-testid="design-generate-asset"
               disabled={
-                loadingPrompt ||
+                promptBusy ||
                 generateBusy ||
                 !promptText.trim() ||
                 audioDisabled

@@ -39,6 +39,8 @@ import {
 } from "@/projects/assets/episode-design/approved-item";
 import { createEpisodeAssetDesignIdempotencyKey } from "@/projects/assets/episode-design/prompts";
 import { mergeGeneratedMediaState } from "@/projects/assets/episode-design/generated-media-history";
+import { autoGenerateMissingFormalDesignPrompts } from "@/projects/assets/episode-design/auto-generate-design-prompts";
+import { DEFAULT_DESIGN_PROMPT_MODEL_ID } from "@/projects/assets/episode-design/design-prompt-models";
 import {
   characterNeedsUnboundVoiceConfirm,
   getDesignMediaVoiceBinding,
@@ -441,6 +443,10 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   const [generatingAssetIds, setGeneratingAssetIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [generatingPromptIds, setGeneratingPromptIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const autoPromptBatchKeysRef = useRef(new Set<string>());
   const [assetGenerationProgress, setAssetGenerationProgress] = useState<
     Record<string, AssetGenerationProgress>
   >({});
@@ -537,11 +543,19 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       : null;
   const ownerApprovalOpen = Boolean(ownerApprovalSubmissionId);
   useGenerationBusy(
-    extractionBusy || generatingAssetIds.size > 0,
+    extractionBusy ||
+      generatingAssetIds.size > 0 ||
+      generatingPromptIds.size > 0,
     extractionBusy
       ? `asset-extract-${projectId}`
-      : `asset-image-generation-${projectId}`,
-    extractionBusy ? "资产提取" : "资产图片生成",
+      : generatingPromptIds.size > 0
+        ? `asset-design-prompt-${projectId}`
+        : `asset-image-generation-${projectId}`,
+    extractionBusy
+      ? "资产提取"
+      : generatingPromptIds.size > 0
+        ? "素材提示词生成"
+        : "资产图片生成",
   );
 
   useEffect(() => {
@@ -1091,6 +1105,142 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     setDesignStatus(record.status);
   }, []);
 
+  const kickOffFormalDesignPrompts = useCallback(
+    async (record: EpisodeAssetDesignRecord, episodeId: string) => {
+      const batchKey = `${episodeId}|r${record.revision}|${record.items
+        .map((item) => item.id)
+        .join(",")}`;
+      if (autoPromptBatchKeysRef.current.has(batchKey)) return;
+      autoPromptBatchKeysRef.current.add(batchKey);
+
+      const { ok, failed } = await autoGenerateMissingFormalDesignPrompts({
+        surface,
+        projectId,
+        episodeId,
+        items: record.items,
+        promptModelId: DEFAULT_DESIGN_PROMPT_MODEL_ID,
+        onItemStart: (item) => {
+          setGeneratingPromptIds((prev) => {
+            const next = new Set(prev);
+            next.add(item.id);
+            return next;
+          });
+          setItems((prev) => {
+            const next = prev.map((row) =>
+              row.id === item.id
+                ? {
+                    ...row,
+                    designPrompt: {
+                      status: "generating" as const,
+                      text: "",
+                      generationId: row.designPrompt?.generationId ?? null,
+                      sourceFingerprint:
+                        row.designPrompt?.sourceFingerprint ?? null,
+                      generatedAt: row.designPrompt?.generatedAt ?? null,
+                      updatedAt: new Date().toISOString(),
+                      errorMessage: null,
+                      history: row.designPrompt?.history ?? [],
+                    },
+                  }
+                : row,
+            );
+            itemsRef.current = next;
+            return next;
+          });
+        },
+        onItemSuccess: (item, result) => {
+          setGeneratingPromptIds((prev) => {
+            const next = new Set(prev);
+            next.delete(item.id);
+            return next;
+          });
+          const now = new Date().toISOString();
+          setItems((prev) => {
+            const next = prev.map((row) =>
+              row.id === item.id
+                ? {
+                    ...row,
+                    designPrompt: {
+                      status: "ready" as const,
+                      text: result.text,
+                      generationId: result.generationId,
+                      sourceFingerprint:
+                        row.designPrompt?.sourceFingerprint ?? null,
+                      generatedAt: now,
+                      updatedAt: now,
+                      errorMessage: null,
+                      history: result.history,
+                    },
+                  }
+                : row,
+            );
+            itemsRef.current = next;
+            return next;
+          });
+          setDesignModalItem((prev) =>
+            prev && prev.id === item.id
+              ? {
+                  ...prev,
+                  designPrompt: {
+                    status: "ready" as const,
+                    text: result.text,
+                    generationId: result.generationId,
+                    sourceFingerprint:
+                      prev.designPrompt?.sourceFingerprint ?? null,
+                    generatedAt: now,
+                    updatedAt: now,
+                    errorMessage: null,
+                    history: result.history,
+                  },
+                }
+              : prev,
+          );
+        },
+        onItemError: (item, error) => {
+          setGeneratingPromptIds((prev) => {
+            const next = new Set(prev);
+            next.delete(item.id);
+            return next;
+          });
+          setItems((prev) => {
+            const next = prev.map((row) =>
+              row.id === item.id
+                ? {
+                    ...row,
+                    designPrompt: {
+                      status: "failed" as const,
+                      text: "",
+                      generationId: row.designPrompt?.generationId ?? null,
+                      sourceFingerprint:
+                        row.designPrompt?.sourceFingerprint ?? null,
+                      generatedAt: row.designPrompt?.generatedAt ?? null,
+                      updatedAt: new Date().toISOString(),
+                      errorMessage: error.message,
+                      history: row.designPrompt?.history ?? [],
+                    },
+                  }
+                : row,
+            );
+            itemsRef.current = next;
+            return next;
+          });
+        },
+      });
+
+      if (ok > 0 || failed > 0) {
+        setPageNote(
+          ok > 0
+            ? `资产提取完成，已自动生成 ${ok} 条素材提示词` +
+                (failed > 0 ? `，${failed} 条生成失败可在弹窗重试` : "。")
+            : failed > 0
+              ? `资产提取完成，但素材提示词自动生成失败（${failed}），可打开设计弹窗重试。`
+              : "",
+        );
+      }
+    },
+    [projectId, surface],
+  );
+
   const saveItems = useCallback(
     async (
       nextItems: EpisodeAssetDesignItem[],
@@ -1399,12 +1549,16 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       }
       notifyCreditsRefresh();
       await loadList();
-      if (selectedIdRef.current === extractingEpisodeId) {
-        if (applyPayload.record) {
+      if (applyPayload.record) {
+        if (selectedIdRef.current === extractingEpisodeId) {
           applyRecord(applyPayload.record);
+          setPageNote("本集资产提取完成，请确认设计项。");
+          await loadDetail(extractingEpisodeId);
         }
-        setPageNote("本集资产提取完成，请确认设计项。");
-        await loadDetail(extractingEpisodeId);
+        void kickOffFormalDesignPrompts(
+          applyPayload.record,
+          extractingEpisodeId,
+        );
       }
     } catch (error) {
       const busyConflict =
@@ -1461,6 +1615,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     extractionBusy,
     extractingEpisodeIds,
     fingerprint,
+    kickOffFormalDesignPrompts,
     loadDetail,
     loadList,
     markEpisodeExtracting,
@@ -1668,6 +1823,10 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       await loadList();
       if (selectedIdRef.current === SCRIPT_ASSET_DESIGN_ID) {
         applyRecord(applyPayload.record);
+        void kickOffFormalDesignPrompts(
+          applyPayload.record,
+          SCRIPT_ASSET_DESIGN_ID,
+        );
         setPageNote(
           `已提取 ${applyPayload.record.items.length} 项` +
             (repairedCount > 0 ? `，${repairedCount} 项已自动修复` : "") +
@@ -1677,6 +1836,10 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         await loadDetail(SCRIPT_ASSET_DESIGN_ID);
       } else {
         setPageNote("完整剧本资产提取已完成，可返回全剧本查看。");
+        void kickOffFormalDesignPrompts(
+          applyPayload.record,
+          SCRIPT_ASSET_DESIGN_ID,
+        );
       }
     } catch (error) {
       const busyConflict =
@@ -1782,6 +1945,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     assetExtractionModel,
     confirming,
     extractionBusy,
+    kickOffFormalDesignPrompts,
     loadDetail,
     loadList,
     markEpisodeExtracting,
@@ -1837,6 +2001,10 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         rejectedItems: applyPayload.rejectedItems ?? [],
       });
       applyRecord(applyPayload.record);
+      void kickOffFormalDesignPrompts(
+        applyPayload.record,
+        SCRIPT_ASSET_DESIGN_ID,
+      );
       setPageNote(
         `已重新应用生成结果：${applyPayload.record.items.length} 项资产。`,
       );
@@ -1857,6 +2025,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     applyRecord,
     batchExtracting,
     extractionError?.generationId,
+    kickOffFormalDesignPrompts,
     loadDetail,
     loadList,
     saving,
@@ -1924,6 +2093,10 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       setFullScriptPending(false);
       setFullScriptAssetCount(applyPayload.record.items.length);
       applyRecord(applyPayload.record);
+      void kickOffFormalDesignPrompts(
+        applyPayload.record,
+        SCRIPT_ASSET_DESIGN_ID,
+      );
       setPageNote(
         `已合并重试结果：${applyPayload.record.items.length} 项资产` +
           ((retryPayload.failedRemaining ?? 0) > 0
@@ -1948,6 +2121,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     applyRecord,
     batchExtracting,
     extractionError?.generationId,
+    kickOffFormalDesignPrompts,
     loadDetail,
     loadList,
     saving,

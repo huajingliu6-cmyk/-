@@ -123,5 +123,8 @@ describe("design prompt model selection", () => {
     expect(footSlice).toContain("design-generate-asset");
     expect(footSlice).not.toContain("design-regenerate-prompt");
     expect(footSlice).not.toContain("重新生成提示词");
+    expect(modal).toContain("生成提示词");
+    expect(modal).not.toContain('data-testid="design-extract-info"');
+    expect(modal).not.toContain("资产提取信息");
   });
 });

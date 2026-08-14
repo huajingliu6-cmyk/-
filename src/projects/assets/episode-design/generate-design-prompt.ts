@@ -13,8 +13,9 @@ import {
   type DesignPromptModelId,
 } from "@/projects/assets/episode-design/design-prompt-models";
 import {
-  buildDesignPromptBrief,
+  buildDesignPromptUserPayloadText,
   looksLikeExtractDraftPrompt,
+  sanitizeFormalDesignPromptCandidate,
 } from "@/projects/assets/episode-design/format-design-draft-seed";
 import type {
   EpisodeAssetDesignItem,
@@ -29,15 +30,17 @@ import type { TextGenerationJob } from "@/text-generation/types";
 
 export {
   buildDesignPromptBrief,
+  buildDesignPromptUserPayloadText,
   formatDesignDraftSeedText,
   looksLikeExtractDraftPrompt,
   resolveFormalDesignPromptText,
+  sanitizeFormalDesignPromptCandidate,
 } from "@/projects/assets/episode-design/format-design-draft-seed";
 
 const DESIGN_PROMPT_FORMAT_CORRECTION = [
   "上一次输出是资产信息摘录，不是最终素材提示词。",
-  "请严格按照已发布任务规则，只返回可直接用于生成素材的完整中文提示词正文。",
-  "不要再输出【角色描述】【外貌】【服装】等提取字段列表。",
+  "请严格按照已发布任务规则，只返回一整段完整、连贯、可直接用于生成素材的中文提示词正文，",
+  "不要输出字段标题、JSON、Markdown、列表或解释。",
 ].join("");
 
 export type DesignPromptExecutionMetadata = Pick<
@@ -120,18 +123,25 @@ function assertTextModality(resolved: {
   }
 }
 
-/** Reject empty / JSON / image / extract-draft dumps — never fall back to seed. */
+function throwFormatInvalid(message: string): never {
+  throw new AiConfigError("AI_DESIGN_PROMPT_FORMAT_INVALID", message);
+}
+
+/**
+ * Reject empty / JSON / extract-field dumps / concept-art fallbacks.
+ * Never fall back to extract seed.
+ */
 export function assertValidDesignPromptText(
   text: string,
   item?: EpisodeAssetDesignItem,
 ): string {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    throw new Error("模型未返回有效的资产设计提示词");
+  const cleaned = sanitizeFormalDesignPromptCandidate(text);
+  if (!cleaned) {
+    throwFormatInvalid("模型未返回有效的资产设计提示词");
   }
   if (
-    /^!\[[^\]]*\]\(\s*https?:\/\//i.test(trimmed) ||
-    /^https?:\/\/\S+\.(png|jpe?g|webp|gif)(\?\S*)?$/i.test(trimmed)
+    /^!\[[^\]]*\]\(\s*https?:\/\//i.test(cleaned) ||
+    /^https?:\/\/\S+\.(png|jpe?g|webp|gif)(\?\S*)?$/i.test(cleaned)
   ) {
     throw new AiConfigError(
       "AI_CAPABILITY_MODALITY_MISMATCH",
@@ -139,21 +149,21 @@ export function assertValidDesignPromptText(
     );
   }
   const looksJson =
-    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
-    (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
-    /```(?:json)?/i.test(trimmed);
+    (cleaned.startsWith("{") && cleaned.endsWith("}")) ||
+    (cleaned.startsWith("[") && cleaned.endsWith("]")) ||
+    /```(?:json)?/i.test(text);
   if (looksJson) {
-    throw new Error(
+    throwFormatInvalid(
       "模型返回了 JSON/结构化内容而非提示词正文，请重试或检查任务规则。",
     );
   }
-  if (looksLikeExtractDraftPrompt(trimmed, item)) {
-    throw new AiConfigError(
-      "AI_DESIGN_PROMPT_FORMAT_INVALID",
-      "模型返回了资产提取摘录而非正式素材提示词。",
-    );
+  if (/concept\s*art/i.test(cleaned)) {
+    throwFormatInvalid("模型返回了英文 concept art 回退内容，不是正式中文提示词。");
   }
-  return trimmed;
+  if (looksLikeExtractDraftPrompt(cleaned, item) || looksLikeExtractDraftPrompt(text, item)) {
+    throwFormatInvalid("模型返回了资产提取摘录而非正式素材提示词。");
+  }
+  return cleaned;
 }
 
 /**
@@ -203,16 +213,12 @@ export async function streamRedesignPromptInConversation(input: {
     });
   }
 
-  const designBrief = [
-    buildDesignPromptBrief(
-      input.item,
-      input.episodeText,
-      input.userRequirement,
-    ),
-    "",
-    "【项目视觉风格】",
+  const designBrief = buildDesignPromptUserPayloadText(
+    input.item,
+    input.episodeText,
+    input.userRequirement,
     styleResolved.directive,
-  ].join("\n");
+  );
 
   const userPrompt = assembleUntrustedUserData(
     "asset_design_context",

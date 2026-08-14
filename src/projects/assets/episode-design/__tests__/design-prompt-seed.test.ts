@@ -1,180 +1,214 @@
-import { describe, expect, it } from "vitest";
-import {
-  buildDesignPromptBrief,
-  formatDesignDraftSeedText,
-  looksLikeExtractDraftPrompt,
-  resolveFormalDesignPromptText,
-} from "@/projects/assets/episode-design/format-design-draft-seed";
-import type { CharacterDesignItem } from "@/projects/assets/episode-design/types";
 import { readFileSync } from "fs";
 import path from "path";
+import { describe, expect, it } from "vitest";
+import {
+  assertValidDesignPromptText,
+  streamRedesignPromptInConversation,
+} from "@/projects/assets/episode-design/generate-design-prompt";
+import {
+  buildDesignPromptUserPayloadText,
+  containsForbiddenExtractFieldTags,
+  extractAssetFacts,
+  legacyExtractSeedTextForCompare,
+  looksLikeExtractDraftPrompt,
+  resolveFormalDesignPromptText,
+  sanitizeFormalDesignPromptCandidate,
+} from "@/projects/assets/episode-design/format-design-draft-seed";
+import type { EpisodeAssetDesignItem } from "@/projects/assets/episode-design/types";
 
 function characterItem(
-  patch: Partial<CharacterDesignItem["draft"]> = {},
-): CharacterDesignItem {
+  overrides?: Partial<EpisodeAssetDesignItem>,
+): EpisodeAssetDesignItem {
   return {
-    id: "item-1",
+    id: "char-1",
     assetType: "character",
-    name: "江宸",
-    resolution: "create_new",
-    existingAssetId: null,
-    libraryAssetId: null,
-    source: "ai",
+    name: "林清",
     draft: {
       description: "沉稳果敢的青年",
-      appearance: "长发及腰，眉眼清冷",
-      clothing: "青衫白袍",
+      appearance: "短发，深色瞳孔",
+      clothing: "深灰西装",
       role: "男主",
-      age: "20",
-      voiceId: null,
-      voiceName: null,
-      voiceBound: false,
-      usageInEpisode: "开场登场",
-      evidence: "第一集",
-      ...patch,
+      age: "29",
+      usageInEpisode: "法庭对峙",
+      evidence: "第1集",
     },
-  };
+    ...overrides,
+  } as EpisodeAssetDesignItem;
 }
 
-describe("formatDesignDraftSeedText", () => {
-  it("formats extracted draft fields for the extract-info panel", () => {
-    const text = formatDesignDraftSeedText(characterItem());
-    expect(text).toContain("【角色描述】沉稳果敢的青年");
-    expect(text).toContain("【外貌】长发及腰，眉眼清冷");
-    expect(text).toContain("【服装】青衫白袍");
-    expect(text).not.toContain("本集正文");
+describe("structured design-prompt facts (no field-title seed)", () => {
+  it("extracts internal facts without labeled titles", () => {
+    const facts = extractAssetFacts(characterItem());
+    expect(facts).toEqual({
+      description: "沉稳果敢的青年",
+      appearance: "短发，深色瞳孔",
+      clothing: "深灰西装",
+      role: "男主",
+      age: "29",
+      usageInEpisode: "法庭对峙",
+      evidence: "第1集",
+    });
   });
 
-  it("omits empty fields", () => {
-    const text = formatDesignDraftSeedText(
-      characterItem({ clothing: "", age: "", evidence: "" }),
-    );
-    expect(text).not.toContain("【服装】");
-    expect(text).not.toContain("【年龄】");
-    expect(text).toContain("【外貌】");
-  });
-
-  it("buildDesignPromptBrief is facts-only (no ambiguous photoreal bans)", () => {
-    const brief = buildDesignPromptBrief(
+  it("user payload is JSON facts + instructions, not 【角色描述】 output schema", () => {
+    const payload = buildDesignPromptUserPayloadText(
       characterItem(),
-      "江宸走入大厅。",
-      "青衫要有褶皱",
+      "本集正文示例",
+      "",
     );
-    expect(brief).toContain("【资产名称】江宸");
-    expect(brief).toContain("【外貌】长发及腰，眉眼清冷");
-    expect(brief).toContain("【本集正文摘录】");
-    expect(brief).toContain("江宸走入大厅。");
-    expect(brief).toContain("【用户素材要求】");
-    expect(brief).toContain("青衫要有褶皱");
-    expect(brief).not.toContain("避免写实真人");
-    expect(brief).not.toContain("禁止真人");
-    expect(brief).not.toContain("不要写实人脸");
-    expect(brief).not.toContain("请据此撰写");
+    expect(payload).toContain('"assetType": "character"');
+    expect(payload).toContain('"appearance": "短发，深色瞳孔"');
+    expect(payload).toContain("仅为事实输入，不是输出格式");
+    expect(payload).toContain("一整段完整、连贯");
+    expect(payload).not.toMatch(/【角色描述】沉稳/);
+  });
+
+  it("legacy seed compare still detects dirty historical labeled text", () => {
+    const seed = legacyExtractSeedTextForCompare(characterItem());
+    expect(seed).toContain("【角色描述】");
+    expect(looksLikeExtractDraftPrompt(seed, characterItem())).toBe(true);
+    expect(containsForbiddenExtractFieldTags(seed)).toBe(true);
   });
 });
 
-describe("dirty formal prompt detection", () => {
-  it("treats seed-equal or extract-sourced text as not generated", () => {
-    const item = characterItem();
-    const seed = formatDesignDraftSeedText(item);
-    expect(looksLikeExtractDraftPrompt(seed, item)).toBe(true);
-    expect(
-      resolveFormalDesignPromptText({
-        ...item,
-        designPrompt: {
-          status: "ready",
-          text: seed,
-          generationId: null,
-          sourceFingerprint: null,
-          generatedAt: null,
-          updatedAt: null,
-          errorMessage: null,
-          history: [
-            {
-              text: seed,
-              generatedAt: "2026-01-01T00:00:00.000Z",
-              generationId: null,
-              source: "extract",
-            },
-          ],
-        },
-      }),
-    ).toBe("");
+describe("resolveFormalDesignPromptText dirty data", () => {
+  it("hides labeled extract dumps and extract-sourced rows", () => {
+    const item = characterItem({
+      designPrompt: {
+        status: "ready",
+        text: "【角色描述】女主\n【外貌】短发\n【服装】青衫",
+        generationId: null,
+        sourceFingerprint: null,
+        generatedAt: null,
+        updatedAt: null,
+        errorMessage: null,
+        history: [],
+      },
+    });
+    expect(resolveFormalDesignPromptText(item)).toBe("");
+
+    const extractSourced = characterItem({
+      designPrompt: {
+        status: "ready",
+        text: "【角色描述】女主\n【外貌】短发\n【服装】青衫",
+        generationId: null,
+        sourceFingerprint: null,
+        generatedAt: null,
+        updatedAt: null,
+        errorMessage: null,
+        history: [
+          {
+            text: "【角色描述】女主\n【外貌】短发\n【服装】青衫",
+            generatedAt: new Date().toISOString(),
+            generationId: null,
+            source: "extract",
+          },
+        ],
+      },
+    });
+    expect(resolveFormalDesignPromptText(extractSourced)).toBe("");
   });
 
-  it("keeps real regenerated prompts", () => {
-    const item = characterItem();
+  it("keeps continuous formal Chinese prompts", () => {
     const formal =
-      "超写实真人影视摄影质感，虚构角色江宸，青衫白袍，侧光电影剧照，16:9";
-    expect(looksLikeExtractDraftPrompt(formal, item)).toBe(false);
+      "横构图电影剧照，虚构青年律师立于法庭中央，短发深色瞳孔，深灰西装，冷硬侧光，写实影视摄影质感。";
     expect(
-      resolveFormalDesignPromptText({
-        ...item,
-        designPrompt: {
-          status: "ready",
-          text: formal,
-          generationId: "tg_abc",
-          sourceFingerprint: "fp",
-          generatedAt: "2026-01-01T00:00:00.000Z",
-          updatedAt: "2026-01-01T00:00:00.000Z",
-          errorMessage: null,
-          history: [
-            {
-              text: formal,
-              generatedAt: "2026-01-01T00:00:00.000Z",
-              generationId: "tg_abc",
-              source: "regenerate",
-            },
-          ],
-        },
-      }),
+      resolveFormalDesignPromptText(
+        characterItem({
+          designPrompt: {
+            status: "ready",
+            text: formal,
+            generationId: "tg_abc",
+            sourceFingerprint: null,
+            generatedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            errorMessage: null,
+            history: [],
+          },
+        }),
+      ),
     ).toBe(formal);
   });
 });
 
-describe("DesignAssetModal formal prompt vs extract info", () => {
+describe("assertValidDesignPromptText", () => {
+  it("rejects any forbidden extract field tag", () => {
+    expect(() =>
+      assertValidDesignPromptText("【角色描述】女主 站在窗前", characterItem()),
+    ).toThrow(/资产提取摘录|AI_DESIGN_PROMPT_FORMAT_INVALID|正式素材提示词/);
+  });
+
+  it("rejects english concept art fallback", () => {
+    expect(() =>
+      assertValidDesignPromptText("concept art of a young woman", characterItem()),
+    ).toThrow(/concept art/);
+  });
+
+  it("sanitizes to one continuous paragraph and accepts formal Chinese", () => {
+    const cleaned = assertValidDesignPromptText(
+      "横构图电影剧照。\n\n虚构青年律师短发深色瞳孔。\n- 深灰西装\n写实侧光。",
+      characterItem(),
+    );
+    expect(cleaned).not.toContain("\n");
+    expect(cleaned).toContain("横构图电影剧照");
+    expect(cleaned).not.toContain("【角色描述】");
+  });
+
+  it("sanitizeFormalDesignPromptCandidate collapses lists and fences", () => {
+    expect(
+      sanitizeFormalDesignPromptCandidate("```text\n甲\n\n乙\n```"),
+    ).toBe("甲 乙");
+  });
+});
+
+describe("DesignAssetModal formal prompt UI", () => {
   const modal = readFileSync(
     path.join(process.cwd(), "src/projects/assets/DesignAssetModal.tsx"),
     "utf-8",
   );
+  const workspace = readFileSync(
+    path.join(
+      process.cwd(),
+      "src/projects/assets/EpisodeAssetDesignWorkspace.tsx",
+    ),
+    "utf-8",
+  );
 
-  it("never puts extract seed into the formal textarea", () => {
-    expect(modal).toContain("formatDesignDraftSeedText");
+  it("does not show extract-info region or labeled field titles", () => {
+    expect(modal).not.toContain('data-testid="design-extract-info"');
+    expect(modal).not.toContain("资产提取信息");
+    expect(modal).not.toContain("formatDesignDraftSeedText");
+    expect(modal).not.toContain("【角色描述】");
+    expect(modal).not.toContain("【外貌】");
+    expect(modal).not.toContain("【服装】");
     expect(modal).toContain("resolveFormalDesignPromptText");
-    expect(modal).toContain('data-testid="design-extract-info"');
-    expect(modal).toContain("资产提取信息");
     expect(modal).toContain("尚未生成");
-    expect(modal).toContain('data-testid="design-prompt-not-generated"');
+    expect(modal).toContain("生成提示词");
+    expect(modal).toContain("重新生成提示词");
+    expect(modal).toContain("designPromptAutoGenKey");
+    expect(modal).toContain('void regeneratePromptRef.current("")');
+    expect(modal).toContain("handlePromptGenerateClick");
     expect(modal).not.toContain("initialPromptForItem");
     expect(modal).not.toContain("didSeedExtract");
     expect(modal).not.toContain("buildInitialPromptHistory");
-    expect(modal).toContain("模型未返回有效的资产设计提示词");
   });
 
-  it("does not call onPromptUpdated on mount to seed extract draft", () => {
-    expect(modal).not.toMatch(
-      /useEffect\(\(\) => \{\s*if \(!didSeedExtract\)/,
-    );
-    expect(modal).not.toContain(
-      "onPromptUpdatedRef.current(item.id, seed",
-    );
+  it("auto-generates once without requiring userRequirement dialog first", () => {
+    expect(modal).toContain("formalPromptMissing");
+    expect(modal).toContain("autoPromptKeyRef");
+    expect(modal).toMatch(/if \(formalPromptMissing\) \{\s*void regeneratePrompt\(""\)/);
+    expect(workspace).toContain("kickOffFormalDesignPrompts");
+    expect(workspace).toContain("autoGenerateMissingFormalDesignPrompts");
+    expect(workspace).toContain("DEFAULT_DESIGN_PROMPT_MODEL_ID");
   });
 
-  it("keeps regenerate controls and requirement dialog", () => {
-    expect(modal).toContain("重新生成提示词");
+  it("keeps regenerate requirement dialog only for re-generate path", () => {
     expect(modal).toContain("输入素材要求");
     expect(modal).toContain("userRequirement");
-    expect(modal).toContain("promptModelId");
-    expect(modal).toContain("design-prompt-actions");
     expect(modal).toContain("design-regenerate-requirement-input");
-    expect(modal).not.toContain("近景头像＋三视图");
-    expect(modal).not.toMatch(/needsAuto/);
-
-    const textareaIdx = modal.indexOf('data-testid="design-prompt-textarea"');
-    const regenerateIdx = modal.indexOf('data-testid="design-regenerate-prompt"');
-    const footIdx = modal.indexOf('className="ead-modal__foot"');
-    expect(textareaIdx).toBeGreaterThan(-1);
-    expect(regenerateIdx).toBeGreaterThan(textareaIdx);
-    expect(regenerateIdx).toBeLessThan(footIdx);
+    expect(modal).toContain("生成提示词");
   });
 });
+
+// Keep stream import referenced for typecheck of test module graph.
+void streamRedesignPromptInConversation;
