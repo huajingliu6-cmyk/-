@@ -4,6 +4,7 @@ import { getProjectRecord } from "@/projects/project-access";
 import { confirmEpisodeAssetDesign } from "@/projects/assets/episode-design/confirm";
 import { syncManagementToWorkspace } from "@/projects/workspace-sync/sync-management-to-workspace";
 import { guardEpisodeAssetDesignRemoteData } from "@/projects/assets/episode-design/route-remote-guard";
+import { getEnterpriseForProject } from "@/enterprise/store";
 
 type RouteContext = {
   params: Promise<{ projectId: string; episodeId: string }>;
@@ -42,6 +43,7 @@ export async function POST(request: Request, context: RouteContext) {
     typeof raw.expectedRevision === "number" ? raw.expectedRevision : null;
   const fingerprint =
     typeof raw.fingerprint === "string" ? raw.fingerprint.trim() : "";
+  const itemId = typeof raw.itemId === "string" ? raw.itemId.trim() : "";
 
   if (expectedRevision === null || !Number.isInteger(expectedRevision)) {
     return NextResponse.json(
@@ -56,6 +58,19 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
+  if (itemId) {
+    const guardedEnterprise = await guardEpisodeAssetDesignRemoteData(() =>
+      getEnterpriseForProject(projectId),
+    );
+    if (guardedEnterprise instanceof NextResponse) return guardedEnterprise;
+    if (guardedEnterprise) {
+      return NextResponse.json(
+        { error: "企业项目不支持单项直接入库", code: "PERSONAL_PROJECT_REQUIRED" },
+        { status: 403 },
+      );
+    }
+  }
+
   const guardedResult = await guardEpisodeAssetDesignRemoteData(() =>
     confirmEpisodeAssetDesign({
       projectId,
@@ -63,6 +78,7 @@ export async function POST(request: Request, context: RouteContext) {
       expectedRevision,
       userId: gated.user.id,
       fingerprint,
+      ...(itemId ? { itemId } : {}),
     }),
   );
   if (guardedResult instanceof NextResponse) return guardedResult;
@@ -76,6 +92,8 @@ export async function POST(request: Request, context: RouteContext) {
         ? 409
         : result.code === "EPISODE_DESIGN_NOT_FOUND"
           ? 404
+          : result.code === "ASSET_DESIGN_ITEM_NOT_FOUND"
+            ? 404
           : 400;
     return NextResponse.json(
       { error: result.message, code: result.code },

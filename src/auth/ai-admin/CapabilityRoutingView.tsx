@@ -196,22 +196,9 @@ function resolveRoutes(data: AdminAiData): ResolvedRoute[] {
       };
     }
 
-    const runtimeReuse = capability.capabilityId === "asset.design-prompt.generate";
-    // The item-level prompt endpoint deliberately resolves the same
-    // `episode_asset_design` capability as extraction. Its own registry
-    // binding is a compatibility alias and is not consulted at runtime.
-    const runtimeBinding = runtimeReuse
-      ? findCapabilityBinding(
-          data.rules.find((item) => item.capabilityId === "asset.episode-design.generate") ??
-            capability,
-          data.capabilityBindings,
-        )
-      : capabilityBinding;
-    const slotId = runtimeReuse
-      ? "episode-asset-design-text"
-      : runtimeBinding
-        ? runtimeBinding.profileSlotId
-        : capability.defaultProfileSlot;
+    const slotId = capabilityBinding
+      ? capabilityBinding.profileSlotId
+      : capability.defaultProfileSlot;
     const slotBinding = slotId
       ? data.slotBindings.find((item) => item.profileSlot === slotId) ?? null
       : null;
@@ -225,9 +212,8 @@ function resolveRoutes(data: AdminAiData): ResolvedRoute[] {
 
     let routeType: ResolvedRoute["routeType"] = explicitId ? "explicit" : "default";
     if (!slotId || capability.status === "planned") routeType = "unbound";
-    if (runtimeReuse) routeType = "runtime-reuse";
 
-    const enabled = runtimeBinding?.enabled ?? capability.status === "active";
+    const enabled = capabilityBinding?.enabled ?? capability.status === "active";
     const runnable =
       capability.status === "active" &&
       enabled &&
@@ -250,9 +236,7 @@ function resolveRoutes(data: AdminAiData): ResolvedRoute[] {
       routeType,
       runnable,
       statusLabel,
-      warning: runtimeReuse
-        ? "当前实现复用剧本资产提取线路；页面按实际运行路径展示"
-        : undefined,
+      warning: undefined,
     };
   });
 }

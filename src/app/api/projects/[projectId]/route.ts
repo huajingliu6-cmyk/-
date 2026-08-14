@@ -4,20 +4,19 @@ import {
   requireProjectOwnerOrSystemAdmin,
 } from "@/auth/require-access";
 import {
-  canEditProjectHighlights,
-} from "@/auth/capabilities";
-import {
   deleteProjectRecord,
   getProjectRecord,
   ProjectNameConflictError,
   ProjectNotFoundError,
   updateProjectHighlights,
   updateProjectName,
+  updateProjectVisualStyle,
 } from "@/projects/project-access";
 import {
   PROJECT_HIGHLIGHTS_MAX_LENGTH,
   PROJECT_NAME_MAX_LENGTH,
 } from "@/projects/validate-create-project";
+import { isProjectVisualStyleId } from "@/projects/project-visual-style";
 import { isRemoteDataServiceError } from "@/persistence/remote-data-client";
 
 type RouteContext = {
@@ -33,6 +32,7 @@ function toProjectJson(record: {
   projectMode: string;
   status: string;
   highlights: string;
+  visualStyle: string | null;
   passwordEnabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -46,6 +46,7 @@ function toProjectJson(record: {
     projectMode: record.projectMode,
     status: record.status,
     highlights: record.highlights,
+    visualStyle: record.visualStyle,
     passwordEnabled: record.passwordEnabled,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -85,7 +86,7 @@ export async function GET(_request: Request, context: RouteContext) {
   });
 }
 
-/** PATCH：更新项目名称和/或要点（仅项目主理人 / 系统管理员） */
+/** PATCH：更新项目名称和/或要点（仅项目主理人 / 挂靠企业所有者） */
 export async function PATCH(request: Request, context: RouteContext) {
   const { projectId } = await context.params;
   let gated;
@@ -110,13 +111,6 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
   if (!record) {
     return NextResponse.json({ error: "项目不存在" }, { status: 404 });
-  }
-
-  if (!canEditProjectHighlights(gated.user, record.ownerId)) {
-    return NextResponse.json(
-      { error: "仅项目主理人或系统管理员可以修改项目" },
-      { status: 403 },
-    );
   }
 
   let body: unknown;
@@ -150,9 +144,20 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   const hasName = typeof raw.name === "string";
   const hasHighlights = typeof raw.highlights === "string";
-  if (!hasName && !hasHighlights) {
+  const hasVisualStyle = "visualStyle" in raw;
+  if (
+    "stylePrompt" in raw ||
+    "promptDirective" in raw ||
+    "styleDirective" in raw
+  ) {
     return NextResponse.json(
-      { error: "请提供 name 或 highlights" },
+      { error: "不允许客户端覆盖项目视觉风格指令" },
+      { status: 400 },
+    );
+  }
+  if (!hasName && !hasHighlights && !hasVisualStyle) {
+    return NextResponse.json(
+      { error: "请提供 name、highlights 或 visualStyle" },
       { status: 400 },
     );
   }
@@ -175,6 +180,17 @@ export async function PATCH(request: Request, context: RouteContext) {
         await updateProjectHighlights(projectId, highlights),
       );
     }
+    if (hasVisualStyle) {
+      if (!isProjectVisualStyleId(raw.visualStyle)) {
+        return NextResponse.json(
+          { error: "请选择项目生成风格" },
+          { status: 400 },
+        );
+      }
+      updated = toProjectJson(
+        await updateProjectVisualStyle(projectId, raw.visualStyle),
+      );
+    }
     return NextResponse.json({ project: updated });
   } catch (error) {
     if (error instanceof ProjectNotFoundError) {
@@ -193,7 +209,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 }
 
-/** DELETE：删除项目（仅项目主理人 / 系统管理员） */
+/** DELETE：删除项目（仅项目主理人 / 挂靠企业所有者） */
 export async function DELETE(_request: Request, context: RouteContext) {
   const { projectId } = await context.params;
   let gated;
@@ -218,13 +234,6 @@ export async function DELETE(_request: Request, context: RouteContext) {
   }
   if (!record) {
     return NextResponse.json({ error: "项目不存在" }, { status: 404 });
-  }
-
-  if (!canEditProjectHighlights(gated.user, record.ownerId)) {
-    return NextResponse.json(
-      { error: "仅项目主理人或系统管理员可以删除项目" },
-      { status: 403 },
-    );
   }
 
   try {

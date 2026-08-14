@@ -75,6 +75,7 @@ describe("effective project roles and workspace routing helpers", () => {
       name: `perm-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
 
@@ -111,12 +112,14 @@ describe("effective project roles and workspace routing helpers", () => {
       name: `a-${Date.now()}`,
       creationSource: "story",
       projectMode: "canvas",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const p2 = await createProjectRecord(owner.id, {
       name: `b-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await addCardEngineer({

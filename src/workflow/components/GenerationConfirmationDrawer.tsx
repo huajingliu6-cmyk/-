@@ -197,11 +197,11 @@ export function GenerationConfirmationDrawer({
 
           <div className="rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
             {isMock
-              ? "当前为 Mock 模式，不会产生费用，结果将标记为演示视频。可在「管理 API」将视频镜头切换为 HTTP。"
+              ? "当前为 Mock 模式，不会产生费用，结果将标记为演示视频。可在「系统管理 → API 接口」将视频镜头切换为 HTTP。"
               : isHttp
                 ? httpReady
-                  ? "将调用后台「管理 API」中配置的视频镜头 HTTP 接口。"
-                  : "尚未配置视频镜头 API 地址，请管理员在「管理 API」中填写。"
+                  ? "将调用「系统管理 → API 接口」中配置的视频镜头 HTTP 接口。"
+                  : "尚未配置视频镜头 API 地址，请管理员在「系统管理 → API 接口」中填写。"
                 : paidEnabled
                   ? "真实付费生成已启用：确认后将调用阿里云百炼万相接口并产生费用。"
                   : "真实付费生成未启用（ALLOW_PAID_GENERATION=false）。"}
@@ -233,7 +233,7 @@ export function GenerationConfirmationDrawer({
               disabled={!canHttp || selectionBlocking}
               title={
                 !httpReady
-                  ? "请先在「管理 API」配置视频镜头地址"
+                  ? "请先在「系统管理 → API 接口」配置视频镜头地址"
                   : "确认生成"
               }
             >

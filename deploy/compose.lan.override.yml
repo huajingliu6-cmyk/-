@@ -1,19 +1,20 @@
-﻿# Redirect LAN build/run to enterprise-spaces worktree (REQUIRED for recent fixes).
-# Always pair with compose.remote.yml:
+# LAN overlay: build from infinite-canvas (parent of deploy/).
+# Pair with compose.remote.yml:
 #   docker compose --env-file .env.lan -f compose.remote.yml -f compose.lan.override.yml up -d --build
+# Prefer deploy/start-lan.ps1 which stamps BUILD_REVISION.
 services:
   web:
     build:
-      context: ../../infinite-canvas-enterprise-spaces
+      context: ..
       dockerfile: Dockerfile.lan
       args:
-        BUILD_SOURCE: infinite-canvas-enterprise-spaces
+        BUILD_SOURCE: infinite-canvas
         BUILD_REVISION: ${BUILD_REVISION:-unknown}
     environment:
       AUTH_SECRET: ${AUTH_SECRET:-infinite-canvas-dev-secret-change-me}
       AI_CONFIG_ENCRYPTION_KEY: ${AI_CONFIG_ENCRYPTION_KEY:-}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
-      BUILD_SOURCE: infinite-canvas-enterprise-spaces
+      BUILD_SOURCE: infinite-canvas
       BUILD_REVISION: ${BUILD_REVISION:-unknown}
       # Full-script asset extract timeout (ms). Default 600000 = 10 minutes.
       SCRIPT_ASSET_DESIGN_TIMEOUT_MS: "${SCRIPT_ASSET_DESIGN_TIMEOUT_MS:-600000}"
@@ -26,9 +27,9 @@ services:
       - "${WEB_PORT:-3080}:3000"
   api:
     build:
-      context: ../../infinite-canvas-enterprise-spaces/backend
+      context: ../backend
       dockerfile: Dockerfile
   blobstore:
     build:
-      context: ../../infinite-canvas-enterprise-spaces/backend
+      context: ../backend
       dockerfile: Blobstore.Dockerfile

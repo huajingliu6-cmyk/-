@@ -40,7 +40,7 @@ export async function resolveSd2PlatformCredentials(): Promise<
       if (apiUrl && !apiKey) {
         return {
           error:
-            "已配置「移动 SD2 平台」地址但缺少 API Key，请到管理 API 补全并保存",
+            "已配置「移动 SD2 平台」地址但缺少 API Key，请到系统管理 → API 接口补全并保存",
         };
       }
     }
@@ -81,6 +81,6 @@ export async function resolveSd2PlatformCredentials(): Promise<
 
   return {
     error:
-      "人物校验需要移动 SD2 平台。请到「管理 API → 移动 SD2 平台」填写平台 URL 与 Key（视频镜头可继续用方舟）",
+      "人物校验需要移动 SD2 平台。请到「系统管理 → API 接口 → 移动 SD2 平台」填写平台 URL 与 Key（视频镜头可继续用方舟）",
   };
 }

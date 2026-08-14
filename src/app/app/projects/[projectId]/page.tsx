@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { ProjectMembersPanel } from "@/projects/members/ProjectMembersPanel";
+import { readActiveSpace } from "@/enterprise/client-space";
+import { RouteLoadingOverlay } from "@/shell/RouteLoadingOverlay";
 import "@/projects/workbench/workbench.css";
 
 type ProjectPayload = {
@@ -21,12 +23,16 @@ type ProjectPayload = {
 export default function ProjectManagementDetailPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
+  const router = useRouter();
+  const [isPersonalSpace] = useState(
+    () => readActiveSpace().kind === "personal",
+  );
   const [data, setData] = useState<ProjectPayload | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId || isPersonalSpace) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -51,7 +57,36 @@ export default function ProjectManagementDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [isPersonalSpace, projectId]);
+
+  useEffect(() => {
+    if (!projectId || !isPersonalSpace) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/projects/${encodeURIComponent(projectId)}/entry`,
+          { credentials: "include", cache: "no-store" },
+        );
+        const payload = (await response.json()) as {
+          path?: string;
+          error?: string;
+        };
+        if (!response.ok || !payload.path) {
+          throw new Error(payload.error ?? "无法判断项目进度");
+        }
+        if (!cancelled) router.replace(payload.path);
+      } catch (reason) {
+        if (!cancelled) {
+          setError(reason instanceof Error ? reason.message : "无法打开项目");
+          setLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isPersonalSpace, projectId, router]);
 
   if (!projectId) {
     return (
@@ -60,6 +95,15 @@ export default function ProjectManagementDetailPage() {
           <p className="wb-error">缺少项目 ID</p>
         </div>
       </div>
+    );
+  }
+
+  if (isPersonalSpace && loading) {
+    return (
+      <RouteLoadingOverlay
+        title="正在进入项目…"
+        description="正在根据当前创作进度打开对应工作区"
+      />
     );
   }
 

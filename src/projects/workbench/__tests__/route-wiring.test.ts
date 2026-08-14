@@ -49,6 +49,14 @@ describe("workbench vs canvas route wiring", () => {
     expect(source).not.toContain("WorkflowEditor");
   });
 
+  it("shows project member controls only inside an enterprise space", () => {
+    const source = readSrc("src/projects/members/ProjectMembersPanel.tsx");
+    expect(source).toContain("ACTIVE_ENTERPRISE_EVENT");
+    expect(source).toContain("readActiveSpace");
+    expect(source).toContain("useSyncExternalStore");
+    expect(source).toContain("!activeEnterpriseId || !visible");
+  });
+
   it("projects list opens management project path, not canvas", () => {
     const source = readSrc("src/app/app/projects/page.tsx");
     expect(source).toContain("projectWorkbenchPath");

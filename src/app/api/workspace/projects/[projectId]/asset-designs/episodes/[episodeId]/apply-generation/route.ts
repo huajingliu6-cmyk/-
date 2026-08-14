@@ -52,12 +52,6 @@ export async function POST(request: Request, context: RouteContext) {
       { status: 400 },
     );
   }
-  if (!rawText.trim()) {
-    return NextResponse.json(
-      { error: "缺少 rawText", code: "INVALID_REQUEST" },
-      { status: 400 },
-    );
-  }
   if (!fingerprint) {
     return NextResponse.json(
       { error: "缺少 fingerprint", code: "INVALID_REQUEST" },
@@ -83,14 +77,25 @@ export async function POST(request: Request, context: RouteContext) {
     const status =
       result.code === "REVISION_CONFLICT" || result.code === "FINGERPRINT_STALE"
         ? 409
-        : result.code === "EPISODE_NOT_FOUND"
+        : result.code === "EPISODE_NOT_FOUND" ||
+            result.code === "GENERATION_NOT_FOUND"
           ? 404
           : 400;
     return NextResponse.json(
-      { error: result.message, code: result.code },
+      {
+        error: result.message,
+        code: result.code,
+        warnings: result.warnings ?? [],
+        rejectedItems: result.rejectedItems ?? [],
+      },
       { status },
     );
   }
 
-  return NextResponse.json({ record: result.record });
+  return NextResponse.json({
+    record: result.record,
+    warnings: result.warnings,
+    rejectedItems: result.rejectedItems,
+    repaired: result.repaired,
+  });
 }

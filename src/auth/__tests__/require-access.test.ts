@@ -79,6 +79,7 @@ describe("require-access and workspace API gates", () => {
       name: `access-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await addCardEngineer({
@@ -125,6 +126,7 @@ describe("require-access and workspace API gates", () => {
       name: `revoked-${Date.now()}`,
       creationSource: "story",
       projectMode: "canvas",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await addCardEngineer({
@@ -172,6 +174,7 @@ describe("require-access and workspace API gates", () => {
       name: `forge-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     vi.mocked(requireSessionUser).mockResolvedValue({
@@ -205,6 +208,7 @@ describe("require-access and workspace API gates", () => {
       name: `mgmt-assets-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await addCardEngineer({
@@ -239,12 +243,14 @@ describe("require-access and workspace API gates", () => {
       name: `own-${Date.now()}`,
       creationSource: "story",
       projectMode: "canvas",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const p2 = await createProjectRecord(owner2.id, {
       name: `other-${Date.now()}`,
       creationSource: "story",
       projectMode: "canvas",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
 
@@ -268,6 +274,7 @@ describe("require-access and workspace API gates", () => {
       name: `admin-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     vi.mocked(requireSessionUser).mockResolvedValue({
@@ -281,7 +288,7 @@ describe("require-access and workspace API gates", () => {
     if (!gated.ok) {
       expect(gated.response.status).toBe(403);
       const body = (await gated.response.json()) as { error?: string };
-      expect(body.error).toBe("仅项目主理人可操作");
+      expect(body.error).toBe("仅项目主理人或企业所有者可操作");
     }
     expect((await requireActualProjectOwner(project.projectId)).ok).toBe(false);
     expect((await requireVideoCanvasAccess(project.projectId)).ok).toBe(true);
@@ -299,6 +306,7 @@ describe("require-access and workspace API gates", () => {
       name: `admin-own-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     vi.mocked(requireSessionUser).mockResolvedValue({
@@ -318,6 +326,7 @@ describe("require-access and workspace API gates", () => {
       name: `forge-gate-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await addCardEngineer({

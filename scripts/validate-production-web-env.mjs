@@ -34,14 +34,30 @@ function required(name) {
   return value;
 }
 
+function isTruthy(value) {
+  const normalized = (value ?? "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
 if (process.env.NODE_ENV === "production") {
   if (process.env.REMOTE_DATA_ONLY !== "true") {
     throw new Error("production Web requires REMOTE_DATA_ONLY=true");
   }
+  const allowLanVoiceLibrary = isTruthy(
+    process.env.LOCAL_VOICE_LIBRARY_ALLOW_IN_REMOTE,
+  );
   for (const name of directStorageVariables) {
+    if (name === "LOCAL_VOICE_LIBRARY_DIR" && allowLanVoiceLibrary) {
+      continue;
+    }
     if ((process.env[name] ?? "").trim()) {
       throw new Error(`production Web must not configure direct storage via ${name}`);
     }
+  }
+  if (allowLanVoiceLibrary && !(process.env.LOCAL_VOICE_LIBRARY_DIR ?? "").trim()) {
+    throw new Error(
+      "LOCAL_VOICE_LIBRARY_ALLOW_IN_REMOTE requires LOCAL_VOICE_LIBRARY_DIR",
+    );
   }
   const backendUrl = new URL(required("GO_BACKEND_INTERNAL_URL"));
   required("INTERNAL_API_TOKEN");

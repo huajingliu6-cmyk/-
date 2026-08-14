@@ -1,15 +1,15 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Start InfiniteCanvas LAN stack with the REQUIRED enterprise-spaces override.
+  Start InfiniteCanvas LAN stack with compose.remote.yml + compose.lan.override.yml.
 
 .DESCRIPTION
-  Never run compose.remote.yml alone for LAN — that builds the old infinite-canvas
-  context. This script always loads compose.lan.override.yml and stamps BUILD_REVISION.
+  Always pairs both compose files and stamps BUILD_REVISION from this repo.
+  Build context is the infinite-canvas parent of deploy/ (not a sibling worktree).
 #>
 $ErrorActionPreference = "Stop"
 $deployDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$enterprise = Resolve-Path (Join-Path $deployDir "..\..\infinite-canvas-enterprise-spaces")
+$repoRoot = Resolve-Path (Join-Path $deployDir "..")
 Set-Location $deployDir
 
 if (-not (Test-Path ".\compose.remote.yml")) { throw "missing compose.remote.yml" }
@@ -18,16 +18,16 @@ if (-not (Test-Path ".\.env.lan")) { throw "missing .env.lan" }
 
 $rev = "unknown"
 try {
-  Push-Location $enterprise.Path
+  Push-Location $repoRoot.Path
   $rev = (git rev-parse --short HEAD 2>$null)
   if (-not $rev) { $rev = "unknown" }
 } finally {
   Pop-Location
 }
 $env:BUILD_REVISION = $rev
-$env:BUILD_SOURCE = "infinite-canvas-enterprise-spaces"
+$env:BUILD_SOURCE = "infinite-canvas"
 
-Write-Host "LAN start: build context=$($enterprise.Path)"
+Write-Host "LAN start: build context=$($repoRoot.Path)"
 Write-Host "LAN start: BUILD_REVISION=$rev BUILD_SOURCE=$env:BUILD_SOURCE"
 Write-Host "LAN start: compose files=compose.remote.yml + compose.lan.override.yml"
 

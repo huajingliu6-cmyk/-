@@ -75,6 +75,7 @@ function timingSafeEqualString(a: string, b: string): boolean {
 
 export async function createSessionToken(params: {
   userId: string;
+  sessionId: string;
   username: string;
   role: UserRole;
   displayName: string;
@@ -82,6 +83,7 @@ export async function createSessionToken(params: {
 }): Promise<string> {
   const payload: SessionPayload = {
     userId: params.userId,
+    sessionId: params.sessionId,
     username: params.username,
     role: params.role,
     displayName: params.displayName,
@@ -110,6 +112,7 @@ export async function verifySessionToken(
     const payload = JSON.parse(json) as SessionPayload;
     if (
       !payload.userId ||
+      !payload.sessionId ||
       !payload.username ||
       !payload.role ||
       typeof payload.exp !== "number"
@@ -132,11 +135,26 @@ export function sessionCookieOptions(
     ?.split(",")[0]
     ?.trim()
     .toLowerCase();
-  // HTTPS（含 Cloudflare 隧道）必须 Secure，否则部分浏览器不接受/不回传 Cookie
-  const secure =
-    process.env.NODE_ENV === "production" ||
-    process.env.AUTH_COOKIE_SECURE === "true" ||
-    forwardedProto === "https";
+  const requestProto = (() => {
+    if (!request?.url) return null;
+    try {
+      return new URL(request.url).protocol.replace(":", "").toLowerCase();
+    } catch {
+      return null;
+    }
+  })();
+  const authCookieSecure = process.env.AUTH_COOKIE_SECURE?.trim().toLowerCase();
+  // HTTPS（含 Cloudflare 隧道）必须 Secure。纯 HTTP 局域网（如 http://192.168.x.x）
+  // 若仍标 Secure，浏览器会丢弃 Cookie，表现为注册/登录成功却无法进入。
+  // AUTH_COOKIE_SECURE=true|false 可强制覆盖；未设置时按实际协议判定。
+  let secure: boolean;
+  if (authCookieSecure === "true") {
+    secure = true;
+  } else if (authCookieSecure === "false") {
+    secure = false;
+  } else {
+    secure = forwardedProto === "https" || requestProto === "https";
+  }
   return {
     httpOnly: true,
     sameSite: "lax" as const,

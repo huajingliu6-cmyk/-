@@ -64,6 +64,7 @@ describe("video canvas access matrix", () => {
       name: `video-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await addCardEngineer({
@@ -85,12 +86,14 @@ describe("video canvas access matrix", () => {
       name: `own-${Date.now()}`,
       creationSource: "story",
       projectMode: "canvas",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const p2 = await createProjectRecord(owner2.id, {
       name: `other-${Date.now()}`,
       creationSource: "story",
       projectMode: "canvas",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     vi.mocked(requireSessionUser).mockResolvedValue({
@@ -108,6 +111,7 @@ describe("video canvas access matrix", () => {
       name: `admin-video-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     vi.mocked(requireSessionUser).mockResolvedValue({

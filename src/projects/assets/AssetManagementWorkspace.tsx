@@ -6,7 +6,6 @@ import { AssetTabs } from "@/projects/assets/AssetTabs";
 import { CharacterManager } from "@/projects/assets/CharacterManager";
 import { SceneManager } from "@/projects/assets/SceneManager";
 import { PropManager } from "@/projects/assets/PropManager";
-import { AudioManager } from "@/projects/assets/AudioManager";
 import { buildMockAssetBundle } from "@/projects/assets/mock-data";
 import { persistAssetBundle } from "@/projects/assets/persist-asset-bundle";
 import type {
@@ -50,6 +49,8 @@ export function AssetManagementWorkspace({
   const [tabKey, setTabKey] = useState(0);
   const [hydrated, setHydrated] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  const visibleTab: Exclude<AssetTabId, "audio"> =
+    activeTab === "audio" ? "character" : activeTab;
 
   const isWorkspace = context === "workspace";
   const initial = useMemo(() => buildMockAssetBundle(projectId), [projectId]);
@@ -79,15 +80,23 @@ export function AssetManagementWorkspace({
               : `/api/projects/${encodeURIComponent(projectId)}`;
             const meta = await fetch(metaUrl, { credentials: "include" });
             if (meta.ok) {
-              const data = (await meta.json()) as {
-                project?: { name?: string };
-              };
-              setProjectName(data.project?.name ?? "");
+              const metaText = await meta.text();
+              if (metaText.trim()) {
+                const data = JSON.parse(metaText) as {
+                  project?: { name?: string };
+                };
+                setProjectName(data.project?.name ?? "");
+              }
             }
           }
           return;
         }
-        const data = (await res.json()) as {
+        const draftText = await res.text();
+        if (!draftText.trim()) {
+          if (!cancelled) setLoadError("无法加载资产草稿");
+          return;
+        }
+        const data = JSON.parse(draftText) as {
           project?: { name?: string };
           draft?: ProjectAssetBundle | null;
           canEdit?: boolean;
@@ -163,9 +172,25 @@ export function AssetManagementWorkspace({
   }, [editAllowed, persist]);
 
   return (
-    <div className={embedded ? undefined : "amw"}>
-      <div className={embedded ? undefined : "amw-inner"}>
-        <header className={`amw-head${embedded ? " amw-head--embedded" : ""}`}>
+    <div
+      className={
+        embedded
+          ? "amw-library-workspace asset-library-page"
+          : "amw asset-library-page"
+      }
+    >
+      <div
+        className={
+          embedded
+            ? "amw-library-workspace__inner asset-library-page__inner"
+            : "amw-inner asset-library-page__inner"
+        }
+      >
+        <header
+          className={`amw-head asset-library-toolbar${
+            embedded ? " amw-head--embedded" : ""
+          }`}
+        >
           {!embedded ? (
             <div className="amw-head__titles">
               {isWorkspace && backHref ? (
@@ -177,7 +202,7 @@ export function AssetManagementWorkspace({
               ) : null}
               <h1>项目资产管理</h1>
               <p>
-                管理视频制作所需的角色、场景、道具和音频资产。
+                管理视频制作所需的角色、场景和道具资产。
                 {projectName ? ` · ${projectName}` : ""}
                 {loadError ? ` · ${loadError}` : ""}
                 {!hydrated ? " · 加载中…" : ""}
@@ -209,17 +234,23 @@ export function AssetManagementWorkspace({
           {pageNote ? <p className="amw-head__note">{pageNote}</p> : null}
         </header>
 
-        <AssetTabs
-          active={activeTab}
-          onChange={(tab) => {
-            setActiveTab(tab);
-            setTabKey((k) => k + 1);
-            setPageNote("");
-          }}
-        />
+        <div className="asset-library-toolbar">
+          <AssetTabs
+            active={visibleTab}
+            onChange={(tab) => {
+              if (tab === "audio") return;
+              setActiveTab(tab);
+              setTabKey((k) => k + 1);
+              setPageNote("");
+            }}
+          />
+        </div>
 
-        <div key={`${activeTab}-${tabKey}`}>
-          {activeTab === "character" ? (
+        <div
+          className="asset-library-content"
+          key={`${visibleTab}-${tabKey}`}
+        >
+          {visibleTab === "character" ? (
             <CharacterManager
               projectId={projectId}
               characters={characters}
@@ -232,7 +263,7 @@ export function AssetManagementWorkspace({
               }}
             />
           ) : null}
-          {activeTab === "scene" ? (
+          {visibleTab === "scene" ? (
             <SceneManager
               projectId={projectId}
               scenes={scenes}
@@ -244,7 +275,7 @@ export function AssetManagementWorkspace({
               }}
             />
           ) : null}
-          {activeTab === "prop" ? (
+          {visibleTab === "prop" ? (
             <PropManager
               projectId={projectId}
               props={props}
@@ -253,18 +284,6 @@ export function AssetManagementWorkspace({
               onPersist={async (nextProps) => {
                 setProps(nextProps);
                 await persist({ props: nextProps });
-              }}
-            />
-          ) : null}
-          {activeTab === "audio" ? (
-            <AudioManager
-              projectId={projectId}
-              audios={audios}
-              canEdit={editAllowed}
-              onChange={setAudios}
-              onPersist={async (nextAudios) => {
-                setAudios(nextAudios);
-                await persist({ audios: nextAudios });
               }}
             />
           ) : null}

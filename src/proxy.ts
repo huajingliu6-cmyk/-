@@ -3,16 +3,17 @@ import { assertSameOriginMutation } from "@/auth/csrf";
 import { SESSION_COOKIE, verifySessionToken } from "@/auth/session";
 
 /** 欢迎首页公开；登录入口在首页右上角 */
-const PUBLIC_PATHS = new Set(["/", "/login"]);
+const PUBLIC_PATHS = new Set(["/", "/login", "/build-revision"]);
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;
   if (pathname.startsWith("/api/auth/")) return true;
-  // 静态资源
+  // 静态资源 + 非敏感构建标识（LAN 诊断）
   if (
     pathname.startsWith("/_next/") ||
     pathname.startsWith("/brand/") ||
-    pathname === "/favicon.ico"
+    pathname === "/favicon.ico" ||
+    pathname === "/build-info.json"
   ) {
     return true;
   }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Search, X } from "lucide-react";
 import { canCreateProject } from "@/auth/capabilities";
@@ -13,6 +14,18 @@ import {
   type WorkbenchProjectContextAction,
   type WorkbenchProjectContextMenuState,
 } from "@/projects/workbench/WorkbenchProjectContextMenu";
+import {
+  PersonalBlankContextMenu,
+  type PersonalBlankContextMenuState,
+} from "@/projects/workbench/PersonalBlankContextMenu";
+import {
+  shouldOpenPersonalBlankContextMenu,
+} from "@/projects/workbench/personal-blank-context";
+import {
+  ACTIVE_ENTERPRISE_EVENT,
+  readActiveSpace,
+  type ActiveSpace,
+} from "@/enterprise/client-space";
 import type { WorkflowProjectSummary } from "@/workflow/lib/workflow-storage";
 import "./projects.css";
 
@@ -67,6 +80,11 @@ export default function ProjectsPage() {
   const [apiCanCreate, setApiCanCreate] = useState<boolean | null>(null);
   const [contextMenu, setContextMenu] =
     useState<WorkbenchProjectContextMenuState | null>(null);
+  const [blankContextMenu, setBlankContextMenu] =
+    useState<PersonalBlankContextMenuState | null>(null);
+  const [activeSpace, setActiveSpace] = useState<ActiveSpace>(() =>
+    readActiveSpace(),
+  );
   const [renaming, setRenaming] = useState<{
     projectId: string;
     name: string;
@@ -130,6 +148,17 @@ export default function ProjectsPage() {
       window.clearTimeout(boot);
     };
   }, [reloadProjects]);
+
+  useEffect(() => {
+    const onSpaceChanged = (event: Event) => {
+      const detail = (event as CustomEvent<ActiveSpace>).detail;
+      setActiveSpace(detail ?? readActiveSpace());
+      setBlankContextMenu(null);
+    };
+    window.addEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
+    return () =>
+      window.removeEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
+  }, []);
 
   const filtered = useMemo(() => {
     return projects.filter((p) => {
@@ -234,11 +263,32 @@ export default function ProjectsPage() {
 
   const onNewClick = () => {
     if (!canCreate) return;
+    setBlankContextMenu(null);
     setWizardOpen(true);
   };
 
+  const handleBlankContextMenu = (
+    event: ReactMouseEvent<HTMLDivElement>,
+  ) => {
+    if (
+      !shouldOpenPersonalBlankContextMenu({
+        spaceKind: activeSpace.kind,
+        target: event.target instanceof Element ? event.target : null,
+      })
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    setContextMenu(null);
+    setBlankContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+    });
+  };
+
   return (
-    <div className="pm-page">
+    <div className="pm-page" onContextMenu={handleBlankContextMenu}>
       <div className="pm-inner">
         <div className="pm-hero">
           <div>
@@ -342,6 +392,7 @@ export default function ProjectsPage() {
                 onClick={() => openProject(project.projectId)}
                 onContextMenu={(event) => {
                   event.preventDefault();
+                  setBlankContextMenu(null);
                   setContextMenu({
                     projectId: project.projectId,
                     projectName: project.name,
@@ -398,6 +449,13 @@ export default function ProjectsPage() {
         onAction={(action, projectId) => {
           void handleContextAction(action, projectId);
         }}
+      />
+
+      <PersonalBlankContextMenu
+        menu={blankContextMenu}
+        canCreate={canCreate}
+        onClose={() => setBlankContextMenu(null)}
+        onCreate={onNewClick}
       />
 
       {renaming ? (

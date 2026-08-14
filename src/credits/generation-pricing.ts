@@ -29,13 +29,16 @@ export function isFirstImageGeneration(
 
 export function estimateAssetImageCredits(
   generatedMedia: GeneratedMediaState | null | undefined,
+  count = 1,
 ): { points: number; firstGeneration: boolean } {
   const firstGeneration = isFirstImageGeneration(generatedMedia);
+  const safeCount = Math.min(4, Math.max(1, Math.floor(count) || 1));
   return {
     firstGeneration,
     points: firstGeneration
-      ? IMAGE_FIRST_GENERATION_CREDITS
-      : IMAGE_SUBSEQUENT_GENERATION_CREDITS,
+      ? IMAGE_FIRST_GENERATION_CREDITS +
+        (safeCount - 1) * IMAGE_SUBSEQUENT_GENERATION_CREDITS
+      : safeCount * IMAGE_SUBSEQUENT_GENERATION_CREDITS,
   };
 }
 

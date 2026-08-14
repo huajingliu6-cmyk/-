@@ -40,7 +40,7 @@ describe("design asset image generation contract", () => {
     expect(capabilityForDesignAssetType("audio")).toBeNull();
   });
 
-  it("platform brief only locks 16:9/4K, not style that fights admin rules", () => {
+  it("platform brief only locks aspect/resolution, not style that fights admin rules", () => {
     expect(DESIGN_ASSET_IMAGE_ASPECT_RATIO).toBe("16:9");
     expect(DESIGN_ASSET_IMAGE_RESOLUTION).toBe("4K");
     const platform = designAssetPlatformRule("character");
@@ -53,6 +53,10 @@ describe("design asset image generation contract", () => {
     expect(character).toContain("16:9");
     expect(character).toContain("4K");
     expect(character).not.toContain("禁止多视角");
+
+    const portrait = designAssetPlatformRule("character", "9:16", "medium");
+    expect(portrait).toContain("9:16");
+    expect(portrait).toContain("2K");
   });
 
   it("assembles final prompt with published admin task rule", async () => {
@@ -109,7 +113,7 @@ describe("design asset image generation contract", () => {
     expect(src).toContain("legacy-slot-asset-design-prompt-text");
   });
 
-  it("DesignAssetModal exposes preview download and histories", () => {
+  it("DesignAssetModal exposes preview download, histories and generation options", () => {
     const modal = readFileSync(
       path.join(process.cwd(), "src/projects/assets/DesignAssetModal.tsx"),
       "utf-8",
@@ -118,6 +122,18 @@ describe("design asset image generation contract", () => {
     expect(modal).toContain("design-download");
     expect(modal).toContain("design-prompt-history");
     expect(modal).toContain("design-image-history");
+    expect(modal).toContain("design-image-quality");
+    expect(modal).toContain("design-image-aspect-ratio");
+    expect(modal).toContain("design-image-count");
+    expect(modal).toContain("GlassSelect");
+    expect(modal).toContain("menuPortal");
+    expect(modal).not.toContain(
+      'className="ead-generation-option__select"',
+    );
+    expect(modal).not.toMatch(/<select[\s\S]*design-image-quality/);
+    expect(modal).toContain("quality: imageOptions.quality");
+    expect(modal).toContain("aspectRatio: imageOptions.aspectRatio");
+    expect(modal).toContain("count: imageOptions.count");
     expect(modal).toContain("生成资产");
     expect(modal).toContain("generateBusy");
     expect(modal).toContain("onGeneratingAssetChange");

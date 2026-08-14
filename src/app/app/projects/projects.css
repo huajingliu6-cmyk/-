@@ -439,6 +439,18 @@
   background: rgba(196, 92, 92, 0.22);
 }
 
+.wb-context-menu__item:disabled,
+.wb-context-menu__item.is-disabled {
+  opacity: 0.45;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: not-allowed;
+}
+
+.wb-context-menu__item:disabled:hover,
+.wb-context-menu__item.is-disabled:hover {
+  background: transparent;
+}
+
 .wb-rename-overlay {
   position: fixed;
   inset: 0;
@@ -480,6 +492,116 @@
 }
 
 .wb-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.wb-rules-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(6, 8, 14, 0.72);
+}
+
+.wb-rules-card {
+  width: min(620px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #12161f;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.5);
+}
+
+.wb-rules-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.wb-rules-header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.wb-rules-header p {
+  margin: 4px 0 0;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.82rem;
+}
+
+.wb-rules-close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.65);
+  cursor: pointer;
+}
+
+.wb-rules-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.wb-rules-label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.wb-rules-label span {
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+
+.wb-rules-hint {
+  margin: 0.35rem 0 0.85rem;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.wb-rules-textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  padding: 12px;
+  outline: none;
+  line-height: 1.55;
+}
+
+.wb-rules-textarea:focus {
+  border-color: rgb(var(--ui-accent-rgb) / 0.55);
+}
+
+.wb-rules-meta {
+  display: flex;
+  justify-content: space-between;
+  min-height: 18px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.76rem;
+}
+
+.wb-rules-meta span:first-child {
+  color: #f0a0a0;
+}
+
+.wb-rules-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;

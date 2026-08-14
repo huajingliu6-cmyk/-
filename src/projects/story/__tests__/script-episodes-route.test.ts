@@ -177,6 +177,7 @@ describe("script episodes generate + apply", () => {
       name: `ep-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -217,6 +218,7 @@ describe("script episodes generate + apply", () => {
       name: `ep-empty-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -253,6 +255,7 @@ describe("script episodes generate + apply", () => {
       name: `ep-apply-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -357,6 +360,7 @@ describe("script episodes generate + apply", () => {
       name: `ep-fp-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -393,6 +397,7 @@ describe("script episodes generate + apply", () => {
       name: `ep-409-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -431,6 +436,7 @@ describe("script episodes generate + apply", () => {
       name: `ep-ce-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await addCardEngineer({
@@ -492,6 +498,7 @@ describe("script episodes generate + apply", () => {
       name: `ep-unauth-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -531,6 +538,7 @@ describe("script episodes generate + apply", () => {
       name: `ep-cap-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -566,6 +574,7 @@ describe("script episodes generate + apply", () => {
       name: `ep-eq-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();

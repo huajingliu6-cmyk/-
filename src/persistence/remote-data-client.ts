@@ -69,7 +69,7 @@ async function remoteFetch(url: string, init: RequestInit): Promise<Response> {
       signal: controller.signal,
       cache: "no-store",
     });
-  } catch (error) {
+  } catch {
     if (controller.signal.aborted) {
       throw new Error("REMOTE_DATA_TIMEOUT");
     }
@@ -204,6 +204,8 @@ export function isRemoteDataServiceError(error: unknown): boolean {
       error.message === 'REMOTE_DATA_UNAVAILABLE' ||
       error.message.startsWith('REMOTE_DATA_READ_FAILED:') ||
       error.message.startsWith('REMOTE_DATA_WRITE_FAILED:') ||
+      error.message.startsWith('REMOTE_ENTERPRISE_READ_FAILED:') ||
+      error.message.startsWith('REMOTE_ENTERPRISE_WRITE_FAILED:') ||
       error.message.startsWith('REMOTE_BLOB_READ_FAILED:') ||
       error.message.startsWith('REMOTE_BLOB_WRITE_FAILED:') ||
       error.message.startsWith('REMOTE_BLOB_DELETE_FAILED:'))

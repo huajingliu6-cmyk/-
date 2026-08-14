@@ -1,6 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import {
+  ACTIVE_ENTERPRISE_EVENT,
+  readActiveSpace,
+} from "@/enterprise/client-space";
 
 type Engineer = {
   memberId: string;
@@ -20,6 +24,16 @@ type Props = {
   projectId: string;
 };
 
+function subscribeToActiveSpace(onStoreChange: () => void): () => void {
+  window.addEventListener(ACTIVE_ENTERPRISE_EVENT, onStoreChange);
+  return () => window.removeEventListener(ACTIVE_ENTERPRISE_EVENT, onStoreChange);
+}
+
+function getActiveEnterpriseId(): string | null {
+  const space = readActiveSpace();
+  return space.kind === "enterprise" ? space.enterpriseId : null;
+}
+
 export function ProjectMembersPanel({ projectId }: Props) {
   const [ownerLabel, setOwnerLabel] = useState("");
   const [engineers, setEngineers] = useState<Engineer[]>([]);
@@ -27,7 +41,12 @@ export function ProjectMembersPanel({ projectId }: Props) {
   const [results, setResults] = useState<SearchUser[]>([]);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-  const [visible, setVisible] = useState(true);
+  const [visible, setVisible] = useState(false);
+  const activeEnterpriseId = useSyncExternalStore(
+    subscribeToActiveSpace,
+    getActiveEnterpriseId,
+    () => null,
+  );
 
   const applyMembersPayload = useCallback(
     (payload: {
@@ -46,7 +65,7 @@ export function ProjectMembersPanel({ projectId }: Props) {
   );
 
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId || !activeEnterpriseId) return;
     let cancelled = false;
     void (async () => {
       const res = await fetch(
@@ -71,7 +90,7 @@ export function ProjectMembersPanel({ projectId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [applyMembersPayload, projectId]);
+  }, [activeEnterpriseId, applyMembersPayload, projectId]);
 
   const reload = useCallback(async () => {
     const res = await fetch(
@@ -161,7 +180,7 @@ export function ProjectMembersPanel({ projectId }: Props) {
     }
   };
 
-  if (!visible) return null;
+  if (!activeEnterpriseId || !visible) return null;
 
   return (
     <section className="wb-members" data-testid="project-members-panel">

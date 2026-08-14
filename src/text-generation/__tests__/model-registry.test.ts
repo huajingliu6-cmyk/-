@@ -18,5 +18,9 @@ describe("text model registry", () => {
     expect(getTextModelByKey("gpt-4o")).toBeNull();
     expect(getTextModelByKey("qwen-max-secret")).toBeNull();
     expect(getTextModelByKey("balanced-default")).not.toBeNull();
+    expect(getTextModelByKey("deepseek-v4-pro")).not.toBeNull();
+    expect(getTextModelByKey("deepseek-v4-pro")?.displayName).toBe(
+      "Deepseek V4 Pro",
+    );
   });
 });

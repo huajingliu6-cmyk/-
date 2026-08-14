@@ -1,10 +1,10 @@
+import { resolveAiExecutionPlan } from "@/ai-config/execution-plan";
 import { buildEpisodeAssetDesignProviderBrief } from "@/projects/assets/episode-design/prompts";
 import type {
   EpisodeAssetDesignStatus,
   EpisodeDesignConversationMessage,
 } from "@/projects/assets/episode-design/types";
 import { getTextJob } from "@/text-generation/job-store";
-import { buildSystemPrompt } from "@/text-generation/prompts";
 
 const MAX_CONVERSATION_MESSAGES = 40;
 
@@ -71,6 +71,8 @@ export function appendConversationMessage(
 /**
  * Seed the episode-scoped chat from the extract turn so redesign
  * continues in the same model conversation.
+ * System prompt comes from the current execution plan (admin published rule),
+ * never from a frozen legacy template.
  */
 export async function buildEpisodeDesignConversationFromExtract(input: {
   projectId: string;
@@ -80,6 +82,7 @@ export async function buildEpisodeDesignConversationFromExtract(input: {
   title: string;
   content: string;
   targetChars?: number;
+  userId?: string;
 }): Promise<EpisodeDesignConversationMessage[]> {
   const now = new Date().toISOString();
   const job = await getTextJob(input.projectId, input.generationId);
@@ -87,12 +90,16 @@ export async function buildEpisodeDesignConversationFromExtract(input: {
     input.targetChars ??
     (typeof job?.targetChars === "number" ? job.targetChars : 800);
 
-  const systemBase = buildSystemPrompt("episode_asset_design", targetChars);
-  const systemPrompt = [
-    systemBase,
-    "",
-    "本集后续对话规则：若用户发送「{资产名称}重新设计」或附带「用户素材要求：…」，请基于本集已提取的资产设计，为该资产再输出一版完整文生图提示词正文（可含构图与光影），并优先满足用户素材要求；只输出提示词，不要 JSON、不要解释、不要 Markdown 图片。",
-  ].join("\n");
+  const plan = await resolveAiExecutionPlan({
+    capabilityId: "asset.episode-design.generate",
+    projectId: input.projectId,
+    userId: input.userId ?? job?.userId,
+    dynamicInput: {
+      episodeNumber: input.episodeNumber,
+      title: input.title,
+    },
+    targetChars,
+  });
 
   const userBrief =
     job?.brief?.trim() ||
@@ -104,7 +111,7 @@ export async function buildEpisodeDesignConversationFromExtract(input: {
     });
 
   return [
-    { role: "system", content: systemPrompt, at: now },
+    { role: "system", content: plan.systemPrompt, at: now },
     { role: "user", content: userBrief, at: now },
     { role: "assistant", content: input.rawText.trim(), at: now },
   ];

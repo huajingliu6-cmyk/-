@@ -31,8 +31,14 @@ import {
   modalityLabel,
   providerLabel,
 } from "@/auth/ai-admin/admin-data";
+import { CapabilityRulesTab } from "@/auth/ai-admin/CapabilityRulesTab";
+import type { AdminView } from "@/auth/ai-admin/admin-view";
 
 type Filter = "all" | AiModality;
+
+type ModelConnectionsViewProps = {
+  onNavigate?: (view: AdminView) => void;
+};
 
 function toDraft(connection: ModelConnectionPublic): ConnectionDraft {
   return {
@@ -79,7 +85,7 @@ function statusMeta(connection: ModelConnectionPublic | null) {
   return { label: "尚未测试", tone: "warning", Icon: CircleDashed };
 }
 
-export function ModelConnectionsView() {
+export function ModelConnectionsView({ onNavigate }: ModelConnectionsViewProps = {}) {
   const [connections, setConnections] = useState<ModelConnectionPublic[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [draft, setDraft] = useState<ConnectionDraft>(newDraft);
@@ -356,6 +362,33 @@ export function ModelConnectionsView() {
                   <small>保存后只显示密钥末四位</small>
                 </label>
                 {selected?.apiKeyConfigured ? <label className="ai-admin-checkbox"><input type="checkbox" checked={draft.clearApiKey} onChange={(event) => setDraft((value) => ({ ...value, clearApiKey: event.target.checked, apiKey: event.target.checked ? "" : value.apiKey }))} />清除已保存密钥</label> : null}
+              </div>
+            </section>
+
+            <section className="ai-admin-form-section ai-admin-form-section--rules">
+              <div className="ai-admin-form-section__title">
+                <span>03</span>
+                <div>
+                  <strong>关联任务规则</strong>
+                  <small>当前连接实际承载的业务能力及其规则</small>
+                </div>
+              </div>
+              <div className="ai-admin-connection-rules">
+                {creating || !selected ? (
+                  <p
+                    className="ai-admin-connection-rules__hint"
+                    data-testid="admin-connection-rules-unsaved"
+                  >
+                    保存连接后，可在能力线路中绑定业务能力并配置对应任务规则。
+                  </p>
+                ) : (
+                  <CapabilityRulesTab
+                    active
+                    embedded
+                    connectionId={selected.id}
+                    onNavigate={onNavigate}
+                  />
+                )}
               </div>
             </section>
 

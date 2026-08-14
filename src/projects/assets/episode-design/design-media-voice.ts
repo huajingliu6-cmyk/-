@@ -75,6 +75,113 @@ export function isMediaVoiceBound(binding: MediaVoiceBinding): boolean {
   return Boolean(binding.voiceBound && binding.voiceId?.trim());
 }
 
+/**
+ * Personal “确认入库”: show a second confirm when the *current* generated
+ * image has no bound voice. Other history bindings and draft.voice* alone
+ * must not suppress the prompt for an unbound current image.
+ */
+export function characterNeedsUnboundVoiceConfirm(
+  item: Pick<
+    EpisodeAssetDesignItem,
+    "assetType" | "draft" | "generatedMedia" | "libraryAssetId"
+  >,
+): boolean {
+  if (item.assetType !== "character") return false;
+  if (item.libraryAssetId?.trim()) return false;
+  const mediaId = item.generatedMedia?.currentId?.trim();
+  if (!mediaId) return false;
+  return !isMediaVoiceBound(getDesignMediaVoiceBinding(item, mediaId));
+}
+
+/**
+ * PUT/merge guard: never let a stale full-items save clear an already-bound
+ * media voice. Clients may replace with a new bound voiceId; explicit unbind
+ * must go through the atomic media-voice PATCH.
+ */
+export function preserveBoundCharacterMediaVoices(
+  serverItem: EpisodeAssetDesignItem | undefined,
+  clientItem: EpisodeAssetDesignItem,
+): EpisodeAssetDesignItem {
+  if (
+    !serverItem ||
+    serverItem.assetType !== "character" ||
+    clientItem.assetType !== "character"
+  ) {
+    return clientItem;
+  }
+
+  let next: EpisodeAssetDesignItem & { assetType: "character" } = clientItem;
+  const serverHistory = serverItem.generatedMedia?.history ?? [];
+  for (const entry of serverHistory) {
+    const serverBinding = getDesignMediaVoiceBinding(
+      serverItem,
+      entry.mediaId,
+    );
+    if (!isMediaVoiceBound(serverBinding)) continue;
+
+    const clientBinding = getDesignMediaVoiceBinding(next, entry.mediaId);
+    if (isMediaVoiceBound(clientBinding)) {
+      // Client sent a bound voice (same or replacement) — keep client.
+      continue;
+    }
+    next = withDesignMediaVoiceBinding(
+      next,
+      entry.mediaId,
+      serverBinding,
+    ) as EpisodeAssetDesignItem & { assetType: "character" };
+  }
+
+  const serverDraftBound = isMediaVoiceBound({
+    voiceId: serverItem.draft.voiceId,
+    voiceName: serverItem.draft.voiceName,
+    voiceBound: Boolean(serverItem.draft.voiceBound),
+  });
+  const clientDraftBound = isMediaVoiceBound({
+    voiceId: next.draft.voiceId,
+    voiceName: next.draft.voiceName,
+    voiceBound: Boolean(next.draft.voiceBound),
+  });
+  if (serverDraftBound && !clientDraftBound) {
+    const currentId = next.generatedMedia?.currentId?.trim();
+    if (currentId) {
+      const currentBinding = getDesignMediaVoiceBinding(next, currentId);
+      if (isMediaVoiceBound(currentBinding)) {
+        next = {
+          ...next,
+          draft: {
+            ...next.draft,
+            voiceId: currentBinding.voiceId,
+            voiceName: currentBinding.voiceName,
+            voiceBound: true,
+          },
+        };
+      } else {
+        next = {
+          ...next,
+          draft: {
+            ...next.draft,
+            voiceId: serverItem.draft.voiceId,
+            voiceName: serverItem.draft.voiceName,
+            voiceBound: true,
+          },
+        };
+      }
+    } else {
+      next = {
+        ...next,
+        draft: {
+          ...next.draft,
+          voiceId: serverItem.draft.voiceId,
+          voiceName: serverItem.draft.voiceName,
+          voiceBound: true,
+        },
+      };
+    }
+  }
+
+  return next;
+}
+
 /** 写入指定 mediaId 的音色；若为 currentId 则镜像 draft.voice*。 */
 export function withDesignMediaVoiceBinding(
   item: EpisodeAssetDesignItem & { assetType: "character" },

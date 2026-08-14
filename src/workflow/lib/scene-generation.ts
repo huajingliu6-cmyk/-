@@ -89,7 +89,7 @@ export async function generateSceneImage(
 
   if (provider === "http") {
     if (!endpoint) {
-      throw new Error("未配置场景 API 地址，请管理员在「管理 API」中填写");
+      throw new Error("未配置场景 API 地址，请管理员在「系统管理 → API 接口」中填写");
     }
     const generated = await generateViaHttp({
       endpoint,
@@ -108,7 +108,7 @@ export async function generateSceneImage(
     fileName = "scene-demo.png";
     mode = "mock";
     notice =
-      "当前为本地演示生成。管理员可在右上角账户 → 管理 API 中接入场景生成接口。";
+      "当前为本地演示生成。管理员可在「系统管理 → API 接口」接入场景生成接口。";
   }
 
   const stored = await saveAssetFile({

@@ -5,18 +5,18 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { AuthUser } from "@/auth/types";
 import { AUTH_NAV_ITEMS, type ShellNavItem } from "@/shell/nav";
+import { navigationForSpace } from "@/shell/space-navigation";
 import { prefersReducedMotion } from "@/shell/login-portal";
 import { memoryFetch } from "@/shell/memory-fetch";
 import {
   confirmGenerationLeaveIfNeeded,
   isGenerationBusy,
 } from "@/shell/generation-busy";
-
-function initialNavItems(user?: AuthUser): ShellNavItem[] {
-  // Admins already know full nav; avoid flash / stuck workspace-only on API lag.
-  if (user?.role === "admin") return AUTH_NAV_ITEMS;
-  return AUTH_NAV_ITEMS.filter((item) => item.id === "workspace");
-}
+import {
+  ACTIVE_ENTERPRISE_EVENT,
+  readActiveSpace,
+  type ActiveSpace,
+} from "@/enterprise/client-space";
 
 export function AuthenticatedNavigation({
   onNavigate,
@@ -27,7 +27,12 @@ export function AuthenticatedNavigation({
 }) {
   const pathname = usePathname();
   const [bounceId, setBounceId] = useState<string | null>(null);
-  const [items, setItems] = useState<ShellNavItem[]>(() => initialNavItems(user));
+  const [items, setItems] = useState<ShellNavItem[] | null>(() =>
+    user?.role === "admin" ? AUTH_NAV_ITEMS : null,
+  );
+  const [activeSpace, setActiveSpace] = useState<ActiveSpace>(() =>
+    readActiveSpace(),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +59,17 @@ export function AuthenticatedNavigation({
     };
   }, []);
 
+  useEffect(() => {
+    const onSpaceChanged = (event: Event) => {
+      const detail = (event as CustomEvent<ActiveSpace>).detail;
+      setActiveSpace(detail ?? readActiveSpace());
+    };
+    window.addEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
+    return () => window.removeEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
+  }, []);
+
+  const visibleItems = navigationForSpace(activeSpace, items);
+
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(`${href}/`);
 
@@ -65,7 +81,7 @@ export function AuthenticatedNavigation({
 
   return (
     <nav className="shell-nav" aria-label="业务导航">
-      {items.map((item) => {
+      {visibleItems.map((item) => {
         const active = isActive(item.href);
         const className = [
           "shell-nav__item",

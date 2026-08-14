@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import Link from "next/link";
 import {
+  ArrowLeft,
   Bell,
   Cable,
   CheckCircle2,
   ClipboardCheck,
-  FileCog,
   Gauge,
   History,
   LockKeyhole,
@@ -15,21 +16,20 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { AssetApprovalsHistoryTab } from "@/auth/ai-admin/AssetApprovalsHistoryTab";
-import { CapabilityRulesTab } from "@/auth/ai-admin/CapabilityRulesTab";
 import { TextGenerationsHistoryTab } from "@/auth/ai-admin/TextGenerationsHistoryTab";
 import { AdminOverview } from "@/auth/ai-admin/AdminOverview";
 import { CapabilityRoutingView } from "@/auth/ai-admin/CapabilityRoutingView";
 import { ModelConnectionsView } from "@/auth/ai-admin/ModelConnectionsView";
 import type { AuthUser } from "@/auth/types";
+import { APP_SHELL_ROOT } from "@/shell/nav";
+import {
+  type AdminView,
+  resolveAdminInitialView,
+} from "@/auth/ai-admin/admin-view";
 import "@/auth/ai-admin/admin-console.css";
 
-export type AdminView =
-  | "overview"
-  | "connections"
-  | "routes"
-  | "rules"
-  | "generations"
-  | "approvals";
+export type { AdminView };
+export { resolveAdminInitialView };
 
 type AdminConsoleProps = {
   initialView?: AdminView;
@@ -40,7 +40,6 @@ const VIEW_META: Record<AdminView, { title: string; subtitle: string }> = {
   overview: { title: "运行概览", subtitle: "服务、业务能力与任务健康度" },
   connections: { title: "API 连接", subtitle: "统一管理模型服务的接入配置" },
   routes: { title: "能力线路", subtitle: "查看业务功能最终调用的模型服务" },
-  rules: { title: "任务规则", subtitle: "提示规则、校验与发布版本" },
   generations: { title: "生成记录", subtitle: "任务状态、用量与失败详情" },
   approvals: { title: "素材审批", subtitle: "素材提交与审核记录" },
 };
@@ -79,12 +78,6 @@ const NAV_GROUPS: Array<{
         label: "能力线路",
         description: "业务功能实际走向",
         icon: Route,
-      },
-      {
-        id: "rules",
-        label: "任务规则",
-        description: "提示规则与版本",
-        icon: FileCog,
       },
     ],
   },
@@ -134,13 +127,17 @@ export function AdminConsole({ initialView = "overview", user }: AdminConsolePro
   return (
     <div className="ai-admin-console" data-testid="admin-console">
       <aside className="ai-admin-sidebar">
-        <div className="ai-admin-brand">
+        <Link
+          href={APP_SHELL_ROOT}
+          className="ai-admin-brand"
+          aria-label="返回主界面"
+        >
           <span className="ai-admin-brand__mark"><ShieldCheck aria-hidden /></span>
           <span className="ai-admin-brand__copy">
             <strong>Lumina Admin</strong>
             <small>系统管理控制台</small>
           </span>
-        </div>
+        </Link>
 
         <nav className="ai-admin-nav" aria-label="系统管理模块">
           {NAV_GROUPS.map((group) => (
@@ -180,6 +177,15 @@ export function AdminConsole({ initialView = "overview", user }: AdminConsolePro
             <small>{VIEW_META[view].subtitle}</small>
           </div>
           <div className="ai-admin-header__actions">
+            <Link
+              href={APP_SHELL_ROOT}
+              className="ai-admin-back-link"
+              aria-label="返回主界面"
+              data-testid="admin-back-to-app"
+            >
+              <ArrowLeft aria-hidden />
+              <span>返回主界面</span>
+            </Link>
             <button type="button" aria-label="刷新当前页面" onClick={refresh}>
               <RefreshCw aria-hidden />
             </button>
@@ -196,16 +202,9 @@ export function AdminConsole({ initialView = "overview", user }: AdminConsolePro
           {view === "overview" ? (
             <AdminOverview onNavigate={selectView} />
           ) : view === "connections" ? (
-            <ModelConnectionsView />
+            <ModelConnectionsView onNavigate={selectView} />
           ) : view === "routes" ? (
             <CapabilityRoutingView />
-          ) : view === "rules" ? (
-            <section className="ai-admin-view ai-admin-legacy-view">
-              <div className="ai-admin-page-heading">
-                <div><h1>任务规则</h1><p>规则编辑与模型线路分离，降低误操作风险</p></div>
-              </div>
-              <CapabilityRulesTab active />
-            </section>
           ) : view === "generations" ? (
             <section className="ai-admin-view ai-admin-legacy-view">
               <div className="ai-admin-page-heading">

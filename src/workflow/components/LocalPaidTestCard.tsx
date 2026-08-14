@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { safeRandomUUID } from "@/lib/safe-random-id";
 import { LOCAL_PAID_TEST_SUBMIT_WARNING } from "@/video-generation/local-paid-test/constants";
 
 type PublicBits = {
@@ -292,7 +293,7 @@ export function LocalPaidTestCard() {
           token: tokenSnapshot,
           confirmationPhrase: phraseSnapshot,
           armNonce: nonceSnapshot,
-          idempotencyKey: `local-one-shot-${crypto.randomUUID()}`,
+          idempotencyKey: `local-one-shot-${safeRandomUUID()}`,
         }),
       });
       const payload = (await res.json()) as {

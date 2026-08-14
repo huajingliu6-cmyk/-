@@ -28,7 +28,10 @@ import {
   saveStoryboardWorkspaceRemote,
   storyboardRemoteRevision,
 } from "@/projects/storyboard/remote-production-store";
-import { parseDurationSecondsFromVideoPrompt } from "@/projects/storyboard/storyboard-video-params";
+import {
+  parseDurationSecondsFromVideoPrompt,
+  parseStoryboardVideoDefaults,
+} from "@/projects/storyboard/storyboard-video-params";
 
 function draftsDir(projectId: string): string {
   return path.join(projectRootDir(projectId), "drafts");
@@ -472,10 +475,17 @@ export function normalizeWorkspace(
     : [];
   const activeEpisodeId =
     typeof raw.activeEpisodeId === "string" ? raw.activeEpisodeId : null;
+  const videoDefaults =
+    raw.videoDefaults === null || raw.videoDefaults === undefined
+      ? raw.videoDefaults === null
+        ? null
+        : undefined
+      : parseStoryboardVideoDefaults(raw.videoDefaults);
   const normalized: ProjectStoryboardWorkspace = {
     projectId,
     activeEpisodeId,
     productions,
+    ...(videoDefaults !== undefined ? { videoDefaults } : {}),
     updatedAt:
       typeof raw.updatedAt === "string"
         ? raw.updatedAt

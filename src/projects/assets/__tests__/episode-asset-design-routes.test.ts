@@ -15,6 +15,7 @@ import {
   saveEpisodeAssetDesignStore,
   upsertEpisodeRecord,
 } from "@/projects/assets/episode-design/store";
+import { loadAssetBundleDraft } from "@/projects/assets/asset-bundle-store";
 
 vi.mock("@/auth/require-user", () => ({
   requireSessionUser: vi.fn(),
@@ -29,6 +30,7 @@ import {
 import { POST as postConfirm } from "@/app/api/projects/[projectId]/asset-designs/episodes/[episodeId]/confirm/route";
 import { listEpisodeAssetDesigns } from "@/projects/assets/episode-design/episode-design-api";
 import { SCRIPT_ASSET_DESIGN_ID } from "@/projects/assets/episode-design/types";
+import type { EpisodeAssetDesignRecord } from "@/projects/assets/episode-design/types";
 
 function auth(role: AuthUser["role"], id: string): AuthUser {
   return {
@@ -105,6 +107,7 @@ describe("episode asset design routes", () => {
       name: `ads-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -129,6 +132,7 @@ describe("episode asset design routes", () => {
       name: `ads-ce-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const engineer = auth("user", "eng_ads");
@@ -155,6 +159,7 @@ describe("episode asset design routes", () => {
       name: `ads-prop-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -194,13 +199,14 @@ describe("episode asset design routes", () => {
     expect(json.items).toHaveLength(0);
   });
 
-  it("confirm creates assets from review record", async () => {
+  it("confirms one personal asset with its generated image", async () => {
     const owner = auth("user", "owner_ads_confirm");
     vi.mocked(requireSessionUser).mockResolvedValue({ ok: true, user: owner });
     const project = await createProjectRecord(owner.id, {
       name: `ads-c-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -243,7 +249,7 @@ describe("episode asset design routes", () => {
       }),
     );
 
-    const res = await postConfirm(
+    const missingImageRes = await postConfirm(
       new Request("http://localhost", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -256,9 +262,96 @@ describe("episode asset design routes", () => {
         }),
       },
     );
+    expect(missingImageRes.status).toBe(400);
+    expect((await missingImageRes.json()) as { code: string }).toMatchObject({
+      code: "IMAGE_REQUIRED",
+    });
+
+    const latestStore = await loadEpisodeAssetDesignStore(project.projectId);
+    const latestRecord = latestStore.records.find(
+      (record) => record.episodeId === "ep1",
+    )!;
+    await saveEpisodeAssetDesignStore(
+      upsertEpisodeRecord(latestStore, {
+        ...latestRecord,
+        items: latestRecord.items.map((item) => ({
+          ...item,
+          generatedMedia: {
+            currentId: "gen_scene_1",
+            historyIds: ["gen_scene_1"],
+            history: [
+              {
+                mediaId: "gen_scene_1",
+                prompt: "夜晚街道",
+                generatedAt: now,
+                mimeType: "image/webp",
+              },
+            ],
+            status: "completed" as const,
+            promptFingerprint: "prompt-fp",
+            errorMessage: null,
+            mimeType: "image/webp",
+            previewKind: "image" as const,
+          },
+        })),
+      }),
+    );
+
+    const res = await postConfirm(
+      new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expectedRevision: 1,
+          fingerprint,
+          itemId: "i1",
+        }),
+      }),
+      {
+        params: Promise.resolve({
+          projectId: project.projectId,
+          episodeId: "ep1",
+        }),
+      },
+    );
     expect(res.status).toBe(200);
-    const json = (await res.json()) as { counts: { created: number } };
+    const json = (await res.json()) as {
+      counts: { created: number };
+      record: EpisodeAssetDesignRecord;
+    };
     expect(json.counts.created).toBe(1);
+    expect(json.record.status).toBe("review");
+    const bundle = await loadAssetBundleDraft(project.projectId);
+    expect(bundle?.scenes[0]).toMatchObject({
+      name: "新场景",
+      imageFileName: "gen_scene_1",
+      imageMimeType: "image/webp",
+      primaryMediaId: "gen_scene_1",
+      approvedMediaIds: ["gen_scene_1"],
+      status: "completed",
+    });
+
+    const confirmAllRes = await postConfirm(
+      new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedRevision: 1, fingerprint }),
+      }),
+      {
+        params: Promise.resolve({
+          projectId: project.projectId,
+          episodeId: "ep1",
+        }),
+      },
+    );
+    expect(confirmAllRes.status).toBe(200);
+    const confirmAll = (await confirmAllRes.json()) as {
+      counts: { created: number };
+      record: EpisodeAssetDesignRecord;
+    };
+    expect(confirmAll.counts.created).toBe(0);
+    expect(confirmAll.record.status).toBe("confirmed");
+    expect((await loadAssetBundleDraft(project.projectId))?.scenes).toHaveLength(1);
   });
 
   it("PUT returns 409 on revision conflict", async () => {
@@ -268,6 +361,7 @@ describe("episode asset design routes", () => {
       name: `ads-p-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -322,6 +416,7 @@ describe("episode asset design routes", () => {
       name: `full-script-view-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();

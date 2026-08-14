@@ -3,6 +3,8 @@
  * Brief must contain ONLY the current episode — no other episodes or sourceText.
  */
 
+import { safeRandomUUID } from "@/lib/safe-random-id";
+
 export type EpisodeAssetDesignGenerationRequestBody = {
   outputKind: "episode_asset_design";
   projectId: string;
@@ -16,13 +18,7 @@ export type EpisodeAssetDesignGenerationRequestBody = {
 };
 
 export function createEpisodeAssetDesignIdempotencyKey(): string {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
-    return `ead_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-  }
-  return `ead_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  return `ead_${safeRandomUUID().replace(/-/g, "").slice(0, 16)}`;
 }
 
 export function buildEpisodeAssetDesignGenerationRequest(input: {

@@ -103,7 +103,10 @@ export function HeaderLoginPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const payload = (await response.json()) as { error?: string; user?: AuthUser };
+      const raw = await response.text();
+      const payload = (
+        raw.trim() ? JSON.parse(raw) : {}
+      ) as { error?: string; user?: AuthUser };
       if (!response.ok) throw new Error(payload.error ?? `${mode === "login" ? "登录" : "注册"}失败`);
       if (!payload.user) throw new Error(`${mode === "login" ? "登录" : "注册"}失败`);
 

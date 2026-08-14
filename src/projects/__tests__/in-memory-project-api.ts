@@ -26,6 +26,7 @@ export async function requestInMemoryProjectApi(
       creationSource: ProjectRecord["creationSource"];
       projectMode: ProjectRecord["projectMode"];
       highlights?: string;
+      visualStyle?: ProjectRecord["visualStyle"];
       passwordEnabled: boolean;
     };
     const now = new Date(1_800_000_000_000 + state.sequence * 1_000).toISOString();
@@ -39,6 +40,7 @@ export async function requestInMemoryProjectApi(
       projectMode: input.projectMode,
       status: "draft",
       highlights: input.highlights?.trim() ?? "",
+      visualStyle: input.visualStyle ?? null,
       passwordEnabled: input.passwordEnabled,
       passwordHash: null,
       passwordSalt: null,
@@ -57,8 +59,16 @@ export async function requestInMemoryProjectApi(
     const project = state.projects.find((entry) => entry.projectId === projectId);
     if (!project) return new Response(null, { status: 404 });
     if (method === "PATCH") {
-      const input = JSON.parse(String(init.body)) as { highlights: string };
-      project.highlights = input.highlights.trim();
+      const input = JSON.parse(String(init.body)) as {
+        highlights?: string;
+        visualStyle?: ProjectRecord["visualStyle"];
+      };
+      if (typeof input.highlights === "string") {
+        project.highlights = input.highlights.trim();
+      }
+      if (input.visualStyle !== undefined) {
+        project.visualStyle = input.visualStyle;
+      }
       project.updatedAt = new Date(1_800_000_000_000 + state.sequence * 1_000 + state.revision).toISOString();
       state.revision += 1;
     }

@@ -9,6 +9,7 @@ import {
   userOwnsAnyProject,
 } from "@/auth/effective-role";
 import { listMembershipsForUser } from "@/auth/project-members";
+import { userIsEnterpriseOwnerForProject } from "@/enterprise/project-principal";
 import { getProjectRecord } from "@/projects/project-access";
 import {
   assertSafeGenerationId,
@@ -61,7 +62,10 @@ export async function requireProjectManagementAccess(): Promise<
   };
 }
 
-/** 仅项目记录上的 ownerId 与当前用户一致时放行（系统管理员非主理人亦拒绝） */
+/**
+ * 项目主理人（ownerId），或挂靠该项目的企业所有者（与主理人同权）。
+ * 系统管理员非主理人/非该企业所有者亦拒绝（即便有效角色解析为 SYSTEM_ADMIN）。
+ */
 export async function requireActualProjectOwner(
   projectId: string,
 ): Promise<AccessOk<{ access: ResolvedProjectAccess; project: ProjectRecord }> | AccessDenied> {
@@ -75,18 +79,27 @@ export async function requireActualProjectOwner(
       response: NextResponse.json({ error: "项目不存在" }, { status: 404 }),
     };
   }
-  if (project.ownerId !== session.user.id) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "仅项目主理人可操作" }, { status: 403 }),
-    };
-  }
 
   const access = await resolveProjectAccess(session.user, projectId);
   if (!access) {
     return {
       ok: false,
       response: NextResponse.json({ error: "项目不存在" }, { status: 404 }),
+    };
+  }
+
+  const isRecordOwner = project.ownerId === session.user.id;
+  const isEnterpriseOwner = await userIsEnterpriseOwnerForProject(
+    session.user.id,
+    projectId,
+  );
+  if (!isRecordOwner && !isEnterpriseOwner) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "仅项目主理人或企业所有者可操作" },
+        { status: 403 },
+      ),
     };
   }
   return { ok: true, user: session.user, access, project };
@@ -162,8 +175,8 @@ export async function requireVideoCanvasAccess(
 }
 
 /**
- * 项目管理下的项目读写：仅该项目记录上的主理人（ownerId）。
- * 系统管理员非主理人、抽卡工程师均禁止。
+ * 项目管理下的项目读写：项目主理人（ownerId）或挂靠企业所有者。
+ * 系统管理员非主理人/非该企业所有者、抽卡工程师均禁止。
  */
 export async function requireProjectManagementProjectAccess(
   projectId: string,

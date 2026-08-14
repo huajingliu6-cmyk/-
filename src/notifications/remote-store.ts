@@ -38,6 +38,7 @@ export async function createNotificationRemote(input: {
   episodeId: string;
   submissionId: string;
   submitterUserId: string;
+  enterpriseId?: string;
   title: string;
   summary: string;
   dedupeBySubmissionId?: boolean;

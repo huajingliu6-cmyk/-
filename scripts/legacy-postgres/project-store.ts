@@ -23,6 +23,7 @@ import type {
   ProjectPublic,
   ProjectRecord,
 } from "@/projects/types";
+import { parseProjectVisualStyleId } from "@/projects/project-visual-style";
 import type { WorkflowProjectSummary } from "@/workflow/lib/workflow-storage";
 
 function toCreationSource(
@@ -58,6 +59,7 @@ function toRecord(project: {
   projectMode: "canvas" | "full_stack";
   status: string;
   highlights: string;
+  visualStyle?: string | null;
   passwordEnabled: boolean;
   passwordHash: string | null;
   passwordSalt: string | null;
@@ -73,6 +75,7 @@ function toRecord(project: {
     projectMode: fromProjectMode(project.projectMode),
     status: "draft",
     highlights: project.highlights,
+    visualStyle: parseProjectVisualStyleId(project.visualStyle),
     passwordEnabled: project.passwordEnabled,
     passwordHash: project.passwordHash,
     passwordSalt: project.passwordSalt,
@@ -91,6 +94,7 @@ function toPublic(record: ProjectRecord): ProjectPublic {
     projectMode: record.projectMode,
     status: record.status,
     highlights: record.highlights,
+    visualStyle: record.visualStyle,
     passwordEnabled: record.passwordEnabled,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -163,7 +167,7 @@ export async function createProjectRecordPostgres(
     }
   }
 
-  const existingName = await projects.findByName(input.name.trim());
+  const existingName = await projects.findByName(input.name.trim(), ownerId);
   if (existingName) {
     throw new ProjectNameConflictError();
   }
@@ -196,6 +200,7 @@ export async function createProjectRecordPostgres(
           ? "script_processing"
           : "story_creation",
       highlights: (input.highlights ?? "").trim(),
+      visualStyle: input.visualStyle,
       passwordEnabled: input.passwordEnabled,
       passwordHash,
       passwordSalt,
@@ -213,7 +218,7 @@ export async function createProjectRecordPostgres(
       }
     }
     if (isUniqueViolation(error)) {
-      const byName = await projects.findByName(input.name.trim());
+      const byName = await projects.findByName(input.name.trim(), ownerId);
       if (byName) {
         throw new ProjectNameConflictError();
       }

@@ -166,6 +166,7 @@ describe("video paid gate via real routes", () => {
       name: "F1R Paid Gate",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     projectId = project.projectId;

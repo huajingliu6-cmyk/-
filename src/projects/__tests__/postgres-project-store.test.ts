@@ -187,7 +187,7 @@ describe("postgres project store (TEST_DATABASE_URL)", () => {
     expect(count).toBe(1);
   });
 
-  it("rejects duplicate project names", async () => {
+  it("rejects duplicate project names for the same owner", async () => {
     await expect(
       createProjectRecordPostgres(userId, {
         name: `PG Project ${suffix}`,
@@ -196,6 +196,17 @@ describe("postgres project store (TEST_DATABASE_URL)", () => {
         passwordEnabled: false,
       }),
     ).rejects.toBeInstanceOf(ProjectNameConflictError);
+  });
+
+  it("allows duplicate project names for different owners", async () => {
+    const otherOwnerId = `other_${suffix}`;
+    const created = await createProjectRecordPostgres(otherOwnerId, {
+      name: `PG Project ${suffix}`,
+      creationSource: "story",
+      projectMode: "canvas",
+      passwordEnabled: false,
+    });
+    expect(created.ownerId).toBe(otherOwnerId);
   });
 
   it("lists projects from postgres and survives re-read", async () => {
@@ -232,7 +243,7 @@ describe("postgres project store (TEST_DATABASE_URL)", () => {
     });
   });
 
-  it("non-admin cannot create projects by capability policy", () => {
+  it("regular users can create personal projects by capability policy", () => {
     const member: AuthUser = {
       id: memberId,
       username: `member_${suffix}`,
@@ -241,6 +252,6 @@ describe("postgres project store (TEST_DATABASE_URL)", () => {
       createdAt: "t",
       updatedAt: "t",
     };
-    expect(canCreateProject(member)).toBe(false);
+    expect(canCreateProject(member)).toBe(true);
   });
 });

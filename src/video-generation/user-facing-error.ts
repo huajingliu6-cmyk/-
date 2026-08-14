@@ -129,7 +129,7 @@ export function classifyVideoProviderError(
       kind: "config",
       title: "模型配置无效",
       message:
-        "视频模型或接入点无效/无权限。请到「管理 API → 视频镜头」填写可用的模型 ID 或 ep-xxxx。",
+        "视频模型或接入点无效/无权限。请到「系统管理 → API 接口 → 视频镜头」填写可用的模型 ID 或 ep-xxxx。",
     };
   }
 

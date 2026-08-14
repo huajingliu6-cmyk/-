@@ -148,6 +148,15 @@ function seed() {
                 usageInEpisode: "开场",
                 evidence: "剧本",
               },
+              generatedMedia: {
+                currentId: "gen_prop_remote_1",
+                historyIds: ["gen_prop_remote_1"],
+                status: "completed",
+                promptFingerprint: null,
+                errorMessage: null,
+                mimeType: "image/png",
+                previewKind: "image",
+              },
             },
           ],
           confirmedAt: null,
@@ -228,6 +237,25 @@ describe("remote episode asset design confirmation", () => {
     expect(result.ok).toBe(true);
     expect(atomicWrites).toHaveBeenCalledTimes(2);
     expect(documents.get("asset-bundles/project_1")?.revision).toBe(3);
+  });
+
+  it("atomically confirms one design item without confirming the record", async () => {
+    const result = await confirmEpisodeAssetDesign({
+      projectId: "project_1",
+      episodeId: "episode_1",
+      expectedRevision: 1,
+      userId: "owner_1",
+      fingerprint,
+      itemId: "item_1",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(atomicWrites).toHaveBeenCalledTimes(1);
+    const design = documents.get("episode-asset-designs/project_1")?.value as {
+      records: Array<{ status: string; items: Array<{ libraryAssetId?: string }> }>;
+    };
+    expect(design.records[0]?.status).toBe("review");
+    expect(design.records[0]?.items[0]?.libraryAssetId).toBeTruthy();
   });
 
   it("is idempotent when the same revision is already confirmed", async () => {

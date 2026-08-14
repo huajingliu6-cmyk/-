@@ -20,7 +20,7 @@ describe("formatVideoProviderErrorForUser", () => {
     const msg = formatVideoProviderErrorForUser(
       "方舟创建任务失败（404）：The model or endpoint X does not exist",
     );
-    expect(msg).toContain("管理 API");
+    expect(msg).toContain("系统管理 → API 接口");
   });
 
   it("keeps already Chinese moderation copy", () => {

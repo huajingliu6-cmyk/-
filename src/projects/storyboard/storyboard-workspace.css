@@ -176,7 +176,7 @@
 
 .sbw-layout {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: stretch;
   padding-bottom: 72px;
@@ -206,10 +206,192 @@
 }
 
 .sbw-episode-sidebar {
-  width: max-content;
-  min-width: 7.75rem;
-  padding: 12px 10px;
-  overflow: visible;
+  display: none;
+}
+
+/*
+ * 剧集列表：收起仅显示左侧中心小提醒键（约 36×104），
+ * 展开为 fixed 面板；不占布局宽度、不随内容滚动。
+ */
+.sbw-episode-drawer {
+  --sbw-episode-drawer-panel-w: 200px;
+  position: fixed;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1200;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  width: auto;
+  height: auto;
+  max-height: calc(100vh - 48px);
+  pointer-events: none;
+}
+
+.sbw-episode-drawer__panel,
+.sbw-episode-drawer__handle,
+.storyboard-episode-trigger {
+  pointer-events: auto;
+}
+
+.sbw-episode-drawer__panel {
+  display: none;
+  width: var(--sbw-episode-drawer-panel-w);
+  max-width: min(88vw, 240px);
+  min-width: 0;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-height: 0;
+  max-height: calc(100vh - 48px);
+  height: min(70vh, calc(100vh - 48px));
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: none;
+  border-radius: 0 12px 12px 0;
+  background: rgba(12, 14, 24, 0.97);
+  box-shadow: 8px 0 28px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.sbw-episode-drawer.is-open .sbw-episode-drawer__panel {
+  display: flex;
+}
+
+.sbw-episode-drawer__head {
+  flex: 0 0 auto;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sbw-episode-drawer__head h2 {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.sbw-episode-drawer__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 10px;
+  overscroll-behavior: contain;
+}
+
+/* 小提醒键：固定尺寸，禁止全高紫色条 */
+.storyboard-episode-trigger,
+.sbw-episode-drawer__handle {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 104px;
+  min-width: 36px;
+  max-width: 38px;
+  min-height: 90px;
+  max-height: 110px;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 4px;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 0 6px 6px 0;
+  color: #fff;
+  cursor: pointer;
+  letter-spacing: 1px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  background: linear-gradient(
+    160deg,
+    #6d28d9,
+    #8b5cf6,
+    #4f46e5,
+    #7c3aed
+  );
+  background-size: 200% 200%;
+  box-shadow: 0 0 8px rgba(124, 58, 237, 0.55);
+  animation:
+    episode-trigger-gradient 3s ease-in-out infinite,
+    episode-trigger-glow 2.4s ease-in-out infinite;
+}
+
+.sbw-episode-drawer.is-open .storyboard-episode-trigger,
+.sbw-episode-drawer.is-open .sbw-episode-drawer__handle {
+  /* 贴在面板右缘，便于触屏再次点击收起，且不遮挡列表主体 */
+  display: flex;
+  width: 28px;
+  min-width: 28px;
+  max-width: 30px;
+  height: 88px;
+  min-height: 80px;
+  max-height: 96px;
+  animation: none;
+  background: linear-gradient(160deg, #6d28d9, #7c3aed);
+  background-size: 100% 100%;
+  box-shadow: 0 0 6px rgba(124, 58, 237, 0.4);
+  filter: none;
+}
+
+.storyboard-episode-trigger__icon,
+.sbw-episode-drawer__handle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.storyboard-episode-trigger__label,
+.sbw-episode-drawer__handle-label {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.storyboard-episode-trigger:focus-visible,
+.sbw-episode-drawer__handle:focus-visible {
+  outline: 2px solid rgba(250, 245, 255, 0.95);
+  outline-offset: 2px;
+}
+
+@keyframes episode-trigger-gradient {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes episode-trigger-glow {
+  0%,
+  100% {
+    filter: brightness(0.95);
+    box-shadow: 0 0 5px rgba(124, 58, 237, 0.4);
+  }
+  50% {
+    filter: brightness(1.2);
+    box-shadow: 0 0 12px rgba(139, 92, 246, 0.85);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .storyboard-episode-trigger,
+  .sbw-episode-drawer__handle {
+    animation: none;
+    background-position: 50% 50%;
+    filter: none;
+    box-shadow: 0 0 8px rgba(124, 58, 237, 0.45);
+  }
 }
 
 .sbw-episode-sidebar__body {
@@ -691,7 +873,17 @@
 
 @media (max-width: 960px) {
   .sbw-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sbw-episode-drawer {
+    --sbw-episode-drawer-panel-w: 180px;
+  }
+
+  .storyboard-episode-trigger,
+  .sbw-episode-drawer__handle {
+    width: 34px;
+    height: 100px;
   }
 
   .sbw-panel {
@@ -2084,6 +2276,7 @@
   background: #1a1329;
   color: var(--sbw-fg);
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
 }
 
 .sbw-modal__head,
@@ -2092,11 +2285,14 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-shrink: 0;
   padding: 14px 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .sbw-modal__foot {
+  position: relative;
+  z-index: 1;
   border-bottom: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   justify-content: flex-end;
@@ -2110,8 +2306,10 @@
 }
 
 .sbw-modal__body {
+  min-height: 0;
+  flex: 1 1 auto;
   padding: 14px 16px;
-  overflow: auto;
+  overflow-y: auto;
   color: rgba(244, 241, 255, 0.92);
   line-height: 1.55;
 }
@@ -2123,6 +2321,97 @@
 
 .sbw-modal__body .sbw-hint {
   color: var(--sbw-muted);
+}
+
+.global-settings-modal {
+  width: min(900px, calc(100vw - 48px));
+  max-height: min(720px, calc(100vh - 48px), 80vh);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.global-settings-modal__header,
+.global-settings-modal__footer {
+  flex-shrink: 0;
+}
+
+.global-settings-modal__body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px 20px;
+}
+
+.global-settings-modal__hint {
+  margin: 0 0 12px !important;
+  line-height: 1.45;
+}
+
+.global-settings-modal__footer {
+  position: relative;
+  z-index: 1;
+}
+
+.sbw-global-settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+}
+
+.sbw-global-settings-grid .gs__label {
+  margin-bottom: 4px;
+}
+
+/* Portaled select menu for global settings (above modal z-index 2400) */
+.global-settings-select-content {
+  z-index: 2600 !important;
+  min-width: var(--radix-select-trigger-width, 100%);
+  max-height: min(320px, var(--radix-select-content-available-height, 320px));
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: #282338;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.global-settings-select-item {
+  min-height: 42px !important;
+  display: flex;
+  align-items: center;
+  padding: 0 12px !important;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.88);
+  cursor: pointer;
+  transform: none !important;
+}
+
+.global-settings-select-item:hover,
+.global-settings-select-item.is-active,
+.global-settings-select-item[data-highlighted] {
+  background: rgba(139, 92, 246, 0.16);
+  outline: none;
+  border-color: transparent;
+}
+
+.global-settings-select-item.is-selected,
+.global-settings-select-item[data-state="checked"] {
+  color: #fff;
+  background: rgba(124, 58, 237, 0.28);
+  border-color: transparent;
+}
+
+.global-settings-select-item.is-selected:hover,
+.global-settings-select-item.is-selected.is-active {
+  background: rgba(124, 58, 237, 0.36);
+}
+
+@media (max-width: 640px) {
+  .sbw-global-settings-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .sbw-picker-grid {
@@ -2234,7 +2523,17 @@
 
 @media (max-width: 960px) {
   .sbw-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sbw-episode-drawer {
+    --sbw-episode-drawer-panel-w: 180px;
+  }
+
+  .storyboard-episode-trigger,
+  .sbw-episode-drawer__handle {
+    width: 34px;
+    height: 100px;
   }
 
   .sbw-panel {

@@ -3,6 +3,10 @@ import type {
   ProjectCreationSource,
   ProjectMode,
 } from "@/projects/types";
+import {
+  isProjectVisualStyleId,
+  type ProjectVisualStyleId,
+} from "@/projects/project-visual-style";
 
 export type CreateProjectFieldErrors = {
   creationSource?: string;
@@ -10,6 +14,7 @@ export type CreateProjectFieldErrors = {
   password?: string;
   projectMode?: string;
   highlights?: string;
+  visualStyle?: string;
 };
 
 /** 与后端一致的名称约束（避免前后端冲突） */
@@ -22,11 +27,13 @@ export function isCreateProjectReady(input: {
   projectMode: ProjectMode | null;
   passwordEnabled: boolean;
   projectPassword: string;
+  visualStyle: ProjectVisualStyleId | null;
 }): boolean {
   return (
     input.creationSource !== null &&
     input.name.trim().length > 0 &&
     input.projectMode !== null &&
+    input.visualStyle !== null &&
     (!input.passwordEnabled || input.projectPassword.trim().length > 0)
   );
 }
@@ -38,6 +45,7 @@ export function validateCreateProjectForm(input: {
   passwordEnabled: boolean;
   projectPassword: string;
   highlights: string;
+  visualStyle: ProjectVisualStyleId | null;
 }): CreateProjectFieldErrors {
   const errors: CreateProjectFieldErrors = {};
 
@@ -60,6 +68,12 @@ export function validateCreateProjectForm(input: {
     errors.projectMode = "请选择项目模式";
   }
 
+  if (!input.visualStyle) {
+    errors.visualStyle = "请选择项目生成风格";
+  } else if (!isProjectVisualStyleId(input.visualStyle)) {
+    errors.visualStyle = "请选择项目生成风格";
+  }
+
   if (input.highlights.length > PROJECT_HIGHLIGHTS_MAX_LENGTH) {
     errors.highlights = `项目要点不能超过 ${PROJECT_HIGHLIGHTS_MAX_LENGTH} 个字符`;
   }
@@ -76,6 +90,17 @@ export function parseCreateProjectBody(
     return { ok: false, error: "无效请求" };
   }
   const raw = body as Record<string, unknown>;
+
+  if (
+    "stylePrompt" in raw ||
+    "promptDirective" in raw ||
+    "styleDirective" in raw
+  ) {
+    return {
+      ok: false,
+      error: "不允许客户端覆盖项目视觉风格指令",
+    };
+  }
 
   const creationSource = raw.creationSource;
   if (creationSource !== "story" && creationSource !== "script-upload") {
@@ -111,6 +136,11 @@ export function parseCreateProjectBody(
         ? raw.projectHighlights
         : "";
 
+  const visualStyleRaw = raw.visualStyle;
+  const visualStyle = isProjectVisualStyleId(visualStyleRaw)
+    ? visualStyleRaw
+    : null;
+
   const fieldErrors = validateCreateProjectForm({
     creationSource,
     name,
@@ -118,6 +148,7 @@ export function parseCreateProjectBody(
     passwordEnabled,
     projectPassword,
     highlights,
+    visualStyle,
   });
 
   if (highlights.length > PROJECT_HIGHLIGHTS_MAX_LENGTH) {
@@ -133,8 +164,17 @@ export function parseCreateProjectBody(
       fieldErrors.name ||
       fieldErrors.password ||
       fieldErrors.projectMode ||
+      fieldErrors.visualStyle ||
       "校验失败";
     return { ok: false, error: first, fieldErrors };
+  }
+
+  if (!visualStyle) {
+    return {
+      ok: false,
+      error: "请选择项目生成风格",
+      fieldErrors: { visualStyle: "请选择项目生成风格" },
+    };
   }
 
   return {
@@ -144,6 +184,7 @@ export function parseCreateProjectBody(
       creationSource,
       projectMode,
       highlights: highlights.trim(),
+      visualStyle,
       passwordEnabled,
       projectPassword: passwordEnabled ? projectPassword : null,
     },

@@ -120,6 +120,7 @@ next-env.d.ts
 
 # local agent/audit scratch files
 /.audit-*
+/.enterprise-*.log
 /.codex-*.log
 /.9d06-*
 /.extract-*

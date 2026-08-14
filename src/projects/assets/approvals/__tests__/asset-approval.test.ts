@@ -252,6 +252,7 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
       name: `appr-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await addCardEngineer({
@@ -309,6 +310,7 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
       name: `appr2-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const seeded = await seedEpisodeWithMedia(project.projectId);
@@ -348,6 +350,7 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
       name: `appr3-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const seeded = await seedEpisodeWithMedia(project.projectId);
@@ -460,6 +463,7 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
       name: `appr-del-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const seeded = await seedEpisodeWithMedia(project.projectId);
@@ -533,6 +537,7 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
       name: `appr4-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const seeded = await seedEpisodeWithMedia(project.projectId);
@@ -581,6 +586,7 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
       name: `appr5-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const seeded = await seedEpisodeWithMedia(project.projectId);
@@ -609,6 +615,7 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
       name: `appr-del-note-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const seeded = await seedEpisodeWithMedia(project.projectId);
@@ -698,6 +705,7 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
       name: `appr-rej-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await addCardEngineer({
@@ -784,6 +792,7 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
       name: `appr6-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     vi.mocked(requireSessionUser).mockResolvedValue({
@@ -815,6 +824,7 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
       name: `appr7-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await addCardEngineer({
@@ -913,6 +923,7 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
       name: `appr8-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const seeded = await seedEpisodeWithMedia(project.projectId);
@@ -941,6 +952,7 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
       name: `appr9-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const drafts = path.join(
@@ -992,6 +1004,7 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
       name: `appr10-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const seeded = await seedEpisodeWithMedia(project.projectId);

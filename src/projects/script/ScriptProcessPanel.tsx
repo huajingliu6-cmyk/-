@@ -29,7 +29,7 @@ export function ScriptProcessPanel({
   selectedId,
   page,
   numbersOnly = false,
-  emptyHint = "请先上传剧本并点击「分集」。",
+  emptyHint = "确认导入后将自动生成分集方案。",
   onSelect,
   onPageChange,
 }: Props) {

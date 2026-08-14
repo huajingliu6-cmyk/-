@@ -75,6 +75,7 @@ describe("episode asset design text generation route", () => {
       name: `ead-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -159,6 +160,7 @@ describe("episode asset design text generation route", () => {
       name: `script-assets-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -218,6 +220,7 @@ describe("episode asset design text generation route", () => {
       name: `ead-empty-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();

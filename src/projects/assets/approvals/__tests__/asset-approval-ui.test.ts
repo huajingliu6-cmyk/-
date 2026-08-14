@@ -76,12 +76,14 @@ describe("asset approval UI contracts", () => {
     expect(bell).toContain('method: "DELETE"');
   });
 
-  it("admin panel exposes审批记录 tab backed by admin API", () => {
-    const panel = readSrc("src/auth/ApiManagePanel.tsx");
+  it("admin page exposes审批记录 backed by admin API", () => {
+    const page = readSrc("src/app/app/admin/approvals/page.tsx");
     const tab = readSrc("src/auth/ai-admin/AssetApprovalsHistoryTab.tsx");
-    expect(panel).toContain("审批记录");
-    expect(panel).toContain("AssetApprovalsHistoryTab");
-    expect(panel).toContain('ai-config-tab-approvals');
+    const nav = readSrc("src/admin/nav.ts");
+    expect(page).toContain("AssetApprovalsHistoryTab");
+    expect(page).toContain("admin-approvals-page");
+    expect(nav).toContain("审批记录");
+    expect(nav).toContain("/app/admin/approvals");
     expect(tab).toContain("/api/admin/asset-approvals");
     expect(tab).toContain("admin-asset-approvals-history");
   });

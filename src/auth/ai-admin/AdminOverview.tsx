@@ -11,7 +11,7 @@ import {
   Sparkles,
   TriangleAlert,
 } from "lucide-react";
-import type { AdminView } from "@/auth/ai-admin/AdminConsole";
+import type { AdminView } from "@/auth/ai-admin/admin-view";
 import {
   loadAdminAiData,
   type AdminAiData,
@@ -131,14 +131,6 @@ function effectiveSlotFor(
 ): { slotId: string | null; bindingEnabled: boolean; local: boolean } {
   if (capabilityId === "script.split.generate") {
     return { slotId: null, bindingEnabled: true, local: true };
-  }
-  if (capabilityId === "asset.design-prompt.generate") {
-    const sourceBinding = bindingFor(data, "asset.episode-design.generate");
-    return {
-      slotId: "episode-asset-design-text",
-      bindingEnabled: sourceBinding?.enabled ?? true,
-      local: false,
-    };
   }
   if (capabilityId === "video.reference-image.precheck") {
     const dedicated = data.profiles.find((item) => item.id === "video-ref-precheck");

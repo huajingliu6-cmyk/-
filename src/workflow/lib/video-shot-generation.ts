@@ -33,6 +33,6 @@ export async function generateVideoShot(
   request: VideoShotGenerationRequest,
 ): Promise<VideoShotGenerationResult> {
   throw new Error(
-    `旧版 /api/generate/video-shot 已停用（节点 ${request.videoShotNodeId}）。请通过镜头节点提交到 /api/generations（Provider 由后台「管理 API」video-shot 配置）。`,
+    `旧版 /api/generate/video-shot 已停用（节点 ${request.videoShotNodeId}）。请通过镜头节点提交到 /api/generations（Provider 由「系统管理 → API 接口」video-shot 配置）。`,
   );
 }

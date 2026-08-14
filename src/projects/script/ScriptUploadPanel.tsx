@@ -10,12 +10,9 @@ import { SCRIPT_UPLOAD_MAX_CHARS_LABEL } from "@/projects/script/script-upload-l
 
 type Props = {
   file: ScriptSourceFile | null;
-  canSplit: boolean;
-  splitDone: boolean;
   importing: boolean;
   onScriptFile: (file: File) => void;
   onClientError: (message: string) => void;
-  onOpenSplit: () => void;
 };
 
 function formatSize(bytes: number): string {
@@ -42,24 +39,13 @@ function isSupportedScriptName(name: string): boolean {
 
 export function ScriptUploadPanel({
   file,
-  canSplit,
-  splitDone,
   importing,
   onScriptFile,
   onClientError,
-  onOpenSplit,
 }: Props) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const uploadBounce = useChipBounce();
-  const splitBounce = useChipBounce();
-  const splitEnabled = canSplit && !splitDone && !importing;
-  const splitLabel = splitDone ? "已分集" : importing ? "处理中…" : "分集";
-  const splitTitle = splitDone
-    ? "已完成本地分集"
-    : canSplit
-      ? "本地分集"
-      : "请先导入并确认源文本";
 
   return (
     <div aria-label="上传完整剧本">
@@ -114,25 +100,7 @@ export function ScriptUploadPanel({
           }}
           onAnimationEnd={uploadBounce.onAnimationEnd}
         >
-          {importing ? "解析中…" : "上传剧本文件"}
-        </button>
-        <button
-          type="button"
-          className={`scs-btn${splitEnabled ? " scs-btn-primary" : " is-dimmed"}${
-            splitBounce.bounceClass ? ` ${splitBounce.bounceClass}` : ""
-          }`}
-          disabled={!splitEnabled}
-          title={splitTitle}
-          data-testid="script-split-start"
-          aria-pressed={splitDone}
-          onClick={() => {
-            if (!splitEnabled) return;
-            splitBounce.trigger();
-            onOpenSplit();
-          }}
-          onAnimationEnd={splitBounce.onAnimationEnd}
-        >
-          {splitLabel}
+          {importing ? "处理中…" : "上传剧本文件"}
         </button>
       </div>
       <p className="scs-hint scs-upload-limit-note">
@@ -142,7 +110,7 @@ export function ScriptUploadPanel({
         <span className="scs-req-star" aria-hidden>
           *
         </span>
-        选择 TXT / DOCX / Markdown 后先预览解析结果，确认后才写入剧本草稿。
+        选择 TXT / DOCX / Markdown 后先预览解析结果，确认导入后将自动生成分集方案。
       </p>
 
       {file ? (

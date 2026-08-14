@@ -85,6 +85,7 @@ export async function confirmEpisodeAssetDesign(input: {
   expectedRevision: number;
   userId: string;
   fingerprint: string;
+  itemId?: string;
 }): Promise<ConfirmEpisodeAssetDesignResult> {
   if (isRemoteDataOnly()) {
     return confirmEpisodeAssetDesignRemote(input);

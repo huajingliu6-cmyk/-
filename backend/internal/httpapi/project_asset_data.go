@@ -9,12 +9,11 @@ import (
 	"strings"
 )
 
-const maxProjectAssetDataWriteAttempts = 6
-
 var projectAssetDataNamespaces = map[string]string{"bundle": "asset-bundles", "episode-designs": "episode-asset-designs", "approvals": "asset-approvals"}
 
 type projectAssetDataSaveInput struct {
-	Value any `json:"value"`
+	Value            any    `json:"value"`
+	ExpectedRevision *int64 `json:"expectedRevision"`
 }
 type ProjectAssetData struct {
 	store *postgres.Store
@@ -87,41 +86,42 @@ func (h *ProjectAssetData) save(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid project asset data request")
 		return
 	}
-	for a := 0; a < maxProjectAssetDataWriteAttempts; a++ {
-		d, found, e := h.read(r, ns, id)
-		if e != nil {
-			writeError(w, 500, "project asset data read failed")
-			return
-		}
-		rev := int64(0)
-		if found {
-			rev = d.Revision
-		}
-		valueObject, objectOK := in.Value.(map[string]any)
-		if objectOK {
-			valueObject["updatedAt"] = requestTime()
-			if r.URL.Query().Get("kind") == "approvals" {
-				valueObject["version"] = 1
-			}
-			in.Value = valueObject
-		}
-		value, _ := json.Marshal(in.Value)
-		saved, e := h.store.PutDocument(r.Context(), ns, id, &rev, value)
-		if errors.Is(e, postgres.ErrRevisionConflict) {
-			if h.cache != nil {
-				_ = h.cache.Delete(r.Context(), ns, id)
-			}
-			continue
-		}
-		if e != nil {
-			writeError(w, 500, "project asset data write failed")
-			return
-		}
-		if h.cache != nil {
-			_ = h.cache.Set(r.Context(), saved)
-		}
-		writeJSON(w, 200, map[string]any{"value": in.Value, "revision": saved.Revision})
+	d, found, e := h.read(r, ns, id)
+	if e != nil {
+		writeError(w, 500, "project asset data read failed")
 		return
 	}
-	writeError(w, 409, "project asset data write conflict")
+	rev := int64(0)
+	if found {
+		rev = d.Revision
+	}
+	if in.ExpectedRevision != nil {
+		rev = *in.ExpectedRevision
+	}
+	valueObject, objectOK := in.Value.(map[string]any)
+	if objectOK {
+		valueObject["updatedAt"] = requestTime()
+		if r.URL.Query().Get("kind") == "approvals" {
+			valueObject["version"] = 1
+		}
+		in.Value = valueObject
+	}
+	value, _ := json.Marshal(in.Value)
+	saved, e := h.store.PutDocument(r.Context(), ns, id, &rev, value)
+	if errors.Is(e, postgres.ErrRevisionConflict) {
+		if h.cache != nil {
+			_ = h.cache.Delete(r.Context(), ns, id)
+		}
+		// Do not retry the same stale payload — callers must reload and re-merge.
+		writeError(w, 409, "project asset data write conflict")
+		return
+	}
+	if e != nil {
+		writeError(w, 500, "project asset data write failed")
+		return
+	}
+	if h.cache != nil {
+		_ = h.cache.Set(r.Context(), saved)
+	}
+	writeJSON(w, 200, map[string]any{"value": in.Value, "revision": saved.Revision})
 }

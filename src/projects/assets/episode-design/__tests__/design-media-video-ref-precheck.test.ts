@@ -1,13 +1,17 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
+  characterNeedsUncheckedVideoRefBlock,
   designVideoRefSafetyBadge,
   formatDesignVideoRefSafetyNotice,
+  getCurrentDesignMediaVideoRefSafety,
   isDesignMediaVideoRefLocked,
 } from "@/projects/assets/episode-design/design-media-video-ref-labels";
 import {
   getDesignMediaVideoRefSafety,
   withGeneratedMediaVideoRefSafety,
 } from "@/projects/assets/episode-design/design-media-video-ref-precheck";
+import type { EpisodeAssetDesignItem } from "@/projects/assets/episode-design/types";
+import type { VideoRefSafety } from "@/projects/assets/types";
 import { readFileSync } from "fs";
 import path from "path";
 
@@ -156,7 +160,7 @@ describe("design media SD2 person verification", () => {
     );
     vi.mocked(resolveSd2PlatformCredentials).mockResolvedValue({
       error:
-        "人物校验需要移动 SD2 平台。请到「管理 API → 移动 SD2 平台」填写平台 URL 与 Key（视频镜头可继续用方舟）",
+        "人物校验需要移动 SD2 平台。请到「系统管理 → API 接口 → 移动 SD2 平台」填写平台 URL 与 Key（视频镜头可继续用方舟）",
     });
     const result = await precheckDesignGeneratedMedia({
       projectId: "p1",
@@ -193,5 +197,202 @@ describe("design media SD2 person verification", () => {
     expect(mgmt).not.toContain("precheckDesignGeneratedMedia");
     expect(workspace).not.toContain("precheckDesignGeneratedMedia");
     expect(mgmt).toContain("人物校验");
+  });
+});
+
+describe("characterNeedsUncheckedVideoRefBlock (personal confirm gate)", () => {
+  const ok: VideoRefSafety = {
+    status: "ok",
+    checkedAt: "2026-08-13T00:00:00.000Z",
+  };
+  const risk: VideoRefSafety = {
+    status: "likely_real_person",
+    checkedAt: "2026-08-13T00:00:00.000Z",
+  };
+
+  function characterItem(
+    patch: Partial<EpisodeAssetDesignItem> & {
+      generatedMedia?: EpisodeAssetDesignItem["generatedMedia"];
+    } = {},
+  ): Pick<
+    EpisodeAssetDesignItem,
+    "assetType" | "generatedMedia" | "libraryAssetId"
+  > {
+    return {
+      assetType: "character",
+      libraryAssetId: null,
+      generatedMedia: {
+        currentId: "gen_current",
+        historyIds: ["gen_current"],
+        status: "completed",
+        promptFingerprint: null,
+        errorMessage: null,
+        previewKind: "image",
+        history: [
+          {
+            mediaId: "gen_current",
+            prompt: "p",
+            generatedAt: "2026-08-13T00:00:00.000Z",
+          },
+        ],
+      },
+      ...patch,
+    };
+  }
+
+  it("blocks when current image has no videoRefSafety", () => {
+    expect(characterNeedsUncheckedVideoRefBlock(characterItem())).toBe(true);
+  });
+
+  it("allows only when current image status is ok", () => {
+    expect(
+      characterNeedsUncheckedVideoRefBlock(
+        characterItem({
+          generatedMedia: {
+            currentId: "gen_current",
+            historyIds: ["gen_current"],
+            status: "completed",
+            promptFingerprint: null,
+            errorMessage: null,
+            previewKind: "image",
+            videoRefSafety: ok,
+            history: [
+              {
+                mediaId: "gen_current",
+                prompt: "p",
+                generatedAt: "2026-08-13T00:00:00.000Z",
+                videoRefSafety: ok,
+              },
+            ],
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("blocks pending / risk / check_failed (not treated as pass)", () => {
+    for (const status of [
+      "pending",
+      "likely_real_person",
+      "other_risk",
+      "check_failed",
+    ] as const) {
+      expect(
+        characterNeedsUncheckedVideoRefBlock(
+          characterItem({
+            generatedMedia: {
+              currentId: "gen_current",
+              historyIds: ["gen_current"],
+              status: "completed",
+              promptFingerprint: null,
+              errorMessage: null,
+              previewKind: "image",
+              history: [
+                {
+                  mediaId: "gen_current",
+                  prompt: "p",
+                  generatedAt: "2026-08-13T00:00:00.000Z",
+                  videoRefSafety: {
+                    status,
+                    checkedAt: "2026-08-13T00:00:00.000Z",
+                  },
+                },
+              ],
+            },
+          }),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("blocks when only a historical image is ok, not the current one", () => {
+    const item = characterItem({
+      generatedMedia: {
+        currentId: "gen_new",
+        historyIds: ["gen_old", "gen_new"],
+        status: "completed",
+        promptFingerprint: null,
+        errorMessage: null,
+        previewKind: "image",
+        // Stale top-level from previous current — must not unlock confirm.
+        videoRefSafety: ok,
+        history: [
+          {
+            mediaId: "gen_old",
+            prompt: "old",
+            generatedAt: "2026-08-12T00:00:00.000Z",
+            videoRefSafety: ok,
+          },
+          {
+            mediaId: "gen_new",
+            prompt: "new",
+            generatedAt: "2026-08-13T00:00:00.000Z",
+          },
+        ],
+      },
+    });
+    expect(getCurrentDesignMediaVideoRefSafety(item.generatedMedia)).toBeNull();
+    expect(characterNeedsUncheckedVideoRefBlock(item)).toBe(true);
+    // Legacy helper may still see stale top-level; confirm gate must not.
+    expect(
+      getDesignMediaVideoRefSafety(item.generatedMedia, "gen_new")?.status,
+    ).toBe("ok");
+  });
+
+  it("does not block scenes/props or already-library characters", () => {
+    expect(
+      characterNeedsUncheckedVideoRefBlock({
+        assetType: "scene",
+        libraryAssetId: null,
+        generatedMedia: {
+          currentId: "s1",
+          historyIds: ["s1"],
+          status: "completed",
+          promptFingerprint: null,
+          errorMessage: null,
+          previewKind: "image",
+        },
+      }),
+    ).toBe(false);
+    expect(
+      characterNeedsUncheckedVideoRefBlock({
+        assetType: "prop",
+        libraryAssetId: null,
+        generatedMedia: {
+          currentId: "p1",
+          historyIds: ["p1"],
+          status: "completed",
+          promptFingerprint: null,
+          errorMessage: null,
+          previewKind: "image",
+        },
+      }),
+    ).toBe(false);
+    expect(
+      characterNeedsUncheckedVideoRefBlock(
+        characterItem({ libraryAssetId: "char_lib_1" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not block when there is no current image (missing-image path owns that)", () => {
+    expect(
+      characterNeedsUncheckedVideoRefBlock(
+        characterItem({
+          generatedMedia: {
+            currentId: null,
+            historyIds: [],
+            status: "idle",
+            promptFingerprint: null,
+            errorMessage: null,
+            previewKind: "image",
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("risk status is not locked / not a confirm pass", () => {
+    expect(isDesignMediaVideoRefLocked(risk)).toBe(false);
   });
 });

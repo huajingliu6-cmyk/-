@@ -27,6 +27,7 @@ describe("workspace one-way sync isolation", () => {
       name: "Sync Test Project",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     projectId = project.projectId;

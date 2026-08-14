@@ -184,6 +184,7 @@ describe("system admin persistence and CLI semantics", () => {
       name: "No Admin Seed",
       creationSource: "story",
       projectMode: "canvas",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const after = await listUsers();

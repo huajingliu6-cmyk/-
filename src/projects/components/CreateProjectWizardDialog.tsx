@@ -22,6 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { prefersReducedMotion } from "@/shell/login-portal";
+import { safeRandomUUID } from "@/lib/safe-random-id";
 import type {
   CreateProjectAdvancePayload,
   ProjectCreationSource,
@@ -33,6 +34,12 @@ import {
   validateCreateProjectForm,
   type CreateProjectFieldErrors,
 } from "@/projects/validate-create-project";
+import {
+  PROJECT_VISUAL_STYLES,
+  isProjectVisualStyleId,
+  type ProjectVisualStyleId,
+} from "@/projects/project-visual-style";
+import { GlassSelect } from "@/shell/glass-select";
 import "@/projects/create-project-wizard.css";
 
 type Props = {
@@ -51,6 +58,7 @@ const INITIAL = {
   passwordEnabled: false,
   projectPassword: "",
   highlights: "",
+  visualStyle: null as ProjectVisualStyleId | null,
   projectMode: null as ProjectMode | null,
 };
 
@@ -190,6 +198,7 @@ export function CreateProjectWizardDialog({
     projectMode: state.projectMode,
     passwordEnabled: state.passwordEnabled,
     projectPassword: state.projectPassword,
+    visualStyle: state.visualStyle,
   });
 
   const selectSource = (source: ProjectCreationSource) => {
@@ -235,6 +244,10 @@ export function CreateProjectWizardDialog({
     }
     if (errors.projectMode) {
       setState((s) => ({ ...s, shakeKey: "modes" }));
+      return;
+    }
+    if (errors.visualStyle) {
+      setState((s) => ({ ...s, shakeKey: "visualStyle" }));
     }
   };
 
@@ -248,6 +261,7 @@ export function CreateProjectWizardDialog({
       passwordEnabled: state.passwordEnabled,
       projectPassword: state.projectPassword,
       highlights: state.highlights,
+      visualStyle: state.visualStyle,
     });
 
     setState((s) => ({
@@ -264,10 +278,7 @@ export function CreateProjectWizardDialog({
     setState((s) => ({ ...s, isSubmitting: true, fieldErrors: {} }));
 
     if (!idempotencyKeyRef.current) {
-      idempotencyKeyRef.current =
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `ik_${Date.now()}`;
+      idempotencyKeyRef.current = safeRandomUUID();
     }
 
     try {
@@ -279,6 +290,7 @@ export function CreateProjectWizardDialog({
           creationSource: state.creationSource,
           projectMode: state.projectMode,
           highlights: state.highlights,
+          visualStyle: state.visualStyle,
           passwordEnabled: state.passwordEnabled,
           projectPassword: state.passwordEnabled
             ? state.projectPassword
@@ -549,6 +561,7 @@ export function CreateProjectWizardDialog({
                             passwordEnabled: state.passwordEnabled,
                             projectPassword: state.projectPassword,
                             highlights: state.highlights,
+                            visualStyle: state.visualStyle,
                           });
                           setState((s) => ({
                             ...s,
@@ -641,6 +654,51 @@ export function CreateProjectWizardDialog({
                       )}
                     </div>
 
+                    <div
+                      className={`cpw-field cpw-field--stagger-3${
+                        state.shakeKey === "visualStyle" ? " is-shake" : ""
+                      }`}
+                    >
+                      <div className="cpw-label-row">
+                        <label className="cpw-label" htmlFor="cpw-visual-style">
+                          生成风格
+                          <span className="cpw-req" aria-hidden>
+                            *
+                          </span>
+                        </label>
+                        <span className="cpw-hint">必选，影响后续全部生成</span>
+                      </div>
+                      <div data-testid="cpw-visual-style">
+                        <GlassSelect
+                          id="cpw-visual-style"
+                          label="生成风格"
+                          hideLabel
+                          menuPortal
+                          placeholder="请选择项目生成风格"
+                          value={state.visualStyle ?? ""}
+                          options={PROJECT_VISUAL_STYLES.map((style) => ({
+                            id: style.id,
+                            label: style.label,
+                          }))}
+                          onChange={(id) =>
+                            setState((s) => ({
+                              ...s,
+                              visualStyle: isProjectVisualStyleId(id)
+                                ? id
+                                : null,
+                              fieldErrors: {
+                                ...s.fieldErrors,
+                                visualStyle: undefined,
+                              },
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="cpw-error" data-testid="cpw-visual-style-error">
+                        {errors.visualStyle ?? ""}
+                      </div>
+                    </div>
+
                     <div className="cpw-field cpw-field--stagger-3">
                       <div className="cpw-label-row">
                         <label className="cpw-label" htmlFor={highlightsId}>
@@ -653,7 +711,7 @@ export function CreateProjectWizardDialog({
                       <textarea
                         id={highlightsId}
                         className="cpw-textarea"
-                        placeholder="填写故事方向、人物关系、视觉风格、制作要求或其他重要信息"
+                        placeholder="填写故事方向、人物关系、制作要求或其他重要信息"
                         value={state.highlights}
                         rows={4}
                         onChange={(e) =>

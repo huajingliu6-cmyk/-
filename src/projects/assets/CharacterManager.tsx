@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { CharacterList } from "@/projects/assets/CharacterList";
+import { useRef, useState } from "react";
+import { CharacterList, CharacterListHeader } from "@/projects/assets/CharacterList";
 import { CharacterDetail } from "@/projects/assets/CharacterDetail";
 import { CharacterCreateDialog } from "@/projects/assets/CharacterCreateDialog";
+import { AssetLibraryLayout } from "@/projects/assets/AssetLibraryLayout";
 import {
   findVoiceOption,
   voiceOptionsFromAudios,
@@ -41,13 +42,19 @@ export function CharacterManager({
   const [imageRevisions, setImageRevisions] = useState<Record<string, number>>(
     {},
   );
+  const charactersRef = useRef(characters);
+  charactersRef.current = characters;
 
   const projectVoices = voiceOptionsFromAudios(audios);
   const selected =
     characters.find((c) => c.id === selectedId) ?? characters[0] ?? null;
 
   const updateOne = (next: CharacterAsset) => {
-    onChange(characters.map((c) => (c.id === next.id ? next : c)));
+    const updated = charactersRef.current.map((c) =>
+      c.id === next.id ? next : c,
+    );
+    charactersRef.current = updated;
+    onChange(updated);
   };
 
   const handleCreate = async (draft: CharacterDraftInput) => {
@@ -72,7 +79,8 @@ export function CharacterManager({
       status: "draft",
     };
     created.status = deriveCharacterStatus(created);
-    const next = [...characters, created];
+    const next = [...charactersRef.current, created];
+    charactersRef.current = next;
     onChange(next);
     setSelectedId(id);
     setCreateOpen(false);
@@ -85,7 +93,7 @@ export function CharacterManager({
           assetId: id,
           pendingFile: draft.pendingImageFile,
           persist: async () => {
-            await onPersist(next);
+            await onPersist(charactersRef.current);
           },
         });
         setImageRevisions((prev) => ({
@@ -99,15 +107,20 @@ export function CharacterManager({
     }
   };
 
-  const handleSave = () => {
-    if (!selected) return;
+  const handleSave = (snapshot?: CharacterAsset) => {
+    const base =
+      snapshot ??
+      charactersRef.current.find((c) => c.id === selectedId) ??
+      selected;
+    if (!base) return;
     const nextItem = {
-      ...selected,
-      status: deriveCharacterStatus(selected),
+      ...base,
+      status: deriveCharacterStatus(base),
     };
-    const next = characters.map((c) =>
+    const next = charactersRef.current.map((c) =>
       c.id === nextItem.id ? nextItem : c,
     );
+    charactersRef.current = next;
     onChange(next);
     setNote("正在保存角色…");
     void onPersist(next)
@@ -119,35 +132,47 @@ export function CharacterManager({
 
   return (
     <>
-      <div className="amw-layout">
-        <CharacterList
-          projectId={projectId}
-          characters={characters}
-          selectedId={selectedId}
-          canEdit={canEdit}
-          imageRevisions={imageRevisions}
-          onSelect={setSelectedId}
-          onCreate={() => setCreateOpen(true)}
-        />
-        <CharacterDetail
-          projectId={projectId}
-          character={selected}
-          canEdit={canEdit}
-          note={note}
-          projectVoices={projectVoices}
-          audios={audios}
-          imageRevision={selected ? (imageRevisions[selected.id] ?? 0) : 0}
-          onChange={updateOne}
-          onSave={handleSave}
-          onPreviewStatus={setNote}
-          onImageRevision={(assetId, next) =>
-            setImageRevisions((prev) => ({ ...prev, [assetId]: next }))
-          }
-          ensurePersisted={async () => {
-            await onPersist(characters);
-          }}
-        />
-      </div>
+      <AssetLibraryLayout
+        listLabel="角色列表"
+        listHeader={
+          <CharacterListHeader
+            canEdit={canEdit}
+            onCreate={() => setCreateOpen(true)}
+          />
+        }
+        list={
+          <CharacterList
+            listOnly
+            projectId={projectId}
+            characters={characters}
+            selectedId={selectedId}
+            canEdit={canEdit}
+            imageRevisions={imageRevisions}
+            onSelect={setSelectedId}
+            onCreate={() => setCreateOpen(true)}
+          />
+        }
+        details={
+          <CharacterDetail
+            projectId={projectId}
+            character={selected}
+            canEdit={canEdit}
+            note={note}
+            projectVoices={projectVoices}
+            audios={audios}
+            imageRevision={selected ? (imageRevisions[selected.id] ?? 0) : 0}
+            onChange={updateOne}
+            onSave={handleSave}
+            onPreviewStatus={setNote}
+            onImageRevision={(assetId, next) =>
+              setImageRevisions((prev) => ({ ...prev, [assetId]: next }))
+            }
+            ensurePersisted={async () => {
+              await onPersist(charactersRef.current);
+            }}
+          />
+        }
+      />
       <CharacterCreateDialog
         open={createOpen}
         projectVoices={projectVoices}

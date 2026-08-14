@@ -10,6 +10,10 @@ import type {
   SceneAsset,
 } from "@/projects/assets/types";
 import { upsertEpisodeRecord } from "@/projects/assets/episode-design/store";
+import {
+  getDesignMediaVoiceBinding,
+  isMediaVoiceBound,
+} from "@/projects/assets/episode-design/design-media-voice";
 import type {
   EpisodeAssetDesignItem,
   EpisodeAssetDesignRecord,
@@ -31,9 +35,11 @@ export type ConfirmEpisodeAssetDesignResult =
       ok: false;
       code:
         | "EPISODE_DESIGN_NOT_FOUND"
+        | "ASSET_DESIGN_ITEM_NOT_FOUND"
         | "REVISION_CONFLICT"
         | "FINGERPRINT_STALE"
         | "RESOLUTION_PENDING"
+        | "IMAGE_REQUIRED"
         | "ASSET_NOT_FOUND"
         | "ALREADY_CONFIRMED";
       message: string;
@@ -70,13 +76,25 @@ function createCharacterAsset(
   item: EpisodeAssetDesignItem & { assetType: "character" },
   createId: () => string,
 ): CharacterAsset {
+  const mediaId = item.generatedMedia?.currentId?.trim() ?? "";
+  const mediaEntry = item.generatedMedia?.history?.find(
+    (entry) => entry.mediaId === mediaId,
+  );
+  const binding = getDesignMediaVoiceBinding(item, mediaId);
+  const voiceBound = isMediaVoiceBound(binding);
   return {
     id: createId(), projectId, name: item.name, role: item.draft.role,
     description: item.draft.description, appearance: item.draft.appearance,
     clothing: item.draft.clothing, age: item.draft.age ?? "", gender: "",
-    voiceId: item.draft.voiceId ?? null, voiceName: item.draft.voiceName ?? null,
-    voiceStyle: null, imageFileName: null, imageObjectUrl: null,
-    imageMimeType: null, status: "draft",
+    voiceId: voiceBound ? binding.voiceId : null,
+    voiceName: voiceBound ? binding.voiceName : null,
+    voiceStyle: null,
+    ...(voiceBound
+      ? { mediaVoices: { [mediaId]: { voiceId: binding.voiceId, voiceName: binding.voiceName } } }
+      : {}),
+    imageFileName: mediaId, imageObjectUrl: null,
+    imageMimeType: mediaEntry?.mimeType ?? item.generatedMedia?.mimeType ?? "image/png",
+    approvedMediaIds: [mediaId], primaryMediaId: mediaId, status: "completed",
   };
 }
 
@@ -85,12 +103,17 @@ function createSceneAsset(
   item: EpisodeAssetDesignItem & { assetType: "scene" },
   createId: () => string,
 ): SceneAsset {
+  const mediaId = item.generatedMedia?.currentId?.trim() ?? "";
+  const mediaEntry = item.generatedMedia?.history?.find(
+    (entry) => entry.mediaId === mediaId,
+  );
   return {
     id: createId(), projectId, name: item.name, sceneType: "",
     description: item.draft.description, timeOfDay: item.draft.timeOfDay,
     location: item.draft.location, style: item.draft.style,
-    imageFileName: null, imageObjectUrl: null, imageMimeType: null,
-    status: "draft",
+    imageFileName: mediaId, imageObjectUrl: null,
+    imageMimeType: mediaEntry?.mimeType ?? item.generatedMedia?.mimeType ?? "image/png",
+    approvedMediaIds: [mediaId], primaryMediaId: mediaId, status: "completed",
   };
 }
 
@@ -99,11 +122,16 @@ function createPropAsset(
   item: EpisodeAssetDesignItem & { assetType: "prop" },
   createId: () => string,
 ): PropAsset {
+  const mediaId = item.generatedMedia?.currentId?.trim() ?? "";
+  const mediaEntry = item.generatedMedia?.history?.find(
+    (entry) => entry.mediaId === mediaId,
+  );
   return {
     id: createId(), projectId, name: item.name, propType: item.draft.propType,
     usage: item.draft.usage, description: item.draft.description,
-    imageFileName: null, imageObjectUrl: null, imageMimeType: null,
-    status: "draft",
+    imageFileName: mediaId, imageObjectUrl: null,
+    imageMimeType: mediaEntry?.mimeType ?? item.generatedMedia?.mimeType ?? "image/png",
+    approvedMediaIds: [mediaId], primaryMediaId: mediaId, status: "completed",
   };
 }
 
@@ -126,6 +154,8 @@ export function transformEpisodeAssetDesignConfirmation(input: {
   expectedRevision: number;
   userId: string;
   fingerprint: string;
+  /** Personal projects may confirm one card without closing the whole record. */
+  itemId?: string;
   store: ProjectEpisodeAssetDesignStore;
   bundle: ProjectAssetBundle;
   now?: string;
@@ -137,7 +167,7 @@ export function transformEpisodeAssetDesignConfirmation(input: {
   if (!record) {
     return { writeRequired: false, result: { ok: false, code: "EPISODE_DESIGN_NOT_FOUND", message: "该集资产设计记录不存在" } };
   }
-  if (record.status === "confirmed" && record.confirmedRevision === input.expectedRevision && record.contentFingerprint === input.fingerprint) {
+  if (!input.itemId && record.status === "confirmed" && record.confirmedRevision === input.expectedRevision && record.contentFingerprint === input.fingerprint) {
     return { writeRequired: false, result: { ok: true, counts: { created: 0, linked: 0, ignored: 0 }, createdAssets: [], record } };
   }
   if (record.revision !== input.expectedRevision) {
@@ -146,9 +176,52 @@ export function transformEpisodeAssetDesignConfirmation(input: {
   if (record.contentFingerprint && record.contentFingerprint !== input.fingerprint) {
     return { writeRequired: false, result: { ok: false, code: "FINGERPRINT_STALE", message: "剧集正文已变更，请重新生成资产设计" } };
   }
-  for (const item of record.items) {
+  const targetItem = input.itemId
+    ? record.items.find((item) => item.id === input.itemId)
+    : null;
+  if (input.itemId && !targetItem) {
+    return {
+      writeRequired: false,
+      result: {
+        ok: false,
+        code: "ASSET_DESIGN_ITEM_NOT_FOUND",
+        message: "资产设计项不存在",
+      },
+    };
+  }
+  if (
+    targetItem?.libraryAssetId &&
+    findAssetById(input.bundle, targetItem.assetType, targetItem.libraryAssetId)
+  ) {
+    return {
+      writeRequired: false,
+      result: {
+        ok: true,
+        counts: { created: 0, linked: 0, ignored: 0 },
+        createdAssets: [],
+        record,
+      },
+    };
+  }
+
+  const itemsToConfirm = targetItem ? [targetItem] : record.items;
+  for (const item of itemsToConfirm) {
     if (item.resolution === "pending") {
       return { writeRequired: false, result: { ok: false, code: "RESOLUTION_PENDING", message: `资产「${item.name}」尚未选择处理方式` } };
+    }
+    if (
+      item.resolution === "create_new" &&
+      item.assetType !== "audio" &&
+      !item.generatedMedia?.currentId?.trim()
+    ) {
+      return {
+        writeRequired: false,
+        result: {
+          ok: false,
+          code: "IMAGE_REQUIRED",
+          message: `资产「${item.name}」尚未生成图片，无法确认入库`,
+        },
+      };
     }
   }
 
@@ -161,6 +234,17 @@ export function transformEpisodeAssetDesignConfirmation(input: {
   const createId = input.createId ?? randomUUID;
 
   for (const item of record.items) {
+    if (targetItem && item.id !== targetItem.id) {
+      nextItems.push(item);
+      continue;
+    }
+    if (
+      item.libraryAssetId &&
+      findAssetById(bundle, item.assetType, item.libraryAssetId)
+    ) {
+      nextItems.push(item);
+      continue;
+    }
     if (item.resolution === "ignore") {
       ignored += 1;
       nextItems.push(item);
@@ -205,8 +289,17 @@ export function transformEpisodeAssetDesignConfirmation(input: {
 
   const now = input.now ?? new Date().toISOString();
   const nextRecord: EpisodeAssetDesignRecord = {
-    ...record, items: nextItems, status: "confirmed", confirmedAt: now,
-    confirmedBy: input.userId, confirmedRevision: record.revision, updatedAt: now,
+    ...record,
+    items: nextItems,
+    ...(targetItem
+      ? {}
+      : {
+          status: "confirmed" as const,
+          confirmedAt: now,
+          confirmedBy: input.userId,
+          confirmedRevision: record.revision,
+        }),
+    updatedAt: now,
   };
   const result = { ok: true as const, counts: { created, linked, ignored }, createdAssets, record: nextRecord };
   return {

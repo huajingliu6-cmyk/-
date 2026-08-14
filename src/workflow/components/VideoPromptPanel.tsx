@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Wand2 } from "lucide-react";
+import { safeRandomUUID } from "@/lib/safe-random-id";
 import {
   GlassIconButton,
   GlassSendButton,
@@ -496,7 +497,7 @@ export function VideoPromptPanel({
     if (!idempotencyKeyRef.current) {
       idempotencyKeyRef.current =
         typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? `${nodeId}-${crypto.randomUUID()}`
+          ? `${nodeId}-${safeRandomUUID()}`
           : `${nodeId}-${Date.now()}`;
     }
     const idempotencyKey = idempotencyKeyRef.current;
@@ -621,7 +622,7 @@ export function VideoPromptPanel({
       notice.includes("暂时无法确认");
     idempotencyKeyRef.current =
       typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? `${nodeId}-${crypto.randomUUID()}`
+        ? `${nodeId}-${safeRandomUUID()}`
         : `${nodeId}-${Date.now()}`;
     if (wasUnknown) {
       setNotice(
@@ -906,7 +907,7 @@ export function VideoPromptPanel({
               if (!idempotencyKeyRef.current) {
                 idempotencyKeyRef.current =
                   typeof crypto !== "undefined" && "randomUUID" in crypto
-                    ? `${nodeId}-${crypto.randomUUID()}`
+                    ? `${nodeId}-${safeRandomUUID()}`
                     : `${nodeId}-${Date.now()}`;
               }
               setConfirmOpen(true);

@@ -2,7 +2,10 @@
 
 import type { CharacterAsset } from "@/projects/assets/types";
 import { characterDisplayStatus } from "@/projects/assets/status";
-import { AssetListThumb } from "@/projects/assets/AssetListThumb";
+import {
+  AssetCompactList,
+  AssetListPanelHeader,
+} from "@/projects/assets/AssetCompactList";
 
 type Props = {
   projectId: string;
@@ -12,6 +15,8 @@ type Props = {
   onCreate: () => void;
   canEdit: boolean;
   imageRevisions?: Record<string, number>;
+  /** When true, only render the scrollable list (header provided by layout). */
+  listOnly?: boolean;
 };
 
 function initials(name: string): string {
@@ -28,11 +33,70 @@ export function CharacterList({
   onCreate,
   canEdit,
   imageRevisions = {},
+  listOnly = false,
 }: Props) {
+  const list = (
+    <AssetCompactList
+      projectId={projectId}
+      selectedId={selectedId}
+      onSelect={onSelect}
+      emptyMessage="暂无角色。点击「新建角色」开始准备资产。"
+      testId="character-card-grid"
+      items={characters.map((c) => {
+        const status = characterDisplayStatus(c);
+        return {
+          id: c.id,
+          name: c.name || "未命名角色",
+          status,
+          warn: !c.voiceId || status === "待完善",
+          placeholder: initials(c.name),
+          asset: c,
+          revision: imageRevisions[c.id] ?? 0,
+        };
+      })}
+    />
+  );
+
+  if (listOnly) return list;
+
   return (
     <section className="amw-panel" aria-label="角色列表">
       <div className="amw-panel__head">
-        <h2>角色列表</h2>
+        <AssetListPanelHeader
+          title="角色列表"
+          action={
+            <button
+              type="button"
+              className="amw-btn amw-btn-primary"
+              disabled={!canEdit}
+              onClick={onCreate}
+            >
+              + 新建角色
+            </button>
+          }
+        />
+      </div>
+      <div
+        className="amw-panel__body asset-library__list-scroll"
+        data-testid="character-library-scroll"
+      >
+        {list}
+      </div>
+    </section>
+  );
+}
+
+export function CharacterListHeader({
+  canEdit,
+  onCreate,
+}: {
+  canEdit: boolean;
+  onCreate: () => void;
+}) {
+  return (
+    <AssetListPanelHeader
+      title="角色列表"
+      action={
         <button
           type="button"
           className="amw-btn amw-btn-primary"
@@ -41,50 +105,7 @@ export function CharacterList({
         >
           + 新建角色
         </button>
-      </div>
-      <div className="amw-panel__body">
-        {characters.length === 0 ? (
-          <div className="amw-empty">暂无角色。点击「新建角色」开始准备资产。</div>
-        ) : (
-          <div className="amw-list">
-            {characters.map((c, index) => {
-              const status = characterDisplayStatus(c);
-              const warn = !c.voiceId || status === "待完善";
-              return (
-                <button
-                  key={c.id}
-                  type="button"
-                  className={`amw-card${selectedId === c.id ? " is-selected" : ""}`}
-                  style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
-                  onClick={() => onSelect(c.id)}
-                >
-                  <span className="amw-avatar" aria-hidden>
-                    <AssetListThumb
-                      projectId={projectId}
-                      asset={c}
-                      placeholder={initials(c.name)}
-                      revision={imageRevisions[c.id] ?? 0}
-                    />
-                  </span>
-                  <span className="amw-card__meta">
-                    <p className="amw-card__title">{c.name || "未命名角色"}</p>
-                    <p className="amw-card__sub">
-                      {c.role || "未设定定位"}
-                      {" · "}
-                      {c.voiceId
-                        ? c.voiceStyle || c.voiceName || "已绑定音色"
-                        : "未绑定音色"}
-                    </p>
-                  </span>
-                  <span className={`amw-badge${warn ? " is-warn" : " is-ok"}`}>
-                    {status}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </section>
+      }
+    />
   );
 }

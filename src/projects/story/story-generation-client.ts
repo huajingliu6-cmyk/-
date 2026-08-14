@@ -3,6 +3,8 @@
  * Does not call stubs or invent mock story text.
  */
 
+import { safeRandomUUID } from "@/lib/safe-random-id";
+
 export type StoryGenerationStreamMeta = {
   generationId: string;
   displayModelName?: string;
@@ -88,33 +90,15 @@ function parseSseBlocks(buffer: string): {
 }
 
 export function createStoryGenerationIdempotencyKey(): string {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
-    return `story_${crypto.randomUUID()}`;
-  }
-  return `story_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  return `story_${safeRandomUUID()}`;
 }
 
 export function createScriptOutlineIdempotencyKey(): string {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
-    return `outline_${crypto.randomUUID()}`;
-  }
-  return `outline_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  return `outline_${safeRandomUUID()}`;
 }
 
 export function createScriptEpisodesIdempotencyKey(): string {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
-    return `episodes_${crypto.randomUUID()}`;
-  }
-  return `episodes_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  return `episodes_${safeRandomUUID()}`;
 }
 
 /**

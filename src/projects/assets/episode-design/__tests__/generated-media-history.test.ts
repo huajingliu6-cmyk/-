@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   appendGeneratedMediaGeneration,
+  appendGeneratedMediaGenerations,
   mergeGeneratedMediaState,
   mergeMediaIdLists,
   mergePromptHistories,
@@ -35,6 +36,54 @@ describe("generated media history is append-only", () => {
     expect(second.historyIds).toEqual(["gen_1", "gen_2"]);
     expect(second.history?.map((h) => h.mediaId)).toEqual(["gen_1", "gen_2"]);
     expect(second.history?.[0]?.prompt).toBe("第一版");
+  });
+
+  it("appendGeneratedMediaGenerations sets currentId to first of batch", () => {
+    const prev = appendGeneratedMediaGeneration(undefined, {
+      mediaId: "old",
+      prompt: "旧图",
+      generatedAt: "t0",
+      promptFingerprint: "fp0",
+      mimeType: "image/png",
+    });
+    const batch = appendGeneratedMediaGenerations(prev, [
+      {
+        mediaId: "gen_a",
+        prompt: "一批",
+        generatedAt: "t1",
+        promptFingerprint: "fp1",
+        mimeType: "image/png",
+      },
+      {
+        mediaId: "gen_b",
+        prompt: "一批",
+        generatedAt: "t1",
+        promptFingerprint: "fp1",
+        mimeType: "image/png",
+      },
+      {
+        mediaId: "gen_c",
+        prompt: "一批",
+        generatedAt: "t1",
+        promptFingerprint: "fp1",
+        mimeType: "image/png",
+      },
+      {
+        mediaId: "gen_d",
+        prompt: "一批",
+        generatedAt: "t1",
+        promptFingerprint: "fp1",
+        mimeType: "image/png",
+      },
+    ]);
+    expect(batch.currentId).toBe("gen_a");
+    expect(batch.historyIds).toEqual([
+      "old",
+      "gen_a",
+      "gen_b",
+      "gen_c",
+      "gen_d",
+    ]);
   });
 
   it("mergeGeneratedMediaState refuses to shrink history", () => {

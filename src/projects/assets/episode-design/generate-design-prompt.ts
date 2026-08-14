@@ -1,25 +1,87 @@
+import { createHash } from "crypto";
 import { resolveCapabilityForOutputKind } from "@/ai-config/resolve";
+import { resolveAiExecutionPlan } from "@/ai-config/execution-plan";
 import { AiConfigError } from "@/ai-config/errors";
+import { assembleUntrustedUserData } from "@/ai-config/prompt-assembly";
 import {
   appendConversationMessage,
   buildRedesignUserMessage,
 } from "@/projects/assets/episode-design/design-conversation";
+import {
+  DEFAULT_DESIGN_PROMPT_MODEL_ID,
+  getDesignPromptModel,
+  type DesignPromptModelId,
+} from "@/projects/assets/episode-design/design-prompt-models";
+import {
+  buildDesignPromptBrief,
+  looksLikeExtractDraftPrompt,
+} from "@/projects/assets/episode-design/format-design-draft-seed";
 import type {
   EpisodeAssetDesignItem,
   EpisodeDesignConversationMessage,
 } from "@/projects/assets/episode-design/types";
+import { getProjectRecord } from "@/projects/project-access";
+import { requireProjectVisualStyleDirective } from "@/projects/project-visual-style";
 import { HttpCompatibleTextProvider } from "@/text-generation/provider/http-compatible-provider";
 import { MockTextProvider } from "@/text-generation/provider/mock-provider";
 import type { TextGenerationProvider } from "@/text-generation/provider/types";
+import type { TextGenerationJob } from "@/text-generation/types";
 
 export {
   buildDesignPromptBrief,
   formatDesignDraftSeedText,
+  looksLikeExtractDraftPrompt,
+  resolveFormalDesignPromptText,
 } from "@/projects/assets/episode-design/format-design-draft-seed";
+
+const DESIGN_PROMPT_FORMAT_CORRECTION = [
+  "上一次输出是资产信息摘录，不是最终素材提示词。",
+  "请严格按照已发布任务规则，只返回可直接用于生成素材的完整中文提示词正文。",
+  "不要再输出【角色描述】【外貌】【服装】等提取字段列表。",
+].join("");
+
+export type DesignPromptExecutionMetadata = Pick<
+  TextGenerationJob,
+  | "capabilityId"
+  | "taskRuleSource"
+  | "taskRuleVersion"
+  | "taskRuleHash"
+  | "modelConnectionId"
+  | "systemPolicyVersion"
+  | "outputContractVersion"
+  | "inputFingerprint"
+  | "systemPromptHash"
+  | "userPromptHash"
+  | "messageRoles"
+  | "enableThinking"
+  | "maxOutputTokens"
+>;
+
+export type DesignPromptCallDiagnostics = {
+  capabilityId: string;
+  outputKind: "asset_design_prompt";
+  taskRuleSource: "builtin" | "custom";
+  taskRuleVersion: number | null;
+  taskRuleHash: string;
+  modelConnectionId: string | null;
+  providerModelId: string;
+  modelKey: string;
+  systemPromptHash: string;
+  userPromptHash: string;
+  messageRoles: string;
+  enableThinking: boolean;
+  maxOutputTokens: number;
+  formatCorrectionRetried?: boolean;
+};
+
+function hashPrompt(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
 
 function createProviderFromResolved(
   resolved: Awaited<ReturnType<typeof resolveCapabilityForOutputKind>>,
   fallbackModelId: string,
+  selectedProviderModelId?: string,
 ): TextGenerationProvider {
   if (resolved.profile.provider === "mock") {
     return new MockTextProvider();
@@ -28,7 +90,9 @@ function createProviderFromResolved(
     return new HttpCompatibleTextProvider(
       resolved.secret,
       resolved.profile.apiUrl,
-      resolved.profile.model || fallbackModelId,
+      selectedProviderModelId ||
+        resolved.profile.model ||
+        fallbackModelId,
     );
   }
   throw new AiConfigError(
@@ -51,103 +115,278 @@ function assertTextModality(resolved: {
   ) {
     throw new AiConfigError(
       "AI_CAPABILITY_MODALITY_MISMATCH",
-      "本集资产文本对话接到了文生图接口。请到「管理 API」将「剧集资产设计」文本模型配置正确，不要使用 gpt-image 等图片模型。",
+      "资产设计提示词接到了文生图接口。请到「系统管理 → 能力线路」将「资产设计提示词生成」配置为文本模型，不要使用 gpt-image 等图片模型。",
     );
   }
 }
 
+/** Reject empty / JSON / image / extract-draft dumps — never fall back to seed. */
+export function assertValidDesignPromptText(
+  text: string,
+  item?: EpisodeAssetDesignItem,
+): string {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    throw new Error("模型未返回有效的资产设计提示词");
+  }
+  if (
+    /^!\[[^\]]*\]\(\s*https?:\/\//i.test(trimmed) ||
+    /^https?:\/\/\S+\.(png|jpe?g|webp|gif)(\?\S*)?$/i.test(trimmed)
+  ) {
+    throw new AiConfigError(
+      "AI_CAPABILITY_MODALITY_MISMATCH",
+      "文本对话返回了图片链接而非提示词。请检查「资产设计提示词生成」是否误配成文生图地址。",
+    );
+  }
+  const looksJson =
+    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+    (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+    /```(?:json)?/i.test(trimmed);
+  if (looksJson) {
+    throw new Error(
+      "模型返回了 JSON/结构化内容而非提示词正文，请重试或检查任务规则。",
+    );
+  }
+  if (looksLikeExtractDraftPrompt(trimmed, item)) {
+    throw new AiConfigError(
+      "AI_DESIGN_PROMPT_FORMAT_INVALID",
+      "模型返回了资产提取摘录而非正式素材提示词。",
+    );
+  }
+  return trimmed;
+}
+
 /**
- * Continue the episode extract conversation with「{name}重新设计」(+ optional requirement).
- * Uses the same text model as「提取本集资产」(episode_asset_design).
+ * Generate a design prompt via asset.design-prompt.generate.
+ * Does not reuse episode extract system prompts or conversation system turns.
  */
 export async function streamRedesignPromptInConversation(input: {
   projectId: string;
   userId: string;
   item: EpisodeAssetDesignItem;
   conversation: EpisodeDesignConversationMessage[];
-  /** Owner-provided material requirements appended to the redesign cue. */
+  episodeText: string;
   userRequirement?: string | null;
-}): Promise<{
-  text: string;
-  nextConversation: EpisodeDesignConversationMessage[];
-  redesignCue: string;
-}> {
-  if (!input.conversation.length) {
-    throw new Error("本集尚无提取对话，请先点击「提取本集资产」。");
-  }
+  promptModelId?: DesignPromptModelId;
+}): Promise<
+  {
+    text: string;
+    nextConversation: EpisodeDesignConversationMessage[];
+    redesignCue: string;
+    promptModelId: DesignPromptModelId;
+    displayModelName: string;
+    providerModelId: string;
+    systemPrompt: string;
+    userPrompt: string;
+    diagnostics: DesignPromptCallDiagnostics;
+  } & DesignPromptExecutionMetadata
+> {
+  const selectedModel = getDesignPromptModel(
+    input.promptModelId ?? DEFAULT_DESIGN_PROMPT_MODEL_ID,
+  );
 
   const redesignCue = buildRedesignUserMessage(
     input.item.name,
     input.userRequirement,
   );
-  const withUser = appendConversationMessage(input.conversation, {
+
+  const capabilityId = "asset.design-prompt.generate" as const;
+  const project = await getProjectRecord(input.projectId);
+  const styleResolved = requireProjectVisualStyleDirective({
+    visualStyle: project?.visualStyle,
+    highlights: project?.highlights,
+  });
+  if (!styleResolved.ok) {
+    throw Object.assign(new Error(styleResolved.error), {
+      code: "PROJECT_VISUAL_STYLE_REQUIRED",
+      status: 400,
+    });
+  }
+
+  const designBrief = [
+    buildDesignPromptBrief(
+      input.item,
+      input.episodeText,
+      input.userRequirement,
+    ),
+    "",
+    "【项目视觉风格】",
+    styleResolved.directive,
+  ].join("\n");
+
+  const userPrompt = assembleUntrustedUserData(
+    "asset_design_context",
+    designBrief,
+  );
+
+  const [resolved, plan] = await Promise.all([
+    resolveCapabilityForOutputKind("asset_design_prompt"),
+    resolveAiExecutionPlan({
+      capabilityId,
+      projectId: input.projectId,
+      userId: input.userId,
+      dynamicInput: {
+        assetType: input.item.assetType,
+        assetName: input.item.name,
+        draft: input.item.draft,
+        episodeText: input.episodeText,
+        userRequirement: input.userRequirement ?? "",
+      },
+      targetChars: 1200,
+    }),
+  ]);
+
+  assertTextModality(resolved);
+
+  const systemPrompt = plan.systemPrompt;
+  if (!systemPrompt.includes("[ADMIN_PUBLISHED_TASK_RULE]")) {
+    throw new AiConfigError(
+      "AI_TASK_RULE_CONFIG_INVALID",
+      "任务规则未正确装配，请联系管理员检查「资产设计提示词生成」规则配置。",
+    );
+  }
+
+  const enableThinking = false;
+  const maxOutputTokens = 8192;
+
+  const provider = createProviderFromResolved(
+    resolved,
+    selectedModel.providerModelId,
+    selectedModel.providerModelId,
+  );
+
+  async function streamOnce(
+    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  ): Promise<string> {
+    let text = "";
+    for await (const ev of provider.streamText({
+      systemPrompt,
+      userPrompt: messages[messages.length - 1]?.content ?? userPrompt,
+      providerModelId: selectedModel.providerModelId,
+      maxOutputTokens,
+      enableThinking,
+      messages,
+    })) {
+      if (ev.type === "delta") text += ev.text;
+      if (ev.type === "error") {
+        throw new Error(ev.message || "素材提示词生成失败");
+      }
+    }
+    return text;
+  }
+
+  const baseMessages: Array<{
+    role: "system" | "user" | "assistant";
+    content: string;
+  }> = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt },
+  ];
+
+  let formatCorrectionRetried = false;
+  let text = await streamOnce(baseMessages);
+  let finalText: string;
+  try {
+    finalText = assertValidDesignPromptText(text, input.item);
+  } catch (firstError) {
+    const isFormatInvalid =
+      firstError instanceof AiConfigError &&
+      firstError.code === "AI_DESIGN_PROMPT_FORMAT_INVALID";
+    if (!isFormatInvalid) throw firstError;
+
+    formatCorrectionRetried = true;
+    const retryMessages = [
+      ...baseMessages,
+      { role: "assistant" as const, content: text.trim() || "(空)" },
+      { role: "user" as const, content: DESIGN_PROMPT_FORMAT_CORRECTION },
+    ];
+    const retryText = await streamOnce(retryMessages);
+    try {
+      finalText = assertValidDesignPromptText(retryText, input.item);
+    } catch {
+      throw new AiConfigError(
+        "AI_DESIGN_PROMPT_FORMAT_INVALID",
+        "模型连续两次返回资产提取摘录而非正式素材提示词，请调整任务规则或重试。",
+      );
+    }
+  }
+
+  const historyWithoutSystem = input.conversation.filter(
+    (m) => m.role !== "system",
+  );
+  const withUser = appendConversationMessage(historyWithoutSystem, {
     role: "user",
     content: redesignCue,
     at: new Date().toISOString(),
   });
-
-  // Same capability/model as extract — keep one continuous episode chat.
-  const resolved = await resolveCapabilityForOutputKind("episode_asset_design");
-  assertTextModality(resolved);
-
-  const provider = createProviderFromResolved(
-    resolved,
-    "mock-episode-asset-design",
-  );
-  const providerModelId = resolved.profile.model || "mock-episode-asset-design";
-  const systemPrompt =
-    withUser.find((m) => m.role === "system")?.content ??
-    "你是影视资产设计助手。";
-
-  let text = "";
-  for await (const ev of provider.streamText({
-    systemPrompt,
-    userPrompt: redesignCue,
-    providerModelId,
-    maxOutputTokens: 8192,
-    enableThinking: true,
-    messages: withUser.map(({ role, content }) => ({ role, content })),
-  })) {
-    if (ev.type === "delta") text += ev.text;
-    if (ev.type === "error") {
-      throw new Error(ev.message || "素材提示词生成失败");
-    }
-  }
-
-  const trimmed = text.trim();
-  const fallback = `${input.item.assetType} concept art of ${input.item.name}, cinematic lighting, detailed`;
-  const finalText = trimmed || fallback;
-
-  if (
-    /^!\[[^\]]*\]\(\s*https?:\/\//i.test(finalText) ||
-    /^https?:\/\/\S+\.(png|jpe?g|webp)(\?\S*)?$/i.test(finalText)
-  ) {
-    throw new AiConfigError(
-      "AI_CAPABILITY_MODALITY_MISMATCH",
-      "文本对话返回了图片链接而非提示词。请检查「剧集资产设计」是否误配成文生图地址。",
-    );
-  }
-
   const nextConversation = appendConversationMessage(withUser, {
     role: "assistant",
     content: finalText,
     at: new Date().toISOString(),
   });
 
-  return { text: finalText, nextConversation, redesignCue };
+  const systemPromptHash = hashPrompt(systemPrompt);
+  const userPromptHash = hashPrompt(userPrompt);
+  const messageRoles = baseMessages.map((m) => m.role).join(",");
+
+  const diagnostics: DesignPromptCallDiagnostics = {
+    capabilityId,
+    outputKind: "asset_design_prompt",
+    taskRuleSource: plan.taskRule.source,
+    taskRuleVersion: plan.taskRule.version,
+    taskRuleHash: plan.taskRule.contentHash,
+    modelConnectionId: plan.modelConnection.id,
+    providerModelId: selectedModel.providerModelId,
+    modelKey: selectedModel.id,
+    systemPromptHash,
+    userPromptHash,
+    messageRoles,
+    enableThinking,
+    maxOutputTokens,
+    formatCorrectionRetried,
+  };
+
+  return {
+    text: finalText,
+    nextConversation,
+    redesignCue,
+    promptModelId: selectedModel.id,
+    displayModelName: selectedModel.label,
+    providerModelId: selectedModel.providerModelId,
+    systemPrompt,
+    userPrompt,
+    diagnostics,
+    capabilityId,
+    taskRuleSource: plan.taskRule.source,
+    taskRuleVersion: plan.taskRule.version,
+    taskRuleHash: plan.taskRule.contentHash,
+    modelConnectionId: plan.modelConnection.id,
+    systemPolicyVersion: plan.systemPolicyVersion,
+    outputContractVersion: plan.outputContractVersion,
+    inputFingerprint: plan.inputFingerprint,
+    systemPromptHash,
+    userPromptHash,
+    messageRoles,
+    enableThinking,
+    maxOutputTokens,
+  };
 }
 
-/** @deprecated Prefer streamRedesignPromptInConversation for episode continuity. */
+/** @deprecated Prefer streamRedesignPromptInConversation with episodeText. */
 export async function streamDesignPromptText(input: {
   projectId: string;
   userId: string;
   item: EpisodeAssetDesignItem;
   episodeText: string;
   conversation?: EpisodeDesignConversationMessage[];
+  promptModelId?: DesignPromptModelId;
 }): Promise<{
   text: string;
   nextConversation?: EpisodeDesignConversationMessage[];
   redesignCue?: string;
+  promptModelId?: DesignPromptModelId;
+  displayModelName?: string;
+  providerModelId?: string;
 }> {
   if (input.conversation && input.conversation.length > 0) {
     return streamRedesignPromptInConversation({
@@ -155,6 +394,8 @@ export async function streamDesignPromptText(input: {
       userId: input.userId,
       item: input.item,
       conversation: input.conversation,
+      episodeText: input.episodeText,
+      promptModelId: input.promptModelId,
     });
   }
   throw new Error("本集尚无提取对话，请先点击「提取本集资产」。");

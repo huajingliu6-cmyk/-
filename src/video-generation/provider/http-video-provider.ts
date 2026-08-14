@@ -280,7 +280,7 @@ export class HttpVideoProvider implements VideoProvider {
   ): Promise<ProviderSubmitResult> {
     if (!this.apiUrl) {
       throw Object.assign(
-        new Error("未配置视频镜头 API 地址，请管理员在「管理 API」中填写"),
+        new Error("未配置视频镜头 API 地址，请管理员在「系统管理 → API 接口」中填写"),
         { code: "MISSING_HTTP_VIDEO_ENDPOINT" },
       );
     }
@@ -307,7 +307,7 @@ export class HttpVideoProvider implements VideoProvider {
   ): Promise<ProviderSubmitResult> {
     if (!this.apiKey) {
       throw Object.assign(
-        new Error("未配置视频镜头 API Key，请管理员在「管理 API」中填写"),
+        new Error("未配置视频镜头 API Key，请管理员在「系统管理 → API 接口」中填写"),
         { code: "MISSING_HTTP_VIDEO_API_KEY" },
       );
     }
@@ -628,7 +628,7 @@ export class HttpVideoProvider implements VideoProvider {
   ): Promise<ProviderSubmitResult> {
     if (!this.apiKey) {
       throw Object.assign(
-        new Error("未配置视频镜头 API Key，请管理员在「管理 API」中填写"),
+        new Error("未配置视频镜头 API Key，请管理员在「系统管理 → API 接口」中填写"),
         { code: "MISSING_HTTP_VIDEO_API_KEY" },
       );
     }
@@ -729,7 +729,7 @@ export class HttpVideoProvider implements VideoProvider {
       const hint =
         res.status === 404 ||
         /does not exist|do not have access|不存在|无权/i.test(String(errMsg))
-          ? "。请到火山方舟控制台复制可用的模型 ID 或推理接入点 ID（ep-xxxx），填入「管理 API → 视频镜头 → 模型」后保存"
+          ? "。请到火山方舟控制台复制可用的模型 ID 或推理接入点 ID（ep-xxxx），填入「系统管理 → API 接口 → 视频镜头 → 模型」后保存"
           : /duration.*not valid|duration.*invalid/i.test(String(errMsg))
             ? "。Seedance 参考生视频时长需为 4–15 秒；分镜若不足 4 秒会自动上调后重试"
             : /image_url.*not valid|image_url.*invalid/i.test(String(errMsg))
@@ -821,7 +821,7 @@ export class HttpVideoProvider implements VideoProvider {
   ): Promise<ProviderSubmitResult> {
     if (!this.apiKey) {
       throw Object.assign(
-        new Error("未配置视频镜头 API Key，请管理员在「管理 API」中填写"),
+        new Error("未配置视频镜头 API Key，请管理员在「系统管理 → API 接口」中填写"),
         { code: "MISSING_HTTP_VIDEO_API_KEY" },
       );
     }

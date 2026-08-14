@@ -26,10 +26,10 @@ describe("project principal capabilities", () => {
     expect(listCapabilities(admin)).toContain("createProject");
   });
 
-  it("普通用户不能新建项目", () => {
+  it("普通用户可以在个人空间新建项目", () => {
     const member = user("user");
-    expect(canCreateProject(member)).toBe(false);
-    expect(listCapabilities(member)).not.toContain("createProject");
+    expect(canCreateProject(member)).toBe(true);
+    expect(listCapabilities(member)).toContain("createProject");
   });
 
   it("系统管理员或项目 owner 可编辑要点", () => {

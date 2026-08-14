@@ -89,6 +89,7 @@ describe("script outline persistence + text-generations", () => {
       name: `outline-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -181,6 +182,7 @@ describe("script outline persistence + text-generations", () => {
       name: `outline2-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -294,6 +296,7 @@ describe("script outline persistence + text-generations", () => {
       name: `outline3-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await addCardEngineer({
@@ -385,6 +388,7 @@ describe("script outline persistence + text-generations", () => {
       name: `outline4-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const res = await postTextGenerations(

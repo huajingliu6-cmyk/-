@@ -601,7 +601,7 @@ export async function ensureShotVideoRefPrechecks(params: {
       skippedCharacters,
       safetyByAssetId,
       sd2PlatformConfigured,
-      blockMessage: `以下人物参考尚未完成 SD 审核，无法提交方舟生视频：${uncertified.join("、")}。请先在设计素材中完成「人物校验」，或检查「管理 API → 移动 SD2 平台」配置。`,
+      blockMessage: `以下人物参考尚未完成 SD 审核，无法提交方舟生视频：${uncertified.join("、")}。请先在设计素材中完成「人物校验」，或检查「系统管理 → API 接口 → 移动 SD2 平台」配置。`,
     };
   }
 

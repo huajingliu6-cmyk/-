@@ -14,6 +14,7 @@ describe("create project form validation", () => {
         projectMode: "canvas",
         passwordEnabled: false,
         projectPassword: "",
+        visualStyle: "live_action_cinematic",
       }),
     ).toBe(false);
   });
@@ -26,6 +27,7 @@ describe("create project form validation", () => {
         projectMode: null,
         passwordEnabled: false,
         projectPassword: "",
+        visualStyle: "live_action_cinematic",
       }),
     ).toBe(false);
   });
@@ -38,6 +40,7 @@ describe("create project form validation", () => {
         projectMode: "full-stack",
         passwordEnabled: false,
         projectPassword: "",
+        visualStyle: "three_d_animation",
       }),
     ).toBe(true);
   });
@@ -50,6 +53,7 @@ describe("create project form validation", () => {
       passwordEnabled: false,
       projectPassword: "",
       highlights: "",
+      visualStyle: "live_action_cinematic",
     });
     expect(errors.name).toBe("请输入项目名称");
   });
@@ -62,6 +66,7 @@ describe("create project form validation", () => {
       passwordEnabled: false,
       projectPassword: "",
       highlights: "",
+      visualStyle: "live_action_cinematic",
     });
     expect(errors.password).toBeUndefined();
     expect(
@@ -71,6 +76,7 @@ describe("create project form validation", () => {
         projectMode: "canvas",
         passwordEnabled: false,
         projectPassword: "",
+        visualStyle: "live_action_cinematic",
       }),
     ).toBe(true);
   });
@@ -83,6 +89,7 @@ describe("create project form validation", () => {
       passwordEnabled: true,
       projectPassword: "",
       highlights: "",
+      visualStyle: "live_action_cinematic",
     });
     expect(errors.password).toBe("已启用项目密码，请填写项目访问密码");
   });
@@ -95,6 +102,7 @@ describe("create project form validation", () => {
         projectMode: "canvas",
         passwordEnabled: false,
         projectPassword: "",
+        visualStyle: "comic",
       }),
     ).toBe(true);
   });
@@ -107,8 +115,22 @@ describe("create project form validation", () => {
       passwordEnabled: false,
       projectPassword: "",
       highlights: "",
+      visualStyle: "live_action_cinematic",
     });
     expect(errors.projectMode).toBe("请选择项目模式");
+  });
+
+  it("未选择生成风格时显示错误", () => {
+    const errors = validateCreateProjectForm({
+      creationSource: "story",
+      name: "A",
+      projectMode: "canvas",
+      passwordEnabled: false,
+      projectPassword: "",
+      highlights: "",
+      visualStyle: null,
+    });
+    expect(errors.visualStyle).toBe("请选择项目生成风格");
   });
 
   it("parseCreateProjectBody 拒绝无效入口并在勾选密码时要求密码", () => {
@@ -120,11 +142,13 @@ describe("create project form validation", () => {
       passwordEnabled: true,
       projectPassword: "secret",
       highlights: "要点",
+      visualStyle: "live_action_cinematic",
     });
     expect(ok.ok).toBe(true);
     if (ok.ok) {
       expect(ok.value.name).toBe("Demo");
       expect(ok.value.projectPassword).toBe("secret");
+      expect(ok.value.visualStyle).toBe("live_action_cinematic");
     }
 
     const badPwd = parseCreateProjectBody({
@@ -133,6 +157,7 @@ describe("create project form validation", () => {
       projectMode: "canvas",
       passwordEnabled: true,
       projectPassword: "",
+      visualStyle: "live_action_cinematic",
     });
     expect(badPwd.ok).toBe(false);
   });

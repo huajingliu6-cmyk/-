@@ -7,6 +7,10 @@ import {
   type WorkspaceFeature,
 } from "@/auth/roles";
 import { findProjectMember, listMembershipsForUser } from "@/auth/project-members";
+import {
+  listProjectIdsOwnedViaEnterprise,
+  userIsEnterpriseOwnerForProject,
+} from "@/enterprise/project-principal";
 import { getProjectRecord, listProjectRecords } from "@/projects/project-access";
 
 export type ResolvedProjectAccess = {
@@ -18,7 +22,8 @@ export type ResolvedProjectAccess = {
 
 /**
  * 统一解析当前用户对某项目的有效角色。
- * PROJECT_OWNER 仅以 Project.ownerId 为准，不从 ProjectMember 读取。
+ * PROJECT_OWNER：Project.ownerId，或挂靠该项目的企业所有者（与主理人同权）。
+ * 不从 ProjectMember 读取 PROJECT_OWNER。
  */
 export async function resolveEffectiveProjectRole(
   userId: string,
@@ -37,6 +42,10 @@ export async function resolveEffectiveProjectRole(
   if (!project) return "NONE";
 
   if (project.ownerId === userId) {
+    return "PROJECT_OWNER";
+  }
+
+  if (await userIsEnterpriseOwnerForProject(userId, projectId)) {
     return "PROJECT_OWNER";
   }
 
@@ -65,7 +74,9 @@ export async function resolveProjectAccess(
 
 export async function userOwnsAnyProject(userId: string): Promise<boolean> {
   const records = await listProjectRecords();
-  return records.some((r) => r.ownerId === userId);
+  if (records.some((r) => r.ownerId === userId)) return true;
+  const viaEnterprise = await listProjectIdsOwnedViaEnterprise(userId);
+  return viaEnterprise.length > 0;
 }
 
 export async function listAccessibleWorkspaceProjectIds(
@@ -79,9 +90,10 @@ export async function listAccessibleWorkspaceProjectIds(
   const owned = records
     .filter((r) => r.ownerId === user.id)
     .map((r) => r.projectId);
+  const viaEnterprise = await listProjectIdsOwnedViaEnterprise(user.id);
   const memberships = await listMembershipsForUser(user.id);
   const memberIds = memberships.map((m) => m.projectId);
-  return [...new Set([...owned, ...memberIds])];
+  return [...new Set([...owned, ...viaEnterprise, ...memberIds])];
 }
 
 export async function listManagedProjectIdsForUser(
@@ -89,7 +101,11 @@ export async function listManagedProjectIdsForUser(
 ): Promise<string[] | "all"> {
   if (getSystemRole(user) === "SYSTEM_ADMIN") return "all";
   const records = await listProjectRecords();
-  return records.filter((r) => r.ownerId === user.id).map((r) => r.projectId);
+  const owned = records
+    .filter((r) => r.ownerId === user.id)
+    .map((r) => r.projectId);
+  const viaEnterprise = await listProjectIdsOwnedViaEnterprise(user.id);
+  return [...new Set([...owned, ...viaEnterprise])];
 }
 
 export function hasWorkspaceFeature(

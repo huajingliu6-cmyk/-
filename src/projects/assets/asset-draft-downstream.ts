@@ -11,15 +11,13 @@ export async function synchronizeAssetDraftDownstream(input: {
   next: AssetBundleDraft;
 }): Promise<{ deferred: boolean }> {
   const remoteOnly = isRemoteDataOnly();
-  if (!remoteOnly) {
-    try {
-      await syncChangedCharacterVoicesFromBundle(input);
-    } catch (error) {
-      console.error('[character-voice-sync] asset draft sync failed', {
-        projectId: input.projectId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+  try {
+    await syncChangedCharacterVoicesFromBundle(input);
+  } catch (error) {
+    console.error('[character-voice-sync] asset draft sync failed', {
+      projectId: input.projectId,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
   const syncResult = await syncManagementToWorkspace(input.projectId);
   if (!syncResult.ok) {

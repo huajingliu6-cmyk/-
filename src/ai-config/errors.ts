@@ -25,8 +25,10 @@ export type AiConfigErrorCode =
   | "AI_TASK_RULE_REVISION_CONFLICT"
   | "AI_TASK_RULE_TOO_LARGE"
   | "AI_TASK_RULE_MARKDOWN_INVALID"
+  | "AI_TASK_RULE_CONTRACT_CONFLICT"
   | "AI_OUTPUT_SCHEMA_INVALID"
   | "AI_OUTPUT_BUSINESS_VALIDATION_FAILED"
+  | "AI_DESIGN_PROMPT_FORMAT_INVALID"
   | "AI_PROVIDER_REQUEST_FAILED"
   | "AI_PAID_CONFIRMATION_REQUIRED";
 
@@ -59,7 +61,7 @@ export function publicAiConfigErrorMessage(code: AiConfigErrorCode): string {
     case "AI_PROVIDER_CREDENTIAL_MISSING":
     case "AI_PROVIDER_CREDENTIAL_UNAVAILABLE":
     case "AI_MODEL_SECRET_MISSING":
-      return "绑定的模型连接缺少有效 API Key，请到「管理 API」补全密钥后重试。";
+      return "绑定的模型连接缺少有效 API Key，请到「系统管理 → API 接口」补全密钥后重试。";
     case "AI_MODEL_UNBOUND":
     case "AI_MODEL_CONNECTION_DISABLED":
     case "AI_MODEL_ADAPTER_UNAVAILABLE":
@@ -70,9 +72,13 @@ export function publicAiConfigErrorMessage(code: AiConfigErrorCode): string {
     case "AI_TASK_RULE_TOO_LARGE":
     case "AI_TASK_RULE_MARKDOWN_INVALID":
       return "AI 任务规则配置异常，请联系系统管理员。";
+    case "AI_TASK_RULE_CONTRACT_CONFLICT":
+      return "当前资产提取任务规则与固定输出格式冲突，请联系管理员修正任务规则后重试。";
     case "AI_OUTPUT_SCHEMA_INVALID":
     case "AI_OUTPUT_BUSINESS_VALIDATION_FAILED":
       return "AI 生成结果未通过校验，请稍后重试。";
+    case "AI_DESIGN_PROMPT_FORMAT_INVALID":
+      return "模型返回了资产提取摘录而非正式素材提示词，请重新生成。";
     case "AI_PROVIDER_REQUEST_FAILED":
       return "AI 服务请求失败，请稍后重试。";
     case "AI_PAID_CONFIRMATION_REQUIRED":

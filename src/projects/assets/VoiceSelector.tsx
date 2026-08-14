@@ -8,6 +8,7 @@ import {
 import {
   VOICE_CATALOG,
   findVoiceOption,
+  withSelectedLocalVoice,
 } from "@/projects/assets/voice-catalog";
 import type { VoiceOption } from "@/projects/assets/types";
 
@@ -80,6 +81,11 @@ export function VoiceSelector({
   }, [localVoicesProp]);
 
   const localVoices = localVoicesProp ?? fetchedLocal;
+  const visibleLocalVoices = withSelectedLocalVoice(
+    value,
+    projectVoices,
+    localVoices,
+  );
 
   const groups: GlassSelectGroup[] = [
     {
@@ -88,7 +94,7 @@ export function VoiceSelector({
       emptyHint: localError
         ? localError
         : "桌面「本地音频库」暂无可用音频。可将 mp3/wav/ogg 放入该文件夹后刷新。",
-      options: localVoices.map(toOption),
+      options: visibleLocalVoices.map(toOption),
     },
     {
       id: "project",
@@ -123,7 +129,7 @@ export function VoiceSelector({
           return;
         }
         const hit =
-          findVoiceOption(id, projectVoices, localVoices) ??
+          findVoiceOption(id, projectVoices, visibleLocalVoices) ??
           null;
         onChange(hit);
       }}

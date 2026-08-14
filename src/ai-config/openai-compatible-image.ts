@@ -12,6 +12,10 @@ export type OpenAiCompatibleImageRequest = {
   aspectRatio?: string;
   /** Logical resolution hint: 1K / 2K / 4K */
   resolution?: string;
+  /** Provider quality: high | medium | low */
+  quality?: "high" | "medium" | "low";
+  /** Number of images to request (1–4) */
+  count?: number;
   /** Extra metadata fields some proxies accept */
   extra?: Record<string, unknown>;
 };
@@ -21,6 +25,24 @@ export type OpenAiCompatibleImageResult = {
   mimeType: string;
   resolvedUrl: string;
 };
+
+export type OpenAiCompatibleImagesResult = {
+  images: Array<{ buffer: Buffer; mimeType: string }>;
+  resolvedUrl: string;
+};
+
+const SUPPORTED_ASPECT_RATIOS = new Set([
+  "1:1",
+  "5:4",
+  "9:16",
+  "21:9",
+  "16:9",
+  "4:3",
+  "3:2",
+  "4:5",
+  "3:4",
+  "2:3",
+]);
 
 /**
  * Admin often saves base URLs like `https://host/v1`.
@@ -46,8 +68,7 @@ export function resolveOpenAiCompatibleImageEndpoint(apiUrl: string): string {
 
 export function normalizeImageAspectRatio(aspectRatio?: string): string {
   const raw = (aspectRatio ?? "16:9").trim().replace("/", ":");
-  if (raw === "9:16") return "9:16";
-  if (raw === "1:1") return "1:1";
+  if (SUPPORTED_ASPECT_RATIOS.has(raw)) return raw;
   return "16:9";
 }
 
@@ -68,9 +89,19 @@ export function normalizeImageResolutionTier(
   return "4k";
 }
 
+function nearestEven(value: number): number {
+  const rounded = Math.round(value);
+  if (rounded % 2 === 0) return Math.max(2, rounded);
+  const down = rounded - 1;
+  const up = rounded + 1;
+  return Math.abs(value - down) <= Math.abs(value - up)
+    ? Math.max(2, down)
+    : up;
+}
+
 /**
  * Pixel size for providers that want WIDTHxHEIGHT.
- * 4K 16:9 → 3840x2160 (not 1536x1024 / 1080P).
+ * Long-edge: 4K=3840, 2K=2560, 1K=1920. Square keeps legacy sizes.
  */
 export function mapImageSize(params: {
   aspectRatio?: string;
@@ -79,78 +110,143 @@ export function mapImageSize(params: {
   const aspect = normalizeImageAspectRatio(params.aspectRatio);
   const tier = normalizeImageResolutionTier(params.resolution);
 
-  if (aspect === "9:16") {
-    if (tier === "4k") return "2160x3840";
-    if (tier === "2k") return "1440x2560";
-    return "1080x1920";
-  }
   if (aspect === "1:1") {
     if (tier === "4k") return "2160x2160";
     if (tier === "2k") return "2048x2048";
     return "1024x1024";
   }
-  // 16:9
-  if (tier === "4k") return "3840x2160";
-  if (tier === "2k") return "2560x1440";
-  return "1920x1080";
+
+  const [wRatioRaw, hRatioRaw] = aspect.split(":");
+  const wRatio = Number(wRatioRaw);
+  const hRatio = Number(hRatioRaw);
+  if (!Number.isFinite(wRatio) || !Number.isFinite(hRatio) || wRatio <= 0 || hRatio <= 0) {
+    return tier === "4k" ? "3840x2160" : tier === "2k" ? "2560x1440" : "1920x1080";
+  }
+
+  const longEdge = tier === "4k" ? 3840 : tier === "2k" ? 2560 : 1920;
+  if (wRatio >= hRatio) {
+    const width = longEdge;
+    const height = nearestEven(longEdge * (hRatio / wRatio));
+    return `${width}x${height}`;
+  }
+  const height = longEdge;
+  const width = nearestEven(longEdge * (wRatio / hRatio));
+  return `${width}x${height}`;
 }
 
-function extractImagePayload(json: Record<string, unknown>): {
+function clampImageCount(count?: number): number {
+  if (typeof count !== "number" || !Number.isFinite(count)) return 1;
+  return Math.min(4, Math.max(1, Math.floor(count)));
+}
+
+function normalizeQuality(
+  quality?: string,
+): "high" | "medium" | "low" {
+  if (quality === "medium" || quality === "low" || quality === "high") {
+    return quality;
+  }
+  return "high";
+}
+
+type ExtractedImage = {
   base64?: string;
   url?: string;
   mimeType?: string;
-} {
+};
+
+function extractAllImagePayloads(
+  json: Record<string, unknown>,
+): ExtractedImage[] {
+  const out: ExtractedImage[] = [];
+
   if (typeof json.base64 === "string" && json.base64.trim()) {
-    return {
+    out.push({
       base64: json.base64,
       mimeType: typeof json.mimeType === "string" ? json.mimeType : undefined,
-    };
+    });
   }
   if (typeof json.url === "string" && json.url.trim()) {
-    return { url: json.url };
+    out.push({ url: json.url });
   }
+
   const data = json.data;
-  if (Array.isArray(data) && data.length > 0) {
-    const first = data[0];
-    if (first && typeof first === "object" && !Array.isArray(first)) {
-      const row = first as Record<string, unknown>;
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const row = item as Record<string, unknown>;
       if (typeof row.b64_json === "string" && row.b64_json.trim()) {
-        return { base64: row.b64_json, mimeType: "image/png" };
+        out.push({ base64: row.b64_json, mimeType: "image/png" });
+        continue;
       }
       if (typeof row.url === "string" && row.url.trim()) {
-        return { url: row.url };
+        out.push({ url: row.url });
+        continue;
       }
       if (typeof row.base64 === "string" && row.base64.trim()) {
-        return {
+        out.push({
           base64: row.base64,
           mimeType:
             typeof row.mimeType === "string" ? row.mimeType : "image/png",
-        };
+        });
       }
     }
   }
+
   const output = json.output;
   if (output && typeof output === "object" && !Array.isArray(output)) {
-    const out = output as Record<string, unknown>;
-    const results = out.results;
-    if (Array.isArray(results) && results[0] && typeof results[0] === "object") {
-      const row = results[0] as Record<string, unknown>;
-      if (typeof row.url === "string") return { url: row.url };
-      if (typeof row.b64_json === "string") return { base64: row.b64_json };
+    const outObj = output as Record<string, unknown>;
+    const results = outObj.results;
+    if (Array.isArray(results)) {
+      for (const item of results) {
+        if (!item || typeof item !== "object") continue;
+        const row = item as Record<string, unknown>;
+        if (typeof row.url === "string" && row.url.trim()) {
+          out.push({ url: row.url });
+        } else if (typeof row.b64_json === "string" && row.b64_json.trim()) {
+          out.push({ base64: row.b64_json, mimeType: "image/png" });
+        }
+      }
     }
   }
-  return {};
+
+  return out.slice(0, 4);
 }
 
-async function parseImageSuccessResponse(
+async function materializeExtractedImage(
+  extracted: ExtractedImage,
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  if (extracted.base64) {
+    return {
+      buffer: Buffer.from(extracted.base64, "base64"),
+      mimeType: extracted.mimeType || "image/png",
+    };
+  }
+  if (extracted.url) {
+    const fileRes = await fetch(extracted.url);
+    if (!fileRes.ok) {
+      throw new Error("无法下载文生图返回的图片 URL");
+    }
+    return {
+      buffer: Buffer.from(await fileRes.arrayBuffer()),
+      mimeType: fileRes.headers.get("content-type") || "image/png",
+    };
+  }
+  throw new Error("文生图服务响应缺少图片数据");
+}
+
+async function parseImagesSuccessResponse(
   res: Response,
   resolvedUrl: string,
-): Promise<OpenAiCompatibleImageResult> {
+): Promise<OpenAiCompatibleImagesResult> {
   const contentType = res.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) {
     return {
-      buffer: Buffer.from(await res.arrayBuffer()),
-      mimeType: contentType || "image/png",
+      images: [
+        {
+          buffer: Buffer.from(await res.arrayBuffer()),
+          mimeType: contentType || "image/png",
+        },
+      ],
       resolvedUrl,
     };
   }
@@ -172,71 +268,82 @@ async function parseImageSuccessResponse(
     throw new Error(msg);
   }
 
-  const extracted = extractImagePayload(json);
-  if (extracted.base64) {
-    return {
-      buffer: Buffer.from(extracted.base64, "base64"),
-      mimeType: extracted.mimeType || "image/png",
-      resolvedUrl,
-    };
-  }
-  if (extracted.url) {
-    const fileRes = await fetch(extracted.url);
-    if (!fileRes.ok) {
-      throw new Error("无法下载文生图返回的图片 URL");
-    }
-    return {
-      buffer: Buffer.from(await fileRes.arrayBuffer()),
-      mimeType: fileRes.headers.get("content-type") || "image/png",
-      resolvedUrl,
-    };
+  const extracted = extractAllImagePayloads(json);
+  if (extracted.length === 0) {
+    throw new Error(
+      "文生图服务响应缺少图片数据（期望 data[].b64_json / data[].url）",
+    );
   }
 
-  throw new Error(
-    "文生图服务响应缺少图片数据（期望 data[].b64_json / data[].url）",
+  const images = await Promise.all(
+    extracted.map((item) => materializeExtractedImage(item)),
   );
+
+  return { images, resolvedUrl };
+}
+
+function buildImageRequestBody(input: {
+  prompt: string;
+  model?: string;
+  aspect: string;
+  tier: "1k" | "2k" | "4k";
+  quality: "high" | "medium" | "low";
+  count: number;
+  pixelSize: string;
+  sizeMode: "aspect" | "pixel";
+  extra?: Record<string, unknown>;
+}): Record<string, unknown> {
+  const size = input.sizeMode === "pixel" ? input.pixelSize : input.aspect;
+  return {
+    prompt: input.prompt,
+    n: input.count,
+    ...(input.model ? { model: input.model } : {}),
+    quality: input.quality,
+    size,
+    resolution: input.tier,
+    aspect_ratio: input.aspect,
+    output_size: input.pixelSize,
+    width: Number(input.pixelSize.split("x")[0]),
+    height: Number(input.pixelSize.split("x")[1]),
+    upscale: input.tier === "4k" ? "4K" : input.tier.toUpperCase(),
+    ...(input.extra ?? {}),
+  };
 }
 
 /**
- * POST OpenAI-compatible `/images/generations` (or already-absolute image route).
- *
- * codesonline / gpt-image-2 style: `size` = aspect ("16:9"), `resolution` = "4k".
+ * Batch OpenAI-compatible `/images/generations`.
+ * Sends n/size/quality and materializes every returned image (max 4).
  */
-export async function generateOpenAiCompatibleImage(
+export async function generateOpenAiCompatibleImages(
   params: OpenAiCompatibleImageRequest,
-): Promise<OpenAiCompatibleImageResult> {
+): Promise<OpenAiCompatibleImagesResult> {
   const resolvedUrl = resolveOpenAiCompatibleImageEndpoint(params.endpoint);
   const aspect = normalizeImageAspectRatio(params.aspectRatio);
   const tier = normalizeImageResolutionTier(params.resolution);
+  const quality = normalizeQuality(params.quality);
+  const count = clampImageCount(params.count);
   const pixelSize = mapImageSize({
     aspectRatio: aspect,
     resolution: tier.toUpperCase(),
   });
 
-  const body: Record<string, unknown> = {
+  const body = buildImageRequestBody({
     prompt: params.prompt,
-    n: 1,
-    ...(params.model ? { model: params.model } : {}),
-    quality: "high",
-    // Primary contract for gpt-image-2 proxies (codesonline / toapis…)
-    size: aspect,
-    resolution: tier,
-    aspect_ratio: aspect,
-    // Explicit 4K pixel hint for gateways that read WIDTHxHEIGHT
-    output_size: pixelSize,
-    width: Number(pixelSize.split("x")[0]),
-    height: Number(pixelSize.split("x")[1]),
-    upscale: tier === "4k" ? "4K" : tier.toUpperCase(),
-    ...(params.extra ?? {}),
-  };
+    model: params.model,
+    aspect,
+    tier,
+    quality,
+    count,
+    pixelSize,
+    sizeMode: "aspect",
+    extra: params.extra,
+  });
 
   const res = await fetch(resolvedUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(params.apiKey
-        ? { Authorization: `Bearer ${params.apiKey}` }
-        : {}),
+      ...(params.apiKey ? { Authorization: `Bearer ${params.apiKey}` } : {}),
     },
     body: JSON.stringify(body),
   });
@@ -252,26 +359,25 @@ export async function generateOpenAiCompatibleImage(
       const message = parsed.error?.message ?? "";
       if (code === "model_not_allowed" || /无权调用模型/.test(message)) {
         throw new Error(
-          `${message || "当前 API Key 无权调用该图片模型"}。请到「管理 API」→「角色外貌生成」更换有权限的模型名，或更换可用的 API Key。`,
+          `${message || "当前 API Key 无权调用该图片模型"}。请到「系统管理 → API 接口」→「角色外貌生成」更换有权限的模型名，或更换可用的 API Key。`,
         );
       }
-      // Retry with pure pixel size if gateway rejects aspect-style size
       if (
         res.status === 400 &&
         (/size|resolution|unmarshal|invalid/i.test(message) ||
           /size|resolution|unmarshal|invalid/i.test(detail))
       ) {
-        const retryBody: Record<string, unknown> = {
+        const retryBody = buildImageRequestBody({
           prompt: params.prompt,
-          n: 1,
-          size: pixelSize,
-          quality: "high",
-          ...(params.model ? { model: params.model } : {}),
-          resolution: tier,
-          aspect_ratio: aspect,
-          upscale: tier === "4k" ? "4K" : tier.toUpperCase(),
-          ...(params.extra ?? {}),
-        };
+          model: params.model,
+          aspect,
+          tier,
+          quality,
+          count,
+          pixelSize,
+          sizeMode: "pixel",
+          extra: params.extra,
+        });
         const retry = await fetch(resolvedUrl, {
           method: "POST",
           headers: {
@@ -283,7 +389,7 @@ export async function generateOpenAiCompatibleImage(
           body: JSON.stringify(retryBody),
         });
         if (retry.ok) {
-          return parseImageSuccessResponse(retry, resolvedUrl);
+          return parseImagesSuccessResponse(retry, resolvedUrl);
         }
         const retryText = await retry.text();
         detail = `${message || detail}；像素尺寸重试亦失败：${retryText.slice(0, 160)}`;
@@ -291,12 +397,34 @@ export async function generateOpenAiCompatibleImage(
         detail = message;
       }
     } catch (e) {
-      if (e instanceof Error && e.message.includes("管理 API")) throw e;
+      if (e instanceof Error && (e.message.includes("系统管理") || e.message.includes("管理 API"))) throw e;
     }
     throw new Error(
       `文生图服务返回错误（${res.status}）：${detail}（请求 ${resolvedUrl}）`,
     );
   }
 
-  return parseImageSuccessResponse(res, resolvedUrl);
+  return parseImagesSuccessResponse(res, resolvedUrl);
+}
+
+/**
+ * POST OpenAI-compatible `/images/generations` (or already-absolute image route).
+ * Single-image wrapper — keeps canvas / legacy callers compatible.
+ */
+export async function generateOpenAiCompatibleImage(
+  params: OpenAiCompatibleImageRequest,
+): Promise<OpenAiCompatibleImageResult> {
+  const batch = await generateOpenAiCompatibleImages({
+    ...params,
+    count: 1,
+  });
+  const first = batch.images[0];
+  if (!first) {
+    throw new Error("文生图服务未返回图片");
+  }
+  return {
+    buffer: first.buffer,
+    mimeType: first.mimeType,
+    resolvedUrl: batch.resolvedUrl,
+  };
 }

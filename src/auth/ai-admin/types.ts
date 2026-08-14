@@ -44,6 +44,8 @@ export type CapabilityRuleSummary = {
   versionCount: number;
   effectiveRulePreview: string;
   builtinRuleLength: number;
+  outputContractConflict?: boolean;
+  outputContractConflictMessage?: string | null;
 };
 
 export type CapabilityDiag = {

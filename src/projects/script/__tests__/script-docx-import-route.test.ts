@@ -79,6 +79,7 @@ describe("script-draft import-docx", () => {
       name: "d1",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const bytes = await buildThreeEpisodeDocxWithSplitTitle();
@@ -115,6 +116,7 @@ describe("script-draft import-docx", () => {
       name: "d2",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const bytes = await buildMinimalDocx([{ type: "p", runs: ["整篇无标题正文"] }]);
@@ -169,6 +171,7 @@ describe("script-draft import-docx", () => {
       name: "d3",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const bytes = await buildMinimalDocx([{ type: "p", runs: ["正文"] }]);
@@ -195,6 +198,7 @@ describe("script-draft import-docx", () => {
       name: "d4",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const pid = project.projectId;

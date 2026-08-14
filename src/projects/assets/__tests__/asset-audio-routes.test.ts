@@ -124,7 +124,8 @@ async function seedProject(owner: AuthUser) {
     name: `aud-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     creationSource: "story",
     projectMode: "full-stack",
-    passwordEnabled: false,
+    visualStyle: "live_action_cinematic",
+      passwordEnabled: false,
   });
   await saveAssetBundleDraft({
     projectId: project.projectId,

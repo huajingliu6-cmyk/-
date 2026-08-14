@@ -129,6 +129,24 @@
   animation: gs-menu-in 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+.gs__menu--portal {
+  /* top/left/width/max-height/z-index come from inline fixed positioning */
+  top: auto;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  max-width: none;
+}
+
+.gs__menu--portal.gs__menu--top {
+  transform-origin: bottom center;
+  animation-name: gs-menu-in-top;
+}
+
+.gs__menu--portal.gs__menu--top.is-closing {
+  animation-name: gs-menu-out-top;
+}
+
 .gs__menu.is-closing {
   animation: gs-menu-out 0.2s ease-in both;
 }
@@ -478,6 +496,28 @@
   to {
     opacity: 0;
     transform: translateY(-8px) scale(0.96);
+  }
+}
+
+@keyframes gs-menu-in-top {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes gs-menu-out-top {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
   }
 }
 

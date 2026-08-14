@@ -66,16 +66,8 @@ async function logout(page: Page, base: string) {
 }
 
 async function openAiPanel(page: Page, base: string) {
-  await page.goto(`${base}/app`, { waitUntil: "networkidle" });
-  await page.waitForTimeout(1200);
-  const menuBtn = page
-    .locator('button[title="打开账户"]')
-    .or(page.getByRole("button", { name: /H2 Admin/ }))
-    .first();
-  await menuBtn.click();
-  await page.waitForTimeout(400);
-  await page.getByRole("button", { name: "管理 API", exact: true }).click();
-  await page.waitForSelector('[data-testid="ai-config-tab-models"]', {
+  await page.goto(`${base}/app/admin`, { waitUntil: "networkidle" });
+  await page.waitForSelector('[data-testid="system-admin-page"]', {
     timeout: 30000,
   });
 }
@@ -108,7 +100,10 @@ async function setRuleEditor(page: Page, slug: string, text: string) {
 }
 
 async function openSplitRuleCard(page: Page, slug: string) {
-  await page.getByTestId("ai-config-tab-rules").click();
+  await page.getByTestId("admin-nav-capabilities").click();
+  await page.waitForSelector('[data-testid="admin-capabilities-page"]', {
+    timeout: 15000,
+  });
   await page.waitForTimeout(800);
   const card = page.getByTestId(`ai-rule-card-${slug}`);
   await card.waitFor({ timeout: 30000 });
@@ -245,12 +240,15 @@ async function main() {
     await openAiPanel(page, base);
     steps.push({ name: "s1 admin opens AI config", ok: true });
 
-    await page.getByTestId("ai-config-tab-models").click();
+    await page.getByTestId("admin-nav-apis").click();
+    await page.waitForSelector('[data-testid="admin-api-slots"]', {
+      timeout: 15000,
+    });
     await page.waitForTimeout(800);
     const modelsText = await page.locator("body").innerText();
     steps.push({
       name: "s1 models tab visible",
-      ok: /模型|Mock|连接/.test(modelsText),
+      ok: /接口|故事生成|本地演示/.test(modelsText),
     });
 
     // Bind via API for reliability after UI presence check
@@ -552,10 +550,11 @@ async function main() {
         await menu.click();
         await page.waitForTimeout(300);
       }
-      const manageApi = page.getByRole("button", { name: "管理 API", exact: true });
+      const manageApi = page.getByRole("link", { name: "系统管理", exact: true });
+      const manageApiBtn = page.getByRole("button", { name: "系统管理", exact: true });
       steps.push({
-        name: `s9 non-admin ${u} no 管理 API entry`,
-        ok: (await manageApi.count()) === 0,
+        name: `s9 non-admin ${u} no 系统管理 entry`,
+        ok: (await manageApi.count()) === 0 && (await manageApiBtn.count()) === 0,
       });
       await logout(page, base);
     }

@@ -24,6 +24,7 @@ import type {
 } from "@/projects/workspace-sync/types";
 import {
   loadWorkspaceAssetsRemoteValue,
+  loadWorkspaceEpisodeDesignsRemoteDocument,
   loadWorkspaceEpisodeDesignsRemoteValue,
   loadWorkspaceSnapshotRemoteValue,
   saveWorkspaceAssetsRemote,
@@ -206,15 +207,42 @@ export async function loadWorkspaceLocalEpisodeDesigns(
   return normalizeEpisodeAssetDesignStore(projectId, raw);
 }
 
+export async function loadWorkspaceLocalEpisodeDesignsDocument(
+  projectId: string,
+): Promise<{
+  value: ProjectEpisodeAssetDesignStore;
+  remoteRevision: number | null;
+}> {
+  if (isRemoteDataOnly()) {
+    const document = await loadWorkspaceEpisodeDesignsRemoteDocument(projectId);
+    return {
+      value:
+        document === null
+          ? emptyEpisodeAssetDesignStore(projectId)
+          : normalizeEpisodeAssetDesignStore(projectId, document.value),
+      remoteRevision: document?.revision ?? 0,
+    };
+  }
+  return {
+    value: await loadWorkspaceLocalEpisodeDesigns(projectId),
+    remoteRevision: null,
+  };
+}
+
 export async function saveWorkspaceLocalEpisodeDesigns(
   store: ProjectEpisodeAssetDesignStore,
+  options?: { expectedRemoteRevision?: number },
 ): Promise<ProjectEpisodeAssetDesignStore> {
   const next: ProjectEpisodeAssetDesignStore = {
     ...store,
     updatedAt: new Date().toISOString(),
   };
   if (isRemoteDataOnly()) {
-    return saveWorkspaceEpisodeDesignsRemote(store.projectId, next);
+    return saveWorkspaceEpisodeDesignsRemote(
+      store.projectId,
+      next,
+      options?.expectedRemoteRevision,
+    );
   }
   await ensureWorkspace(store.projectId);
   await atomicWriteJson(

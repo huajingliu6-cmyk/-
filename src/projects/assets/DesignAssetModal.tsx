@@ -7,27 +7,65 @@ import type {
   EpisodeAssetDesignItem,
   GeneratedMediaState,
 } from "@/projects/assets/episode-design/types";
-import type { AudioAsset, VideoRefSafety, VoiceOption } from "@/projects/assets/types";
-import { formatDesignDraftSeedText } from "@/projects/assets/episode-design/format-design-draft-seed";
+import type { VideoRefSafety } from "@/projects/assets/types";
+import { formatDesignDraftSeedText, resolveFormalDesignPromptText } from "@/projects/assets/episode-design/format-design-draft-seed";
 import {
   designVideoRefSafetyBadge,
   isDesignMediaVideoRefLocked,
 } from "@/projects/assets/episode-design/design-media-video-ref-labels";
-import {
-  getDesignMediaVoiceBinding,
-  isMediaVoiceBound,
-  withDesignCurrentMediaAndVoiceMirror,
-  withDesignMediaVoiceBinding,
-} from "@/projects/assets/episode-design/design-media-voice";
+import { withDesignCurrentMediaAndVoiceMirror } from "@/projects/assets/episode-design/design-media-voice";
 import {
   appendPromptHistory,
   mergeMediaIdLists,
 } from "@/projects/assets/episode-design/generated-media-history";
 import { getProjectAssetImageUrl } from "@/projects/assets/asset-image-url";
 import { DesignImageLightbox } from "@/projects/assets/DesignImageLightbox";
-import { VoiceSelector } from "@/projects/assets/VoiceSelector";
-import { VoicePreviewButton } from "@/projects/assets/VoicePreviewButton";
 import { useGenerationBusy } from "@/shell/GenerationBusyGuard";
+import { safeRandomUUID } from "@/lib/safe-random-id";
+import type { AssetGenerationProgress } from "@/projects/assets/DesignGenerationOverlay";
+import {
+  DEFAULT_DESIGN_IMAGE_OPTIONS,
+  DESIGN_IMAGE_ASPECT_RATIOS,
+  DESIGN_IMAGE_ASPECT_RATIO_LABELS,
+  DESIGN_IMAGE_COUNTS,
+  DESIGN_IMAGE_QUALITIES,
+  DESIGN_IMAGE_QUALITY_LABELS,
+  formatDesignImagePreviewTitle,
+  type DesignImageGenerationOptions,
+} from "@/projects/assets/episode-design/image-generation-options";
+import {
+  DEFAULT_DESIGN_PROMPT_MODEL_ID,
+  DESIGN_PROMPT_MODELS,
+  type DesignPromptModelId,
+} from "@/projects/assets/episode-design/design-prompt-models";
+import {
+  GlassSelect,
+  type GlassSelectOption,
+} from "@/shell/glass-select";
+
+const DESIGN_IMAGE_QUALITY_OPTIONS: GlassSelectOption[] =
+  DESIGN_IMAGE_QUALITIES.map((value) => ({
+    id: value,
+    label: DESIGN_IMAGE_QUALITY_LABELS[value],
+  }));
+
+const DESIGN_IMAGE_RATIO_OPTIONS: GlassSelectOption[] =
+  DESIGN_IMAGE_ASPECT_RATIOS.map((value) => ({
+    id: value,
+    label: DESIGN_IMAGE_ASPECT_RATIO_LABELS[value],
+  }));
+
+const DESIGN_IMAGE_COUNT_OPTIONS: GlassSelectOption[] =
+  DESIGN_IMAGE_COUNTS.map((value) => ({
+    id: String(value),
+    label: `${value}张`,
+  }));
+
+const DESIGN_PROMPT_MODEL_OPTIONS: GlassSelectOption[] =
+  DESIGN_PROMPT_MODELS.map((model) => ({
+    id: model.id,
+    label: model.label,
+  }));
 
 export type DesignAssetModalProps = {
   open: boolean;
@@ -36,8 +74,6 @@ export type DesignAssetModalProps = {
   episodeId: string;
   /** management | workspace — selects API base path */
   surface: "project_management" | "workspace";
-  projectVoices?: VoiceOption[];
-  audios?: AudioAsset[];
   /** Parent-owned in-flight flag so remount / other actions keep「生成中」. */
   isGeneratingAsset?: boolean;
   onGeneratingAssetChange?: (itemId: string, generating: boolean) => void;
@@ -54,8 +90,13 @@ export type DesignAssetModalProps = {
     itemId: string,
     media?: GeneratedMediaState | null,
   ) => void;
-  /** Persist voice / media patches from the modal (per history image). */
+  /** Persist media current selection patches from the modal (per history image). */
   onItemPatched?: (itemId: string, next: EpisodeAssetDesignItem) => void;
+  /** Temporary UI progress for card overlay; null clears it. */
+  onGenerationProgress?: (
+    itemId: string,
+    progress: AssetGenerationProgress | null,
+  ) => void;
 };
 
 function apiBase(
@@ -81,33 +122,11 @@ function apiBase(
   };
 }
 
-function initialPromptForItem(item: EpisodeAssetDesignItem): string {
-  const saved = item.designPrompt?.text?.trim() ?? "";
-  if (saved) return item.designPrompt!.text;
-  return formatDesignDraftSeedText(item);
-}
-
 function pushLocalPromptHistory(
   prev: AssetDesignPromptHistoryEntry[] | undefined,
   entry: AssetDesignPromptHistoryEntry,
 ): AssetDesignPromptHistoryEntry[] {
   return appendPromptHistory(prev, entry);
-}
-
-function buildInitialPromptHistory(
-  item: EpisodeAssetDesignItem,
-  seed: string,
-): AssetDesignPromptHistoryEntry[] {
-  let history = item.designPrompt?.history ?? [];
-  if (seed.trim() && !(item.designPrompt?.text?.trim())) {
-    history = pushLocalPromptHistory(history, {
-      text: seed,
-      generatedAt: new Date().toISOString(),
-      generationId: null,
-      source: "extract",
-    });
-  }
-  return history;
 }
 
 type DesignAssetModalBodyProps = DesignAssetModalProps & {
@@ -119,24 +138,26 @@ function DesignAssetModalBody({
   projectId,
   episodeId,
   surface,
-  projectVoices = [],
-  audios = [],
   isGeneratingAsset = false,
   onGeneratingAssetChange,
   onClose,
   onPromptUpdated,
   onAssetGenerated,
   onItemPatched,
+  onGenerationProgress,
 }: DesignAssetModalBodyProps) {
   const titleId = useId();
-  const seed = initialPromptForItem(item);
-  const initialHistory = buildInitialPromptHistory(item, seed);
-  const didSeedExtract =
-    Boolean(seed.trim()) && !(item.designPrompt?.text?.trim());
+  const extractInfoText = formatDesignDraftSeedText(item);
+  const formalPrompt = resolveFormalDesignPromptText(item);
+  const formalPromptMissing = !formalPrompt;
 
-  const [promptText, setPromptText] = useState(seed);
-  const [promptHistory, setPromptHistory] =
-    useState<AssetDesignPromptHistoryEntry[]>(initialHistory);
+  const [promptText, setPromptText] = useState(formalPrompt);
+  const [promptModelId, setPromptModelId] = useState<DesignPromptModelId>(
+    DEFAULT_DESIGN_PROMPT_MODEL_ID,
+  );
+  const [promptHistory, setPromptHistory] = useState<
+    AssetDesignPromptHistoryEntry[]
+  >(item.designPrompt?.history ?? []);
   const [loadingPrompt, setLoadingPrompt] = useState(false);
   const [requirementOpen, setRequirementOpen] = useState(false);
   const [requirementDraft, setRequirementDraft] = useState("");
@@ -152,7 +173,9 @@ function DesignAssetModalBody({
   const [copyNote, setCopyNote] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [voiceNote, setVoiceNote] = useState("");
+  const [imageOptions, setImageOptions] = useState<DesignImageGenerationOptions>(
+    DEFAULT_DESIGN_IMAGE_OPTIONS,
+  );
   const [precheckBusy, setPrecheckBusy] = useState(false);
   const [videoRefSafety, setVideoRefSafety] = useState<VideoRefSafety | null>(
     item.generatedMedia?.videoRefSafety ?? null,
@@ -170,6 +193,7 @@ function DesignAssetModalBody({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const previewObjectUrlRef = useRef<string | null>(null);
+  const progressClearTimerRef = useRef<number | null>(null);
   const onPromptUpdatedRef = useRef(onPromptUpdated);
   const [syncedMediaCurrentId, setSyncedMediaCurrentId] = useState(
     item.generatedMedia?.currentId ?? null,
@@ -183,11 +207,33 @@ function DesignAssetModalBody({
   }, [onPromptUpdated]);
 
   useEffect(() => {
-    if (!didSeedExtract) return;
-    // Body remounts via key={item.id}; notify parent once after open seed.
-    onPromptUpdatedRef.current(item.id, seed, { history: initialHistory });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-once seed notify
+    return () => {
+      if (progressClearTimerRef.current != null) {
+        window.clearTimeout(progressClearTimerRef.current);
+        progressClearTimerRef.current = null;
+      }
+    };
   }, []);
+
+  const reportProgress = useCallback(
+    (progress: AssetGenerationProgress | null) => {
+      onGenerationProgress?.(item.id, progress);
+    },
+    [item.id, onGenerationProgress],
+  );
+
+  const scheduleProgressClear = useCallback(
+    (delayMs: number) => {
+      if (progressClearTimerRef.current != null) {
+        window.clearTimeout(progressClearTimerRef.current);
+      }
+      progressClearTimerRef.current = window.setTimeout(() => {
+        progressClearTimerRef.current = null;
+        onGenerationProgress?.(item.id, null);
+      }, delayMs);
+    },
+    [item.id, onGenerationProgress],
+  );
 
   const incomingMedia = item.generatedMedia;
   const incomingCurrentId = incomingMedia?.currentId ?? null;
@@ -314,11 +360,15 @@ function DesignAssetModalBody({
           body: JSON.stringify({
             idempotencyKey: `prompt-${item.id}-${Date.now()}`,
             userRequirement,
+            promptModelId,
           }),
         });
         const payload = (await res.json()) as {
           error?: string;
           prompt?: string;
+          promptModelId?: string;
+          displayModelName?: string;
+          providerModelId?: string;
           designPrompt?: {
             text?: string;
             status?: string;
@@ -330,9 +380,12 @@ function DesignAssetModalBody({
           throw new Error(payload.error ?? "提示词生成失败");
         }
         const text =
-          payload.prompt ??
-          payload.designPrompt?.text ??
-          initialPromptForItem(item);
+          payload.prompt?.trim() ||
+          payload.designPrompt?.text?.trim() ||
+          "";
+        if (!text) {
+          throw new Error("模型未返回有效的资产设计提示词");
+        }
         const now = new Date().toISOString();
         const history =
           payload.designPrompt?.history ??
@@ -358,7 +411,7 @@ function DesignAssetModalBody({
         setLoadingPrompt(false);
       }
     },
-    [item, surface, projectId, episodeId, promptHistory],
+    [item, surface, projectId, episodeId, promptHistory, promptModelId],
   );
 
   const openRequirementDialog = useCallback(() => {
@@ -447,15 +500,25 @@ function DesignAssetModalBody({
     onGeneratingAssetChange?.(item.id, true);
     setError("");
     setNotice("");
+    if (progressClearTimerRef.current != null) {
+      window.clearTimeout(progressClearTimerRef.current);
+      progressClearTimerRef.current = null;
+    }
     try {
+      reportProgress({ stage: "validating", percent: 8 });
       const urls = apiBase(surface, projectId, episodeId, item.id);
+      reportProgress({ stage: "submitted", percent: 22 });
+      reportProgress({ stage: "generating", percent: 38 });
       const res = await fetch(urls.generate, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: promptText,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: safeRandomUUID(),
           confirmPaidGeneration: false,
+          quality: imageOptions.quality,
+          aspectRatio: imageOptions.aspectRatio,
+          count: imageOptions.count,
         }),
       });
       const payload = (await res.json()) as {
@@ -470,6 +533,7 @@ function DesignAssetModalBody({
       if (!res.ok) {
         throw new Error(payload.error ?? "资产生成失败");
       }
+      reportProgress({ stage: "saving", percent: 88 });
       const media = payload.generatedMedia ?? null;
       if (media?.currentId) {
         setPickedMediaId(media.currentId);
@@ -498,10 +562,18 @@ function DesignAssetModalBody({
       setSyncedPromptHistoryLen(history.length);
       onPromptUpdated(item.id, promptText, { history });
       onAssetGenerated(item.id, media);
-      setNotice(payload.notice ?? "已生成 4K · 16:9 参考图");
+      reportProgress({ stage: "completed", percent: 100 });
+      scheduleProgressClear(900);
+      setNotice(
+        payload.notice ??
+          `已生成 ${imageOptions.count} 张 · ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio}`,
+      );
       setShowImageHistory(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "资产生成失败");
+      const message = e instanceof Error ? e.message : "资产生成失败";
+      setError(message);
+      reportProgress({ stage: "failed", percent: 0, message });
+      scheduleProgressClear(2200);
     } finally {
       setGeneratingAsset(false);
       onGeneratingAssetChange?.(item.id, false);
@@ -513,10 +585,14 @@ function DesignAssetModalBody({
     episodeId,
     promptText,
     promptHistory,
+    imageOptions,
     generateBusy,
     onGeneratingAssetChange,
     onPromptUpdated,
     onAssetGenerated,
+    onGenerationProgress,
+    reportProgress,
+    scheduleProgressClear,
   ]);
 
   const handleVideoRefPrecheck = useCallback(async () => {
@@ -565,7 +641,7 @@ function DesignAssetModalBody({
   const audioDisabled = item.assetType === "audio";
   const styleBrief =
     item.assetType === "character"
-      ? "插画/设定图风格人物参考（避免写实真人剧照）"
+      ? "超写实真人影视摄影质感的虚构角色参考（禁止复刻现实可识别个人）"
       : item.assetType === "prop"
         ? "设定图风格道具参考"
         : item.assetType === "scene"
@@ -573,10 +649,11 @@ function DesignAssetModalBody({
           : "16:9、4K 素材";
   const emptyPreviewHint = audioDisabled
     ? "当前类型暂不支持图片预览"
-    : `点击「生成资产」将按 16:9、4K 生成${styleBrief}`;
+    : `点击「生成资产」将按 ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio} · ${imageOptions.count}张 生成${styleBrief}`;
   const generateTitle = audioDisabled
     ? "当前未配置该类型的音频生成能力"
-    : `文生图 · 4K · 16:9 · ${styleBrief}`;
+    : `文生图 · ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio} · ${imageOptions.count}张 · ${styleBrief}`;
+  const previewTitle = formatDesignImagePreviewTitle(imageOptions);
   const precheckLabel =
     item.assetType === "character" ? "人物校验" : "参考图校验";
 
@@ -593,28 +670,6 @@ function DesignAssetModalBody({
 
   const safetyBadge = designVideoRefSafetyBadge(safetyForPreview);
   const precheckLocked = isDesignMediaVideoRefLocked(safetyForPreview);
-
-  const mediaVoice =
-    item.assetType === "character"
-      ? getDesignMediaVoiceBinding(item, currentMediaId)
-      : null;
-  const mediaVoiceBound = mediaVoice ? isMediaVoiceBound(mediaVoice) : false;
-
-  const patchCharacterVoice = (binding: {
-    voiceId: string | null;
-    voiceName: string | null;
-    voiceBound: boolean;
-  }) => {
-    if (item.assetType !== "character" || !currentMediaId || !onItemPatched) {
-      return;
-    }
-    const next = withDesignMediaVoiceBinding(
-      item,
-      currentMediaId,
-      binding,
-    );
-    onItemPatched(item.id, next);
-  };
 
   return (
     <>
@@ -650,6 +705,19 @@ function DesignAssetModalBody({
 
           <div className="ead-modal__grid">
             <div className="ead-modal__col">
+              {extractInfoText.trim() ? (
+                <div
+                  className="ead-extract-info"
+                  data-testid="design-extract-info"
+                >
+                  <div className="ead-modal__section-head">
+                    <span>资产提取信息</span>
+                  </div>
+                  <pre className="ead-extract-info__body" aria-readonly="true">
+                    {extractInfoText}
+                  </pre>
+                </div>
+              ) : null}
               <div className="ead-modal__section-head">
                 <span>素材提示词</span>
                 <button
@@ -702,6 +770,11 @@ function DesignAssetModalBody({
                   className="amw-textarea"
                   data-testid="design-prompt-textarea"
                   aria-label="素材提示词"
+                  placeholder={
+                    formalPromptMissing
+                      ? "尚未生成正式素材提示词。请点击「重新生成提示词」。"
+                      : "正式素材提示词"
+                  }
                   value={promptText}
                   disabled={loadingPrompt}
                   rows={12}
@@ -711,11 +784,58 @@ function DesignAssetModalBody({
                   }}
                 />
               </label>
+              {formalPromptMissing && !promptText.trim() ? (
+                <p
+                  className="ead-muted"
+                  data-testid="design-prompt-not-generated"
+                >
+                  尚未生成
+                </p>
+              ) : null}
+              <div
+                className="ead-prompt-actions"
+                data-testid="design-prompt-actions"
+              >
+                <button
+                  type="button"
+                  className="amw-btn ead-prompt-actions__regenerate"
+                  data-testid="design-regenerate-prompt"
+                  disabled={loadingPrompt || generateBusy}
+                  onClick={openRequirementDialog}
+                >
+                  {loadingPrompt ? "生成中…" : "重新生成提示词"}
+                </button>
+
+                <div
+                  className="ead-prompt-actions__model"
+                  data-testid="design-prompt-model"
+                >
+                  <GlassSelect
+                    label="提示词模型"
+                    hideLabel
+                    value={promptModelId}
+                    options={DESIGN_PROMPT_MODEL_OPTIONS}
+                    disabled={loadingPrompt || generateBusy}
+                    menuPortal
+                    menuSideOffset={6}
+                    menuCollisionPadding={12}
+                    onChange={(value) => {
+                      if (
+                        DESIGN_PROMPT_MODELS.some(
+                          (model) => model.id === value,
+                        )
+                      ) {
+                        setPromptModelId(value as DesignPromptModelId);
+                      }
+                    }}
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="ead-modal__col">
               <div className="ead-modal__section-head">
-                <span>生成预览 · 4K · 16:9</span>
+                <span>{previewTitle}</span>
                 <div className="ead-modal__section-actions">
                   <button
                     type="button"
@@ -779,6 +899,88 @@ function DesignAssetModalBody({
                   ) : null}
                 </div>
               </div>
+              {!audioDisabled ? (
+                <div
+                  className="ead-generation-options"
+                  data-testid="design-image-generation-options"
+                >
+                  <div
+                    className="ead-generation-option"
+                    data-testid="design-image-quality"
+                  >
+                    <GlassSelect
+                      label="画质"
+                      value={imageOptions.quality}
+                      disabled={generateBusy}
+                      options={DESIGN_IMAGE_QUALITY_OPTIONS}
+                      menuPortal
+                      menuSideOffset={6}
+                      menuCollisionPadding={12}
+                      onChange={(value) => {
+                        setImageOptions((prev) => ({
+                          ...prev,
+                          quality:
+                            value as DesignImageGenerationOptions["quality"],
+                        }));
+                      }}
+                    />
+                  </div>
+
+                  <div
+                    className="ead-generation-option"
+                    data-testid="design-image-aspect-ratio"
+                  >
+                    <GlassSelect
+                      label="比例"
+                      value={imageOptions.aspectRatio}
+                      disabled={generateBusy}
+                      options={DESIGN_IMAGE_RATIO_OPTIONS}
+                      menuPortal
+                      menuSideOffset={6}
+                      menuCollisionPadding={12}
+                      onChange={(value) => {
+                        setImageOptions((prev) => ({
+                          ...prev,
+                          aspectRatio:
+                            value as DesignImageGenerationOptions["aspectRatio"],
+                        }));
+                      }}
+                    />
+                  </div>
+
+                  <div
+                    className="ead-generation-option"
+                    data-testid="design-image-count"
+                  >
+                    <GlassSelect
+                      label="张数"
+                      value={String(imageOptions.count)}
+                      disabled={generateBusy}
+                      options={DESIGN_IMAGE_COUNT_OPTIONS}
+                      menuPortal
+                      menuSideOffset={6}
+                      menuCollisionPadding={12}
+                      onChange={(value) => {
+                        const count = Number(value);
+
+                        if (
+                          !DESIGN_IMAGE_COUNTS.includes(
+                            count as DesignImageGenerationOptions["count"],
+                          )
+                        ) {
+                          return;
+                        }
+
+                        setImageOptions((prev) => ({
+                          ...prev,
+                          count:
+                            count as DesignImageGenerationOptions["count"],
+                        }));
+                      }}
+                    />
+                  </div>
+                </div>
+              ) : null}
               <div
                 className={
                   previewObjectUrl
@@ -838,87 +1040,6 @@ function DesignAssetModalBody({
                     : ""}
                 </p>
               ) : null}
-              {item.assetType === "character" && currentMediaId ? (
-                <div
-                  className="ead-modal__voice-row"
-                  data-testid="design-media-voice"
-                >
-                  <p className="ead-muted ead-modal__voice-hint">
-                    当前历史图需单独绑定音色；切换图片后请重新选择并绑定。
-                  </p>
-                  <div className="ead-card__voice-row">
-                    <div className="ead-card__voice-select">
-                      <VoiceSelector
-                        label="本图音色"
-                        value={mediaVoice?.voiceId ?? null}
-                        disabled={generateBusy}
-                        projectVoices={projectVoices}
-                        onChange={(voice) =>
-                          patchCharacterVoice({
-                            voiceId: voice?.id ?? null,
-                            voiceName: voice?.name ?? null,
-                            voiceBound: false,
-                          })
-                        }
-                      />
-                    </div>
-                    <div className="ead-card__voice-actions">
-                      <VoicePreviewButton
-                        projectId={projectId}
-                        voiceId={mediaVoice?.voiceId ?? null}
-                        audios={audios}
-                        className="amw-btn ead-card__voice-preview"
-                        testId="design-media-voice-preview"
-                        onStatus={setVoiceNote}
-                      />
-                      <button
-                        type="button"
-                        className={`amw-btn ead-card__voice-bind${
-                          mediaVoiceBound ? " is-bound" : ""
-                        }`}
-                        data-testid="design-media-voice-bind"
-                        disabled={
-                          generateBusy ||
-                          !mediaVoice?.voiceId ||
-                          mediaVoiceBound
-                        }
-                        title={
-                          mediaVoiceBound
-                            ? "本图音色已绑定"
-                            : "将当前选择的音色绑定到本张历史图"
-                        }
-                        onClick={() => {
-                          if (!mediaVoice?.voiceId) {
-                            setVoiceNote("请先选择音色再绑定");
-                            return;
-                          }
-                          patchCharacterVoice({
-                            voiceId: mediaVoice.voiceId,
-                            voiceName: mediaVoice.voiceName,
-                            voiceBound: true,
-                          });
-                          setNotice(
-                            `已为本图绑定音色${
-                              mediaVoice.voiceName
-                                ? `：${mediaVoice.voiceName}`
-                                : ""
-                            }`,
-                          );
-                        }}
-                      >
-                        {mediaVoiceBound ? "本图已绑定" : "绑定音色"}
-                      </button>
-                    </div>
-                  </div>
-                  {voiceNote ? (
-                    <p className="ead-muted ead-card__voice-note">{voiceNote}</p>
-                  ) : null}
-                </div>
-              ) : item.assetType === "character" ? (
-                <p className="ead-muted" data-testid="design-media-voice-empty">
-                  请先生成图片，再为该历史图绑定音色。
-                </p>
-              ) : null}
               {showImageHistory ? (
                 <div
                   className="ead-history-strip ead-history-strip--images"
@@ -945,7 +1066,6 @@ function DesignAssetModalBody({
                                 (h) => h.mediaId === id,
                               )?.videoRefSafety ?? null;
                             setVideoRefSafety(fromHistory);
-                            setVoiceNote("");
                             if (
                               item.assetType === "character" &&
                               onItemPatched
@@ -1008,18 +1128,11 @@ function DesignAssetModalBody({
           <footer className="ead-modal__foot">
             <button
               type="button"
-              className="amw-btn"
-              data-testid="design-regenerate-prompt"
-              disabled={loadingPrompt || generateBusy}
-              onClick={openRequirementDialog}
-            >
-              {loadingPrompt ? "生成中…" : "重新生成提示词"}
-            </button>
-            <button
-              type="button"
               className="amw-btn amw-btn-primary"
               data-testid="design-copy"
-              disabled={!promptText.trim() || loadingPrompt || generateBusy}
+              disabled={
+                !promptText.trim() || loadingPrompt || generateBusy
+              }
               onClick={() => void handleCopy()}
             >
               一键复制

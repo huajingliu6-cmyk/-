@@ -88,6 +88,35 @@ describe("stale text generation jobs", () => {
     ).toBe(false);
   });
 
+  it("does not treat script_asset_design as stale at 185s", () => {
+    const updatedAt = "2026-08-14T08:00:46.122Z";
+    const now = Date.parse(updatedAt) + 185_000;
+    expect(
+      isStaleTextJob(
+        baseJob({
+          outputKind: "script_asset_design",
+          updatedAt,
+        }),
+        now,
+      ),
+    ).toBe(false);
+  });
+
+  it("marks script_asset_design stale after dedicated timeout plus grace", () => {
+    const updatedAt = "2026-08-14T08:00:46.122Z";
+    const timeoutMs = 600_000;
+    const now = Date.parse(updatedAt) + timeoutMs + 15_000 + 1;
+    expect(
+      isStaleTextJob(
+        baseJob({
+          outputKind: "script_asset_design",
+          updatedAt,
+        }),
+        now,
+      ),
+    ).toBe(true);
+  });
+
   it("reclaims a stale job and releases its credit reservation", async () => {
     const job = baseJob();
     await saveTextJob(job);

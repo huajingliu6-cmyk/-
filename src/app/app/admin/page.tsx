@@ -1,7 +1,7 @@
 import {
   AdminConsole,
-  type AdminView,
 } from "@/auth/ai-admin/AdminConsole";
+import { resolveAdminInitialView } from "@/auth/ai-admin/admin-view";
 import { assertSystemAdminPage } from "@/auth/page-guards";
 
 type AdminPageProps = {
@@ -9,23 +9,6 @@ type AdminPageProps = {
     view?: string | string[];
   }>;
 };
-
-const ADMIN_VIEW_ALIASES: Readonly<Record<string, AdminView>> = {
-  overview: "overview",
-  connections: "connections",
-  routes: "routes",
-  routing: "routes",
-  rules: "rules",
-  generations: "generations",
-  history: "generations",
-  approvals: "approvals",
-};
-
-function resolveInitialView(value: string | string[] | undefined): AdminView {
-  return typeof value === "string"
-    ? (ADMIN_VIEW_ALIASES[value] ?? "overview")
-    : "overview";
-}
 
 export default async function SystemAdminPage({
   searchParams,
@@ -36,7 +19,7 @@ export default async function SystemAdminPage({
   return (
     <AdminConsole
       user={user}
-      initialView={resolveInitialView(resolvedSearchParams?.view)}
+      initialView={resolveAdminInitialView(resolvedSearchParams?.view)}
     />
   );
 }

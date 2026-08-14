@@ -18,7 +18,8 @@ export type VideoGenerationConfirmPayload = {
   aspectRatio: string;
   resolution: string;
   modelLabel: string;
-  creditEstimate: number;
+  /** null = 该分辨率暂未配置价格 */
+  creditEstimate: number | null;
   isPaidProvider: boolean;
   isMockProvider: boolean;
   characterAssets?: string[];
@@ -162,7 +163,12 @@ export function VideoGenerationConfirmationDialog({
             <li>画幅：{payload.aspectRatio}</li>
             <li>分辨率：{payload.resolution}</li>
             <li>视频模型：{payload.modelLabel}</li>
-            <li>预计消耗积分：{payload.creditEstimate}</li>
+            <li>
+              预计消耗积分：
+              {payload.creditEstimate == null
+                ? "当前分辨率暂未配置价格"
+                : payload.creditEstimate}
+            </li>
             <li>
               付费 Provider：
               {payload.isPaidProvider ? "是（真实付费）" : "否"}
@@ -248,6 +254,7 @@ export function VideoGenerationConfirmationDialog({
             disabled={
               confirming ||
               blockForMissingCharacterRefs ||
+              payload.creditEstimate == null ||
               (payload.mode === "episode" &&
                 payload.pendingCount === 0 &&
                 !includeSucceeded)

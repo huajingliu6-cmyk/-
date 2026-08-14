@@ -1,5 +1,5 @@
 /**
- * Transport DTO for asset.episode-design.generate structured output.
+ * Transport DTO for asset.episode-design.generate structured output (canonical).
  */
 
 import { z } from "zod";
@@ -14,19 +14,9 @@ export const EPISODE_ASSET_DESIGN_DESCRIPTION_MAX_CHARS = 5000;
 export const EPISODE_ASSET_DESIGN_EVIDENCE_MAX_CHARS = 500;
 export const EPISODE_ASSET_DESIGN_RAW_OUTPUT_MAX_CHARS = 120_000;
 
-const REJECTED_KEY_PATTERN =
-  /^(id|existingAssetId|libraryAssetId|projectId|modelId|providerModelId|base64)$/i;
-
-const DangerousKeySchema = z
-  .string()
-  .refine(
-    (k) => k !== "__proto__" && k !== "constructor" && k !== "prototype",
-    { message: "危险字段名" },
-  );
-
 const AssetTypeSchema = z.enum(["character", "scene", "prop", "audio"]);
 
-const CharacterDesignSchema = z
+export const CharacterDesignSchema = z
   .object({
     description: z.string().max(EPISODE_ASSET_DESIGN_DESCRIPTION_MAX_CHARS).optional(),
     appearance: z.string().max(500).optional(),
@@ -37,7 +27,7 @@ const CharacterDesignSchema = z
   })
   .strict();
 
-const SceneDesignSchema = z
+export const SceneDesignSchema = z
   .object({
     description: z.string().max(EPISODE_ASSET_DESIGN_DESCRIPTION_MAX_CHARS).optional(),
     timeOfDay: z.string().max(100).optional(),
@@ -48,7 +38,7 @@ const SceneDesignSchema = z
   })
   .strict();
 
-const PropDesignSchema = z
+export const PropDesignSchema = z
   .object({
     description: z.string().max(EPISODE_ASSET_DESIGN_DESCRIPTION_MAX_CHARS).optional(),
     propType: z.string().max(200).optional(),
@@ -58,7 +48,7 @@ const PropDesignSchema = z
   })
   .strict();
 
-const AudioDesignSchema = z
+export const AudioDesignSchema = z
   .object({
     description: z.string().max(EPISODE_ASSET_DESIGN_DESCRIPTION_MAX_CHARS).optional(),
     audioKind: z.enum(["music", "sfx", "narration", "voice"]).optional(),
@@ -67,7 +57,7 @@ const AudioDesignSchema = z
   })
   .strict();
 
-const AssetItemSchema = z
+export const AssetItemSchema = z
   .object({
     type: AssetTypeSchema,
     name: z
@@ -94,6 +84,10 @@ const AssetItemSchema = z
   })
   .strict();
 
+/**
+ * Canonical internal DTO. Prefer parseEpisodeAssetDesignOutput for model output;
+ * this schema remains the strict post-normalize contract.
+ */
 export const EpisodeAssetDesignGenerationDtoSchema = z
   .object({
     version: z.literal(EPISODE_ASSET_DESIGN_GENERATION_VERSION),
@@ -131,229 +125,17 @@ export type EpisodeAssetDesignGenerationDto = z.infer<
   typeof EpisodeAssetDesignGenerationDtoSchema
 >;
 
-export type ParseEpisodeAssetDesignResult =
-  | { ok: true; value: EpisodeAssetDesignGenerationDto }
-  | {
-      ok: false;
-      code:
-        | "EPISODE_ASSET_DESIGN_OUTPUT_INVALID"
-        | "EPISODE_ASSET_DESIGN_CONTENT_EMPTY";
-      message: string;
-    };
+export type {
+  ParseAssetWarning,
+  RejectedAssetItem,
+} from "@/projects/assets/episode-design/normalize-raw-asset";
 
-function stripSingleJsonFence(raw: string): string | null {
-  const trimmed = raw.trim();
-  const fence = /^```(?:json)?\s*\n([\s\S]*?)\n```$/i.exec(trimmed);
-  if (!fence) return null;
-  return fence[1]!.trim();
-}
+export { rejectDangerousKeys } from "@/projects/assets/episode-design/reject-dangerous-keys";
 
-function rejectDangerousKeys(value: unknown, path: string[]): string | null {
-  if (value === null || typeof value !== "object") return null;
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i += 1) {
-      const hit = rejectDangerousKeys(value[i], [...path, String(i)]);
-      if (hit) return hit;
-    }
-    return null;
-  }
-  for (const key of Object.keys(value as Record<string, unknown>)) {
-    const check = DangerousKeySchema.safeParse(key);
-    if (!check.success) {
-      return `包含危险字段：${key}`;
-    }
-    if (REJECTED_KEY_PATTERN.test(key)) {
-      return `包含不允许的字段：${key}`;
-    }
-    const lower = key.toLowerCase();
-    if (lower.includes("base64") || lower.includes("filepath") || lower.includes("path")) {
-      return `包含不允许的字段：${key}`;
-    }
-    const hit = rejectDangerousKeys(
-      (value as Record<string, unknown>)[key],
-      [...path, key],
-    );
-    if (hit) return hit;
-  }
-  return null;
-}
-
-export function parseEpisodeAssetDesignOutput(
-  raw: string,
-): ParseEpisodeAssetDesignResult {
-  if (raw.length > EPISODE_ASSET_DESIGN_RAW_OUTPUT_MAX_CHARS) {
-    return {
-      ok: false,
-      code: "EPISODE_ASSET_DESIGN_OUTPUT_INVALID",
-      message: "模型输出超过长度上限",
-    };
-  }
-
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return {
-      ok: false,
-      code: "EPISODE_ASSET_DESIGN_CONTENT_EMPTY",
-      message: "模型输出为空",
-    };
-  }
-
-  let jsonText = trimmed;
-  const fenced = stripSingleJsonFence(trimmed);
-  if (fenced !== null) {
-    jsonText = fenced;
-  } else if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
-    return {
-      ok: false,
-      code: "EPISODE_ASSET_DESIGN_OUTPUT_INVALID",
-      message: "模型输出必须是单个 JSON 对象或单一 json 代码围栏",
-    };
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(jsonText);
-  } catch {
-    return {
-      ok: false,
-      code: "EPISODE_ASSET_DESIGN_OUTPUT_INVALID",
-      message: "模型输出不是合法 JSON",
-    };
-  }
-
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return {
-      ok: false,
-      code: "EPISODE_ASSET_DESIGN_OUTPUT_INVALID",
-      message: "模型输出必须是 JSON 对象",
-    };
-  }
-
-  const normalized = normalizeEpisodeAssetDesignPayload(parsed);
-  const danger = rejectDangerousKeys(normalized, []);
-  if (danger) {
-    return {
-      ok: false,
-      code: "EPISODE_ASSET_DESIGN_OUTPUT_INVALID",
-      message: danger,
-    };
-  }
-
-  const validated = EpisodeAssetDesignGenerationDtoSchema.safeParse(normalized);
-  if (!validated.success) {
-    const issue = validated.error.issues[0];
-    const path = issue?.path?.length ? issue.path.join(".") : "";
-    const rawMsg = issue?.message ?? "结构化资产设计校验失败";
-    const msg =
-      rawMsg === "Invalid input" || rawMsg === "Required"
-        ? path
-          ? `字段 ${path} 格式无效（design 须为对象，不能是纯文本）`
-          : "资产设计字段格式无效（design 须为对象，不能是纯文本）"
-        : rawMsg;
-    if (/不能为空|为空/.test(msg)) {
-      return {
-        ok: false,
-        code: "EPISODE_ASSET_DESIGN_CONTENT_EMPTY",
-        message: msg,
-      };
-    }
-    return {
-      ok: false,
-      code: "EPISODE_ASSET_DESIGN_OUTPUT_INVALID",
-      message: msg,
-    };
-  }
-
-  return { ok: true, value: validated.data };
-}
-
-/**
- * Models often return `design` as a long prose string. Coerce to the typed
- * object shape expected by the DTO so apply-generation does not fail with
- * Zod's opaque "Invalid input".
- */
-function normalizeEpisodeAssetDesignPayload(parsed: object): object {
-  const root = parsed as Record<string, unknown>;
-  if (!Array.isArray(root.assets)) return parsed;
-  return {
-    ...root,
-    assets: root.assets.map((asset) => {
-      if (!asset || typeof asset !== "object" || Array.isArray(asset)) {
-        return asset;
-      }
-      const item = { ...(asset as Record<string, unknown>) };
-      if (typeof item.design === "string") {
-        const text = item.design.trim();
-        const type = item.type;
-        if (type === "character") {
-          item.design = {
-            appearance: text,
-            description: text,
-          };
-        } else if (type === "scene") {
-          item.design = {
-            description: text,
-            location: text,
-          };
-        } else if (type === "prop") {
-          item.design = {
-            description: text,
-            usage: text,
-          };
-        } else if (type === "audio") {
-          item.design = {
-            description: text,
-          };
-        } else {
-          item.design = { description: text };
-        }
-      } else if (
-        item.design &&
-        typeof item.design === "object" &&
-        !Array.isArray(item.design)
-      ) {
-        const source = item.design as Record<string, unknown>;
-        const prompt = typeof source.prompt === "string" ? source.prompt.trim() : "";
-        const description =
-          typeof source.description === "string"
-            ? source.description.trim()
-            : prompt;
-        const type = item.type;
-        const normalized: Record<string, string> = {};
-        if (description) normalized.description = description;
-        if (typeof source.usageInEpisode === "string") {
-          normalized.usageInEpisode = source.usageInEpisode;
-        }
-        if (typeof source.evidence === "string") {
-          normalized.evidence = source.evidence;
-        }
-        if (type === "character") {
-          normalized.appearance =
-            typeof source.appearance === "string" ? source.appearance : prompt;
-          if (typeof source.clothing === "string") normalized.clothing = source.clothing;
-          if (typeof source.role === "string") normalized.role = source.role;
-        } else if (type === "scene") {
-          normalized.location =
-            typeof source.location === "string" ? source.location : prompt;
-          if (typeof source.timeOfDay === "string") normalized.timeOfDay = source.timeOfDay;
-          if (typeof source.style === "string") normalized.style = source.style;
-        } else if (type === "prop") {
-          normalized.usage =
-            typeof source.usage === "string" ? source.usage : prompt;
-          if (typeof source.propType === "string") normalized.propType = source.propType;
-        } else if (type === "audio") {
-          if (
-            source.audioKind === "music" ||
-            source.audioKind === "sfx" ||
-            source.audioKind === "narration" ||
-            source.audioKind === "voice"
-          ) {
-            normalized.audioKind = source.audioKind;
-          }
-        }
-        item.design = normalized;
-      }
-      return item;
-    }),
-  };
-}
+// parseEpisodeAssetDesignOutput lives in parse-episode-asset-design.ts to avoid
+// circular imports with the canonical Zod schemas above.
+export {
+  parseEpisodeAssetDesignOutput,
+  parseEpisodeAssetDesignOutputAsync,
+  type ParseEpisodeAssetDesignResult,
+} from "@/projects/assets/episode-design/parse-episode-asset-design";

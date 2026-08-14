@@ -2,12 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import {
-  FolderOpen,
-  Pencil,
-  Shield,
-  Trash2,
-} from "lucide-react";
+import { FolderOpen, Pencil, Settings2, Trash2 } from "lucide-react";
 
 export type WorkbenchProjectContextAction =
   | "open"
@@ -92,8 +87,8 @@ export function WorkbenchProjectContextMenu({
     },
     {
       id: "rules",
-      label: "编辑任务规则",
-      icon: Shield,
+      label: "编辑项目规则",
+      icon: Settings2,
       hidden: !menu.canEditRules,
     },
     {

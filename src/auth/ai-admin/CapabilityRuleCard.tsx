@@ -17,6 +17,7 @@ import type {
   RuleCheckResult,
   TaskRuleDraft,
 } from "@/auth/ai-admin/types";
+import { resolveCapabilityProfileSlot } from "@/auth/ai-admin/connection-capability-rules";
 import {
   capabilitySlug,
   ruleStatusLabel,
@@ -33,6 +34,8 @@ type Props = {
   onSummaryRefresh: () => void;
   onError: (message: string) => void;
   onNotice: (message: string) => void;
+  /** When false, hide the model-connection binder (managed on 能力线路). Default true. */
+  showConnectionBinding?: boolean;
 };
 
 type RuleDetail = {
@@ -41,13 +44,6 @@ type RuleDetail = {
   builtinRule: string;
   publishedVersion: number | null;
 };
-
-function profileSlotForCap(
-  summary: CapabilityRuleSummary,
-  diag?: CapabilityDiag,
-): string | null {
-  return diag?.profileSlotId ?? summary.defaultProfileSlot;
-}
 
 export function CapabilityRuleCard({
   summary,
@@ -59,10 +55,11 @@ export function CapabilityRuleCard({
   onSummaryRefresh,
   onError,
   onNotice,
+  showConnectionBinding = true,
 }: Props) {
   const slug = capabilitySlug(summary.capabilityId);
   const planned = summary.status === "planned";
-  const profileSlot = profileSlotForCap(summary, diag);
+  const profileSlot = resolveCapabilityProfileSlot(summary, diag);
 
   const [expanded, setExpanded] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -512,7 +509,7 @@ export function CapabilityRuleCard({
               <span className="text-sm font-medium text-zinc-100">
                 {summary.label}
               </span>
-              <span className="text-[10px] text-zinc-500">
+              <span className="ai-admin-rule-capability-id text-[10px] text-zinc-500">
                 {summary.capabilityId}
               </span>
             </div>
@@ -540,6 +537,16 @@ export function CapabilityRuleCard({
             {planned ? (
               <p className="mt-1 text-[11px] text-amber-300">功能尚未接线</p>
             ) : null}
+            {summary.outputContractConflict ? (
+              <p
+                className="mt-1 text-[11px] text-rose-300"
+                data-testid={`ai-rule-contract-conflict-${slug}`}
+                role="alert"
+              >
+                {summary.outputContractConflictMessage ??
+                  "当前已发布规则与固定输出协议冲突，请恢复内置或修正后重新发布。"}
+              </p>
+            ) : null}
           </div>
         </button>
 
@@ -549,7 +556,7 @@ export function CapabilityRuleCard({
               <div className="mb-2 text-xs text-zinc-500">加载规则中…</div>
             ) : null}
 
-            {profileSlot ? (
+            {showConnectionBinding && profileSlot ? (
               <div className="mb-3 max-w-md">
                 <GlassSelect
                   label="绑定模型连接"
@@ -569,7 +576,7 @@ export function CapabilityRuleCard({
             </label>
             <textarea
               ref={editorRef}
-              className="mb-2 min-h-[160px] w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-zinc-100 outline-none"
+              className="ai-admin-rule-editor mb-2 min-h-[180px] w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-zinc-100 outline-none"
               value={editorContent}
               data-testid={`ai-rule-editor-${slug}`}
               onChange={(e) => setEditorContent(e.target.value)}

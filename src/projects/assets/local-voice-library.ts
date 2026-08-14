@@ -17,6 +17,16 @@ export type LocalVoiceLibraryEntry = VoiceOption & {
   sizeBytes: number;
 };
 
+/**
+ * Remote/production normally refuses host filesystem voices.
+ * LAN may opt in with LOCAL_VOICE_LIBRARY_ALLOW_IN_REMOTE=true and a mounted dir.
+ */
+export function isLocalVoiceLibraryEnabled(): boolean {
+  if (!isRemoteDataOnly()) return true;
+  const flag = process.env.LOCAL_VOICE_LIBRARY_ALLOW_IN_REMOTE?.trim().toLowerCase();
+  return flag === "1" || flag === "true" || flag === "yes";
+}
+
 export function getLocalVoiceLibraryDir(): string {
   const fromEnv = process.env.LOCAL_VOICE_LIBRARY_DIR?.trim();
   if (fromEnv) return path.resolve(fromEnv);
@@ -54,7 +64,7 @@ function isSafeLibraryFileName(fileName: string): boolean {
 export async function resolveLocalVoiceFile(
   voiceId: string,
 ): Promise<{ absolutePath: string; fileName: string; mimeType: string } | null> {
-  if (isRemoteDataOnly()) return null;
+  if (!isLocalVoiceLibraryEnabled()) return null;
   const fileName = decodeLocalVoiceId(voiceId);
   if (!fileName || !isSafeLibraryFileName(fileName)) return null;
 
@@ -79,7 +89,7 @@ export async function resolveLocalVoiceFile(
 }
 
 export async function listLocalVoiceLibrary(): Promise<LocalVoiceLibraryEntry[]> {
-  if (isRemoteDataOnly()) return [];
+  if (!isLocalVoiceLibraryEnabled()) return [];
   const root = getLocalVoiceLibraryDir();
   let names: string[];
   try {

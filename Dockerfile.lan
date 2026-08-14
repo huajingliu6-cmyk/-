@@ -13,7 +13,11 @@ ENV GO_BACKEND_INTERNAL_URL=http://api:8080
 ENV INTERNAL_API_TOKEN=build-only-placeholder
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+ARG BUILD_REVISION=unknown
+ARG BUILD_SOURCE=infinite-canvas
+ENV BUILD_REVISION=$BUILD_REVISION
+ENV BUILD_SOURCE=$BUILD_SOURCE
+RUN node scripts/write-build-info.mjs && npm run build
 
 FROM node:22-alpine AS runtime
 WORKDIR /app
@@ -21,6 +25,10 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
+ARG BUILD_REVISION=unknown
+ARG BUILD_SOURCE=infinite-canvas
+ENV BUILD_REVISION=$BUILD_REVISION
+ENV BUILD_SOURCE=$BUILD_SOURCE
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs
 COPY --from=build --chown=nextjs:nodejs /app/public ./public
@@ -29,4 +37,4 @@ COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=build --chown=nextjs:nodejs /app/scripts/validate-production-web-env.mjs ./validate-production-web-env.mjs
 USER nextjs
 EXPOSE 3000
-CMD ["sh", "-c", "node validate-production-web-env.mjs && exec node server.js"]
+CMD ["sh", "-c", "node validate-production-web-env.mjs && echo \"[build-info] source=$BUILD_SOURCE revision=$BUILD_REVISION\" && exec node server.js"]

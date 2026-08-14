@@ -64,4 +64,19 @@ describe("generation-busy wiring contracts", () => {
     expect(storyboard).toContain("useGenerationBusy");
     expect(script).toContain("useGenerationBusy");
   });
+
+  it("asset extract registers GenerationBusyGuard while extractionBusy", () => {
+    const assets = readSrc(
+      "src/projects/assets/EpisodeAssetDesignWorkspace.tsx",
+    );
+    const busyIdx = assets.indexOf("useGenerationBusy(");
+    expect(busyIdx).toBeGreaterThan(-1);
+    const busySlice = assets.slice(busyIdx, busyIdx + 280);
+    expect(busySlice).toContain("extractionBusy || generatingAssetIds.size > 0");
+    expect(busySlice).toContain("asset-extract-${projectId}");
+    expect(busySlice).toContain("资产提取");
+    expect(assets).toContain("extractionBusy");
+    expect(assets).toContain("extractingEpisodeIds");
+    expect(assets).toContain("currentEpisodeExtracting");
+  });
 });

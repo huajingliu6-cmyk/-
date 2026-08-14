@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { type NodeProps } from "@xyflow/react";
 import { Mountain, Plus, ZoomIn } from "lucide-react";
+import { safeRandomUUID } from "@/lib/safe-random-id";
 import { AssetThumb } from "@/workflow/components/AssetThumb";
 import { BrandMarkFrame } from "@/workflow/components/BrandMark";
 import { ImageLightbox } from "@/workflow/components/ImageLightbox";
@@ -48,7 +49,7 @@ export function SceneNodeView({ id, selected }: NodeProps) {
         });
         uploaded.push(asset);
         newViewpoints.push({
-          id: `vp-${crypto.randomUUID().slice(0, 8)}`,
+          id: `vp-${safeRandomUUID().slice(0, 8)}`,
           tag: "custom",
           label: file.name,
           assetId: asset.id,

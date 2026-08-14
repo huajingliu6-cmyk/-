@@ -1,3 +1,4 @@
+import { safeRandomUUID } from "@/lib/safe-random-id";
 import { createNodeByType } from "@/workflow/create-node";
 import type {
   AssetRecord,
@@ -66,7 +67,7 @@ export function createNodeFromAsset(
     }
     case "scene": {
       const viewpoint: SceneViewpoint = {
-        id: `vp-${crypto.randomUUID().slice(0, 8)}`,
+        id: `vp-${safeRandomUUID().slice(0, 8)}`,
         tag: "custom",
         label: asset.name,
         assetId: asset.id,
@@ -213,7 +214,7 @@ export function attachAssetToNode(
         return { ok: true, node };
       }
       const viewpoint: SceneViewpoint = {
-        id: `vp-${crypto.randomUUID().slice(0, 8)}`,
+        id: `vp-${safeRandomUUID().slice(0, 8)}`,
         tag: "custom",
         label: asset.name,
         assetId: asset.id,

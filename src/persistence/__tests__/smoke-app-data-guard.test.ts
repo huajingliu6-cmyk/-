@@ -172,6 +172,7 @@ describe("smoke APP_DATA_DIR isolation guard", () => {
       name: `Smoke Project ${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await addCardEngineer({

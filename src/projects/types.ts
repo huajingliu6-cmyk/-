@@ -1,3 +1,5 @@
+import type { ProjectVisualStyleId } from "@/projects/project-visual-style";
+
 export type ProjectCreationSource = "story" | "script-upload";
 
 export type ProjectMode = "canvas" | "full-stack";
@@ -20,6 +22,11 @@ export type ProjectRecord = {
   status: ProjectLifecycleStatus;
   /** 可选项目要点 */
   highlights: string;
+  /**
+   * Canonical project visual style id.
+   * Legacy projects without a style resolve to null — never silently default.
+   */
+  visualStyle: ProjectVisualStyleId | null;
   passwordEnabled: boolean;
   /** scrypt 哈希；passwordEnabled 为 false 时为 null */
   passwordHash: string | null;
@@ -38,6 +45,7 @@ export type ProjectPublic = {
   projectMode: ProjectMode;
   status: ProjectLifecycleStatus;
   highlights: string;
+  visualStyle: ProjectVisualStyleId | null;
   passwordEnabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -48,6 +56,8 @@ export type CreateProjectInput = {
   creationSource: ProjectCreationSource;
   projectMode: ProjectMode;
   highlights?: string;
+  /** Required canonical style id for new projects. */
+  visualStyle: ProjectVisualStyleId;
   passwordEnabled: boolean;
   /** 仅当 passwordEnabled 时提交；服务端哈希后丢弃原文 */
   projectPassword?: string | null;

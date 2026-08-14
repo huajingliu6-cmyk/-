@@ -51,7 +51,7 @@ function balanceDisplay(credits: CreditsState): ReactNode {
 
 /**
  * 积分中心：居中 Dialog（遮罩 / ESC / 点击外部关闭）。
- * 沿用 ApiManagePanel / ImageLightbox 的 dialog 模式，视觉对齐登录卡片深色玻璃语言。
+ * 沿用账户设置 / ImageLightbox 的 dialog 模式，视觉对齐登录卡片深色玻璃语言。
  */
 export function PointsCenterModal({
   open,

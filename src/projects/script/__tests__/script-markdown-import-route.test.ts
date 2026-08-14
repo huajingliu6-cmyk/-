@@ -88,6 +88,7 @@ describe("script-draft import-markdown", () => {
       name: "m1",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const res = await importMd(mdRequest(project.projectId, THREE, "Story.MD"), {
@@ -122,6 +123,7 @@ describe("script-draft import-markdown", () => {
       name: "m-admin",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const res = await importMd(
@@ -139,6 +141,7 @@ describe("script-draft import-markdown", () => {
       name: "m-ext",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const ctx = { params: Promise.resolve({ projectId: project.projectId }) };
@@ -156,6 +159,7 @@ describe("script-draft import-markdown", () => {
       name: "m2",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const engineer = auth("user", "md-ce");
@@ -197,6 +201,7 @@ describe("script-draft import-markdown", () => {
       name: "m3",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const ctx = { params: Promise.resolve({ projectId: project.projectId }) };
@@ -218,6 +223,7 @@ describe("script-draft import-markdown", () => {
       name: "m4",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const pid = project.projectId;

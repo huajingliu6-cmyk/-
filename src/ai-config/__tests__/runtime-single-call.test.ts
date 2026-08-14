@@ -66,6 +66,7 @@ describe("H2 runtime single-call composition", () => {
       name: "H2 Runtime",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
 
@@ -117,6 +118,7 @@ describe("H2 runtime single-call composition", () => {
       name: "H2 Full Script Assets",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const sourceText = [
@@ -146,7 +148,7 @@ describe("H2 runtime single-call composition", () => {
     expect(last).not.toBeNull();
     expect(last!.userPrompt).toContain(sourceText);
     expect(last!.userPrompt).toContain("未分集完整剧本");
-    expect(last!.systemPrompt).toContain("不得拆成逐集对话");
+    expect(last!.systemPrompt).toContain("IMMUTABLE_OUTPUT_CONTRACT");
     expect(getMockTextCallCount()).toBe(1);
   });
 });

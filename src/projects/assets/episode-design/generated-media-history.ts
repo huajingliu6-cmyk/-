@@ -174,31 +174,61 @@ export function appendGeneratedMediaGeneration(
     mimeType?: string | null;
   },
 ): GeneratedMediaState {
-  const entry: GeneratedMediaHistoryEntry = {
+  return appendGeneratedMediaGenerations(prev, [input]);
+}
+
+/** Append a batch of generations; currentId = first image in the batch. */
+export function appendGeneratedMediaGenerations(
+  prev: GeneratedMediaState | undefined,
+  inputs: Array<{
+    mediaId: string;
+    prompt: string;
+    generatedAt: string;
+    promptFingerprint: string;
+    mimeType?: string | null;
+  }>,
+): GeneratedMediaState {
+  if (inputs.length === 0) {
+    return (
+      prev ?? {
+        currentId: null,
+        historyIds: [],
+        history: [],
+        status: "idle",
+        promptFingerprint: null,
+        errorMessage: null,
+        previewKind: "image",
+      }
+    );
+  }
+
+  const first = inputs[0]!;
+  const entries: GeneratedMediaHistoryEntry[] = inputs.map((input) => ({
     mediaId: input.mediaId,
     prompt: input.prompt,
     generatedAt: input.generatedAt,
     mimeType: input.mimeType ?? null,
     promptFingerprint: input.promptFingerprint,
-  };
+  }));
+
   return (
     mergeGeneratedMediaState(prev, {
-      currentId: input.mediaId,
-      historyIds: [input.mediaId],
-      history: [entry],
+      currentId: first.mediaId,
+      historyIds: inputs.map((input) => input.mediaId),
+      history: entries,
       status: "completed",
-      promptFingerprint: input.promptFingerprint,
+      promptFingerprint: first.promptFingerprint,
       errorMessage: null,
-      mimeType: input.mimeType ?? null,
+      mimeType: first.mimeType ?? null,
       previewKind: "image",
     }) ?? {
-      currentId: input.mediaId,
-      historyIds: [input.mediaId],
-      history: [entry],
+      currentId: first.mediaId,
+      historyIds: inputs.map((input) => input.mediaId),
+      history: entries,
       status: "completed",
-      promptFingerprint: input.promptFingerprint,
+      promptFingerprint: first.promptFingerprint,
       errorMessage: null,
-      mimeType: input.mimeType ?? null,
+      mimeType: first.mimeType ?? null,
       previewKind: "image",
     }
   );

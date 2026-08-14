@@ -6,6 +6,7 @@ import {
 } from "@/ai-config/capabilities";
 import { getBuiltinTaskRule } from "@/ai-config/builtin-task-rules";
 import { AiConfigError } from "@/ai-config/errors";
+import { findTaskRuleOutputContractConflict } from "@/ai-config/task-rule-contract-guard";
 import { resolveAppDataPath } from "@/persistence/data-root";
 import { isRemoteDataOnly } from "@/persistence/remote-data-client";
 import {
@@ -219,7 +220,10 @@ export async function getEffectivePublishedRule(
   };
 }
 
-export function checkRule(content: string): RuleCheckResult {
+export function checkRule(
+  content: string,
+  capabilityId?: AiCapabilityId | string | null,
+): RuleCheckResult {
   const errors: RuleCheckItem[] = [];
   const warnings: RuleCheckItem[] = [];
   const infos: RuleCheckItem[] = [];
@@ -277,6 +281,24 @@ export function checkRule(content: string): RuleCheckResult {
       code: "CONTRACT_CONFLICT",
       message: "文本资产提取任务不应要求直接生成图片或二进制",
     });
+  }
+
+  const resolvedCapability =
+    typeof capabilityId === "string" && capabilityId.trim()
+      ? getAiCapability(capabilityId)?.id
+      : null;
+  if (resolvedCapability) {
+    const contractConflict = findTaskRuleOutputContractConflict(
+      resolvedCapability,
+      content,
+    );
+    if (contractConflict) {
+      errors.push({
+        severity: "error",
+        code: contractConflict.code,
+        message: `${contractConflict.message}（冲突语义：${contractConflict.patterns.join("、")}）`,
+      });
+    }
   }
 
   if (trimmed.length > 0 && trimmed.length < 20) {
@@ -389,7 +411,7 @@ export async function publishRule(
       "草稿 revision 冲突，请刷新后重试",
     );
   }
-  const check = checkRule(content);
+  const check = checkRule(content, id);
   if (check.errors.length > 0) {
     throw new AiConfigError(
       "AI_TASK_RULE_CONFIG_INVALID",

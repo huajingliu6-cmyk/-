@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSessionUser } from "@/auth/require-user";
 import { AiConfigError } from "@/ai-config/errors";
 import { loadAssetBundleDraft } from "@/projects/assets/asset-bundle-store";
+import { getProjectRecord } from "@/projects/project-access";
 import {
   findProduction,
   isRecord,
@@ -10,7 +11,11 @@ import {
   persistProduction,
 } from "@/projects/storyboard/api-helpers";
 import { buildStoryboardPromptContext } from "@/projects/storyboard/services/storyboard-prompt-context";
-import { regenerateShotVideoPromptWithLlm } from "@/projects/storyboard/services/storyboard-prompt-llm";
+import {
+  regenerateShotVideoPromptWithLlm,
+  StoryboardPromptFillError,
+} from "@/projects/storyboard/services/storyboard-prompt-llm";
+import { requireProjectVisualStyleDirective } from "@/projects/project-visual-style";
 import { parseDurationSecondsFromVideoPrompt } from "@/projects/storyboard/storyboard-video-params";
 import {
   getShotVideoPrompt,
@@ -49,10 +54,12 @@ export async function POST(request: Request, context: RouteContext) {
     "model" in body ||
     "modelId" in body ||
     "provider" in body ||
-    "providerModelId" in body
+    "providerModelId" in body ||
+    "stylePrompt" in body ||
+    "visualStyle" in body
   ) {
     return NextResponse.json(
-      { error: "不允许指定视频或外部模型参数" },
+      { error: "不允许指定视频、外部模型参数或覆盖项目视觉风格" },
       { status: 400 },
     );
   }
@@ -113,15 +120,27 @@ export async function POST(request: Request, context: RouteContext) {
 
   const previousPrompt = getShotVideoPrompt(originalShot);
   const libraryAssets = await loadAssetBundleDraft(projectId);
+  const project = await getProjectRecord(projectId);
+  const styleResolved = requireProjectVisualStyleDirective({
+    visualStyle: project?.visualStyle,
+    highlights: project?.highlights,
+  });
+  if (!styleResolved.ok) {
+    return NextResponse.json({ error: styleResolved.error }, { status: 400 });
+  }
   const promptContext = buildStoryboardPromptContext({
     scriptText:
       production.confirmedScriptText ?? production.workingScriptText,
     libraryAssets,
+    visualStyle: styleResolved.styleId,
+    highlights: project?.highlights,
+    visualStyleDirective: styleResolved.directive,
   });
   let nextPrompt: string;
   try {
     nextPrompt = await regenerateShotVideoPromptWithLlm({
       projectId,
+      episodeId,
       userId: session.user.id,
       shot: originalShot,
       sceneTitle,
@@ -133,20 +152,33 @@ export async function POST(request: Request, context: RouteContext) {
     }
   } catch (error) {
     const message =
-      error instanceof AiConfigError
+      error instanceof StoryboardPromptFillError
         ? error.message
-        : error instanceof Error
+        : error instanceof AiConfigError
           ? error.message
-          : "提示词重新生成失败";
+          : error instanceof Error
+            ? error.message
+            : "提示词重新生成失败";
     return NextResponse.json(
       {
         error: message,
-        code: error instanceof AiConfigError ? error.code : undefined,
+        code:
+          error instanceof StoryboardPromptFillError
+            ? error.code
+            : error instanceof AiConfigError
+              ? error.code
+              : undefined,
         shot: originalShot,
         production,
         preservedPrompt: previousPrompt,
       },
-      { status: error instanceof AiConfigError ? 400 : 500 },
+      {
+        status:
+          error instanceof AiConfigError ||
+          error instanceof StoryboardPromptFillError
+            ? 400
+            : 500,
+      },
     );
   }
 

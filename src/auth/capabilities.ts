@@ -11,15 +11,9 @@ export type Capability =
   | "generateProjectContent";
 
 export function listCapabilities(user: AuthUser): readonly Capability[] {
-  if (getSystemRole(user) === "SYSTEM_ADMIN") {
-    return [
-      "createProject",
-      "editProjectHighlightsAsPrincipal",
-      "generateProjectContent",
-    ] as const;
-  }
-  // 项目主理人：可编辑自己项目要点与生成内容；创建项目仍限系统管理员
+  void user;
   return [
+    "createProject",
     "editProjectHighlightsAsPrincipal",
     "generateProjectContent",
   ] as const;
@@ -32,9 +26,10 @@ export function hasCapability(
   return listCapabilities(user).includes(capability);
 }
 
-/** 是否有权新建项目（系统管理员） */
+/** 每个已登录账号都可以在个人空间创建自己的项目。 */
 export function canCreateProject(user: AuthUser): boolean {
-  return getSystemRole(user) === "SYSTEM_ADMIN";
+  void user;
+  return true;
 }
 
 /**

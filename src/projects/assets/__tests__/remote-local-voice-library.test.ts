@@ -35,6 +35,7 @@ describe("remote local voice library", () => {
     process.env.DATA_ROOT = path.join(isolatedRoot, "data-root");
     process.env.LOCAL_VOICE_LIBRARY_DIR = voiceDir;
     process.env.REMOTE_DATA_ONLY = "true";
+    delete process.env.LOCAL_VOICE_LIBRARY_ALLOW_IN_REMOTE;
   });
 
   afterEach(() => {
@@ -42,6 +43,7 @@ describe("remote local voice library", () => {
     delete process.env.DATA_ROOT;
     delete process.env.LOCAL_VOICE_LIBRARY_DIR;
     delete process.env.REMOTE_DATA_ONLY;
+    delete process.env.LOCAL_VOICE_LIBRARY_ALLOW_IN_REMOTE;
     rmSync(isolatedRoot, { recursive: true, force: true });
   });
 
@@ -60,5 +62,26 @@ describe("remote local voice library", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ directory: null, voices: [] });
+  });
+
+  it("LAN opt-in can enumerate and resolve a mounted library", async () => {
+    process.env.LOCAL_VOICE_LIBRARY_ALLOW_IN_REMOTE = "true";
+    const voiceId = encodeLocalVoiceId("server-private.wav");
+
+    const listed = await listLocalVoiceLibrary();
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.fileName).toBe("server-private.wav");
+    expect(await resolveLocalVoiceFile(voiceId)).toMatchObject({
+      fileName: "server-private.wav",
+    });
+
+    const response = await listVoices();
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      directory: string | null;
+      voices: Array<{ fileName: string }>;
+    };
+    expect(body.directory).toBe(path.resolve(voiceDir));
+    expect(body.voices).toHaveLength(1);
   });
 });

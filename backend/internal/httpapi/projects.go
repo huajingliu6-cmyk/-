@@ -31,6 +31,7 @@ type ProjectRecord struct {
 	ProjectMode     string  `json:"projectMode"`
 	Status          string  `json:"status"`
 	Highlights      string  `json:"highlights"`
+	VisualStyle     *string `json:"visualStyle"`
 	PasswordEnabled bool    `json:"passwordEnabled"`
 	PasswordHash    *string `json:"passwordHash"`
 	PasswordSalt    *string `json:"passwordSalt"`
@@ -39,17 +40,18 @@ type ProjectRecord struct {
 }
 
 type projectPublic struct {
-	ProjectID       string `json:"projectId"`
-	RootFolderID    string `json:"rootFolderId"`
-	Name            string `json:"name"`
-	OwnerID         string `json:"ownerId"`
-	CreationSource  string `json:"creationSource"`
-	ProjectMode     string `json:"projectMode"`
-	Status          string `json:"status"`
-	Highlights      string `json:"highlights"`
-	PasswordEnabled bool   `json:"passwordEnabled"`
-	CreatedAt       string `json:"createdAt"`
-	UpdatedAt       string `json:"updatedAt"`
+	ProjectID       string  `json:"projectId"`
+	RootFolderID    string  `json:"rootFolderId"`
+	Name            string  `json:"name"`
+	OwnerID         string  `json:"ownerId"`
+	CreationSource  string  `json:"creationSource"`
+	ProjectMode     string  `json:"projectMode"`
+	Status          string  `json:"status"`
+	Highlights      string  `json:"highlights"`
+	VisualStyle     *string `json:"visualStyle"`
+	PasswordEnabled bool    `json:"passwordEnabled"`
+	CreatedAt       string  `json:"createdAt"`
+	UpdatedAt       string  `json:"updatedAt"`
 }
 
 type projectCatalog struct {
@@ -241,17 +243,25 @@ func (handler *Projects) create(writer http.ResponseWriter, request *http.Reques
 		CreationSource  string  `json:"creationSource"`
 		ProjectMode     string  `json:"projectMode"`
 		Highlights      string  `json:"highlights"`
+		VisualStyle     string  `json:"visualStyle"`
 		PasswordEnabled bool    `json:"passwordEnabled"`
 		ProjectPassword *string `json:"projectPassword"`
 		IdempotencyKey  string  `json:"idempotencyKey"`
+		StylePrompt     *string `json:"stylePrompt"`
+		PromptDirective *string `json:"promptDirective"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
 	if err := decoder.Decode(&input); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid project payload")
 		return
 	}
+	if input.StylePrompt != nil || input.PromptDirective != nil {
+		writeError(writer, http.StatusBadRequest, "client style overrides are not allowed")
+		return
+	}
 	input.Name = strings.TrimSpace(input.Name)
 	input.Highlights = strings.TrimSpace(input.Highlights)
+	input.VisualStyle = strings.TrimSpace(input.VisualStyle)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 	if input.Name == "" || utf8.RuneCountInString(input.Name) > projectNameMaxLength {
 		writeError(writer, http.StatusBadRequest, "invalid project name")
@@ -263,6 +273,10 @@ func (handler *Projects) create(writer http.ResponseWriter, request *http.Reques
 	}
 	if input.ProjectMode != "canvas" && input.ProjectMode != "full-stack" {
 		writeError(writer, http.StatusBadRequest, "invalid project mode")
+		return
+	}
+	if !isValidProjectVisualStyle(input.VisualStyle) {
+		writeError(writer, http.StatusBadRequest, "invalid project visual style")
 		return
 	}
 	if utf8.RuneCountInString(input.Highlights) > projectHighlightsMaxLength {
@@ -281,10 +295,11 @@ func (handler *Projects) create(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	now := requestTime()
+	visualStyle := input.VisualStyle
 	project := ProjectRecord{
 		ProjectID: projectID, RootFolderID: projectID, Name: input.Name, OwnerID: ownerID,
 		CreationSource: input.CreationSource, ProjectMode: input.ProjectMode, Status: "draft",
-		Highlights: input.Highlights, PasswordEnabled: input.PasswordEnabled,
+		Highlights: input.Highlights, VisualStyle: &visualStyle, PasswordEnabled: input.PasswordEnabled,
 		PasswordHash: passwordHash, PasswordSalt: passwordSalt, CreatedAt: now, UpdatedAt: now,
 	}
 	result, err := handler.mutateCatalog(request, func(catalog *projectCatalog) (any, bool, error) {
@@ -302,7 +317,7 @@ func (handler *Projects) create(writer http.ResponseWriter, request *http.Reques
 			}
 		}
 		for _, existing := range catalog.Projects {
-			if existing.Name == project.Name {
+			if existing.OwnerID == project.OwnerID && existing.Name == project.Name {
 				return nil, false, errProjectNameConflict
 			}
 		}
@@ -328,12 +343,20 @@ func (handler *Projects) create(writer http.ResponseWriter, request *http.Reques
 
 func (handler *Projects) patch(writer http.ResponseWriter, request *http.Request, projectID string) {
 	var input struct {
-		Highlights *string `json:"highlights"`
-		Name       *string `json:"name"`
+		Highlights      *string `json:"highlights"`
+		VisualStyle     *string `json:"visualStyle"`
+		Name            *string `json:"name"`
+		OwnerID         *string `json:"ownerId"`
+		StylePrompt     *string `json:"stylePrompt"`
+		PromptDirective *string `json:"promptDirective"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
-	if err := decoder.Decode(&input); err != nil || (input.Highlights == nil && input.Name == nil) {
+	if err := decoder.Decode(&input); err != nil || (input.Highlights == nil && input.Name == nil && input.OwnerID == nil && input.VisualStyle == nil) {
 		writeError(writer, http.StatusBadRequest, "invalid project payload")
+		return
+	}
+	if input.StylePrompt != nil || input.PromptDirective != nil {
+		writeError(writer, http.StatusBadRequest, "client style overrides are not allowed")
 		return
 	}
 	var highlights *string
@@ -345,6 +368,15 @@ func (handler *Projects) patch(writer http.ResponseWriter, request *http.Request
 		}
 		highlights = &value
 	}
+	var visualStyle *string
+	if input.VisualStyle != nil {
+		value := strings.TrimSpace(*input.VisualStyle)
+		if !isValidProjectVisualStyle(value) {
+			writeError(writer, http.StatusBadRequest, "invalid project visual style")
+			return
+		}
+		visualStyle = &value
+	}
 	var name *string
 	if input.Name != nil {
 		value := strings.TrimSpace(*input.Name)
@@ -353,6 +385,15 @@ func (handler *Projects) patch(writer http.ResponseWriter, request *http.Request
 			return
 		}
 		name = &value
+	}
+	var ownerID *string
+	if input.OwnerID != nil {
+		value := strings.TrimSpace(*input.OwnerID)
+		if value == "" {
+			writeError(writer, http.StatusBadRequest, "invalid project owner")
+			return
+		}
+		ownerID = &value
 	}
 	result, err := handler.mutateCatalog(request, func(catalog *projectCatalog) (any, bool, error) {
 		index := -1
@@ -366,16 +407,31 @@ func (handler *Projects) patch(writer http.ResponseWriter, request *http.Request
 			return nil, false, postgres.ErrNotFound
 		}
 		project := catalog.Projects[index]
+		nextOwnerID := project.OwnerID
+		if ownerID != nil {
+			nextOwnerID = *ownerID
+		}
 		if name != nil && project.Name != *name {
 			for _, existing := range catalog.Projects {
-				if existing.ProjectID != projectID && existing.Name == *name {
+				if existing.ProjectID != projectID && existing.OwnerID == nextOwnerID && existing.Name == *name {
 					return nil, false, errProjectNameConflict
 				}
 			}
 			project.Name = *name
 		}
+		if ownerID != nil && project.OwnerID != *ownerID {
+			for _, existing := range catalog.Projects {
+				if existing.ProjectID != projectID && existing.OwnerID == *ownerID && existing.Name == project.Name {
+					return nil, false, errProjectNameConflict
+				}
+			}
+			project.OwnerID = *ownerID
+		}
 		if highlights != nil {
 			project.Highlights = *highlights
+		}
+		if visualStyle != nil {
+			project.VisualStyle = visualStyle
 		}
 		project.UpdatedAt = requestTime()
 		catalog.Projects[index] = project
@@ -435,8 +491,23 @@ func publicProject(project ProjectRecord) projectPublic {
 	return projectPublic{
 		ProjectID: project.ProjectID, RootFolderID: project.RootFolderID, Name: project.Name,
 		OwnerID: project.OwnerID, CreationSource: project.CreationSource, ProjectMode: project.ProjectMode,
-		Status: project.Status, Highlights: project.Highlights, PasswordEnabled: project.PasswordEnabled,
+		Status: project.Status, Highlights: project.Highlights, VisualStyle: project.VisualStyle,
+		PasswordEnabled: project.PasswordEnabled,
 		CreatedAt: project.CreatedAt, UpdatedAt: project.UpdatedAt,
+	}
+}
+
+func isValidProjectVisualStyle(value string) bool {
+	switch value {
+	case "live_action_cinematic",
+		"three_d_animation",
+		"hand_drawn_illustration",
+		"two_d_animation",
+		"comic",
+		"traditional_chinese":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -3,7 +3,9 @@
 export type NotificationType =
   | "asset_approval_submitted"
   | "asset_approval_approved"
-  | "asset_approval_rejected";
+  | "asset_approval_rejected"
+  | "enterprise_join_approved"
+  | "enterprise_join_rejected";
 
 export type AppNotification = {
   id: string;
@@ -13,6 +15,7 @@ export type AppNotification = {
   episodeId: string;
   submissionId: string;
   submitterUserId: string;
+  enterpriseId?: string;
   title: string;
   summary: string;
   createdAt: string;

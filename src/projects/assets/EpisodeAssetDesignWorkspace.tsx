@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
-  AudioLines,
   MapPinned,
   Package,
   UserRound,
@@ -13,8 +12,19 @@ import {
 import {
   GlassSelect,
   type GlassSelectGroup,
+  type GlassSelectOption,
 } from "@/shell/glass-select";
 import { useGenerationBusy } from "@/shell/GenerationBusyGuard";
+import { safeRandomUUID } from "@/lib/safe-random-id";
+import {
+  DesignGenerationOverlay,
+  type AssetGenerationProgress,
+} from "@/projects/assets/DesignGenerationOverlay";
+import {
+  ACTIVE_ENTERPRISE_EVENT,
+  readActiveSpace,
+  type ActiveSpace,
+} from "@/enterprise/client-space";
 import {
   cancelStoryGeneration,
   notifyCreditsRefresh,
@@ -30,14 +40,20 @@ import {
 import { createEpisodeAssetDesignIdempotencyKey } from "@/projects/assets/episode-design/prompts";
 import { mergeGeneratedMediaState } from "@/projects/assets/episode-design/generated-media-history";
 import {
+  characterNeedsUnboundVoiceConfirm,
   getDesignMediaVoiceBinding,
   isMediaVoiceBound,
-  withDesignMediaVoiceBinding,
 } from "@/projects/assets/episode-design/design-media-voice";
+import { characterNeedsUncheckedVideoRefBlock } from "@/projects/assets/episode-design/design-media-video-ref-labels";
+import {
+  itemFromCharacterDraft,
+  mergePatchedDesignItem,
+} from "@/projects/assets/episode-design/character-design-item";
+import { shouldApplySavedDesignRecord } from "@/projects/assets/episode-design/update-media-voice";
 import {
   EPISODE_ASSET_DESIGN_STATUS_LABELS,
-  type AudioDesignItem,
   type CharacterDesignItem,
+  type EpisodeAssetActiveGeneration,
   type EpisodeAssetDesignAssetType,
   type EpisodeAssetDesignItem,
   type EpisodeAssetDesignRecord,
@@ -55,9 +71,6 @@ const SceneCreateDialog = dynamic(
 const PropCreateDialog = dynamic(
   () => import("@/projects/assets/PropCreateDialog").then((m) => m.PropCreateDialog),
 );
-const AudioCreateDialog = dynamic(
-  () => import("@/projects/assets/AudioCreateDialog").then((m) => m.AudioCreateDialog),
-);
 const SubmitApprovalModal = dynamic(
   () => import("@/projects/assets/approvals/SubmitApprovalModal").then((m) => m.SubmitApprovalModal),
 );
@@ -70,14 +83,13 @@ const DesignAssetModal = dynamic(
 const DesignImageLightbox = dynamic(
   () => import("@/projects/assets/DesignImageLightbox").then((m) => m.DesignImageLightbox),
 );
-import { findVoiceOption, voiceOptionsFromAudios } from "@/projects/assets/voice-catalog";
+import { voiceOptionsFromAudios } from "@/projects/assets/voice-catalog";
 import { VoiceSelector } from "@/projects/assets/VoiceSelector";
 import { VoicePreviewButton } from "@/projects/assets/VoicePreviewButton";
 import { uploadProjectAssetImage } from "@/projects/assets/upload-asset-image";
 import { uploadProjectAssetAudio } from "@/projects/assets/upload-asset-audio";
 import type {
   AudioAsset,
-  AudioDraftInput,
   CharacterDraftInput,
   PropDraftInput,
   ProjectAssetBundle,
@@ -123,7 +135,6 @@ const GROUPS: Array<{
   { type: "character", label: "角色" },
   { type: "scene", label: "场景" },
   { type: "prop", label: "道具" },
-  { type: "audio", label: "音频需求" },
 ];
 /** Skip titles that only repeat「第N集」so the list/detail don't look duplicated. */
 function meaningfulEpisodeTitle(
@@ -145,44 +156,7 @@ function meaningfulEpisodeTitle(
 }
 
 function newItemId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `item_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function itemFromCharacterDraft(
-  draft: CharacterDraftInput,
-  options: {
-    id: string;
-    projectVoices: VoiceOption[];
-    previous?: CharacterDesignItem | null;
-  },
-): CharacterDesignItem {
-  const voice = findVoiceOption(draft.voiceId, options.projectVoices);
-  const previous = options.previous;
-  return {
-    id: options.id,
-    name: draft.name.trim(),
-    resolution: previous?.resolution ?? "create_new",
-    existingAssetId: previous?.existingAssetId ?? null,
-    libraryAssetId: previous?.libraryAssetId ?? null,
-    source: previous?.source ?? "manual",
-    note: previous?.note ?? "",
-    assetType: "character",
-    draft: {
-      description: draft.description,
-      appearance: previous?.draft.appearance ?? "",
-      clothing: draft.clothing,
-      role: draft.role,
-      age: draft.age,
-      voiceId: voice?.id ?? draft.voiceId ?? null,
-      voiceName: voice?.name ?? previous?.draft.voiceName ?? null,
-      voiceBound: previous?.draft.voiceBound ?? false,
-      usageInEpisode: previous?.draft.usageInEpisode ?? "",
-      evidence: previous?.draft.evidence ?? "",
-    },
-  };
+  return `item_${safeRandomUUID()}`;
 }
 
 function itemFromSceneDraft(
@@ -228,31 +202,6 @@ function itemFromPropDraft(
       description: draft.description,
       propType: previous?.draft.propType ?? "",
       usage: previous?.draft.usage ?? "",
-      usageInEpisode: previous?.draft.usageInEpisode ?? "",
-      evidence: previous?.draft.evidence ?? "",
-    },
-  };
-}
-
-function itemFromAudioDraft(
-  draft: AudioDraftInput,
-  options: { id: string; previous?: AudioDesignItem | null },
-): AudioDesignItem {
-  const previous = options.previous;
-  return {
-    id: options.id,
-    name: draft.name.trim(),
-    resolution: previous?.resolution ?? "create_new",
-    existingAssetId: previous?.existingAssetId ?? null,
-    libraryAssetId: previous?.libraryAssetId ?? null,
-    source: previous?.source ?? "manual",
-    note: previous?.note ?? "",
-    assetType: "audio",
-    draft: {
-      description: previous?.draft.description ?? "",
-      audioKind: draft.type,
-      duration: draft.duration,
-      source: draft.source,
       usageInEpisode: previous?.draft.usageInEpisode ?? "",
       evidence: previous?.draft.evidence ?? "",
     },
@@ -318,61 +267,6 @@ function propDraftFromItem(
   };
 }
 
-function audioDraftFromItem(
-  item: AudioDesignItem,
-  pending: PendingMediaEntry | null | undefined,
-): AudioDraftInput {
-  const audioPending = pending?.kind === "audio" ? pending : null;
-  const dialogUrl = audioPending
-    ? URL.createObjectURL(audioPending.file)
-    : null;
-  return {
-    name: item.name,
-    type: item.draft.audioKind,
-    duration: item.draft.duration,
-    source: item.draft.source,
-    fileName: audioPending?.file.name ?? null,
-    objectUrl: dialogUrl,
-    mimeType: audioPending?.file.type || null,
-    pendingAudioFile: audioPending?.file ?? null,
-  };
-}
-
-function itemSummary(item: EpisodeAssetDesignItem): string {
-  switch (item.assetType) {
-    case "character": {
-      const parts = [item.draft.role, item.draft.age].filter((p) => p.trim());
-      return parts.join(" · ");
-    }
-    case "scene": {
-      const parts = [item.draft.timeOfDay, item.draft.location].filter((p) =>
-        p.trim(),
-      );
-      return parts.join(" · ");
-    }
-    case "prop": {
-      const parts = [item.draft.propType, item.draft.usage].filter((p) =>
-        p.trim(),
-      );
-      return parts.join(" · ");
-    }
-    case "audio": {
-      const kindLabel =
-        item.draft.audioKind === "voice"
-          ? "音色"
-          : item.draft.audioKind === "music"
-            ? "音乐"
-            : item.draft.audioKind === "sfx"
-              ? "音效"
-              : "旁白";
-      const parts = [kindLabel, item.draft.duration, item.draft.source].filter(
-        (p) => p.trim(),
-      );
-      return parts.join(" · ");
-    }
-  }
-}
-
 function formatMetaTime(value: string | null | undefined): string | null {
   if (!value) return null;
   const date = new Date(value);
@@ -380,18 +274,73 @@ function formatMetaTime(value: string | null | undefined): string | null {
   return date.toLocaleString("zh-CN");
 }
 
+function formatFullScriptExtractionError(
+  code: string,
+  fallbackMessage: string,
+): string {
+  switch (code) {
+    case "AI_TASK_RULE_CONTRACT_CONFLICT":
+      return "当前资产提取任务规则与固定输出格式冲突，请联系管理员修正任务规则后重试。";
+    case "MODEL_TIMEOUT":
+      return "全剧本资产提取模型生成超时，请稍后重试或更换模型。已调用模型但未在时限内完成；可点击下方按钮重试。";
+    case "EMPTY_MODEL_OUTPUT":
+      return "模型未返回任何内容，请重试提取。";
+    case "EPISODE_ASSET_DESIGN_CONTENT_EMPTY":
+      return fallbackMessage.includes("空")
+        ? fallbackMessage
+        : "模型输出为空，未能提取资产。";
+    case "EPISODE_ASSET_DESIGN_OUTPUT_INVALID":
+    case "PARSE_FAILED":
+      if (/合法 JSON|JSON 对象|代码围栏/i.test(fallbackMessage)) {
+        return `模型返回内容不是合法的资产 JSON：${fallbackMessage}`;
+      }
+      return `模型返回的 JSON 不符合资产结构：${fallbackMessage}`;
+    default:
+      return fallbackMessage || "全剧本资产提取失败，请重试。";
+  }
+}
+
+const ASSET_EXTRACTION_MODEL_OPTIONS: GlassSelectOption[] = [
+  {
+    id: "deepseek-v4-pro",
+    label: "Deepseek V4 Pro",
+  },
+];
+
+type AssetSummaryPanel = "extracted" | "library" | "generated" | null;
+
+function AssetSummaryButton({
+  label,
+  count,
+  active,
+  testId,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  testId: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`ead-summary-button${active ? " is-active" : ""}`}
+      data-testid={testId}
+      aria-expanded={active}
+      onClick={onClick}
+    >
+      <strong>{count}</strong>
+      <span>{label}</span>
+    </button>
+  );
+}
+
 function statusBadgeClass(status: EpisodeAssetDesignStatus): string {
   if (status === "confirmed") return "ead-badge is-ok";
   if (status === "stale" || status === "failed") return "ead-badge is-warn";
   if (status === "generating") return "ead-badge is-busy";
   return "ead-badge";
-}
-
-function countByStatus(
-  items: EpisodeListItem[],
-  status: EpisodeAssetDesignStatus,
-): number {
-  return items.filter((item) => item.designStatus === status).length;
 }
 
 export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
@@ -408,13 +357,24 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       ? `/api/workspace/projects/${encodeURIComponent(projectId)}`
       : `/api/projects/${encodeURIComponent(projectId)}`;
   const queryEpisodeId = searchParams.get("episodeId")?.trim() || null;
+  const [activeSpace, setActiveSpace] = useState<ActiveSpace>(() =>
+    readActiveSpace(),
+  );
   const [episodes, setEpisodes] = useState<EpisodeListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>(
     () => queryEpisodeId || SCRIPT_ASSET_DESIGN_ID,
   );
   const [detail, setDetail] = useState<EpisodeDetailPayload | null>(null);
   const [items, setItems] = useState<EpisodeAssetDesignItem[]>([]);
+  const itemsRef = useRef(items);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
   const [revision, setRevision] = useState(0);
+  const revisionRef = useRef(revision);
+  useEffect(() => {
+    revisionRef.current = revision;
+  }, [revision]);
   const [fingerprint, setFingerprint] = useState("");
   const [designStatus, setDesignStatus] =
     useState<EpisodeAssetDesignStatus>("not_started");
@@ -430,16 +390,46 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [fullScriptPending, setFullScriptPending] = useState(false);
   const [fullScriptAssetCount, setFullScriptAssetCount] = useState(0);
-  const [generating, setGenerating] = useState(false);
   const [batchExtracting, setBatchExtracting] = useState(false);
+  /** In-flight asset extract jobs keyed by episodeId (incl. full-script id). */
+  const [extractingEpisodeIds, setExtractingEpisodeIds] = useState<
+    Set<string>
+  >(() => new Set());
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [confirmingItemId, setConfirmingItemId] = useState<string | null>(null);
+  const [pendingUnboundVoiceConfirmItem, setPendingUnboundVoiceConfirmItem] =
+    useState<{ id: string; name: string } | null>(null);
+  const [pendingUncheckedVideoRefItem, setPendingUncheckedVideoRefItem] =
+    useState<{ id: string; name: string } | null>(null);
+  const [savingVoiceItemIds, setSavingVoiceItemIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [pageNote, setPageNote] = useState("");
+  const [extractionError, setExtractionError] = useState<{
+    code: string;
+    message: string;
+    generationId?: string | null;
+    canReapply?: boolean;
+    canRetryChunks?: boolean;
+  } | null>(null);
+  const [extractDiagnostics, setExtractDiagnostics] = useState<{
+    extracted: number;
+    repaired: number;
+    rejected: number;
+    rejectedItems: Array<{ index: number; name?: string; reason: string }>;
+  } | null>(null);
   const [confirmSummary, setConfirmSummary] = useState<string | null>(null);
   const [reextractOpen, setReextractOpen] = useState(false);
   const [modelKey, setModelKey] = useState(
     STORY_TEXT_MODELS[0]?.id ?? "balanced-default",
   );
+  const [assetExtractionModel, setAssetExtractionModel] = useState(
+    "deepseek-v4-pro",
+  );
+  const [assetSummaryPanel, setAssetSummaryPanel] =
+    useState<AssetSummaryPanel>(null);
+  const summaryRef = useRef<HTMLDivElement | null>(null);
   const [createDialogType, setCreateDialogType] =
     useState<EpisodeAssetDesignAssetType | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -451,6 +441,9 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   const [generatingAssetIds, setGeneratingAssetIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [assetGenerationProgress, setAssetGenerationProgress] = useState<
+    Record<string, AssetGenerationProgress>
+  >({});
   const [pendingApprovalMediaIds, setPendingApprovalMediaIds] = useState<
     Set<string>
   >(() => new Set());
@@ -459,29 +452,96 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   >(() => new Set());
   const [submitApprovalOpen, setSubmitApprovalOpen] = useState(false);
   const [projectName, setProjectName] = useState(projectId);
-  const abortRef = useRef<AbortController | null>(null);
-  const generationIdRef = useRef<string | null>(null);
-  const generatingRef = useRef(false);
+  const selectedIdRef = useRef(selectedId);
+  const extractJobsRef = useRef(
+    new Map<
+      string,
+      {
+        controller: AbortController;
+        generationId: string | null;
+        fingerprint: string;
+        revision: number;
+        items: EpisodeAssetDesignItem[];
+      }
+    >(),
+  );
+  /** Lightweight recovery polls when server says generating but this tab has no live stream. */
+  const extractPollTimersRef = useRef(new Map<string, number>());
+  const extractPollStartedAtRef = useRef(new Map<string, number>());
+  const confirmingRef = useRef(false);
+  const isPersonalSpace = activeSpace.kind === "personal";
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
+  const markEpisodeExtracting = useCallback((episodeId: string, on: boolean) => {
+    setExtractingEpisodeIds((prev) => {
+      const has = prev.has(episodeId);
+      if (on && has) return prev;
+      if (!on && !has) return prev;
+      const next = new Set(prev);
+      if (on) next.add(episodeId);
+      else next.delete(episodeId);
+      return next;
+    });
+  }, []);
+
+  const stopExtractPoll = useCallback((episodeId: string) => {
+    const timerId = extractPollTimersRef.current.get(episodeId);
+    if (timerId != null) {
+      window.clearInterval(timerId);
+      extractPollTimersRef.current.delete(episodeId);
+    }
+    extractPollStartedAtRef.current.delete(episodeId);
+  }, []);
+
+  useEffect(() => {
+    const timers = extractPollTimersRef.current;
+    const startedAt = extractPollStartedAtRef.current;
+    return () => {
+      for (const timerId of timers.values()) {
+        window.clearInterval(timerId);
+      }
+      timers.clear();
+      startedAt.clear();
+    };
+  }, []);
+
+  const currentEpisodeExtracting =
+    selectedId != null &&
+    (extractingEpisodeIds.has(selectedId) ||
+      (!detailLoading && designStatus === "generating"));
+
+  const extractionBusy =
+    batchExtracting ||
+    designStatus === "generating" ||
+    currentEpisodeExtracting ||
+    extractingEpisodeIds.has(SCRIPT_ASSET_DESIGN_ID);
+
+  useEffect(() => {
+    const onSpaceChanged = (event: Event) => {
+      const detail = (event as CustomEvent<ActiveSpace>).detail;
+      setActiveSpace(detail ?? readActiveSpace());
+    };
+    window.addEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
+    return () =>
+      window.removeEventListener(ACTIVE_ENTERPRISE_EVENT, onSpaceChanged);
+  }, []);
 
   // Modal open state is driven only by the URL so closing (strip query) and
   // re-clicking the unread notification (push query again) both work.
   const ownerApprovalSubmissionId =
-    surface === "project_management"
+    !isPersonalSpace && surface === "project_management"
       ? searchParams.get("approvalSubmissionId")?.trim() || null
       : null;
   const ownerApprovalOpen = Boolean(ownerApprovalSubmissionId);
-  useEffect(() => {
-    generatingRef.current = generating;
-  }, [generating]);
-
   useGenerationBusy(
-    generating || batchExtracting || generatingAssetIds.size > 0,
-    `asset-design-${projectId}`,
-    generatingAssetIds.size > 0
-      ? "资产图生成"
-      : batchExtracting
-        ? "全剧本资产提取"
-        : "资产提取",
+    extractionBusy || generatingAssetIds.size > 0,
+    extractionBusy
+      ? `asset-extract-${projectId}`
+      : `asset-image-generation-${projectId}`,
+    extractionBusy ? "资产提取" : "资产图片生成",
   );
 
   useEffect(() => {
@@ -544,27 +604,6 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     [bundle.audios],
   );
 
-  const progress = useMemo(() => {
-    const total = episodes.length;
-    const confirmed = countByStatus(episodes, "confirmed");
-    return {
-      total,
-      confirmed,
-      notStarted: countByStatus(episodes, "not_started"),
-      review: countByStatus(episodes, "review"),
-      stale: countByStatus(episodes, "stale"),
-    };
-  }, [episodes]);
-  const pendingExtractionCount = useMemo(
-    () =>
-      episodes.filter(
-        (episode) =>
-          episode.designStatus === "not_started" ||
-          episode.designStatus === "failed" ||
-          episode.designStatus === "stale",
-      ).length,
-    [episodes],
-  );
   const pendingEpisodes = useMemo(
     () =>
       episodes.filter(
@@ -603,7 +642,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     );
     groups.push({
       id: "ready",
-      label: "已提取，可复核或审批",
+      label: isPersonalSpace ? "已提取，可确认" : "已提取，可复核或审批",
       emptyHint: "暂无可复核剧集",
       options: readyEpisodes.map((episode) => ({
         id: episode.episodeId,
@@ -611,13 +650,69 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       })),
     });
     return groups;
-  }, [episodes, pendingEpisodes]);
+  }, [episodes, isPersonalSpace, pendingEpisodes]);
   const episodeSelectPlaceholder = listLoading
     ? "加载剧集…"
     : pendingEpisodes.length > 0
       ? `待补提取（${pendingEpisodes.length}）`
-      : "选择剧集复核";
+      : isPersonalSpace
+        ? "选择剧集确认"
+        : "选择剧集复核";
   const isFullScriptDesign = selectedId === SCRIPT_ASSET_DESIGN_ID;
+
+  const extractedAssets = items;
+  const ungeneratedAssets = useMemo(
+    () =>
+      items.filter(
+        (item) =>
+          item.assetType !== "audio" &&
+          !item.generatedMedia?.currentId?.trim(),
+      ),
+    [items],
+  );
+  const libraryAssets = useMemo(
+    () => items.filter((item) => isApprovedEpisodeDesignItem(item)),
+    [items],
+  );
+  const generatedAssets = useMemo(
+    () =>
+      items.filter(
+        (item) =>
+          item.assetType !== "audio" &&
+          Boolean(item.generatedMedia?.currentId?.trim()),
+      ),
+    [items],
+  );
+  const summaryItems =
+    assetSummaryPanel === "extracted"
+      ? ungeneratedAssets
+      : assetSummaryPanel === "library"
+        ? libraryAssets
+        : generatedAssets;
+  const summaryTitle =
+    assetSummaryPanel === "extracted"
+      ? "待生成图片"
+      : assetSummaryPanel === "library"
+        ? "已入库资产"
+        : "已提取资产";
+
+  useEffect(() => {
+    if (!assetSummaryPanel) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAssetSummaryPanel(null);
+    };
+    const onPointerDown = (event: MouseEvent) => {
+      if (!summaryRef.current?.contains(event.target as Node)) {
+        setAssetSummaryPanel(null);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("mousedown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, [assetSummaryPanel]);
 
   const loadList = useCallback(async () => {
     setListLoading(true);
@@ -628,6 +723,17 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       if (!res.ok) throw new Error("无法加载剧集列表");
       const data = (await res.json()) as { items: EpisodeListItem[] };
       setEpisodes(data.items ?? []);
+      setExtractingEpisodeIds((prev) => {
+        const next = new Set(prev);
+        for (const ep of data.items ?? []) {
+          if (ep.designStatus === "generating") {
+            next.add(ep.episodeId);
+          } else if (!extractJobsRef.current.has(ep.episodeId)) {
+            next.delete(ep.episodeId);
+          }
+        }
+        return next;
+      });
       setSelectedId((prev) => {
         if (prev === SCRIPT_ASSET_DESIGN_ID) return prev;
         if (prev && data.items.some((ep) => ep.episodeId === prev)) return prev;
@@ -664,6 +770,11 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
 
   const loadApprovalMediaFlags = useCallback(
     async (episodeId: string) => {
+      if (isPersonalSpace) {
+        setPendingApprovalMediaIds(new Set());
+        setApprovedApprovalMediaIds(new Set());
+        return;
+      }
       try {
         const url =
           surface === "workspace"
@@ -709,7 +820,74 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         setApprovedApprovalMediaIds(new Set());
       }
     },
-    [apiRoot, projectId, surface],
+    [apiRoot, isPersonalSpace, projectId, surface],
+  );
+
+  const startExtractPoll = useCallback(
+    (episodeId: string) => {
+      if (extractJobsRef.current.has(episodeId)) return;
+      if (extractPollTimersRef.current.has(episodeId)) return;
+
+      extractPollStartedAtRef.current.set(episodeId, Date.now());
+      markEpisodeExtracting(episodeId, true);
+
+      const tick = async () => {
+        if (extractJobsRef.current.has(episodeId)) {
+          stopExtractPoll(episodeId);
+          return;
+        }
+        const startedAt = extractPollStartedAtRef.current.get(episodeId) ?? Date.now();
+        try {
+          const res = await fetch(
+            `${apiRoot}/asset-designs/episodes/${encodeURIComponent(episodeId)}`,
+          );
+          if (!res.ok) return;
+          const payload = (await res.json()) as EpisodeDetailPayload;
+
+          if (payload.designStatus === "generating") {
+            // Keep polling — server reconcile decides failed/stale, not remount.
+            void startedAt;
+            return;
+          }
+
+          stopExtractPoll(episodeId);
+          markEpisodeExtracting(episodeId, false);
+          void loadList();
+          if (selectedIdRef.current !== episodeId) return;
+          if (payload.record.revision < revisionRef.current) return;
+
+          setDetail(payload);
+          setItems(payload.record.items);
+          itemsRef.current = payload.record.items;
+          setRevision(payload.record.revision);
+          revisionRef.current = payload.record.revision;
+          setFingerprint(payload.currentFingerprint);
+          setDesignStatus(payload.designStatus);
+          if (payload.designStatus === "failed") {
+            setPageNote("资产提取失败，请重试。");
+          } else {
+            setPageNote("");
+          }
+          if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
+            setFullScriptAssetCount(payload.record.items.length);
+            setFullScriptPending(
+              payload.designStatus === "not_started" &&
+                payload.record.items.length === 0,
+            );
+            setBatchExtracting(false);
+          }
+        } catch {
+          /* keep polling until server leaves generating */
+        }
+      };
+
+      void tick();
+      const timerId = window.setInterval(() => {
+        void tick();
+      }, 2000);
+      extractPollTimersRef.current.set(episodeId, timerId);
+    },
+    [apiRoot, loadList, markEpisodeExtracting, stopExtractPoll],
   );
 
   const loadDetail = useCallback(
@@ -753,39 +931,28 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
           return mergedMedia ? { ...next, generatedMedia: mergedMedia } : next;
         });
         setRevision(payload.record.revision);
+        revisionRef.current = payload.record.revision;
         setFingerprint(payload.currentFingerprint);
-        // Orphaned “提取中” after refresh / crashed stream — unlock the UI.
-        if (payload.designStatus === "generating" && !generatingRef.current) {
-          setDesignStatus("failed");
-          try {
-            const res = await fetch(
-              `${apiRoot}/asset-designs/episodes/${encodeURIComponent(episodeId)}`,
-              {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  expectedRevision: payload.record.revision,
-                  fingerprint: payload.currentFingerprint,
-                  items: payload.record.items,
-                  status: "failed",
-                }),
-              },
-            );
-            if (res.ok) {
-              const fixed = (await res.json()) as {
-                record?: EpisodeAssetDesignRecord;
-              };
-              if (fixed.record) {
-                setItems(fixed.record.items);
-                setRevision(fixed.record.revision);
-                setDesignStatus(fixed.record.status);
-              }
-            }
-          } catch {
-            /* keep local failed unlock even if persist fails */
+        // Restore extract UI from server status. Live streams keep their own
+        // job entry; otherwise start a lightweight poll (refresh / remount).
+        if (payload.designStatus === "generating") {
+          setDesignStatus("generating");
+          markEpisodeExtracting(episodeId, true);
+          if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
+            setBatchExtracting(true);
+          }
+          if (!extractJobsRef.current.has(episodeId)) {
+            startExtractPoll(episodeId);
+          } else {
+            stopExtractPoll(episodeId);
           }
         } else {
           setDesignStatus(payload.designStatus);
+          markEpisodeExtracting(episodeId, false);
+          stopExtractPoll(episodeId);
+          if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
+            setBatchExtracting(false);
+          }
         }
 
         let content = payload.episode.content?.replace(/\r\n/g, "\n") ?? "";
@@ -821,7 +988,15 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         setDetailLoading(false);
       }
     },
-    [apiRoot, loadApprovalMediaFlags, projectId, surface],
+    [
+      apiRoot,
+      loadApprovalMediaFlags,
+      markEpisodeExtracting,
+      projectId,
+      startExtractPoll,
+      stopExtractPoll,
+      surface,
+    ],
   );
 
   useEffect(() => {
@@ -906,9 +1081,13 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     return () => window.clearTimeout(timer);
   }, [loadDetail, selectedId]);
 
-    const applyRecord = useCallback((record: EpisodeAssetDesignRecord) => {
+  const applyRecord = useCallback((record: EpisodeAssetDesignRecord) => {
+    if (record.revision < revisionRef.current) return;
+
     setItems(record.items);
+    itemsRef.current = record.items;
     setRevision(record.revision);
+    revisionRef.current = record.revision;
     setDesignStatus(record.status);
   }, []);
 
@@ -937,7 +1116,8 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              expectedRevision: options?.expectedRevision ?? revision,
+              expectedRevision:
+                options?.expectedRevision ?? revisionRef.current,
               fingerprint,
               items: nextItems.map((item) => ({
                 ...item,
@@ -956,7 +1136,15 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
           error?: string;
         };
         if (!res.ok) throw new Error(payload.error ?? "保存失败");
-        if (payload.record) applyRecord(payload.record);
+        if (
+          payload.record &&
+          shouldApplySavedDesignRecord(
+            payload.record.revision,
+            revisionRef.current,
+          )
+        ) {
+          applyRecord(payload.record);
+        }
         if (!options?.silent) {
           setPageNote("已保存本集资产。");
         }
@@ -973,66 +1161,223 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         }
       }
     },
-    [apiRoot, applyRecord, fingerprint, loadList, revision, selectedId],
+    [apiRoot, applyRecord, fingerprint, loadList, selectedId],
   );
 
-  const markExtractStatus = useCallback(
-    async (
-      status: "generating" | "failed",
-      expectedRevision?: number,
-    ) => {
-      if (!selectedId || !fingerprint) return null;
-      return saveItems(items, {
-        status,
-        expectedRevision,
-        silent: true,
-        skipReloadList: true,
-      });
+  const bindMediaVoice = useCallback(
+    async (input: {
+      itemId: string;
+      mediaId: string;
+      voiceId: string;
+      voiceName: string | null;
+    }): Promise<boolean> => {
+      if (!selectedId) return false;
+
+      setSavingVoiceItemIds((prev) => new Set(prev).add(input.itemId));
+
+      try {
+        const res = await fetch(
+          `${apiRoot}/asset-designs/episodes/${encodeURIComponent(
+            selectedId,
+          )}/items/${encodeURIComponent(input.itemId)}/media-voice`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mediaId: input.mediaId,
+              voiceId: input.voiceId,
+              voiceName: input.voiceName,
+              voiceBound: true,
+            }),
+          },
+        );
+
+        const payload = (await res.json()) as {
+          record?: EpisodeAssetDesignRecord;
+          item?: EpisodeAssetDesignItem;
+          error?: string;
+        };
+        if (!res.ok || !payload.record) {
+          throw new Error(payload.error ?? "音色绑定失败");
+        }
+
+        applyRecord(payload.record);
+
+        setDesignModalItem((current) =>
+          current?.id === input.itemId
+            ? payload.record!.items.find((row) => row.id === input.itemId) ??
+              current
+            : current,
+        );
+
+        return true;
+      } catch (error) {
+        setPageNote(
+          error instanceof Error ? error.message : "音色绑定失败",
+        );
+        return false;
+      } finally {
+        setSavingVoiceItemIds((prev) => {
+          const next = new Set(prev);
+          next.delete(input.itemId);
+          return next;
+        });
+      }
     },
-    [fingerprint, items, saveItems, selectedId],
+    [apiRoot, applyRecord, selectedId],
   );
+
+  const markExtractStatusForEpisode = useCallback(
+    async (input: {
+      episodeId: string;
+      status: "generating" | "failed";
+      fingerprint: string;
+      expectedRevision: number;
+      items: EpisodeAssetDesignItem[];
+      activeGeneration?: EpisodeAssetActiveGeneration | null;
+    }): Promise<EpisodeAssetDesignRecord | null> => {
+      try {
+        const res = await fetch(
+          `${apiRoot}/asset-designs/episodes/${encodeURIComponent(input.episodeId)}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              expectedRevision: input.expectedRevision,
+              fingerprint: input.fingerprint,
+              items: input.items.map((item) => ({
+                ...item,
+                note: typeof item.note === "string" ? item.note : "",
+                resolution:
+                  item.resolution === "pending"
+                    ? "create_new"
+                    : item.resolution,
+              })),
+              status: input.status,
+              ...(input.activeGeneration !== undefined
+                ? { activeGeneration: input.activeGeneration }
+                : input.status === "failed"
+                  ? { activeGeneration: null }
+                  : {}),
+            }),
+          },
+        );
+        const payload = (await res.json()) as {
+          record?: EpisodeAssetDesignRecord;
+          error?: string;
+        };
+        if (!res.ok) throw new Error(payload.error ?? "无法更新提取状态");
+        return payload.record ?? null;
+      } catch (error) {
+        if (selectedIdRef.current === input.episodeId) {
+          setPageNote(
+            error instanceof Error ? error.message : "无法更新提取状态",
+          );
+        }
+        return null;
+      }
+    },
+    [apiRoot],
+  );
+
+  const putEpisodeExtractStatus = markExtractStatusForEpisode;
 
   const runExtract = useCallback(async () => {
-    if (!selectedId || generating || saving) return;
+    if (!selectedId || !fingerprint || saving) return;
+    if (extractionBusy) return;
+    if (extractJobsRef.current.has(selectedId)) return;
+    if (extractingEpisodeIds.has(selectedId)) return;
+
+    const extractingEpisodeId = selectedId;
+    const snapshotItems = itemsRef.current.map((item) => ({ ...item }));
+    const snapshotFingerprint = fingerprint;
+    let statusRevision = revisionRef.current;
+    const idempotencyKey = createEpisodeAssetDesignIdempotencyKey();
+    const startedAt = new Date().toISOString();
+
     setReextractOpen(false);
-    setGenerating(true);
-    setSaving(false);
     setPageNote("");
     setConfirmSummary(null);
+    markEpisodeExtracting(extractingEpisodeId, true);
+    if (selectedIdRef.current === extractingEpisodeId) {
+      setDesignStatus("generating");
+    }
+
     const controller = new AbortController();
-    abortRef.current = controller;
-    generationIdRef.current = null;
-    let statusRevision = revision;
+    extractJobsRef.current.set(extractingEpisodeId, {
+      controller,
+      generationId: null,
+      fingerprint: snapshotFingerprint,
+      revision: statusRevision,
+      items: snapshotItems,
+    });
+
     const timeoutId = window.setTimeout(() => {
       controller.abort();
     }, 180_000);
 
     try {
-      const generatingRecord = await markExtractStatus(
-        "generating",
-        statusRevision,
-      );
+      const generatingRecord = await markExtractStatusForEpisode({
+        episodeId: extractingEpisodeId,
+        status: "generating",
+        fingerprint: snapshotFingerprint,
+        expectedRevision: statusRevision,
+        items: snapshotItems,
+        activeGeneration: {
+          generationId: null,
+          idempotencyKey,
+          outputKind: "episode_asset_design",
+          startedAt,
+          updatedAt: startedAt,
+        },
+      });
       if (!generatingRecord) {
         throw new Error("无法开始提取，请刷新后重试");
       }
       statusRevision = generatingRecord.revision;
+      const job = extractJobsRef.current.get(extractingEpisodeId);
+      if (job) job.revision = statusRevision;
+      if (selectedIdRef.current === extractingEpisodeId) {
+        applyRecord(generatingRecord);
+      }
 
       const result = await streamStoryGeneration({
         projectId,
         brief: "",
         modelKey,
         targetChars: 1000,
-        idempotencyKey: createEpisodeAssetDesignIdempotencyKey(),
+        idempotencyKey,
         outputKind: "episode_asset_design",
-        episodeId: selectedId,
+        episodeId: extractingEpisodeId,
         signal: controller.signal,
         onMeta: (meta) => {
-          generationIdRef.current = meta.generationId;
+          const live = extractJobsRef.current.get(extractingEpisodeId);
+          if (live) live.generationId = meta.generationId;
+          void markExtractStatusForEpisode({
+            episodeId: extractingEpisodeId,
+            status: "generating",
+            fingerprint: snapshotFingerprint,
+            expectedRevision: statusRevision,
+            items: snapshotItems,
+            activeGeneration: {
+              generationId: meta.generationId,
+              idempotencyKey,
+              outputKind: "episode_asset_design",
+              startedAt,
+              updatedAt: new Date().toISOString(),
+            },
+          }).then((rec) => {
+            if (rec) {
+              statusRevision = rec.revision;
+              const liveJob = extractJobsRef.current.get(extractingEpisodeId);
+              if (liveJob) liveJob.revision = rec.revision;
+            }
+          });
         },
       });
 
       const applyRes = await fetch(
-        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(selectedId)}/apply-generation`,
+        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(extractingEpisodeId)}/apply-generation`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1040,7 +1385,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
             generationId: result.generationId,
             rawText: result.text,
             expectedRevision: statusRevision,
-            fingerprint,
+            fingerprint: snapshotFingerprint,
           }),
           signal: controller.signal,
         },
@@ -1052,48 +1397,86 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       if (!applyRes.ok) {
         throw new Error(applyPayload.error ?? "应用生成结果失败");
       }
-      if (applyPayload.record) {
-        applyRecord(applyPayload.record);
-      }
       notifyCreditsRefresh();
-      setPageNote("本集资产提取完成，请确认设计项。");
       await loadList();
-      await loadDetail(selectedId);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        setPageNote("已取消生成。");
-      } else if (error instanceof StoryGenerationClientError) {
-        setPageNote(error.message);
-      } else {
-        setPageNote(
-          error instanceof Error ? error.message : "提取失败，请稍后重试",
-        );
+      if (selectedIdRef.current === extractingEpisodeId) {
+        if (applyPayload.record) {
+          applyRecord(applyPayload.record);
+        }
+        setPageNote("本集资产提取完成，请确认设计项。");
+        await loadDetail(extractingEpisodeId);
       }
-      await markExtractStatus("failed", statusRevision);
+    } catch (error) {
+      const busyConflict =
+        error instanceof StoryGenerationClientError &&
+        error.code === "ASSET_EXTRACT_IN_PROGRESS";
+      if (busyConflict) {
+        if (selectedIdRef.current === extractingEpisodeId) {
+          setPageNote("资产正在提取中…");
+          setDesignStatus("generating");
+        }
+        extractJobsRef.current.delete(extractingEpisodeId);
+        markEpisodeExtracting(extractingEpisodeId, true);
+        startExtractPoll(extractingEpisodeId);
+        await loadList();
+        return;
+      }
+      const aborted =
+        error instanceof DOMException && error.name === "AbortError";
+      if (selectedIdRef.current === extractingEpisodeId) {
+        if (aborted) {
+          setPageNote("已取消生成。");
+        } else if (error instanceof StoryGenerationClientError) {
+          setPageNote(error.message);
+        } else {
+          setPageNote(
+            error instanceof Error ? error.message : "提取失败，请稍后重试",
+          );
+        }
+      }
+      const job = extractJobsRef.current.get(extractingEpisodeId);
+      await markExtractStatusForEpisode({
+        episodeId: extractingEpisodeId,
+        status: "failed",
+        fingerprint: job?.fingerprint ?? snapshotFingerprint,
+        expectedRevision: job?.revision ?? statusRevision,
+        items: job?.items ?? snapshotItems,
+        activeGeneration: null,
+      });
       await loadList();
+      if (selectedIdRef.current === extractingEpisodeId) {
+        setDesignStatus("failed");
+      }
     } finally {
       window.clearTimeout(timeoutId);
-      setGenerating(false);
-      setSaving(false);
-      abortRef.current = null;
+      if (!extractPollTimersRef.current.has(extractingEpisodeId)) {
+        extractJobsRef.current.delete(extractingEpisodeId);
+        stopExtractPoll(extractingEpisodeId);
+        markEpisodeExtracting(extractingEpisodeId, false);
+      }
     }
   }, [
     apiRoot,
     applyRecord,
+    extractionBusy,
+    extractingEpisodeIds,
     fingerprint,
-    generating,
     loadDetail,
     loadList,
-    markExtractStatus,
+    markEpisodeExtracting,
+    markExtractStatusForEpisode,
     modelKey,
     projectId,
-    revision,
     saving,
     selectedId,
+    startExtractPoll,
+    stopExtractPoll,
   ]);
 
   const handleExtract = useCallback(() => {
-    if (!selectedId || generating || saving) return;
+    if (!selectedId || saving) return;
+    if (extractionBusy) return;
+    if (extractingEpisodeIds.has(selectedId)) return;
     const hasReviewItems =
       items.length > 0 &&
       (designStatus === "review" ||
@@ -1104,16 +1487,36 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       return;
     }
     void runExtract();
-  }, [designStatus, generating, items.length, runExtract, saving, selectedId]);
+  }, [
+    designStatus,
+    extractionBusy,
+    extractingEpisodeIds,
+    items.length,
+    runExtract,
+    saving,
+    selectedId,
+  ]);
 
   const handleExtractAll = useCallback(async () => {
-    if (generating || batchExtracting || saving || confirming) return;
+    if (extractionBusy || saving || confirming) return;
+    if (extractJobsRef.current.has(SCRIPT_ASSET_DESIGN_ID)) return;
+
+    const extractingEpisodeId = SCRIPT_ASSET_DESIGN_ID;
     const controller = new AbortController();
-    abortRef.current = controller;
-    generationIdRef.current = null;
+    const idempotencyKey = createEpisodeAssetDesignIdempotencyKey();
+    const startedAt = new Date().toISOString();
+    extractJobsRef.current.set(extractingEpisodeId, {
+      controller,
+      generationId: null,
+      fingerprint: "",
+      revision: 0,
+      items: [],
+    });
     setBatchExtracting(true);
-    setGenerating(true);
+    markEpisodeExtracting(extractingEpisodeId, true);
+    setDesignStatus("generating");
     setPageNote("");
+    setExtractionError(null);
     setConfirmSummary(null);
 
     try {
@@ -1126,18 +1529,79 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         throw new Error(payload.error ?? "无法加载完整原始剧本");
       }
       const scriptDetail = (await detailRes.json()) as EpisodeDetailPayload;
+      if (scriptDetail.designStatus === "generating") {
+        // Another tab / prior session already owns the extract — sync UI, do not fail it.
+        applyRecord(scriptDetail.record);
+        setDesignStatus("generating");
+        setBatchExtracting(true);
+        markEpisodeExtracting(extractingEpisodeId, true);
+        extractJobsRef.current.delete(extractingEpisodeId);
+        startExtractPoll(extractingEpisodeId);
+        return;
+      }
+      const job = extractJobsRef.current.get(extractingEpisodeId);
+      if (job) {
+        job.fingerprint = scriptDetail.currentFingerprint;
+        job.revision = scriptDetail.record.revision;
+        job.items = scriptDetail.record.items;
+      }
+
+      const generatingRecord = await markExtractStatusForEpisode({
+        episodeId: extractingEpisodeId,
+        status: "generating",
+        fingerprint: scriptDetail.currentFingerprint,
+        expectedRevision: scriptDetail.record.revision,
+        items: scriptDetail.record.items,
+        activeGeneration: {
+          generationId: null,
+          idempotencyKey,
+          outputKind: "script_asset_design",
+          startedAt,
+          updatedAt: startedAt,
+        },
+      });
+      if (!generatingRecord) {
+        throw new Error("无法开始提取，请刷新后重试");
+      }
+      if (job) job.revision = generatingRecord.revision;
+      if (selectedIdRef.current === extractingEpisodeId) {
+        applyRecord(generatingRecord);
+      }
+
       const result = await streamStoryGeneration({
         projectId,
         brief: "",
-        modelKey,
+        modelKey: assetExtractionModel,
         targetChars: 20_000,
-        idempotencyKey: createEpisodeAssetDesignIdempotencyKey(),
+        idempotencyKey,
         outputKind: "script_asset_design",
         signal: controller.signal,
         onMeta: (meta) => {
-          generationIdRef.current = meta.generationId;
+          const live = extractJobsRef.current.get(extractingEpisodeId);
+          if (live) live.generationId = meta.generationId;
+          void markExtractStatusForEpisode({
+            episodeId: extractingEpisodeId,
+            status: "generating",
+            fingerprint: scriptDetail.currentFingerprint,
+            expectedRevision: generatingRecord.revision,
+            items: scriptDetail.record.items,
+            activeGeneration: {
+              generationId: meta.generationId,
+              idempotencyKey,
+              outputKind: "script_asset_design",
+              startedAt,
+              updatedAt: new Date().toISOString(),
+            },
+          });
         },
       });
+
+      if (!result.text.trim()) {
+        throw Object.assign(new Error("模型未返回任何内容，请重试提取。"), {
+          code: "EMPTY_MODEL_OUTPUT",
+        });
+      }
+
       const applyRes = await fetch(
         `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}/apply-generation`,
         {
@@ -1146,7 +1610,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
           body: JSON.stringify({
             generationId: result.generationId,
             rawText: result.text,
-            expectedRevision: scriptDetail.record.revision,
+            expectedRevision: generatingRecord.revision,
             fingerprint: scriptDetail.currentFingerprint,
           }),
           signal: controller.signal,
@@ -1155,62 +1619,450 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       const applyPayload = (await applyRes.json()) as {
         record?: EpisodeAssetDesignRecord;
         error?: string;
+        code?: string;
+        warnings?: Array<{ code: string; message: string }>;
+        rejectedItems?: Array<{
+          index: number;
+          name?: string;
+          reason: string;
+        }>;
+        repaired?: boolean;
       };
       if (!applyRes.ok || !applyPayload.record) {
-        throw new Error(applyPayload.error ?? "应用全剧本资产结果失败");
+        const code = applyPayload.code ?? "PARSE_FAILED";
+        const live = extractJobsRef.current.get(extractingEpisodeId);
+        throw Object.assign(
+          new Error(
+            formatFullScriptExtractionError(
+              code,
+              applyPayload.error ?? "应用全剧本资产结果失败",
+            ),
+          ),
+          {
+            code,
+            generationId: live?.generationId ?? result.generationId,
+            canReapply: Boolean(live?.generationId ?? result.generationId),
+            rejectedItems: applyPayload.rejectedItems ?? [],
+          },
+        );
       }
 
-      setSelectedId(SCRIPT_ASSET_DESIGN_ID);
+      notifyCreditsRefresh();
       setFullScriptAssetCount(applyPayload.record.items.length);
       setFullScriptPending(false);
-      applyRecord(applyPayload.record);
-      notifyCreditsRefresh();
-      setPageNote("完整剧本资产已一次性提取完成，请在下方核对。");
+      setExtractionError(null);
+      const rejectedCount = applyPayload.rejectedItems?.length ?? 0;
+      const repairedCount = applyPayload.repaired
+        ? 1
+        : (applyPayload.warnings ?? []).filter((w) =>
+            /USAGE_PROMOTED|ASSET_MERGED|UNMAPPED_DESIGN_FIELD|repair/i.test(
+              w.code,
+            ),
+          ).length;
+      setExtractDiagnostics({
+        extracted: applyPayload.record.items.length,
+        repaired: repairedCount,
+        rejected: rejectedCount,
+        rejectedItems: applyPayload.rejectedItems ?? [],
+      });
+      await loadList();
+      if (selectedIdRef.current === SCRIPT_ASSET_DESIGN_ID) {
+        applyRecord(applyPayload.record);
+        setPageNote(
+          `已提取 ${applyPayload.record.items.length} 项` +
+            (repairedCount > 0 ? `，${repairedCount} 项已自动修复` : "") +
+            (rejectedCount > 0 ? `，${rejectedCount} 项需人工检查` : "") +
+            "，请在下方核对。",
+        );
+        await loadDetail(SCRIPT_ASSET_DESIGN_ID);
+      } else {
+        setPageNote("完整剧本资产提取已完成，可返回全剧本查看。");
+      }
     } catch (error) {
+      const busyConflict =
+        (error instanceof StoryGenerationClientError &&
+          error.code === "ASSET_EXTRACT_IN_PROGRESS") ||
+        (error &&
+          typeof error === "object" &&
+          "code" in error &&
+          (error as { code?: string }).code === "ASSET_EXTRACT_IN_PROGRESS");
+
+      if (busyConflict) {
+        setPageNote("资产正在提取中…");
+        setExtractionError(null);
+        setDesignStatus("generating");
+        setBatchExtracting(true);
+        markEpisodeExtracting(extractingEpisodeId, true);
+        extractJobsRef.current.delete(extractingEpisodeId);
+        startExtractPoll(extractingEpisodeId);
+        await loadList();
+        return;
+      }
+
       if (error instanceof DOMException && error.name === "AbortError") {
         setPageNote("已取消全剧本资产提取。");
+        setExtractionError(null);
+      } else if (error instanceof StoryGenerationClientError) {
+        const message = formatFullScriptExtractionError(
+          error.code,
+          error.message,
+        );
+        setExtractionError({
+          code: error.code,
+          message,
+          generationId: extractJobsRef.current.get(SCRIPT_ASSET_DESIGN_ID)
+            ?.generationId,
+          canReapply: false,
+        });
+        setPageNote("");
       } else {
-        setPageNote(error instanceof Error ? error.message : "全剧本提取失败");
+        const code =
+          error && typeof error === "object" && "code" in error
+            ? String((error as { code?: string }).code ?? "EXTRACT_FAILED")
+            : "EXTRACT_FAILED";
+        const generationId =
+          error && typeof error === "object" && "generationId" in error
+            ? String((error as { generationId?: string }).generationId ?? "")
+            : extractJobsRef.current.get(SCRIPT_ASSET_DESIGN_ID)?.generationId ??
+              "";
+        const canReapply = Boolean(
+          error &&
+            typeof error === "object" &&
+            "canReapply" in error &&
+            (error as { canReapply?: boolean }).canReapply,
+        );
+        setExtractionError({
+          code,
+          message:
+            error instanceof Error
+              ? error.message
+              : "全剧本资产提取失败，请重试。",
+          generationId: generationId || null,
+          canReapply,
+          canRetryChunks: code === "PARTIAL_CHUNKS_FAILED",
+        });
+        const rejectedItems =
+          error && typeof error === "object" && "rejectedItems" in error
+            ? ((error as { rejectedItems?: Array<{ index: number; name?: string; reason: string }> })
+                .rejectedItems ?? [])
+            : [];
+        if (rejectedItems.length > 0) {
+          setExtractDiagnostics({
+            extracted: 0,
+            repaired: 0,
+            rejected: rejectedItems.length,
+            rejectedItems,
+          });
+        }
+        setPageNote("");
       }
+      const live = extractJobsRef.current.get(extractingEpisodeId);
+      if (live?.fingerprint) {
+        await markExtractStatusForEpisode({
+          episodeId: extractingEpisodeId,
+          status: "failed",
+          fingerprint: live.fingerprint,
+          expectedRevision: live.revision,
+          items: live.items,
+          activeGeneration: null,
+        });
+      }
+      await loadList();
+    } finally {
+      if (!extractPollTimersRef.current.has(extractingEpisodeId)) {
+        extractJobsRef.current.delete(extractingEpisodeId);
+        stopExtractPoll(extractingEpisodeId);
+        markEpisodeExtracting(extractingEpisodeId, false);
+        setBatchExtracting(false);
+      }
+    }
+  }, [
+    apiRoot,
+    applyRecord,
+    assetExtractionModel,
+    confirming,
+    extractionBusy,
+    loadDetail,
+    loadList,
+    markEpisodeExtracting,
+    markExtractStatusForEpisode,
+    projectId,
+    saving,
+    startExtractPoll,
+    stopExtractPoll,
+  ]);
+
+  const handleReapplyGeneration = useCallback(async () => {
+    const generationId = extractionError?.generationId;
+    if (!generationId || batchExtracting || saving) return;
+    setBatchExtracting(true);
+    try {
+      const detailRes = await fetch(
+        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}`,
+      );
+      if (!detailRes.ok) {
+        throw new Error("无法加载完整原始剧本");
+      }
+      const scriptDetail = (await detailRes.json()) as EpisodeDetailPayload;
+      const applyRes = await fetch(
+        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}/apply-generation`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            generationId,
+            expectedRevision: scriptDetail.record.revision,
+            fingerprint: scriptDetail.currentFingerprint,
+          }),
+        },
+      );
+      const applyPayload = (await applyRes.json()) as {
+        record?: EpisodeAssetDesignRecord;
+        error?: string;
+        code?: string;
+        warnings?: Array<{ code: string; message: string }>;
+        rejectedItems?: Array<{ index: number; name?: string; reason: string }>;
+        repaired?: boolean;
+      };
+      if (!applyRes.ok || !applyPayload.record) {
+        throw new Error(applyPayload.error ?? "重新应用失败");
+      }
+      setExtractionError(null);
+      setFullScriptAssetCount(applyPayload.record.items.length);
+      setFullScriptPending(false);
+      setExtractDiagnostics({
+        extracted: applyPayload.record.items.length,
+        repaired: applyPayload.repaired ? 1 : 0,
+        rejected: applyPayload.rejectedItems?.length ?? 0,
+        rejectedItems: applyPayload.rejectedItems ?? [],
+      });
+      applyRecord(applyPayload.record);
+      setPageNote(
+        `已重新应用生成结果：${applyPayload.record.items.length} 项资产。`,
+      );
+      await loadList();
+      await loadDetail(SCRIPT_ASSET_DESIGN_ID);
+    } catch (error) {
+      setExtractionError({
+        code: "REAPPLY_FAILED",
+        message: error instanceof Error ? error.message : "重新应用失败",
+        generationId,
+        canReapply: true,
+      });
     } finally {
       setBatchExtracting(false);
-      setGenerating(false);
-      setSaving(false);
-      abortRef.current = null;
-      generationIdRef.current = null;
-      await loadDetail(SCRIPT_ASSET_DESIGN_ID);
     }
   }, [
     apiRoot,
     applyRecord,
     batchExtracting,
-    confirming,
-    generating,
+    extractionError?.generationId,
     loadDetail,
-    modelKey,
-    projectId,
+    loadList,
     saving,
   ]);
 
-  const handleCancelGenerate = useCallback(async () => {
-    abortRef.current?.abort();
-    const genId = generationIdRef.current;
-    if (genId) {
-      await cancelStoryGeneration(projectId, genId);
+  const handleRetryFailedChunks = useCallback(async () => {
+    const generationId = extractionError?.generationId;
+    if (!generationId || batchExtracting || saving) return;
+    setBatchExtracting(true);
+    try {
+      const retryRes = await fetch(
+        `${apiRoot}/asset-designs/retry-failed-chunks`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ generationId }),
+        },
+      );
+      const retryPayload = (await retryRes.json()) as {
+        content?: string;
+        failedRemaining?: number;
+        error?: string;
+        code?: string;
+      };
+      if (!retryRes.ok || !retryPayload.content) {
+        throw new Error(retryPayload.error ?? "重试失败分块未成功");
+      }
+      const detailRes = await fetch(
+        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}`,
+      );
+      const scriptDetail = (await detailRes.json()) as EpisodeDetailPayload;
+      const applyRes = await fetch(
+        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}/apply-generation`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            generationId,
+            rawText: retryPayload.content,
+            expectedRevision: scriptDetail.record.revision,
+            fingerprint: scriptDetail.currentFingerprint,
+          }),
+        },
+      );
+      const applyPayload = (await applyRes.json()) as {
+        record?: EpisodeAssetDesignRecord;
+        error?: string;
+        rejectedItems?: Array<{ index: number; name?: string; reason: string }>;
+        repaired?: boolean;
+      };
+      if (!applyRes.ok || !applyPayload.record) {
+        throw new Error(applyPayload.error ?? "应用重试结果失败");
+      }
+      setExtractionError(
+        (retryPayload.failedRemaining ?? 0) > 0
+          ? {
+              code: "PARTIAL_CHUNKS_FAILED",
+              message: `仍有 ${retryPayload.failedRemaining} 个分块失败，可继续重试`,
+              generationId,
+              canRetryChunks: true,
+              canReapply: true,
+            }
+          : null,
+      );
+      setFullScriptPending(false);
+      setFullScriptAssetCount(applyPayload.record.items.length);
+      applyRecord(applyPayload.record);
+      setPageNote(
+        `已合并重试结果：${applyPayload.record.items.length} 项资产` +
+          ((retryPayload.failedRemaining ?? 0) > 0
+            ? `（仍有 ${retryPayload.failedRemaining} 块失败）`
+            : ""),
+      );
+      await loadList();
+      await loadDetail(SCRIPT_ASSET_DESIGN_ID);
+    } catch (error) {
+      setExtractionError({
+        code: "RETRY_CHUNKS_FAILED",
+        message: error instanceof Error ? error.message : "重试失败分块失败",
+        generationId,
+        canRetryChunks: true,
+        canReapply: true,
+      });
+    } finally {
+      setBatchExtracting(false);
     }
-    setGenerating(false);
-    setSaving(false);
-    setPageNote(batchExtracting ? "正在取消全剧本提取…" : "已取消生成。");
-    if (!batchExtracting) await markExtractStatus("failed");
+  }, [
+    apiRoot,
+    applyRecord,
+    batchExtracting,
+    extractionError?.generationId,
+    loadDetail,
+    loadList,
+    saving,
+  ]);
+
+  const handleCancelGenerate = useCallback(async (episodeIdArg?: string) => {
+    const episodeId = episodeIdArg ?? selectedId;
+    if (!episodeId) return;
+    const job = extractJobsRef.current.get(episodeId);
+    stopExtractPoll(episodeId);
+
+    if (job) {
+      job.controller.abort();
+      const genId = job.generationId;
+      if (genId) {
+        try {
+          await cancelStoryGeneration(projectId, genId);
+        } catch {
+          /* best-effort cancel */
+        }
+      }
+
+      if (episodeId !== SCRIPT_ASSET_DESIGN_ID) {
+        await putEpisodeExtractStatus({
+          episodeId,
+          status: "failed",
+          fingerprint: job.fingerprint,
+          expectedRevision: job.revision,
+          items: job.items,
+        });
+      }
+      extractJobsRef.current.delete(episodeId);
+    } else if (episodeId !== SCRIPT_ASSET_DESIGN_ID) {
+      await putEpisodeExtractStatus({
+        episodeId,
+        status: "failed",
+        fingerprint: fingerprint || "",
+        expectedRevision: revisionRef.current,
+        items: itemsRef.current,
+      });
+    } else {
+      try {
+        const res = await fetch(
+          `${apiRoot}/asset-designs/episodes/${encodeURIComponent(episodeId)}`,
+        );
+        if (res.ok) {
+          const payload = (await res.json()) as EpisodeDetailPayload;
+          await fetch(
+            `${apiRoot}/asset-designs/episodes/${encodeURIComponent(episodeId)}`,
+            {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                expectedRevision: payload.record.revision,
+                fingerprint: payload.currentFingerprint,
+                items: payload.record.items,
+                status: "failed",
+              }),
+            },
+          );
+        }
+      } catch {
+        /* best-effort cancel unlock */
+      }
+    }
+
+    if (selectedIdRef.current === episodeId) {
+      setDesignStatus("failed");
+    }
+
+    markEpisodeExtracting(episodeId, false);
+    if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
+      setBatchExtracting(false);
+      setPageNote("已取消全剧本资产提取。");
+    } else {
+      setPageNote("已取消生成。");
+    }
     await loadList();
-  }, [batchExtracting, loadList, markExtractStatus, projectId]);
+  }, [
+    apiRoot,
+    fingerprint,
+    loadList,
+    markEpisodeExtracting,
+    projectId,
+    putEpisodeExtractStatus,
+    selectedId,
+    stopExtractPoll,
+  ]);
 
   const handleConfirm = useCallback(async () => {
     if (!selectedId || !fingerprint) return;
+    const latestItems = itemsRef.current;
+    const missingImages = latestItems.filter(
+      (item) =>
+        (item.resolution === "create_new" || item.resolution === "pending") &&
+        item.assetType !== "audio" &&
+        !item.generatedMedia?.currentId?.trim(),
+    );
+    if (missingImages.length > 0) {
+      setPageNote(
+        `无法确认：${missingImages.map((item) => item.name).join("、")}尚未生成图片。`,
+      );
+      return;
+    }
+    const unboundVoices = latestItems.filter((item) => {
+      if (item.resolution !== "create_new" || item.assetType !== "character") {
+        return false;
+      }
+      const mediaId = item.generatedMedia?.currentId?.trim();
+      return !mediaId || !isMediaVoiceBound(getDesignMediaVoiceBinding(item, mediaId));
+    });
     setConfirming(true);
     setPageNote("");
     try {
-      const savedRecord = await saveItems(items);
+      const savedRecord = await saveItems(latestItems);
       if (!savedRecord) return;
 
       const res = await fetch(
@@ -1290,6 +2142,12 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         }
       }
       if (note) setPageNote(note);
+      if (unboundVoices.length > 0) {
+        const voiceReminder = `${unboundVoices.length} 个角色尚未绑定音色，可在资产库中继续补充。`;
+        setPageNote((current) =>
+          current ? `${current} ${voiceReminder}` : voiceReminder,
+        );
+      }
       await loadList();
       await loadBundle();
     } catch (error) {
@@ -1302,7 +2160,6 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     applyRecord,
     fingerprint,
     isFullScriptDesign,
-    items,
     loadBundle,
     loadList,
     pendingMedia,
@@ -1311,7 +2168,172 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     selectedId,
   ]);
 
-const updateItem = useCallback(
+  const confirmItemToLibrary = useCallback(
+    async (itemId: string) => {
+      if (!isPersonalSpace || !selectedId || !fingerprint) return;
+      if (confirmingRef.current) return;
+      const latestItems = itemsRef.current;
+      const item = latestItems.find((candidate) => candidate.id === itemId);
+      if (!item) return;
+      if (item.libraryAssetId?.trim()) return;
+      if (
+        (item.resolution === "create_new" || item.resolution === "pending") &&
+        item.assetType !== "audio" &&
+        !item.generatedMedia?.currentId?.trim()
+      ) {
+        setPageNote(`无法确认：「${item.name}」尚未生成图片。`);
+        return;
+      }
+
+      confirmingRef.current = true;
+      setConfirming(true);
+      setConfirmingItemId(itemId);
+      setPageNote("");
+      try {
+        const savedRecord = await saveItems(latestItems, {
+          skipReloadList: true,
+        });
+        if (!savedRecord) return;
+        const res = await fetch(
+          `${apiRoot}/asset-designs/episodes/${encodeURIComponent(selectedId)}/confirm`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              expectedRevision: savedRecord.revision,
+              fingerprint,
+              itemId,
+            }),
+          },
+        );
+        const payload = (await res.json()) as {
+          record?: EpisodeAssetDesignRecord;
+          createdAssets?: Array<{
+            itemId: string;
+            assetId: string;
+            assetType: EpisodeAssetDesignAssetType;
+          }>;
+          error?: string;
+        };
+        if (!res.ok) throw new Error(payload.error ?? "确认入库失败");
+        if (payload.record) applyRecord(payload.record);
+
+        const created = payload.createdAssets?.find(
+          (entry) => entry.itemId === itemId,
+        );
+        const pending = pendingMedia[itemId];
+        let mediaUploadFailed = false;
+        if (created && pending) {
+          try {
+            if (pending.kind === "image") {
+              await uploadProjectAssetImage(
+                projectId,
+                created.assetId,
+                pending.file,
+              );
+            } else {
+              await uploadProjectAssetAudio(
+                projectId,
+                created.assetId,
+                pending.file,
+              );
+            }
+            if (pending.objectUrl.startsWith("blob:")) {
+              URL.revokeObjectURL(pending.objectUrl);
+            }
+            setPendingMedia((previous) => {
+              const next = { ...previous };
+              delete next[itemId];
+              return next;
+            });
+          } catch {
+            mediaUploadFailed = true;
+          }
+        }
+
+        setPageNote(
+          mediaUploadFailed
+            ? `「${item.name}」已入库，但媒体上传失败，可在资产库补传。`
+            : `「${item.name}」已确认入库。`,
+        );
+        await Promise.all([loadList(), loadBundle()]);
+      } catch (error) {
+        setPageNote(error instanceof Error ? error.message : "确认入库失败");
+      } finally {
+        confirmingRef.current = false;
+        setConfirming(false);
+        setConfirmingItemId(null);
+        setPendingUnboundVoiceConfirmItem(null);
+        setPendingUncheckedVideoRefItem(null);
+      }
+    },
+    [
+      apiRoot,
+      applyRecord,
+      fingerprint,
+      isPersonalSpace,
+      loadBundle,
+      loadList,
+      pendingMedia,
+      projectId,
+      saveItems,
+      selectedId,
+    ],
+  );
+
+  const handleConfirmItem = useCallback(
+    (itemId: string) => {
+      if (!isPersonalSpace || !selectedId || !fingerprint) return;
+      if (saving || confirmingRef.current || confirming || confirmingItemId) {
+        return;
+      }
+      const latestItems = itemsRef.current;
+      const item = latestItems.find((candidate) => candidate.id === itemId);
+      if (!item) return;
+      if (item.libraryAssetId?.trim()) return;
+      if (
+        (item.resolution === "create_new" || item.resolution === "pending") &&
+        item.assetType !== "audio" &&
+        !item.generatedMedia?.currentId?.trim()
+      ) {
+        setPageNote(`无法确认：「${item.name}」尚未生成图片。`);
+        return;
+      }
+
+      // Characters: current-image person verification must pass before voice/入库.
+      if (characterNeedsUncheckedVideoRefBlock(item)) {
+        setPendingUncheckedVideoRefItem({ id: item.id, name: item.name });
+        return;
+      }
+
+      if (characterNeedsUnboundVoiceConfirm(item)) {
+        setPendingUnboundVoiceConfirmItem({ id: item.id, name: item.name });
+        return;
+      }
+
+      void confirmItemToLibrary(itemId);
+    },
+    [
+      confirmItemToLibrary,
+      confirming,
+      confirmingItemId,
+      fingerprint,
+      isPersonalSpace,
+      saving,
+      selectedId,
+    ],
+  );
+
+  const dismissUncheckedVideoRefBlock = useCallback(() => {
+    setPendingUncheckedVideoRefItem(null);
+  }, []);
+
+  const dismissUnboundVoiceConfirm = useCallback(() => {
+    if (confirmingRef.current || confirming || confirmingItemId) return;
+    setPendingUnboundVoiceConfirmItem(null);
+  }, [confirming, confirmingItemId]);
+
+  const updateItem = useCallback(
     (id: string, patch: Partial<EpisodeAssetDesignItem>) => {
       setItems((prev) =>
         prev.map((item) =>
@@ -1408,7 +2430,7 @@ const updateItem = useCallback(
     (draft: CharacterDraftInput) => {
       const previous =
         editingItemId != null
-          ? (items.find(
+          ? (itemsRef.current.find(
               (item) =>
                 item.id === editingItemId && item.assetType === "character",
             ) as CharacterDesignItem | undefined) ?? null
@@ -1434,13 +2456,7 @@ const updateItem = useCallback(
       );
       closeCreateDialog();
     },
-    [
-      closeCreateDialog,
-      editingItemId,
-      items,
-      projectVoices,
-      upsertPendingMedia,
-    ],
+    [closeCreateDialog, editingItemId, projectVoices, upsertPendingMedia],
   );
 
   const handleSceneDialogSubmit = useCallback(
@@ -1501,35 +2517,6 @@ const updateItem = useCallback(
     [closeCreateDialog, editingItemId, items, upsertPendingMedia],
   );
 
-  const handleAudioDialogSubmit = useCallback(
-    (draft: AudioDraftInput) => {
-      const previous =
-        editingItemId != null
-          ? (items.find(
-              (item) =>
-                item.id === editingItemId && item.assetType === "audio",
-            ) as AudioDesignItem | undefined) ?? null
-          : null;
-      const id = previous?.id ?? newItemId();
-      const nextItem = itemFromAudioDraft(draft, { id, previous });
-      if (previous) {
-        setItems((prev) =>
-          prev.map((item) => (item.id === id ? nextItem : item)),
-        );
-      } else {
-        setItems((prev) => [...prev, nextItem]);
-      }
-      upsertPendingMedia(
-        id,
-        "audio",
-        draft.pendingAudioFile,
-        draft.objectUrl,
-      );
-      closeCreateDialog();
-    },
-    [closeCreateDialog, editingItemId, items, upsertPendingMedia],
-  );
-
   const editingItem = useMemo(() => {
     if (!editingItemId) return null;
     return items.find((item) => item.id === editingItemId) ?? null;
@@ -1551,12 +2538,6 @@ const updateItem = useCallback(
     if (createDialogType !== "prop" || !editingItem) return null;
     if (editingItem.assetType !== "prop") return null;
     return propDraftFromItem(editingItem, pendingMedia[editingItem.id]);
-  }, [createDialogType, editingItem, pendingMedia]);
-
-  const audioInitialDraft = useMemo(() => {
-    if (createDialogType !== "audio" || !editingItem) return null;
-    if (editingItem.assetType !== "audio") return null;
-    return audioDraftFromItem(editingItem, pendingMedia[editingItem.id]);
   }, [createDialogType, editingItem, pendingMedia]);
 
   const staleWarning =
@@ -1583,21 +2564,38 @@ const updateItem = useCallback(
     isFullScriptDesign &&
     designStatus === "not_started" &&
     items.length === 0;
+  const missingImageItems = items.filter(
+    (item) =>
+      (item.resolution === "create_new" || item.resolution === "pending") &&
+      item.assetType !== "audio" &&
+      !item.generatedMedia?.currentId?.trim(),
+  );
+  const unboundVoiceItems = items.filter((item) => {
+    if (item.resolution !== "create_new" || item.assetType !== "character") {
+      return false;
+    }
+    const mediaId = item.generatedMedia?.currentId?.trim();
+    return !mediaId || !isMediaVoiceBound(getDesignMediaVoiceBinding(item, mediaId));
+  });
   const canConfirm =
-    !generating &&
+    !extractionBusy &&
     !saving &&
     !confirming &&
     Boolean(selectedId) &&
     designStatus !== "stale" &&
-    designStatus !== "generating" &&
     designStatus !== "not_started" &&
-    designStatus !== "failed";
+    designStatus !== "failed" &&
+    missingImageItems.length === 0;
+  const confirmDisabledReason =
+    missingImageItems.length > 0
+      ? `请先为${missingImageItems.map((item) => item.name).join("、")}生成图片`
+      : undefined;
 
   const canSubmitApproval =
-    !generating && !saving && Boolean(selectedId);
+    !extractionBusy && !saving && Boolean(selectedId);
 
   const canDesign =
-    !generating &&
+    !extractionBusy &&
     !confirming &&
     (designStatus === "review" ||
       designStatus === "confirmed" ||
@@ -1612,67 +2610,193 @@ const updateItem = useCallback(
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [scriptViewerOpen]);
 
+  useEffect(() => {
+    if (!pendingUncheckedVideoRefItem) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setPendingUncheckedVideoRefItem(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [pendingUncheckedVideoRefItem]);
+
+  useEffect(() => {
+    if (!pendingUnboundVoiceConfirmItem) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (confirming || confirmingItemId) return;
+      setPendingUnboundVoiceConfirmItem(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [pendingUnboundVoiceConfirmItem, confirming, confirmingItemId]);
+
   return (
     <div className="ead" data-testid="episode-asset-design-workspace">
       <div className={`ead-layout${isAwaitingFullScriptExtraction ? " is-pending" : ""}`}>
         <section className="ead-overview amw-panel" aria-labelledby="ead-overview-title">
           <div className="ead-overview__main">
             <div className="ead-overview__copy">
-              <span className="ead-overview__eyebrow">AI 全剧本资产提取</span>
               <div className="ead-overview__title-row">
-                <h2 id="ead-overview-title">全剧本资产提取</h2>
-                <button
-                  type="button"
-                  className="amw-btn amw-btn-primary ead-extract-all-btn"
-                  disabled={
-                    generating ||
-                    batchExtracting ||
-                    saving ||
-                    confirming
-                  }
-                  onClick={() => void handleExtractAll()}
-                  data-testid="ead-extract-all"
-                >
-                  {batchExtracting
-                    ? "提取中…"
-                    : items.length > 0 && isFullScriptDesign
-                      ? "重新提取"
-                      : "一键提取"}
-                </button>
+                <h2 id="ead-overview-title">资产提取</h2>
+
+                <div className="ead-overview__extract-actions">
+                  <button
+                    type="button"
+                    className="amw-btn amw-btn-primary ead-extract-all-btn"
+                    disabled={extractionBusy || saving || confirming}
+                    aria-busy={extractionBusy}
+                    onClick={() => void handleExtractAll()}
+                    data-testid="ead-extract-all"
+                  >
+                    {extractionBusy
+                      ? "提取中…"
+                      : "一键提取基本资产"}
+                  </button>
+                  {extractionBusy ? (
+                    <button
+                      type="button"
+                      className="amw-btn"
+                      onClick={() =>
+                        void handleCancelGenerate(SCRIPT_ASSET_DESIGN_ID)
+                      }
+                      data-testid="ead-cancel-extract-all"
+                    >
+                      取消生成
+                    </button>
+                  ) : null}
+
+                  <div
+                    className="ead-extract-model-select"
+                    data-testid="ead-extract-model"
+                  >
+                    <GlassSelect
+                      label="提取模型"
+                      hideLabel
+                      value={assetExtractionModel}
+                      options={ASSET_EXTRACTION_MODEL_OPTIONS}
+                      disabled={extractionBusy || saving || confirming}
+                      menuPortal
+                      menuSideOffset={6}
+                      menuCollisionPadding={12}
+                      onChange={setAssetExtractionModel}
+                    />
+                  </div>
+                </div>
               </div>
-              <p>系统将扫描完整剧本，提取角色、场景、道具与音频。</p>
+              {extractionBusy ? (
+                <p
+                  className="ead-background-task-note"
+                  aria-live="polite"
+                  data-testid="ead-extract-all-background-note"
+                >
+                  正在提取全剧本资产，通常需要 2-10 分钟。请稍候，提取完成前请勿重复提交或离开后立即再开新任务。
+                </p>
+              ) : null}
+            </div>
+
+            <div className="ead-overview__summary" ref={summaryRef}>
+              <div className="ead-overview__summary-actions">
+                <AssetSummaryButton
+                  label="提取到的资产"
+                  count={extractedAssets.length}
+                  active={assetSummaryPanel === "extracted"}
+                  testId="ead-summary-extracted"
+                  onClick={() =>
+                    setAssetSummaryPanel((prev) =>
+                      prev === "extracted" ? null : "extracted",
+                    )
+                  }
+                />
+                <AssetSummaryButton
+                  label="已入库"
+                  count={libraryAssets.length}
+                  active={assetSummaryPanel === "library"}
+                  testId="ead-summary-library"
+                  onClick={() =>
+                    setAssetSummaryPanel((prev) =>
+                      prev === "library" ? null : "library",
+                    )
+                  }
+                />
+                <AssetSummaryButton
+                  label="已提取"
+                  count={generatedAssets.length}
+                  active={assetSummaryPanel === "generated"}
+                  testId="ead-summary-generated"
+                  onClick={() =>
+                    setAssetSummaryPanel((prev) =>
+                      prev === "generated" ? null : "generated",
+                    )
+                  }
+                />
+              </div>
+
+              {assetSummaryPanel ? (
+                <div
+                  className="ead-summary-popover"
+                  role="dialog"
+                  aria-label="资产统计"
+                  data-testid="ead-summary-popover"
+                >
+                  <div className="ead-summary-popover__head">
+                    <strong>{summaryTitle}</strong>
+                    <button
+                      type="button"
+                      className="ead-summary-popover__close"
+                      aria-label="关闭"
+                      title="关闭"
+                      onClick={() => setAssetSummaryPanel(null)}
+                    >
+                      <X size={15} aria-hidden />
+                    </button>
+                  </div>
+
+                  <div className="ead-summary-popover__list">
+                    {summaryItems.length === 0 ? (
+                      <p className="ead-muted">暂无资产</p>
+                    ) : (
+                      summaryItems.map((item) => {
+                        const disabled = assetSummaryPanel === "library";
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className="ead-summary-popover__item"
+                            disabled={disabled}
+                            onClick={() => {
+                              if (disabled) return;
+                              setDesignModalItem(item);
+                              setAssetSummaryPanel(null);
+                            }}
+                          >
+                            {item.name}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
-          <div className="ead-progress" aria-label="全剧本资产状态">
-            <span>
-              <strong>{isFullScriptDesign ? items.length : fullScriptAssetCount}</strong>
-              全剧本资产
-            </span>
-            <span>
-              <strong>{progress.review}</strong>
-              待复核
-            </span>
-            <span>
-              <strong>{pendingExtractionCount}</strong>
-              可补提取
-            </span>
-          </div>
+
           {fullScriptPending && !isFullScriptDesign ? (
             <div className="ead-full-script-pending" data-testid="ead-full-script-pending">
               <div>
-                <strong>全剧本资产尚未提取</strong>
-                <p>建议先完成全剧本提取；按集补提取仅用于遗漏修复与复核。</p>
+                <strong>尚未提取资产</strong>
               </div>
               <button
                 type="button"
                 className="amw-btn ead-full-script-pending__button"
+                disabled={extractionBusy}
                 onClick={() => setSelectedId(SCRIPT_ASSET_DESIGN_ID)}
-                disabled={batchExtracting || generating}
               >
                 返回全剧本
               </button>
             </div>
           ) : null}
+
           <div className="ead-episode-tool">
             <div className="ead-episode-tool__copy">
               <strong>
@@ -1686,7 +2810,7 @@ const updateItem = useCallback(
                   type="button"
                   className="amw-btn ead-back-full-script"
                   data-testid="ead-back-full-script"
-                  disabled={batchExtracting || generating}
+                  disabled={extractionBusy}
                   onClick={() => setSelectedId(SCRIPT_ASSET_DESIGN_ID)}
                 >
                   返回全剧本资产
@@ -1701,12 +2825,14 @@ const updateItem = useCallback(
                   disabled={
                     listLoading ||
                     episodes.length === 0 ||
-                    batchExtracting ||
-                    generating ||
+                    extractionBusy ||
                     generatingAssetIds.size > 0
                   }
                   placeholder={episodeSelectPlaceholder}
                   groups={episodeSelectGroups}
+                  menuPortal
+                  menuSideOffset={6}
+                  menuCollisionPadding={12}
                   onChange={(id) => setSelectedId(id || SCRIPT_ASSET_DESIGN_ID)}
                 />
               </div>
@@ -1721,12 +2847,63 @@ const updateItem = useCallback(
           {detailLoading || !detail ? (
             <div className="amw-empty">加载资产设计…</div>
           ) : isAwaitingFullScriptExtraction ? (
-            <div className="ead-pending-assets" data-testid="ead-pending-assets">
-              <span className="ead-overview__eyebrow">待提取资产</span>
-              <h2>尚未完成全剧本一键提取</h2>
-              <p>
-                「全剧本资产」只统计上方一键提取的结果。按集提取或已进资产库的条目不会出现在这里，并不代表资产丢失。
-              </p>
+            <div className="ead-pending-assets" data-testid="ead-pending-assets" data-full-script-count={fullScriptAssetCount}>
+              <h2>尚未提取资产</h2>
+              {extractionError ? (
+                <div
+                  className="ead-pending-assets__error"
+                  role="alert"
+                  data-testid="ead-extraction-error"
+                >
+                  <p className="ead-pending-assets__error-title">资产提取失败</p>
+                  <p>{extractionError.message}</p>
+                  {extractDiagnostics && extractDiagnostics.rejectedItems.length > 0 ? (
+                    <ul data-testid="ead-rejected-items">
+                      {extractDiagnostics.rejectedItems.slice(0, 12).map((item) => (
+                        <li key={`${item.index}-${item.name ?? ""}`}>
+                          #{item.index}
+                          {item.name ? ` ${item.name}` : ""}：{item.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <div className="ead-pending-assets__error-actions">
+                    <button
+                      type="button"
+                      className="amw-btn amw-btn-primary"
+                      disabled={extractionBusy || saving || confirming}
+                      onClick={() => void handleExtractAll()}
+                      data-testid="ead-extract-all-retry"
+                    >
+                      {extractionBusy
+                        ? "提取中…"
+                        : "一键提取基本资产"}
+                    </button>
+                    {extractionError.canReapply && extractionError.generationId ? (
+                      <button
+                        type="button"
+                        className="amw-btn"
+                        disabled={extractionBusy || saving || confirming}
+                        onClick={() => void handleReapplyGeneration()}
+                        data-testid="ead-reapply-generation"
+                      >
+                        重新应用已有结果
+                      </button>
+                    ) : null}
+                    {extractionError.canRetryChunks && extractionError.generationId ? (
+                      <button
+                        type="button"
+                        className="amw-btn"
+                        disabled={extractionBusy || saving || confirming}
+                        onClick={() => void handleRetryFailedChunks()}
+                        data-testid="ead-retry-failed-chunks"
+                      >
+                        重试失败分块
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               {extractedEpisodes.length > 0 ? (
                 <div className="ead-pending-assets__recover">
                   <p>
@@ -1750,9 +2927,7 @@ const updateItem = useCallback(
                     查看第{extractedEpisodes[0]?.episodeNumber}集提取结果
                   </button>
                 </div>
-              ) : (
-                <p>点击上方「一键提取」，系统将识别角色、场景、道具与音频需求。</p>
-              )}
+              ) : null}
             </div>
           ) : (
             <div className="ead-detail__inner amw-detail">
@@ -1788,7 +2963,6 @@ const updateItem = useCallback(
                       type="button"
                       className="amw-btn ead-back-full-script"
                       data-testid="ead-back-full-script-detail"
-                      disabled={batchExtracting || generating}
                       onClick={() => setSelectedId(SCRIPT_ASSET_DESIGN_ID)}
                     >
                       返回全剧本资产
@@ -1810,15 +2984,16 @@ const updateItem = useCallback(
                 {!isFullScriptDesign ? (
                   <button
                     type="button"
-                    className="amw-btn amw-btn-primary"
-                    disabled={generating || saving || confirming}
+                    className="amw-btn amw-btn-primary ead-extract-btn"
+                    disabled={extractionBusy || saving || confirming}
+                    aria-busy={extractionBusy}
                     onClick={() => void handleExtract()}
                     data-testid="ead-extract"
                   >
-                    {generating ? "提取中…" : extractLabel}
+                    {extractionBusy ? "提取中…" : extractLabel}
                   </button>
                 ) : null}
-                {generating ? (
+                {extractionBusy ? (
                   <button
                     type="button"
                     className="amw-btn"
@@ -1832,7 +3007,12 @@ const updateItem = useCallback(
                   <button
                     type="button"
                     className="amw-btn"
-                    disabled={!selectedId || generating || saving || confirming}
+                    disabled={
+                      !selectedId ||
+                      extractionBusy ||
+                      saving ||
+                      confirming
+                    }
                     onClick={() => void saveItems(items)}
                     data-testid="ead-save"
                   >
@@ -1854,6 +3034,7 @@ const updateItem = useCallback(
                     type="button"
                     className={`amw-btn${canConfirm ? " amw-btn-primary" : ""}`}
                     disabled={!canConfirm}
+                    title={confirmDisabledReason}
                     onClick={() => void handleConfirm()}
                     data-testid="ead-confirm"
                   >
@@ -1866,6 +3047,30 @@ const updateItem = useCallback(
                 )}
               </div>
 
+              {extractionBusy ? (
+                <p
+                  className="ead-background-task-note"
+                  aria-live="polite"
+                  data-testid="ead-extract-background-note"
+                >
+                  正在提取资产，预计需要 1-3 分钟。提取完成前按钮保持锁定，离开页面后再返回会从服务端恢复进度。
+                </p>
+              ) : null}
+
+              {surface !== "workspace" && missingImageItems.length > 0 ? (
+                <p className="ead-warn" data-testid="ead-missing-image-warning">
+                  无法确认：{missingImageItems.map((item) => item.name).join("、")}
+                  尚未生成图片。生成图片后才能确认入库。
+                </p>
+              ) : null}
+              {surface !== "workspace" &&
+              missingImageItems.length === 0 &&
+              unboundVoiceItems.length > 0 ? (
+                <p className="ead-warn" data-testid="ead-unbound-voice-warning">
+                  提醒：{unboundVoiceItems.length} 个角色尚未绑定音色，可先绑定，或确认入库后在资产库补充。
+                </p>
+              ) : null}
+
               {pageNote ? <p className="amw-note">{pageNote}</p> : null}
               {confirmSummary ? (
                 <div className="ead-confirm-note" data-testid="ead-confirm-summary">
@@ -1873,14 +3078,20 @@ const updateItem = useCallback(
                 </div>
               ) : null}
 
-              <div className="ead-tabs" role="tablist" aria-label="资产分类">
+              <div
+                className="amw-tabs asset-type-tabs"
+                role="tablist"
+                aria-label="资产分类"
+              >
                 {GROUPS.map((group) => (
                   <button
                     key={group.type}
                     type="button"
                     role="tab"
                     aria-selected={activeGroup === group.type}
-                    className={`ead-tab${activeGroup === group.type ? " is-active" : ""}`}
+                    className={`amw-tab asset-type-tab${
+                      activeGroup === group.type ? " is-active" : ""
+                    }`}
                     onClick={() => setActiveGroup(group.type)}
                   >
                     {group.label}
@@ -1900,7 +3111,7 @@ const updateItem = useCallback(
                         <button
                           type="button"
                           className="amw-btn"
-                          disabled={generating || confirming}
+                          disabled={confirming || extractionBusy}
                           onClick={() => openCreateDialog(group.type)}
                         >
                           手动添加
@@ -1922,90 +3133,64 @@ const updateItem = useCallback(
                               projectVoices={projectVoices}
                               audios={bundle.audios}
                               libraryAssets={bundle}
-                              disabled={generating || confirming}
+                              generationProgress={
+                                item.assetType === "character"
+                                  ? assetGenerationProgress[item.id]
+                                  : undefined
+                              }
+                              disabled={
+                                confirming ||
+                                extractionBusy ||
+                                savingVoiceItemIds.has(item.id)
+                              }
                               designDisabled={!canDesign}
                               deleteLocked={
                                 surface === "workspace" &&
                                 isApprovedEpisodeDesignItem(item)
                               }
-                              approvalUi={designCardApprovalUi(
-                                item,
-                                pendingApprovalMediaIds,
-                                approvedApprovalMediaIds,
-                              )}
+                              approvalUi={
+                                isPersonalSpace
+                                  ? "none"
+                                  : designCardApprovalUi(
+                                      item,
+                                      pendingApprovalMediaIds,
+                                      approvedApprovalMediaIds,
+                                    )
+                              }
+                              showPersonalConfirm={
+                                isPersonalSpace && surface === "project_management"
+                              }
+                              confirming={confirmingItemId === item.id}
+                              onConfirm={() => void handleConfirmItem(item.id)}
                               onChange={(patch) => updateItem(item.id, patch)}
-                              onVoiceSelect={(voice) => {
-                                if (item.assetType !== "character") return;
-                                const mediaId =
-                                  item.generatedMedia?.currentId?.trim() ?? "";
-                                if (!mediaId) {
-                                  setPageNote(
-                                    "请先生成图片，再为当前历史图选择音色",
-                                  );
-                                  return;
-                                }
-                                const patched = withDesignMediaVoiceBinding(
-                                  item,
-                                  mediaId,
-                                  {
-                                    voiceId: voice?.id ?? null,
-                                    voiceName: voice?.name ?? null,
-                                    voiceBound: false,
-                                  },
-                                );
-                                const next = items.map((row) =>
-                                  row.id === item.id ? patched : row,
-                                );
-                                setItems(next);
-                                void saveItems(next, { silent: true });
-                              }}
-                              onBindVoice={() => {
-                                if (item.assetType !== "character") return;
-                                const mediaId =
-                                  item.generatedMedia?.currentId?.trim() ?? "";
-                                if (!mediaId) {
-                                  setPageNote(
-                                    "请先生成图片，再为当前历史图绑定音色",
-                                  );
-                                  return;
-                                }
-                                const binding = getDesignMediaVoiceBinding(
-                                  item,
-                                  mediaId,
-                                );
-                                if (!binding.voiceId) {
-                                  setPageNote("请先选择音色再绑定");
-                                  return;
-                                }
-                                const patched = withDesignMediaVoiceBinding(
-                                  item,
-                                  mediaId,
-                                  {
+                              onBindVoice={(binding) => {
+                                void (async () => {
+                                  const ok = await bindMediaVoice({
+                                    itemId: item.id,
+                                    mediaId: binding.mediaId,
                                     voiceId: binding.voiceId,
                                     voiceName: binding.voiceName,
-                                    voiceBound: true,
-                                  },
-                                );
-                                const next = items.map((row) =>
-                                  row.id === item.id ? patched : row,
-                                );
-                                setItems(next);
-                                void saveItems(next).then(() => {
-                                  setPageNote(
-                                    `已为「${item.name}」当前图绑定音色${
-                                      binding.voiceName
-                                        ? `：${binding.voiceName}`
-                                        : ""
-                                    }`,
-                                  );
-                                });
+                                  });
+                                  if (ok) {
+                                    setPageNote(
+                                      `已为「${item.name}」当前图绑定音色${
+                                        binding.voiceName
+                                          ? `：${binding.voiceName}`
+                                          : ""
+                                      }`,
+                                    );
+                                  }
+                                })();
                               }}
                               onPersistNote={(note) => {
-                                const next = items.map((row) =>
+                                if (savingVoiceItemIds.has(item.id)) return;
+                                const latest = itemsRef.current;
+                                const next = latest.map((row) =>
                                   row.id === item.id
                                     ? ({ ...row, note } as EpisodeAssetDesignItem)
                                     : row,
                                 );
+                                itemsRef.current = next;
                                 setItems(next);
                                 void saveItems(next, { silent: true });
                               }}
@@ -2101,6 +3286,86 @@ const updateItem = useCallback(
           </div>
         </div>
       ) : null}
+
+      {pendingUncheckedVideoRefItem ? (
+        <div
+          className="amw-overlay amw-overlay--stacked"
+          role="presentation"
+          data-testid="ead-unchecked-video-ref-block-backdrop"
+          onClick={dismissUncheckedVideoRefBlock}
+        >
+          <div
+            className="amw-dialog ead-unchecked-video-ref-block-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ead-unchecked-video-ref-block-title"
+            data-testid="ead-unchecked-video-ref-block"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 id="ead-unchecked-video-ref-block-title">人物未进行校验</h3>
+            <p className="amw-dialog-desc">人物未进行校验无法入库</p>
+            <div className="amw-dialog-actions ead-unchecked-video-ref-block-actions">
+              <button
+                type="button"
+                className="amw-btn amw-btn-primary"
+                data-testid="ead-unchecked-video-ref-block-dismiss"
+                onClick={dismissUncheckedVideoRefBlock}
+              >
+                知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingUnboundVoiceConfirmItem ? (
+        <div
+          className="amw-overlay amw-overlay--stacked"
+          role="presentation"
+          data-testid="ead-unbound-voice-confirm-backdrop"
+          onClick={dismissUnboundVoiceConfirm}
+        >
+          <div
+            className="amw-dialog ead-unbound-voice-confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ead-unbound-voice-confirm-title"
+            data-testid="ead-unbound-voice-confirm"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 id="ead-unbound-voice-confirm-title">角色未绑定音色</h3>
+            <p className="amw-dialog-desc">
+              此角色未进行音色绑定，是否继续入库？
+            </p>
+            <div className="amw-dialog-actions ead-unbound-voice-confirm-actions">
+              <button
+                type="button"
+                className="amw-btn"
+                data-testid="ead-unbound-voice-confirm-cancel"
+                disabled={Boolean(confirming || confirmingItemId)}
+                onClick={dismissUnboundVoiceConfirm}
+              >
+                否，取消
+              </button>
+              <button
+                type="button"
+                className="amw-btn amw-btn-primary"
+                data-testid="ead-unbound-voice-confirm-continue"
+                disabled={Boolean(confirming || confirmingItemId)}
+                onClick={() => {
+                  const itemId = pendingUnboundVoiceConfirmItem.id;
+                  void confirmItemToLibrary(itemId);
+                }}
+              >
+                {confirming &&
+                confirmingItemId === pendingUnboundVoiceConfirmItem.id
+                  ? "入库中…"
+                  : "是，继续入库"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <CharacterCreateDialog
         key={`character-${createDialogType}-${editingItemId ?? "new"}`}
         open={createDialogType === "character"}
@@ -2126,14 +3391,6 @@ const updateItem = useCallback(
         initialDraft={propInitialDraft}
         submitLabel={editingItemId ? "保存道具" : "添加道具"}
       />
-      <AudioCreateDialog
-        key={`audio-${createDialogType}-${editingItemId ?? "new"}`}
-        open={createDialogType === "audio"}
-        onClose={closeCreateDialog}
-        onSubmit={handleAudioDialogSubmit}
-        initialDraft={audioInitialDraft}
-        submitLabel={editingItemId ? "保存音频" : "添加音频"}
-      />
 
       <DesignAssetModal
         open={
@@ -2144,8 +3401,6 @@ const updateItem = useCallback(
         projectId={projectId}
         episodeId={selectedId ?? ""}
         surface={surface}
-        projectVoices={projectVoices}
-        audios={bundle.audios}
         isGeneratingAsset={
           designModalItem
             ? generatingAssetIds.has(designModalItem.id)
@@ -2159,17 +3414,33 @@ const updateItem = useCallback(
             return next;
           });
         }}
+        onGenerationProgress={(itemId, progress) => {
+          setAssetGenerationProgress((prev) => {
+            if (!progress) {
+              const next = { ...prev };
+              delete next[itemId];
+              return next;
+            }
+            return { ...prev, [itemId]: progress };
+          });
+        }}
         onClose={() => setDesignModalItem(null)}
-        onItemPatched={(itemId, nextItem) => {
+        onItemPatched={(itemId, incomingItem) => {
           setItems((prev) => {
             const next = prev.map((row) =>
-              row.id === itemId ? nextItem : row,
+              row.id === itemId
+                ? mergePatchedDesignItem(row, incomingItem)
+                : row,
             );
+            itemsRef.current = next;
             void saveItems(next, { silent: true });
             return next;
           });
+
           setDesignModalItem((prev) =>
-            prev && prev.id === itemId ? nextItem : prev,
+            prev && prev.id === itemId
+              ? mergePatchedDesignItem(prev, incomingItem)
+              : prev,
           );
         }}
         onPromptUpdated={(itemId, promptText, meta) => {
@@ -2295,12 +3566,15 @@ function DesignItemCard({
   projectVoices,
   audios,
   libraryAssets,
+  generationProgress,
   disabled,
   designDisabled,
   deleteLocked,
   approvalUi,
+  showPersonalConfirm,
+  confirming,
+  onConfirm,
   onChange,
-  onVoiceSelect,
   onBindVoice,
   onPersistNote,
   onDelete,
@@ -2314,33 +3588,68 @@ function DesignItemCard({
     ProjectAssetBundle,
     "characters" | "scenes" | "props"
   >;
+  generationProgress?: AssetGenerationProgress;
   disabled: boolean;
   designDisabled: boolean;
   deleteLocked: boolean;
   approvalUi: "none" | "pending" | "approved";
+  showPersonalConfirm: boolean;
+  confirming: boolean;
+  onConfirm: () => void;
   onChange: (patch: Partial<EpisodeAssetDesignItem>) => void;
-  onVoiceSelect: (voice: VoiceOption | null) => void;
-  onBindVoice: () => void;
+  onBindVoice: (binding: {
+    mediaId: string;
+    voiceId: string;
+    voiceName: string | null;
+  }) => void;
   onPersistNote: (note: string) => void;
   onDelete: () => void;
   onDesign: () => void;
 }) {
   const [cardLightbox, setCardLightbox] = useState(false);
   const [voiceNote, setVoiceNote] = useState("");
-  const description =
-    item.assetType === "audio"
-      ? item.draft.description
-      : item.draft.description;
-  const summary = itemSummary(item);
+  const [voiceDraft, setVoiceDraft] = useState<{
+    mediaId: string;
+    voiceId: string | null;
+    voiceName: string | null;
+  } | null>(null);
+
+  if (item.assetType === "audio") {
+    return null;
+  }
+
+  const isVisualAsset =
+    item.assetType === "scene" || item.assetType === "prop";
   const previewUrl = resolveDesignItemPreviewUrl(
     projectId,
     item,
     libraryAssets,
   );
   const currentMediaId = item.generatedMedia?.currentId?.trim() ?? "";
-  const mediaVoice =
+  const persistedVoice =
     item.assetType === "character"
       ? getDesignMediaVoiceBinding(item, currentMediaId)
+      : null;
+
+  const pendingVoiceDraft =
+    voiceDraft?.mediaId === currentMediaId &&
+    !(
+      persistedVoice &&
+      isMediaVoiceBound(persistedVoice) &&
+      persistedVoice.voiceId === voiceDraft.voiceId
+    )
+      ? voiceDraft
+      : null;
+
+  const mediaVoice =
+    item.assetType === "character"
+      ? pendingVoiceDraft
+        ? {
+            voiceId: pendingVoiceDraft.voiceId,
+            voiceName: pendingVoiceDraft.voiceName,
+            voiceBound: false,
+          }
+        : persistedVoice
       : null;
   const libraryCharacter =
     item.assetType === "character" && item.libraryAssetId
@@ -2351,28 +3660,332 @@ function DesignItemCard({
     currentMediaId && libraryCharacter?.mediaVoices?.[currentMediaId]
       ? libraryCharacter.mediaVoices[currentMediaId]
       : null;
-  /** Prefer per-media design binding; fall back to library per-media / primary. */
+  const voiceLocked = approvalUi === "approved";
+  /** Prefer per-media design binding; library fallback only when voice is locked (approved). */
   const characterVoiceId =
     item.assetType === "character"
       ? mediaVoice?.voiceId ||
-        libraryMediaVoice?.voiceId ||
-        (!currentMediaId ? libraryCharacter?.voiceId ?? null : null)
+        (voiceLocked
+          ? libraryMediaVoice?.voiceId ||
+            libraryCharacter?.voiceId ||
+            null
+          : null)
       : null;
   const characterVoiceLabel =
     item.assetType === "character"
       ? mediaVoice?.voiceName ||
-        libraryMediaVoice?.voiceName ||
-        libraryCharacter?.voiceName ||
+        (voiceLocked
+          ? libraryMediaVoice?.voiceName ||
+            libraryCharacter?.voiceName ||
+            null
+          : null) ||
         (characterVoiceId ? "已绑定音色" : "未绑定音色")
       : "";
-  const voiceLocked = approvalUi === "approved";
   const hasBoundVoice =
     (mediaVoice != null && isMediaVoiceBound(mediaVoice)) ||
     (voiceLocked && Boolean(characterVoiceId));
   const voiceBoundLabel = hasBoundVoice;
+  const isInLibrary = Boolean(item.libraryAssetId?.trim());
+  const isImageMissing =
+    (item.resolution === "create_new" || item.resolution === "pending") &&
+    !currentMediaId;
+  const confirmDisabledReason = isInLibrary
+    ? "该资产已入库"
+    : isImageMissing
+      ? "请先生成图片"
+      : item.resolution === "ignore"
+        ? "已设为本集忽略，无需入库"
+        : undefined;
 
+  const statusLabel = isInLibrary
+    ? "已入库"
+    : approvalUi === "approved"
+      ? "已入库"
+      : approvalUi === "pending"
+        ? "审批中"
+        : "设计中";
+  const statusClass =
+    statusLabel === "已入库"
+      ? " is-ok"
+      : statusLabel === "审批中"
+        ? " is-pending"
+        : " is-draft";
+
+  const mediaBlock = previewUrl ? (
+    <button
+      type="button"
+      className={
+        [
+          approvalUi === "pending"
+            ? "ead-card__preview-btn ead-card__preview-btn--pending"
+            : "ead-card__preview-btn",
+          generationProgress ? "is-generating" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+      }
+      title={approvalUi === "pending" ? "审批中" : "点击放大预览"}
+      onClick={() => setCardLightbox(true)}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element -- project binary preview URL */}
+      <img
+        className={
+          approvalUi === "pending"
+            ? "ead-card__preview ead-card__preview--blur"
+            : "ead-card__preview"
+        }
+        src={previewUrl}
+        alt={item.name ? `${item.name} preview` : "asset preview"}
+      />
+      {approvalUi === "pending" ? (
+        <span
+          className="ead-card__approval-overlay"
+          data-testid={`ead-pending-${item.id}`}
+        >
+          审批中
+        </span>
+      ) : null}
+    </button>
+  ) : (
+    <div
+      className={
+        generationProgress
+          ? "ead-card__icon-wrap asset-card__empty is-generating"
+          : "ead-card__icon-wrap asset-card__empty"
+      }
+      aria-hidden
+    >
+      {item.assetType === "character" ? (
+        <UserRound className="ead-card__icon" size={28} strokeWidth={1.5} />
+      ) : item.assetType === "scene" ? (
+        <MapPinned className="ead-card__icon" size={28} strokeWidth={1.5} />
+      ) : (
+        <Package className="ead-card__icon" size={28} strokeWidth={1.5} />
+      )}
+      <span className="asset-card__empty-label">暂无图片</span>
+    </div>
+  );
+
+  const editButton = (
+    <button
+      type="button"
+      className="amw-btn amw-btn-primary ead-card__design-btn"
+      data-testid={`ead-design-${item.id}`}
+      disabled={disabled || designDisabled}
+      title={designDisabled ? "请先提取本集资产后再进行设计" : undefined}
+      onClick={onDesign}
+    >
+      编辑
+    </button>
+  );
+
+  const deleteButton = (
+    <button
+      type="button"
+      className="amw-btn ead-card__delete-btn"
+      data-testid={`ead-delete-${item.id}`}
+      disabled={disabled || deleteLocked}
+      title={
+        deleteLocked
+          ? "已审批入库的资产仅主理人可在项目管理中删除"
+          : undefined
+      }
+      onClick={onDelete}
+    >
+      删除
+    </button>
+  );
+
+  const actionsBlock = (
+    <div className="asset-card__actions ead-card__actions">
+      {showPersonalConfirm ? (
+        <button
+          type="button"
+          className="amw-btn amw-btn-primary ead-card__confirm-btn"
+          data-testid={`ead-confirm-item-${item.id}`}
+          disabled={
+            disabled ||
+            isInLibrary ||
+            isImageMissing ||
+            item.resolution === "ignore"
+          }
+          title={confirmDisabledReason}
+          onClick={onConfirm}
+        >
+          {confirming ? "入库中…" : isInLibrary ? "已入库" : "确认入库"}
+        </button>
+      ) : null}
+    </div>
+  );
+
+  const characterVoiceBlock =
+    item.assetType === "character" ? (
+      <div className="ead-card__voice-panel">
+        <div className="ead-card__voice-row">
+          <div className="ead-card__voice-select">
+            {voiceLocked ? (
+              <div className="ead-card__voice-readonly">
+                <span className="ead-card__voice-readonly-label">音色</span>
+                <span
+                  className="ead-card__voice-readonly-value"
+                  data-testid={`ead-voice-readonly-${item.id}`}
+                >
+                  {characterVoiceLabel}
+                </span>
+              </div>
+            ) : (
+              <VoiceSelector
+                label="当前图音色"
+                value={characterVoiceId}
+                disabled={disabled || !currentMediaId}
+                projectVoices={projectVoices}
+                onChange={(voice) => {
+                  if (!currentMediaId) {
+                    setVoiceNote("请先生成图片，再为当前历史图选择音色");
+                    return;
+                  }
+                  setVoiceDraft({
+                    mediaId: currentMediaId,
+                    voiceId: voice?.id ?? null,
+                    voiceName: voice?.name ?? null,
+                  });
+                }}
+              />
+            )}
+          </div>
+          <div className="ead-card__voice-actions">
+            <VoicePreviewButton
+              projectId={projectId}
+              voiceId={characterVoiceId}
+              audios={audios}
+              className="amw-btn ead-card__voice-preview"
+              testId={`ead-voice-preview-${item.id}`}
+              onStatus={setVoiceNote}
+            />
+          </div>
+        </div>
+        <div className="ead-card__voice-bind-row">
+          <button
+            type="button"
+            className={`amw-btn ead-card__voice-bind${
+              voiceBoundLabel ? " is-bound" : ""
+            }${voiceLocked && !hasBoundVoice ? " is-missing" : ""}`}
+            data-testid={`ead-voice-bind-${item.id}`}
+            disabled={
+              disabled ||
+              voiceLocked ||
+              !currentMediaId ||
+              !characterVoiceId ||
+              (mediaVoice != null && isMediaVoiceBound(mediaVoice))
+            }
+            title={
+              !currentMediaId
+                ? "请先生成图片，再为当前历史图绑定音色"
+                : voiceLocked && !hasBoundVoice
+                  ? "审批入库时未绑定音色；请主理人在项目管理中为该角色补绑"
+                  : voiceLocked
+                    ? "已审批入库，音色仅主理人可在项目管理中更改"
+                    : mediaVoice != null && isMediaVoiceBound(mediaVoice)
+                      ? "当前历史图音色已绑定"
+                      : "将当前选择的音色绑定到当前历史图"
+            }
+            onClick={() => {
+              if (!currentMediaId || !characterVoiceId) {
+                setVoiceNote("请先选择音色再绑定");
+                return;
+              }
+              onBindVoice({
+                mediaId: currentMediaId,
+                voiceId: characterVoiceId,
+                voiceName: mediaVoice?.voiceName ?? null,
+              });
+            }}
+          >
+            {voiceLocked && !hasBoundVoice
+              ? "未绑定"
+              : voiceBoundLabel
+                ? "已绑定"
+                : "绑定音色"}
+          </button>
+        </div>
+        {voiceNote ? (
+          <p className="ead-muted ead-card__voice-note">{voiceNote}</p>
+        ) : null}
+      </div>
+    ) : null;
+
+  const noteBlock = (
+    <div className="amw-field ead-card__note">
+      <label>备注</label>
+      <textarea
+        className="amw-textarea asset-card__note"
+        value={item.note ?? ""}
+        disabled={disabled}
+        placeholder="项目内成员均可编辑，失焦后自动同步"
+        data-testid={`ead-note-${item.id}`}
+        onChange={(e) => onChange({ note: e.target.value })}
+        onBlur={(e) => onPersistNote(e.target.value)}
+      />
+    </div>
+  );
+
+  const lightbox = (
+    <DesignImageLightbox
+      src={cardLightbox ? previewUrl : null}
+      alt={`${item.name || "资产"} 放大预览`}
+      onClose={() => setCardLightbox(false)}
+    />
+  );
+
+  const nameTitle = item.name || "未命名资产";
+  const characterSummary =
+    item.assetType === "character"
+      ? [item.draft.role, item.draft.age]
+          .filter((part) => part.trim())
+          .join(" · ")
+      : "";
+  const characterDescription =
+    item.assetType === "character" ? item.draft.description : "";
+
+  if (isVisualAsset) {
+    return (
+      <article className="ead-card ead-card--visual-asset">
+        <div className="ead-card__media">
+          {mediaBlock}
+          {editButton}
+          <div className="ead-card__media-delete">{deleteButton}</div>
+        </div>
+        <div className="ead-card__content">
+          <div className="ead-card__header">
+            <h3 className="ead-card__name" title={nameTitle}>
+              {nameTitle}
+            </h3>
+            <span className={`ead-card__status asset-card__status${statusClass}`}>
+              {statusLabel}
+            </span>
+          </div>
+          {approvalUi === "approved" ? (
+            <span
+              className="ead-card__approval-badge is-approved"
+              data-testid={`ead-approved-${item.id}`}
+            >
+              已审批
+            </span>
+          ) : null}
+          {actionsBlock}
+          {noteBlock}
+        </div>
+        {lightbox}
+      </article>
+    );
+  }
+
+  // Character: previous side-by-side layout (do not share visual-asset styles)
   return (
-    <article className="ead-card">
+    <article
+      className="ead-card ead-card--character"
+      data-testid={`ead-character-card-${item.id}`}
+    >
       <div className="ead-card__corner">
         {approvalUi === "approved" ? (
           <span
@@ -2382,192 +3995,60 @@ function DesignItemCard({
             已审批
           </span>
         ) : null}
-        <button
-          type="button"
-          className="amw-btn ead-card__delete-btn"
-          data-testid={`ead-delete-${item.id}`}
-          disabled={disabled || deleteLocked}
-          title={
-            deleteLocked
-              ? "已审批入库的资产仅主理人可在项目管理中删除"
-              : undefined
-          }
-          onClick={onDelete}
-        >
-          删除
-        </button>
+        {showPersonalConfirm ? (
+          <button
+            type="button"
+            className="amw-btn amw-btn-primary ead-card__confirm-btn"
+            data-testid={`ead-confirm-item-${item.id}`}
+            disabled={
+              disabled ||
+              isInLibrary ||
+              isImageMissing ||
+              item.resolution === "ignore"
+            }
+            title={confirmDisabledReason}
+            onClick={onConfirm}
+          >
+            {confirming ? "入库中…" : isInLibrary ? "已入库" : "确认入库"}
+          </button>
+        ) : null}
+        {deleteButton}
       </div>
       <div className="ead-card__layout">
         <div className="ead-card__visual">
-          {previewUrl ? (
-            <button
-              type="button"
-              className={
-                approvalUi === "pending"
-                  ? "ead-card__preview-btn ead-card__preview-btn--pending"
-                  : "ead-card__preview-btn"
-              }
-              title={
-                approvalUi === "pending" ? "审批中" : "点击放大预览"
-              }
-              onClick={() => setCardLightbox(true)}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element -- project binary preview URL */}
-              <img
-                className={
-                  approvalUi === "pending"
-                    ? "ead-card__preview ead-card__preview--blur"
-                    : "ead-card__preview"
-                }
-                src={previewUrl}
-                alt={item.name ? `${item.name} preview` : "asset preview"}
-              />
-              {approvalUi === "pending" ? (
-                <span
-                  className="ead-card__approval-overlay"
-                  data-testid={`ead-pending-${item.id}`}
-                >
-                  审批中
-                </span>
-              ) : null}
-            </button>
-          ) : (
-            <div className="ead-card__icon-wrap" aria-hidden>
-              {item.assetType === "character" ? (
-                <UserRound className="ead-card__icon" size={28} strokeWidth={1.5} />
-              ) : item.assetType === "scene" ? (
-                <MapPinned className="ead-card__icon" size={28} strokeWidth={1.5} />
-              ) : item.assetType === "prop" ? (
-                <Package className="ead-card__icon" size={28} strokeWidth={1.5} />
-              ) : (
-                <AudioLines className="ead-card__icon" size={28} strokeWidth={1.5} />
-              )}
-            </div>
-          )}
-          <p className="ead-card__name">{item.name || "未命名资产"}</p>
-          <button
-            type="button"
-            className="amw-btn amw-btn-primary ead-card__design-btn"
-            data-testid={`ead-design-${item.id}`}
-            disabled={disabled || designDisabled}
-            title={
-              designDisabled
-                ? "请先提取本集资产后再进行设计"
-                : undefined
-            }
-            onClick={onDesign}
-          >
-            设计
-          </button>
+          <div className="ead-card__media-wrap">
+            {mediaBlock}
+            {generationProgress ? (
+              <DesignGenerationOverlay progress={generationProgress} />
+            ) : null}
+            {!generationProgress ? editButton : null}
+          </div>
+          <p className="ead-card__name" title={nameTitle}>
+            {nameTitle}
+          </p>
+          {characterVoiceBlock}
         </div>
         <div className="ead-card__body">
-          {item.assetType === "character" ? (
-            <div className="ead-card__voice-row">
-              <div className="ead-card__voice-select">
-                {voiceLocked ? (
-                  <div className="ead-card__voice-readonly">
-                    <span className="ead-card__voice-readonly-label">音色</span>
-                    <span
-                      className="ead-card__voice-readonly-value"
-                      data-testid={`ead-voice-readonly-${item.id}`}
-                    >
-                      {characterVoiceLabel}
-                    </span>
-                  </div>
-                ) : (
-                  <VoiceSelector
-                    label="当前图音色"
-                    value={characterVoiceId}
-                    disabled={disabled || !currentMediaId}
-                    projectVoices={projectVoices}
-                    onChange={onVoiceSelect}
-                  />
-                )}
-              </div>
-              <div className="ead-card__voice-actions">
-                <VoicePreviewButton
-                  projectId={projectId}
-                  voiceId={characterVoiceId}
-                  audios={audios}
-                  className="amw-btn ead-card__voice-preview"
-                  testId={`ead-voice-preview-${item.id}`}
-                  onStatus={setVoiceNote}
-                />
-                <button
-                  type="button"
-                  className={`amw-btn ead-card__voice-bind${
-                    voiceBoundLabel ? " is-bound" : ""
-                  }${voiceLocked && !hasBoundVoice ? " is-missing" : ""}`}
-                  data-testid={`ead-voice-bind-${item.id}`}
-                  disabled={
-                    disabled ||
-                    voiceLocked ||
-                    !currentMediaId ||
-                    !characterVoiceId ||
-                    (mediaVoice != null && isMediaVoiceBound(mediaVoice))
-                  }
-                  title={
-                    !currentMediaId
-                      ? "请先生成图片，再为当前历史图绑定音色"
-                      : voiceLocked && !hasBoundVoice
-                        ? "审批入库时未绑定音色；请主理人在项目管理中为该角色补绑"
-                        : voiceLocked
-                          ? "已审批入库，音色仅主理人可在项目管理中更改"
-                          : mediaVoice != null && isMediaVoiceBound(mediaVoice)
-                            ? "当前历史图音色已绑定"
-                            : "将当前选择的音色绑定到当前历史图"
-                  }
-                  onClick={onBindVoice}
-                >
-                  {voiceLocked && !hasBoundVoice
-                    ? "未绑定"
-                    : voiceBoundLabel
-                      ? "已绑定"
-                      : "绑定音色"}
-                </button>
-              </div>
-            </div>
-          ) : null}
-          {voiceNote && item.assetType === "character" ? (
-            <p className="ead-muted ead-card__voice-note">{voiceNote}</p>
-          ) : null}
-          {summary ? (
-            <p className="ead-muted ead-card__summary">{summary}</p>
-          ) : null}
-          {item.assetType !== "scene" && item.assetType !== "prop" ? (
-            <div className="amw-field">
-              <label>描述</label>
-              <textarea
-                className="amw-textarea"
-                value={description}
-                disabled={disabled}
-                onChange={(e) =>
-                  onChange({
-                    draft: { ...item.draft, description: e.target.value },
-                  } as Partial<EpisodeAssetDesignItem>)
-                }
-              />
-            </div>
+          {characterSummary ? (
+            <p className="ead-muted ead-card__summary">{characterSummary}</p>
           ) : null}
           <div className="amw-field">
-            <label>备注</label>
+            <label>描述</label>
             <textarea
               className="amw-textarea"
-              value={item.note ?? ""}
+              value={characterDescription}
               disabled={disabled}
-              placeholder="项目内成员均可编辑，失焦后自动同步"
-              data-testid={`ead-note-${item.id}`}
-              onChange={(e) => onChange({ note: e.target.value })}
-              onBlur={(e) => onPersistNote(e.target.value)}
+              onChange={(e) =>
+                onChange({
+                  draft: { ...item.draft, description: e.target.value },
+                } as Partial<EpisodeAssetDesignItem>)
+              }
             />
           </div>
+          {noteBlock}
         </div>
       </div>
-      <DesignImageLightbox
-        src={cardLightbox ? previewUrl : null}
-        alt={`${item.name || "资产"} 放大预览`}
-        onClose={() => setCardLightbox(false)}
-      />
+      {lightbox}
     </article>
   );
 }
