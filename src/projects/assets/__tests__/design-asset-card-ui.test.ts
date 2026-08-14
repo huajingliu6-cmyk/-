@@ -71,6 +71,38 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(css).toContain("aspect-ratio: 16 / 9");
     expect(css).toContain(".ead-card__media-delete");
     expect(css).toContain("padding: 72px 14px 12px");
+    expect(css).toContain(".ead-unbound-voice-confirm-dialog");
+  });
+
+  it("wires unbound-voice second confirm outside design cards", () => {
+    expect(workspace).toContain("pendingUnboundVoiceConfirmItem");
+    expect(workspace).toContain("characterNeedsUnboundVoiceConfirm");
+    expect(workspace).toContain("confirmItemToLibrary");
+    expect(workspace).toContain("ead-unbound-voice-confirm");
+    expect(workspace).toContain("是，继续入库");
+    expect(workspace).toContain("否，取消");
+    expect(workspace).not.toContain("window.confirm");
+    const cardFnIdx = workspace.indexOf("function DesignItemCard");
+    const dialogIdx = workspace.indexOf('data-testid="ead-unbound-voice-confirm"');
+    expect(cardFnIdx).toBeGreaterThan(-1);
+    expect(dialogIdx).toBeGreaterThan(-1);
+    expect(dialogIdx).toBeLessThan(cardFnIdx);
+  });
+
+  it("wires unchecked video-ref block dialog outside design cards", () => {
+    expect(workspace).toContain("pendingUncheckedVideoRefItem");
+    expect(workspace).toContain("characterNeedsUncheckedVideoRefBlock");
+    expect(workspace).toContain("人物未进行校验无法入库");
+    expect(workspace).toContain("ead-unchecked-video-ref-block");
+    expect(workspace).toContain("知道了");
+    expect(workspace).not.toContain("window.alert");
+    expect(css).toContain(".ead-unchecked-video-ref-block-dialog");
+    const cardFnIdx = workspace.indexOf("function DesignItemCard");
+    const dialogIdx = workspace.indexOf(
+      'data-testid="ead-unchecked-video-ref-block"',
+    );
+    expect(dialogIdx).toBeGreaterThan(-1);
+    expect(dialogIdx).toBeLessThan(cardFnIdx);
   });
 
   it("wires character generation frosted overlay on media wrap", () => {

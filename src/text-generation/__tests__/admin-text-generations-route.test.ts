@@ -67,6 +67,7 @@ describe("admin text-generations history route", () => {
       name: "历史测试项目",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
 

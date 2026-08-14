@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  characterNeedsUnboundVoiceConfirm,
   getDesignMediaVoiceBinding,
   isMediaVoiceBound,
   preserveBoundCharacterMediaVoices,
@@ -304,6 +305,120 @@ describe("atomic media-voice persistence", () => {
     expect(shouldApplySavedDesignRecord(5, 6)).toBe(false);
     expect(shouldApplySavedDesignRecord(6, 6)).toBe(true);
     expect(shouldApplySavedDesignRecord(7, 6)).toBe(true);
+  });
+
+  it("characterNeedsUnboundVoiceConfirm uses current media binding only", () => {
+    const unboundCurrent = characterItem({
+      draft: {
+        description: "",
+        appearance: "",
+        clothing: "",
+        role: "",
+        age: "",
+        voiceId: null,
+        voiceName: null,
+        voiceBound: false,
+        usageInEpisode: "",
+        evidence: "",
+      },
+    });
+    expect(characterNeedsUnboundVoiceConfirm(unboundCurrent)).toBe(true);
+
+    const boundCurrent = withDesignMediaVoiceBinding(unboundCurrent, "gen_a", {
+      voiceId: "voice_cur",
+      voiceName: "当前图音色",
+      voiceBound: true,
+    });
+    expect(characterNeedsUnboundVoiceConfirm(boundCurrent)).toBe(false);
+
+    // Other history bound, current image unbound → still prompt.
+    const otherHistoryBound = withDesignMediaVoiceBinding(
+      characterItem({
+        draft: {
+          description: "",
+          appearance: "",
+          clothing: "",
+          role: "",
+          age: "",
+          voiceId: null,
+          voiceName: null,
+          voiceBound: false,
+          usageInEpisode: "",
+          evidence: "",
+        },
+        generatedMedia: {
+          currentId: "gen_b",
+          historyIds: ["gen_a", "gen_b"],
+          history: [
+            {
+              mediaId: "gen_a",
+              prompt: "a",
+              generatedAt: "2026-08-01T00:00:00.000Z",
+              voiceId: "voice_old",
+              voiceName: "旧图音色",
+              voiceBound: true,
+            },
+            {
+              mediaId: "gen_b",
+              prompt: "b",
+              generatedAt: "2026-08-01T01:00:00.000Z",
+            },
+          ],
+          status: "completed",
+          promptFingerprint: null,
+          errorMessage: null,
+          previewKind: "image",
+        },
+      }),
+      "gen_a",
+      { voiceId: "voice_old", voiceName: "旧图音色", voiceBound: true },
+    );
+    expect(characterNeedsUnboundVoiceConfirm(otherHistoryBound)).toBe(true);
+
+    // Current media bound via history even when draft.voice* is empty.
+    const boundHistoryEmptyDraft = withDesignMediaVoiceBinding(
+      characterItem({
+        draft: {
+          description: "",
+          appearance: "",
+          clothing: "",
+          role: "",
+          age: "",
+          voiceId: null,
+          voiceName: null,
+          voiceBound: false,
+          usageInEpisode: "",
+          evidence: "",
+        },
+      }),
+      "gen_a",
+      { voiceId: "voice_hist", voiceName: "历史绑定", voiceBound: true },
+    );
+    expect(characterNeedsUnboundVoiceConfirm(boundHistoryEmptyDraft)).toBe(
+      false,
+    );
+
+    // Scene / prop never prompt.
+    expect(
+      characterNeedsUnboundVoiceConfirm({
+        ...unboundCurrent,
+        assetType: "scene",
+      } as EpisodeAssetDesignItem),
+    ).toBe(false);
+    expect(
+      characterNeedsUnboundVoiceConfirm({
+        ...unboundCurrent,
+        assetType: "prop",
+      } as EpisodeAssetDesignItem),
+    ).toBe(false);
+
+    // Already in library → no prompt.
+    expect(
+      characterNeedsUnboundVoiceConfirm({
+        ...unboundCurrent,
+        libraryAssetId: "char_lib_1",
+      }),
+    ).toBe(false);
   });
 
   it("UI binds voice via PATCH on design cards; design modal has no voice controls", async () => {

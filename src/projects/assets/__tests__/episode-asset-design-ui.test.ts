@@ -35,6 +35,53 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain("取消生成");
   });
 
+  it("does not register extract jobs on the global generation busy lock", () => {
+    const busyCall = workspace.match(
+      /useGenerationBusy\(\s*([\s\S]*?)\s*,\s*extractionBusy/,
+    );
+    expect(workspace).toContain("useGenerationBusy(");
+    expect(workspace).toContain("extractionBusy || generatingAssetIds.size > 0");
+    expect(workspace).toContain("asset-extract-${projectId}");
+    expect(workspace).toContain("asset-image-generation-${projectId}");
+    expect(workspace).toContain("extractingEpisodeIds");
+    expect(workspace).toContain("currentEpisodeExtracting");
+    expect(workspace).toContain('designStatus === "generating"');
+    expect(workspace).toContain("selectedIdRef");
+    expect(workspace).toContain("extractJobsRef");
+    expect(busyCall || workspace.includes("extractionBusy")).toBeTruthy();
+  });
+
+  it("shows extract progress and locks navigation while busy", () => {
+    expect(workspace).toContain("提取中…");
+    expect(workspace).toContain("正在提取全剧本资产，通常需要 2-10 分钟");
+    expect(workspace).toContain('data-testid="ead-extract-background-note"');
+    expect(workspace).toContain('data-testid="ead-extract-all-background-note"');
+    expect(workspace).toContain('aria-live="polite"');
+    expect(workspace).toContain("aria-busy={extractionBusy}");
+    expect(workspace).toContain("disabled={extractionBusy}");
+    expect(workspace).toContain("extractionBusy ||");
+    expect(css).toContain(".ead-background-task-note");
+    expect(css).toContain(".ead-extract-btn");
+    expect(workspace).toContain("extractionBusy");
+  });
+
+  it("scopes extract cancel and completion to the job episode id", () => {
+    expect(workspace).toContain("handleCancelGenerate(SCRIPT_ASSET_DESIGN_ID)");
+    expect(workspace).toContain("selectedIdRef.current === extractingEpisodeId");
+    expect(workspace).toContain("markExtractStatusForEpisode");
+    expect(workspace).toContain("extractJobsRef.current.has(selectedId)");
+    expect(workspace).toContain("startExtractPoll");
+    expect(workspace).toContain("stopExtractPoll");
+  });
+
+  it("restores extracting UI from server generating status with polling", () => {
+    expect(workspace).toContain('payload.designStatus === "generating"');
+    expect(workspace).toContain("startExtractPoll(episodeId)");
+    expect(workspace).toContain("extractPollTimersRef");
+    expect(workspace).toMatch(/setInterval\(\(\) => \{\s*void tick\(\);\s*\}, 2000\)/);
+    expect(workspace).not.toContain("210_000");
+  });
+
   it("workspace submit-approval replaces direct confirm button", () => {
     expect(workspace).toContain('surface === "workspace"');
     expect(workspace).toContain("SubmitApprovalModal");
@@ -133,6 +180,8 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain("fullScriptAssetCount");
     expect(workspace).toContain("ead-layout${isAwaitingFullScriptExtraction");
     expect(workspace).toContain("尚未提取资产");
+    expect(workspace).toContain("extractionError");
+    expect(workspace).toContain('data-testid="ead-extraction-error"');
     expect(workspace).not.toContain("尚未完成全剧本一键提取");
     expect(workspace).not.toContain("并不代表资产丢失");
     expect(workspace).toContain('data-testid="ead-pending-assets"');
@@ -205,6 +254,7 @@ describe("Batch G1-UI episode asset design chrome", () => {
 
   it("shows per-asset confirmation only in personal project management", () => {
     expect(workspace).toContain("handleConfirmItem");
+    expect(workspace).toContain("confirmItemToLibrary");
     expect(workspace).toContain('surface === "project_management"');
     expect(workspace).toContain("showPersonalConfirm");
     expect(workspace).toContain("确认入库");
@@ -212,11 +262,106 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain("ead-confirm-item-");
   });
 
+  it("prompts before confirming characters with unbound current-media voice", () => {
+    expect(workspace).toContain("pendingUnboundVoiceConfirmItem");
+    expect(workspace).toContain("characterNeedsUnboundVoiceConfirm");
+    expect(workspace).toContain("dismissUnboundVoiceConfirm");
+    expect(workspace).toContain("confirmItemToLibrary");
+    expect(workspace).toContain("角色未绑定音色");
+    expect(workspace).toContain("此角色未进行音色绑定，是否继续入库？");
+    expect(workspace).toContain("是，继续入库");
+    expect(workspace).toContain("否，取消");
+    expect(workspace).toContain("ead-unbound-voice-confirm");
+    expect(workspace).toContain("ead-unbound-voice-confirm-continue");
+    expect(workspace).toContain("ead-unbound-voice-confirm-cancel");
+    expect(workspace).toContain('role="dialog"');
+    expect(workspace).toContain('aria-modal="true"');
+    expect(workspace).toContain("ead-unbound-voice-confirm-title");
+    expect(workspace).toContain("confirmingRef");
+    expect(workspace).not.toContain("window.confirm");
+    expect(workspace).not.toContain("window.alert");
+
+    const handleIdx = workspace.indexOf("const handleConfirmItem");
+    const confirmLibIdx = workspace.indexOf("const confirmItemToLibrary");
+    const videoRefGateIdx = workspace.indexOf(
+      "characterNeedsUncheckedVideoRefBlock(item)",
+    );
+    const voiceGateIdx = workspace.indexOf(
+      "characterNeedsUnboundVoiceConfirm(item)",
+    );
+    expect(confirmLibIdx).toBeGreaterThan(-1);
+    expect(handleIdx).toBeGreaterThan(confirmLibIdx);
+    expect(videoRefGateIdx).toBeGreaterThan(handleIdx);
+    expect(voiceGateIdx).toBeGreaterThan(videoRefGateIdx);
+    expect(voiceGateIdx).toBeLessThan(
+      workspace.indexOf("void confirmItemToLibrary(itemId)", handleIdx),
+    );
+
+    expect(css).toContain(".ead-unbound-voice-confirm-dialog");
+    expect(css).toContain(".ead-unbound-voice-confirm-actions");
+  });
+
+  it("blocks personal character confirm when current image is unchecked", () => {
+    expect(workspace).toContain("characterNeedsUncheckedVideoRefBlock");
+    expect(workspace).toContain("pendingUncheckedVideoRefItem");
+    expect(workspace).toContain("dismissUncheckedVideoRefBlock");
+    expect(workspace).toContain("人物未进行校验");
+    expect(workspace).toContain("人物未进行校验无法入库");
+    expect(workspace).toContain("知道了");
+    expect(workspace).toContain("ead-unchecked-video-ref-block");
+    expect(workspace).toContain("ead-unchecked-video-ref-block-dismiss");
+    expect(workspace).toContain("ead-unchecked-video-ref-block-title");
+    expect(workspace).toContain('aria-labelledby="ead-unchecked-video-ref-block-title"');
+    expect(workspace).not.toContain("window.alert");
+
+    const handleIdx = workspace.indexOf("const handleConfirmItem");
+    const missingImageIdx = workspace.indexOf(
+      "尚未生成图片",
+      handleIdx,
+    );
+    const videoRefGateIdx = workspace.indexOf(
+      "characterNeedsUncheckedVideoRefBlock(item)",
+      handleIdx,
+    );
+    const voiceGateIdx = workspace.indexOf(
+      "characterNeedsUnboundVoiceConfirm(item)",
+      handleIdx,
+    );
+    const confirmCallIdx = workspace.indexOf(
+      "void confirmItemToLibrary(itemId)",
+      handleIdx,
+    );
+    expect(missingImageIdx).toBeGreaterThan(handleIdx);
+    expect(videoRefGateIdx).toBeGreaterThan(missingImageIdx);
+    expect(voiceGateIdx).toBeGreaterThan(videoRefGateIdx);
+    expect(confirmCallIdx).toBeGreaterThan(voiceGateIdx);
+
+    // Block dialog must not set confirmingItemId / call confirm API path.
+    const blockOpenSlice = workspace.slice(
+      videoRefGateIdx,
+      voiceGateIdx,
+    );
+    expect(blockOpenSlice).toContain("setPendingUncheckedVideoRefItem");
+    expect(blockOpenSlice).not.toContain("setConfirmingItemId");
+    expect(blockOpenSlice).not.toContain("confirmItemToLibrary");
+
+    const cardFnIdx = workspace.indexOf("function DesignItemCard");
+    const dialogIdx = workspace.indexOf(
+      'data-testid="ead-unchecked-video-ref-block"',
+    );
+    expect(dialogIdx).toBeGreaterThan(-1);
+    expect(dialogIdx).toBeLessThan(cardFnIdx);
+
+    expect(css).toContain(".ead-unchecked-video-ref-block-dialog");
+    expect(css).toContain(".ead-unchecked-video-ref-block-actions");
+  });
+
   it("character cards keep voice select and preview; delete sits top-right", () => {
     const preview = readSrc("src/projects/assets/VoicePreviewButton.tsx");
     expect(workspace).toContain("VoiceSelector");
     expect(workspace).toContain("VoicePreviewButton");
     expect(workspace).toContain("ead-card__voice-row");
+    expect(workspace).toContain("ead-card__voice-bind-row");
     expect(workspace).toContain("ead-voice-preview-");
     expect(workspace).toContain("ead-voice-bind-");
     expect(workspace).toContain("绑定音色");
@@ -239,7 +384,28 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).not.toContain("ead-type-badge-");
     expect(workspace).toContain("ead-card--visual-asset");
     expect(workspace).toContain("ead-card--character");
-    expect(css).toContain("max-width: 50%");
+    expect(css).toMatch(
+      /\.ead-card__voice-row\s*\{[^}]*display:\s*flex/s,
+    );
+    expect(css).toMatch(
+      /\.ead-card__voice-row\s*\{[^}]*gap:\s*8px/s,
+    );
+    expect(css).toMatch(
+      /\.ead-card__voice-select\s*\{[^}]*flex:\s*1 1 0/s,
+    );
+    expect(css).toMatch(
+      /\.ead-card__voice-select\s*\{[^}]*min-width:\s*0/s,
+    );
+    expect(css).not.toMatch(
+      /\.ead-card__voice-select\s*\{[^}]*max-width:\s*50%/s,
+    );
+    expect(css).toMatch(
+      /\.ead-card__voice-actions\s*\{[^}]*flex:\s*0 0 auto/s,
+    );
+    expect(css).toMatch(
+      /\.ead-card__voice-preview\s*\{[^}]*min-width:\s*68px/s,
+    );
+    expect(css).toContain(".ead-card__voice-bind-row");
     expect(css).toContain("position: absolute");
     expect(css).toContain("right: 10px");
     expect(css).toContain("voice-preview-speaker");

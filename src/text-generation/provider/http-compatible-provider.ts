@@ -58,12 +58,22 @@ export function buildHttpCompatibleChatBody(input: {
   return body;
 }
 
+type StreamChunk =
+  | {
+      kind: "delta";
+      text: string;
+      inputTokens?: number;
+      outputTokens?: number;
+      finishReason?: string | null;
+    }
+  | { kind: "error"; event: ProviderTextStreamEvent };
+
 /**
  * OpenAI-compatible Chat Completions stream using admin-configured
  * baseUrl / apiKey / model (never from the client).
  *
- * Gemini / 部分网关在 stream:true 时可能只计费、delta.content 为空；
- * 此时自动回退一次非流式请求读取 message.content。
+ * Yields non-empty delta.content chunks as soon as they arrive.
+ * Non-stream fallback runs only when the stream ends with zero body text.
  */
 export class HttpCompatibleTextProvider implements TextGenerationProvider {
   constructor(
@@ -119,27 +129,34 @@ export class HttpCompatibleTextProvider implements TextGenerationProvider {
           ];
     const enableThinking = Boolean(input.enableThinking);
 
-    const streamed = await this.readStreamingCompletion({
+    let receivedAnyText = false;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let finishReason: string | null = null;
+
+    for await (const chunk of this.iterateStreamingCompletion({
       endpoint,
       model,
       messages,
       maxOutputTokens: input.maxOutputTokens,
       enableThinking,
       signal: input.signal,
-    });
-
-    if (streamed.kind === "error") {
-      yield streamed.event;
-      return;
+    })) {
+      if (chunk.kind === "error") {
+        yield chunk.event;
+        return;
+      }
+      if (chunk.inputTokens) inputTokens = chunk.inputTokens;
+      if (chunk.outputTokens) outputTokens = chunk.outputTokens;
+      if (chunk.finishReason) finishReason = chunk.finishReason;
+      if (chunk.text) {
+        receivedAnyText = true;
+        yield { type: "delta", text: chunk.text };
+      }
     }
 
-    let text = streamed.text;
-    let inputTokens = streamed.inputTokens;
-    let outputTokens = streamed.outputTokens;
-    let finishReason = streamed.finishReason;
-
-    // 流式空正文但请求已成功（常见于 Gemini 兼容网关）：回退非流式。
-    if (!text.trim()) {
+    // Fallback only when the stream completed with no usable body.
+    if (!receivedAnyText) {
       const nonStream = await this.readNonStreamingCompletion({
         endpoint,
         model,
@@ -152,13 +169,18 @@ export class HttpCompatibleTextProvider implements TextGenerationProvider {
         yield nonStream.event;
         return;
       }
-      text = nonStream.text;
-      inputTokens = nonStream.inputTokens || inputTokens;
-      outputTokens = nonStream.outputTokens || outputTokens;
-      finishReason = nonStream.finishReason ?? finishReason;
+      if (nonStream.text.trim()) {
+        receivedAnyText = true;
+        inputTokens = nonStream.inputTokens || inputTokens;
+        outputTokens = nonStream.outputTokens || outputTokens;
+        finishReason = nonStream.finishReason ?? finishReason;
+        yield { type: "delta", text: nonStream.text };
+      } else {
+        finishReason = nonStream.finishReason ?? finishReason;
+      }
     }
 
-    if (!text.trim()) {
+    if (!receivedAnyText) {
       yield {
         type: "error",
         code: "EMPTY_MODEL_OUTPUT",
@@ -177,32 +199,25 @@ export class HttpCompatibleTextProvider implements TextGenerationProvider {
         ? input.messages.map((m) => m.content).join("\n")
         : input.systemPrompt + input.userPrompt;
 
-    yield { type: "delta", text };
     yield {
       type: "usage",
       inputTokens: inputTokens || this.estimateInputTokens(estimateSource),
-      outputTokens: outputTokens || Math.ceil(text.length / 2),
+      outputTokens: outputTokens || 0,
     };
     yield { type: "done" };
   }
 
-  private async readStreamingCompletion(input: {
+  /**
+   * Yields each non-empty content delta as soon as SSE (or JSON body) provides it.
+   */
+  private async *iterateStreamingCompletion(input: {
     endpoint: string;
     model: string;
     messages: Array<{ role: string; content: string }>;
     maxOutputTokens: number;
     enableThinking?: boolean;
     signal?: AbortSignal;
-  }): Promise<
-    | {
-        kind: "ok";
-        text: string;
-        inputTokens: number;
-        outputTokens: number;
-        finishReason: string | null;
-      }
-    | { kind: "error"; event: ProviderTextStreamEvent }
-  > {
+  }): AsyncGenerator<StreamChunk, void, unknown> {
     let res: Response;
     try {
       res = await fetch(input.endpoint, {
@@ -225,12 +240,13 @@ export class HttpCompatibleTextProvider implements TextGenerationProvider {
       });
     } catch {
       if (input.signal?.aborted) {
-        return {
+        yield {
           kind: "error",
           event: { type: "error", code: "CANCELLED", message: "已取消" },
         };
+        return;
       }
-      return {
+      yield {
         kind: "error",
         event: {
           type: "error",
@@ -238,69 +254,143 @@ export class HttpCompatibleTextProvider implements TextGenerationProvider {
           message: "连接模型服务失败",
         },
       };
+      return;
     }
 
     if (!res.ok || !res.body) {
-      return {
-        kind: "error",
-        event: await httpErrorEvent(res),
-      };
+      yield { kind: "error", event: await httpErrorEvent(res) };
+      return;
     }
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let text = "";
-    let inputTokens = 0;
-    let outputTokens = 0;
-    let finishReason: string | null = null;
     let sawSseData = false;
+    let emittedJsonBody = false;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    try {
+      while (true) {
+        if (input.signal?.aborted) {
+          yield {
+            kind: "error",
+            event: { type: "error", code: "CANCELLED", message: "已取消" },
+          };
+          return;
+        }
 
-      if (!sawSseData && buffer.trimStart().startsWith("{")) {
-        const maybeComplete = tryParseJsonObject(buffer);
-        if (maybeComplete) {
-          const extracted = extractCompletionText(maybeComplete);
-          text += extracted.text;
-          if (extracted.inputTokens) inputTokens = extracted.inputTokens;
-          if (extracted.outputTokens) outputTokens = extracted.outputTokens;
-          finishReason = extracted.finishReason;
-          buffer = "";
-          break;
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        if (!sawSseData && !emittedJsonBody && buffer.trimStart().startsWith("{")) {
+          const maybeComplete = tryParseJsonObject(buffer);
+          if (maybeComplete) {
+            const extracted = extractCompletionText(maybeComplete);
+            emittedJsonBody = true;
+            if (extracted.text) {
+              yield {
+                kind: "delta",
+                text: extracted.text,
+                inputTokens: extracted.inputTokens || undefined,
+                outputTokens: extracted.outputTokens || undefined,
+                finishReason: extracted.finishReason,
+              };
+            } else if (extracted.finishReason || extracted.inputTokens || extracted.outputTokens) {
+              yield {
+                kind: "delta",
+                text: "",
+                inputTokens: extracted.inputTokens || undefined,
+                outputTokens: extracted.outputTokens || undefined,
+                finishReason: extracted.finishReason,
+              };
+            }
+            buffer = "";
+            break;
+          }
+        }
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const data = trimmed.slice(5).trim();
+          if (!data) continue;
+          if (data === "[DONE]") continue;
+          sawSseData = true;
+          try {
+            const extracted = extractCompletionText(JSON.parse(data));
+            if (extracted.text) {
+              yield {
+                kind: "delta",
+                text: extracted.text,
+                inputTokens: extracted.inputTokens || undefined,
+                outputTokens: extracted.outputTokens || undefined,
+                finishReason: extracted.finishReason,
+              };
+            } else if (
+              extracted.finishReason ||
+              extracted.inputTokens ||
+              extracted.outputTokens
+            ) {
+              yield {
+                kind: "delta",
+                text: "",
+                inputTokens: extracted.inputTokens || undefined,
+                outputTokens: extracted.outputTokens || undefined,
+                finishReason: extracted.finishReason,
+              };
+            }
+          } catch {
+            /* ignore non-JSON SSE */
+          }
         }
       }
 
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data:")) continue;
-        const data = trimmed.slice(5).trim();
-        if (!data || data === "[DONE]") continue;
-        sawSseData = true;
-        try {
-          const extracted = extractCompletionText(JSON.parse(data));
-          text += extracted.text;
-          if (extracted.inputTokens) inputTokens = extracted.inputTokens;
-          if (extracted.outputTokens) outputTokens = extracted.outputTokens;
-          if (extracted.finishReason) finishReason = extracted.finishReason;
-        } catch {
-          /* ignore non-JSON SSE */
+      // Flush remaining buffer as a final SSE data line if present.
+      const trailing = buffer.trim();
+      if (trailing.startsWith("data:")) {
+        const data = trailing.slice(5).trim();
+        if (data && data !== "[DONE]") {
+          try {
+            const extracted = extractCompletionText(JSON.parse(data));
+            if (extracted.text) {
+              yield {
+                kind: "delta",
+                text: extracted.text,
+                inputTokens: extracted.inputTokens || undefined,
+                outputTokens: extracted.outputTokens || undefined,
+                finishReason: extracted.finishReason,
+              };
+            }
+          } catch {
+            /* ignore */
+          }
         }
+      }
+    } catch {
+      if (input.signal?.aborted) {
+        yield {
+          kind: "error",
+          event: { type: "error", code: "CANCELLED", message: "已取消" },
+        };
+        return;
+      }
+      yield {
+        kind: "error",
+        event: {
+          type: "error",
+          code: "NETWORK_ERROR",
+          message: "读取模型流式响应失败",
+        },
+      };
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
+        /* ignore */
       }
     }
-
-    return {
-      kind: "ok",
-      text,
-      inputTokens,
-      outputTokens,
-      finishReason,
-    };
   }
 
   private async readNonStreamingCompletion(input: {

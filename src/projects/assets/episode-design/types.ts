@@ -172,6 +172,15 @@ export type EpisodeAssetDesignItem =
   | PropDesignItem
   | AudioDesignItem;
 
+/** In-flight extract job pointer — persisted so remount can recover busy UI. */
+export type EpisodeAssetActiveGeneration = {
+  generationId: string | null;
+  idempotencyKey: string;
+  outputKind: "script_asset_design" | "episode_asset_design";
+  startedAt: string;
+  updatedAt: string;
+};
+
 export type EpisodeAssetDesignRecord = {
   episodeId: string;
   episodeNumber: number;
@@ -185,6 +194,8 @@ export type EpisodeAssetDesignRecord = {
    * 「重新生成提示词」appends `{name}重新设计` (+ optional 用户素材要求) in the same conversation.
    */
   designConversation?: EpisodeDesignConversationMessage[];
+  /** Present while an extract job is queued/running (or until reconcile clears it). */
+  activeGeneration?: EpisodeAssetActiveGeneration | null;
   confirmedAt: string | null;
   confirmedBy: string | null;
   confirmedRevision: number | null;

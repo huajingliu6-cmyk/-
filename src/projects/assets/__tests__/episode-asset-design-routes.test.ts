@@ -107,6 +107,7 @@ describe("episode asset design routes", () => {
       name: `ads-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -131,6 +132,7 @@ describe("episode asset design routes", () => {
       name: `ads-ce-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const engineer = auth("user", "eng_ads");
@@ -157,6 +159,7 @@ describe("episode asset design routes", () => {
       name: `ads-prop-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -203,6 +206,7 @@ describe("episode asset design routes", () => {
       name: `ads-c-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -357,6 +361,7 @@ describe("episode asset design routes", () => {
       name: `ads-p-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();
@@ -411,6 +416,7 @@ describe("episode asset design routes", () => {
       name: `full-script-view-${Date.now()}`,
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const now = new Date().toISOString();

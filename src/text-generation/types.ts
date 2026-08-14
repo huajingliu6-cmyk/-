@@ -48,6 +48,17 @@ export type TextGenerationJob = {
   systemPolicyVersion?: string;
   outputContractVersion?: string;
   inputFingerprint?: string;
+  /** Truncated + redacted model output for admin diagnosis (never full secrets). */
+  outputPreview?: string | null;
+  /** Full-script asset extract map-reduce sidecar (JSON string, optional). */
+  mapReduceState?: string | null;
+  /** Redacted prompt diagnostics (hashes only — never API keys or full scripts). */
+  systemPromptHash?: string;
+  userPromptHash?: string;
+  /** Comma-separated message roles in order, e.g. "system,user". */
+  messageRoles?: string;
+  enableThinking?: boolean;
+  maxOutputTokens?: number;
 };
 
 export type ProjectTextDocument = {

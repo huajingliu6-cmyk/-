@@ -5,6 +5,7 @@ import {
   resolveProjectAccess,
 } from "@/auth/effective-role";
 import { getProjectRecord } from "@/projects/project-access";
+import { requireProjectVisualStyleDirective } from "@/projects/project-visual-style";
 import { loadScriptDraft } from "@/projects/script/script-draft-store";
 import { buildScriptSplitProviderBrief } from "@/projects/script/script-split-blocks";
 import {
@@ -17,6 +18,16 @@ import {
   buildEpisodeAssetDesignProviderBrief,
   assertEpisodeAssetDesignBriefIsolation,
 } from "@/projects/assets/episode-design/prompts";
+import {
+  assetExtractEpisodeIdForOutputKind,
+  findBlockingAssetExtract,
+} from "@/projects/assets/episode-design/assert-extract-not-busy";
+import { buildScriptAssetChunks } from "@/projects/assets/episode-design/script-asset-chunks";
+import type { ScriptAssetChunk } from "@/projects/assets/episode-design/script-asset-chunks";
+import {
+  runScriptAssetMapReduce,
+  serializeMapReduceState,
+} from "@/projects/assets/episode-design/script-asset-map-reduce";
 import {
   BRIEF_MAX_CHARS,
   SCRIPT_ASSET_DESIGN_BRIEF_MAX_CHARS,
@@ -52,7 +63,11 @@ import { MockTextProvider } from "@/text-generation/provider/mock-provider";
 import { buildSystemPrompt, buildUserPrompt } from "@/text-generation/prompts";
 import { checkTextGenRateLimit } from "@/text-generation/rate-limit";
 import { truncateToVisibleCharLimit } from "@/text-generation/truncate";
-import { createTextGenerationAbortScope } from "@/text-generation/generation-abort";
+import {
+  createTextGenerationAbortScope,
+  resolveTimeoutMsForOutputKind,
+} from "@/text-generation/generation-abort";
+import { buildSafeOutputPreview } from "@/ai-config/task-rule-contract-guard";
 import {
   isStaleTextJob,
   reclaimStaleTextJob,
@@ -151,6 +166,7 @@ export async function* runTextGenerationStream(
   }
 
   let brief = input.brief.trim();
+  let scriptAssetChunks: ScriptAssetChunk[] | null = null;
 
   if (input.outputKind === "script_split") {
     const draft = await loadScriptDraft(input.projectId);
@@ -229,13 +245,26 @@ export async function* runTextGenerationStream(
       });
       return;
     }
-    brief = [
-      "任务：从以下未分集完整剧本中一次性提取全剧本资产。",
-      "不要按集分批处理，不要与模型进行逐集对话。",
-      "<完整剧本>",
+    scriptAssetChunks = buildScriptAssetChunks({
       sourceText,
-      "</完整剧本>",
-    ].join("\n");
+      episodes: draft?.episodes,
+    });
+    if (scriptAssetChunks.length <= 1) {
+      brief = [
+        "任务：从以下未分集完整剧本中一次性提取全剧本资产。",
+        "不要与模型进行逐集对话。",
+        "<完整剧本>",
+        sourceText,
+        "</完整剧本>",
+      ].join("\n");
+    } else {
+      // Job brief stores a short descriptor only; each chunk carries its own body.
+      brief = [
+        "任务：全剧本资产提取（服务端分块 Map-Reduce）。",
+        `分块数：${scriptAssetChunks.length}`,
+        `剧本可见字数：${countVisibleChars(sourceText)}`,
+      ].join("\n");
+    }
   } else if (input.outputKind === "episode_asset_design") {
     const episodeId = input.episodeId?.trim() ?? "";
     if (!episodeId) {
@@ -379,7 +408,8 @@ export async function* runTextGenerationStream(
     input.outputKind !== "script_episodes" &&
     input.outputKind !== "script_split" &&
     input.outputKind !== "script_asset_design" &&
-    input.outputKind !== "episode_asset_design"
+    input.outputKind !== "episode_asset_design" &&
+    input.outputKind !== "asset_design_prompt"
   ) {
     yield sseEncode({
       event: "error",
@@ -387,6 +417,29 @@ export async function* runTextGenerationStream(
     });
     return;
   }
+
+  const extractEpisodeId = assetExtractEpisodeIdForOutputKind({
+    outputKind: input.outputKind,
+    episodeId: input.episodeId,
+  });
+  if (extractEpisodeId) {
+    const blocking = await findBlockingAssetExtract({
+      projectId: input.projectId,
+      episodeId: extractEpisodeId,
+      idempotencyKey: input.idempotencyKey,
+    });
+    if (blocking.blocked) {
+      yield sseEncode({
+        event: "error",
+        data: {
+          code: "ASSET_EXTRACT_IN_PROGRESS",
+          message: blocking.message,
+        },
+      });
+      return;
+    }
+  }
+
   const validTargetChars =
     input.outputKind === "script_asset_design"
       ? Number.isInteger(input.targetChars) &&
@@ -422,6 +475,29 @@ export async function* runTextGenerationStream(
   let profileSlotId: string | null = null;
   let systemPrompt = buildSystemPrompt(input.outputKind, input.targetChars);
   let userPrompt = buildUserPrompt(brief);
+
+  if (
+    input.outputKind === "script_asset_design" ||
+    input.outputKind === "episode_asset_design" ||
+    input.outputKind === "asset_design_prompt"
+  ) {
+    const styleResolved = requireProjectVisualStyleDirective({
+      visualStyle: project.visualStyle,
+      highlights: project.highlights,
+    });
+    if (!styleResolved.ok) {
+      yield sseEncode({
+        event: "error",
+        data: {
+          code: "PROJECT_VISUAL_STYLE_REQUIRED",
+          message: styleResolved.error,
+        },
+      });
+      return;
+    }
+    systemPrompt = `${systemPrompt}\n\n${styleResolved.directive}`;
+  }
+
   let executionMetadata: Pick<
     TextGenerationJob,
     | "capabilityId"
@@ -492,6 +568,37 @@ export async function* runTextGenerationStream(
         targetChars: input.targetChars,
       });
       systemPrompt = plan.systemPrompt;
+      if (
+        input.outputKind === "script_asset_design" ||
+        input.outputKind === "episode_asset_design" ||
+        input.outputKind === "asset_design_prompt"
+      ) {
+        const styleResolved = requireProjectVisualStyleDirective({
+          visualStyle: project.visualStyle,
+          highlights: project.highlights,
+        });
+        if (!styleResolved.ok) {
+          yield sseEncode({
+            event: "error",
+            data: {
+              code: "PROJECT_VISUAL_STYLE_REQUIRED",
+              message: styleResolved.error,
+            },
+          });
+          return;
+        }
+        systemPrompt = `${systemPrompt}\n\n${styleResolved.directive}`;
+      }
+      if (!systemPrompt.includes("[ADMIN_PUBLISHED_TASK_RULE]")) {
+        yield sseEncode({
+          event: "error",
+          data: {
+            code: "AI_TASK_RULE_CONFIG_INVALID",
+            message: "任务规则未正确装配，请联系管理员检查该能力的任务规则配置。",
+          },
+        });
+        return;
+      }
       userPrompt = assembleUntrustedUserData("project_brief", brief);
       executionMetadata = {
         capabilityId,
@@ -503,8 +610,20 @@ export async function* runTextGenerationStream(
         outputContractVersion: plan.outputContractVersion,
         inputFingerprint: plan.inputFingerprint,
       };
-    } catch {
-      // Keep legacy prompt assembly when execution plan is unavailable.
+    } catch (err) {
+      const code =
+        err instanceof AiConfigError
+          ? err.code
+          : "AI_CONFIGURATION_INVALID";
+      const message =
+        err instanceof AiConfigError
+          ? err.message
+          : "AI 执行计划不可用，请联系管理员检查模型线路与任务规则。";
+      yield sseEncode({
+        event: "error",
+        data: { code, message },
+      });
+      return;
     }
   }
   // Keep createTextGenerationProvider reachable for legacy tests that
@@ -609,7 +728,8 @@ export async function* runTextGenerationStream(
           estimateOutputTokenBudget(model, 4000),
           Math.min(Math.max(model.maxOutputTokensCap, 8192), 8192),
         )
-      : input.outputKind === "episode_asset_design"
+      : input.outputKind === "episode_asset_design" ||
+          input.outputKind === "script_asset_design"
         ? 30_000
       : input.outputKind === "script_episodes"
         ? estimateOutputTokenBudget(
@@ -617,7 +737,19 @@ export async function* runTextGenerationStream(
             Math.min(1000, input.targetChars + 200),
           )
         : estimateOutputTokenBudget(model, input.targetChars);
-  const estIn = provider.estimateInputTokens(systemPrompt + userPrompt);
+  const useScriptAssetMapReduce =
+    input.outputKind === "script_asset_design" &&
+    (scriptAssetChunks?.length ?? 0) > 1;
+  const estIn = useScriptAssetMapReduce
+    ? scriptAssetChunks!.reduce(
+        (sum, chunk) =>
+          sum +
+          provider.estimateInputTokens(
+            systemPrompt + buildUserPrompt(chunk.brief),
+          ),
+        0,
+      )
+    : provider.estimateInputTokens(systemPrompt + userPrompt);
   const reservedPoints = estimatePointsCost({
     inputTokens: estIn,
     outputTokens: maxOut,
@@ -689,18 +821,138 @@ export async function* runTextGenerationStream(
     },
   });
 
-  const abortScope = createTextGenerationAbortScope(input.signal);
+  const abortTimeoutMs = resolveTimeoutMsForOutputKind(input.outputKind);
+  const abortScope = createTextGenerationAbortScope(
+    input.signal,
+    abortTimeoutMs,
+  );
   const { controller } = abortScope;
   abortControllers.set(generationId, controller);
   job = { ...job, status: "running", updatedAt: new Date().toISOString() };
   await saveTextJob(job);
+  const streamStartedAtMs = Date.now();
 
   let content = "";
   let inputTokens: number | null = null;
   let outputTokens: number | null = null;
   let hardStopped = false;
 
+  const modelTimeoutMessage =
+    input.outputKind === "script_asset_design"
+      ? "全剧本资产提取模型生成超时，请稍后重试或更换模型。"
+      : "模型服务响应超时，请稍后重试或更换模型。";
+
+  const persistTimeoutJob = async () => {
+    const actualChars = countVisibleChars(content);
+    const elapsedMs = Date.now() - streamStartedAtMs;
+    job = {
+      ...job,
+      status: "failed",
+      content,
+      actualChars,
+      inputTokens,
+      outputTokens,
+      errorCode: "MODEL_TIMEOUT",
+      errorMessage:
+        input.outputKind === "script_asset_design"
+          ? "全剧本资产提取模型生成超时"
+          : "模型服务响应超时",
+      outputPreview: buildSafeOutputPreview(content || ""),
+      updatedAt: new Date().toISOString(),
+    };
+    await saveTextJob(job);
+    console.warn(
+      JSON.stringify({
+        event: "TEXT_GENERATION_MODEL_TIMEOUT",
+        generationId,
+        outputKind: input.outputKind,
+        elapsedMs,
+        actualChars,
+        modelConnectionId: executionMetadata?.modelConnectionId ?? null,
+        errorCode: "MODEL_TIMEOUT",
+        timeoutMs: abortTimeoutMs,
+      }),
+    );
+  };
+
   try {
+    if (useScriptAssetMapReduce && scriptAssetChunks) {
+      const reduceResult = await runScriptAssetMapReduce({
+        chunks: scriptAssetChunks,
+        provider,
+        systemPrompt,
+        providerModelId,
+        maxOutputTokens: maxOut,
+        signal: controller.signal,
+        onChunkComplete: (chunk) => {
+          // Progress breadcrumb only — no model secrets.
+          console.info(
+            JSON.stringify({
+              event: "SCRIPT_ASSET_CHUNK_DONE",
+              generationId,
+              chunkId: chunk.chunkId,
+              status: chunk.status,
+              assetCount: chunk.assetCount,
+              errorCode: chunk.errorCode ?? null,
+            }),
+          );
+        },
+      });
+
+      content = reduceResult.content;
+      job = {
+        ...job,
+        mapReduceState: serializeMapReduceState(reduceResult.state),
+      };
+
+      if (abortScope.didTimeout()) {
+        await persistTimeoutJob();
+        await releaseReservation({
+          generationId,
+          projectId: input.projectId,
+          reason: "text-generation-timeout",
+        });
+        yield sseEncode({
+          event: "error",
+          data: {
+            code: "MODEL_TIMEOUT",
+            message: modelTimeoutMessage,
+          },
+        });
+        return;
+      }
+
+      if (!reduceResult.ok && reduceResult.state.chunks.every((c) => c.status === "failed")) {
+        job = {
+          ...job,
+          status: "failed",
+          content: reduceResult.content,
+          actualChars: countVisibleChars(reduceResult.content),
+          errorCode: reduceResult.errorCode,
+          errorMessage: reduceResult.errorMessage,
+          mapReduceState: serializeMapReduceState(reduceResult.state),
+          outputPreview: buildSafeOutputPreview(reduceResult.content || ""),
+          updatedAt: new Date().toISOString(),
+        };
+        await saveTextJob(job);
+        await releaseReservation({
+          generationId,
+          projectId: input.projectId,
+          reason: "text-generation-fail",
+        });
+        yield sseEncode({
+          event: "error",
+          data: {
+            code: reduceResult.errorCode,
+            message: reduceResult.errorMessage,
+          },
+        });
+        return;
+      }
+
+      // Stream merged JSON as a single delta for apply-generation compatibility.
+      yield sseEncode({ event: "delta", data: { text: content } });
+    } else {
     for await (const ev of provider.streamText({
       systemPrompt,
       userPrompt,
@@ -713,9 +965,10 @@ export async function* runTextGenerationStream(
       if (ev.type === "delta") {
         const next = content + ev.text;
         const visible = countVisibleChars(next);
-        // Structured JSON episodes must not be mid-truncated.
+        // Structured JSON must not be mid-truncated.
         if (
           input.outputKind !== "script_episodes" &&
+          input.outputKind !== "script_asset_design" &&
           input.outputKind !== "episode_asset_design" &&
           input.outputKind !== "script_split" &&
           visible > input.targetChars
@@ -738,16 +991,7 @@ export async function* runTextGenerationStream(
       } else if (ev.type === "error") {
         if (ev.code === "CANCELLED") {
           if (abortScope.didTimeout()) {
-            job = {
-              ...job,
-              status: "failed",
-              content,
-              actualChars: countVisibleChars(content),
-              errorCode: "MODEL_TIMEOUT",
-              errorMessage: "模型服务响应超时",
-              updatedAt: new Date().toISOString(),
-            };
-            await saveTextJob(job);
+            await persistTimeoutJob();
             await releaseReservation({
               generationId,
               projectId: input.projectId,
@@ -757,7 +1001,7 @@ export async function* runTextGenerationStream(
               event: "error",
               data: {
                 code: "MODEL_TIMEOUT",
-                message: "模型服务响应超时，请稍后重试或更换模型。",
+                message: modelTimeoutMessage,
               },
             });
             return;
@@ -769,6 +1013,7 @@ export async function* runTextGenerationStream(
             actualChars: countVisibleChars(content),
             errorCode: "CANCELLED",
             errorMessage: "用户取消",
+            outputPreview: buildSafeOutputPreview(content || ""),
             updatedAt: new Date().toISOString(),
           };
           await saveTextJob(job);
@@ -796,6 +1041,7 @@ export async function* runTextGenerationStream(
           actualChars: countVisibleChars(content),
           errorCode: ev.code,
           errorMessage: ev.message,
+          outputPreview: buildSafeOutputPreview(content || ""),
           updatedAt: new Date().toISOString(),
         };
         await saveTextJob(job);
@@ -811,6 +1057,7 @@ export async function* runTextGenerationStream(
         return;
       }
     }
+    } // end single-stream else
 
     if (hardStopped) {
       const cut = truncateToVisibleCharLimit(content, input.targetChars);
@@ -842,6 +1089,7 @@ export async function* runTextGenerationStream(
         outputTokens,
         errorCode: "EMPTY_MODEL_OUTPUT",
         errorMessage: "模型输出为空",
+        outputPreview: buildSafeOutputPreview(content || ""),
         updatedAt: new Date().toISOString(),
       };
       await saveTextJob(job);
@@ -902,6 +1150,11 @@ export async function* runTextGenerationStream(
       outputTokens,
       chargedPoints,
       documentId: doc.documentId,
+      outputPreview:
+        input.outputKind === "script_asset_design" ||
+        input.outputKind === "episode_asset_design"
+          ? buildSafeOutputPreview(content)
+          : job.outputPreview ?? null,
       updatedAt: new Date().toISOString(),
     };
     await saveTextJob(job);
@@ -928,43 +1181,47 @@ export async function* runTextGenerationStream(
   } catch (error) {
     if (controller.signal.aborted) {
       const timedOut = abortScope.didTimeout();
-      const latest = (await getTextJob(input.projectId, generationId)) ?? job;
-      await saveTextJob({
-        ...latest,
-        status: timedOut ? "failed" : "cancelled",
-        content,
-        actualChars: countVisibleChars(content),
-        errorCode: timedOut ? "MODEL_TIMEOUT" : "CANCELLED",
-        errorMessage: timedOut ? "模型服务响应超时" : "用户取消",
-        updatedAt: new Date().toISOString(),
-      });
       if (timedOut) {
+        await persistTimeoutJob();
         await releaseReservation({
           generationId,
           projectId: input.projectId,
           reason: "text-generation-timeout",
         });
-      } else {
-        await settleReservation({
-          generationId,
-          actualPoints: estimatePointsCost({
-            inputTokens: inputTokens ?? estIn,
-            outputTokens: outputTokens ?? Math.ceil(content.length / 2),
-            pointsPer1kInput: model.pointsPer1kInput,
-            pointsPer1kOutput: model.pointsPer1kOutput,
-          }),
-          projectId: input.projectId,
-          reason: "text-generation-cancel",
+        yield sseEncode({
+          event: "error",
+          data: {
+            code: "MODEL_TIMEOUT",
+            message: modelTimeoutMessage,
+          },
         });
+        return;
       }
+      const latest = (await getTextJob(input.projectId, generationId)) ?? job;
+      await saveTextJob({
+        ...latest,
+        status: "cancelled",
+        content,
+        actualChars: countVisibleChars(content),
+        errorCode: "CANCELLED",
+        errorMessage: "用户取消",
+        outputPreview: buildSafeOutputPreview(content || ""),
+        updatedAt: new Date().toISOString(),
+      });
+      await settleReservation({
+        generationId,
+        actualPoints: estimatePointsCost({
+          inputTokens: inputTokens ?? estIn,
+          outputTokens: outputTokens ?? Math.ceil(content.length / 2),
+          pointsPer1kInput: model.pointsPer1kInput,
+          pointsPer1kOutput: model.pointsPer1kOutput,
+        }),
+        projectId: input.projectId,
+        reason: "text-generation-cancel",
+      });
       yield sseEncode({
         event: "error",
-        data: timedOut
-          ? {
-              code: "MODEL_TIMEOUT",
-              message: "模型服务响应超时，请稍后重试或更换模型。",
-            }
-          : { code: "CANCELLED", message: "已停止生成" },
+        data: { code: "CANCELLED", message: "已停止生成" },
       });
       return;
     }
@@ -976,6 +1233,7 @@ export async function* runTextGenerationStream(
       actualChars: countVisibleChars(content),
       errorCode: "INTERNAL",
       errorMessage: "生成失败",
+      outputPreview: buildSafeOutputPreview(content || ""),
       updatedAt: new Date().toISOString(),
     });
     await releaseReservation({

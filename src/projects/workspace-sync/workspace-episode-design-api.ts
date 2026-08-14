@@ -184,6 +184,38 @@ export async function getWorkspaceEpisodeAssetDesignDetail(
       draft?.updatedAt ?? new Date().toISOString(),
     );
     const currentFingerprint = getScriptSourceFingerprint(content) ?? "";
+    let finalRecord = record;
+    if (finalRecord.status === "generating") {
+      const { reconcileGeneratingExtractRecord } = await import(
+        "@/projects/assets/episode-design/reconcile-extract-status"
+      );
+      finalRecord = await reconcileGeneratingExtractRecord({
+        projectId,
+        record: finalRecord,
+        fingerprint: currentFingerprint,
+        episodeContent: content,
+        episodeNumber: 0,
+        episodeTitle: "完整原始剧本",
+        persist: async ({ record: next }) => {
+          const local = await loadWorkspaceLocalEpisodeDesigns(projectId);
+          const { store: withRecord } = getOrCreateEpisodeRecord(
+            local,
+            SCRIPT_ASSET_DESIGN_ID,
+            0,
+          );
+          const bumped = {
+            ...next,
+            revision: (getEpisodeDesignRecord(withRecord, SCRIPT_ASSET_DESIGN_ID)?.revision ??
+              next.revision) + 1,
+            updatedAt: new Date().toISOString(),
+          };
+          await saveWorkspaceLocalEpisodeDesigns(
+            upsertEpisodeRecord(withRecord, bumped),
+          );
+          return bumped;
+        },
+      });
+    }
     return {
       ok: true,
       episode: {
@@ -192,9 +224,9 @@ export async function getWorkspaceEpisodeAssetDesignDetail(
         title: "完整原始剧本",
         content,
       },
-      record,
+      record: finalRecord,
       currentFingerprint,
-      designStatus: computeEffectiveStatus(record, currentFingerprint),
+      designStatus: computeEffectiveStatus(finalRecord, currentFingerprint),
     };
   }
   const snapshot = await loadWorkspaceSnapshot(projectId);
@@ -229,12 +261,46 @@ export async function getWorkspaceEpisodeAssetDesignDetail(
     content: episode.content,
   });
 
+  let finalRecord = record;
+  if (finalRecord.status === "generating") {
+    const { reconcileGeneratingExtractRecord } = await import(
+      "@/projects/assets/episode-design/reconcile-extract-status"
+    );
+    finalRecord = await reconcileGeneratingExtractRecord({
+      projectId,
+      record: finalRecord,
+      fingerprint: currentFingerprint,
+      episodeContent: episode.content,
+      episodeNumber: episode.episodeNumber,
+      episodeTitle: episode.title,
+      persist: async ({ record: next }) => {
+        const local = await loadWorkspaceLocalEpisodeDesigns(projectId);
+        const { store: withRecord } = getOrCreateEpisodeRecord(
+          local,
+          episode.id,
+          episode.episodeNumber,
+        );
+        const bumped = {
+          ...next,
+          revision:
+            (getEpisodeDesignRecord(withRecord, episode.id)?.revision ??
+              next.revision) + 1,
+          updatedAt: new Date().toISOString(),
+        };
+        await saveWorkspaceLocalEpisodeDesigns(
+          upsertEpisodeRecord(withRecord, bumped),
+        );
+        return bumped;
+      },
+    });
+  }
+
   return {
     ok: true,
     episode,
-    record,
+    record: finalRecord,
     currentFingerprint,
-    designStatus: computeEffectiveStatus(record, currentFingerprint),
+    designStatus: computeEffectiveStatus(finalRecord, currentFingerprint),
   };
 }
 
@@ -246,6 +312,7 @@ export async function saveWorkspaceEpisodeAssetDesignItems(input: {
   items: EpisodeAssetDesignItem[];
   status?: EpisodeAssetDesignStatus;
   designConversation?: EpisodeDesignConversationMessage[];
+  activeGeneration?: import("@/projects/assets/episode-design/types").EpisodeAssetActiveGeneration | null;
 }): Promise<
   | { ok: true; record: EpisodeAssetDesignRecord }
   | {
@@ -396,6 +463,11 @@ export async function saveWorkspaceEpisodeAssetDesignItems(input: {
       ...(input.designConversation
         ? { designConversation: input.designConversation }
         : {}),
+      ...(input.activeGeneration !== undefined
+        ? { activeGeneration: input.activeGeneration }
+        : input.status && input.status !== "generating"
+          ? { activeGeneration: null }
+          : {}),
     };
     const nextStore = upsertEpisodeRecord(withRecord, nextRecord);
     try {
@@ -427,11 +499,17 @@ export async function applyWorkspaceEpisodeAssetDesignGeneration(input: {
   projectId: string;
   episodeId: string;
   generationId: string;
-  rawText: string;
+  rawText?: string;
   expectedRevision?: number;
   fingerprint: string;
 }): Promise<
-  | { ok: true; record: EpisodeAssetDesignRecord }
+  | {
+      ok: true;
+      record: EpisodeAssetDesignRecord;
+      warnings: import("@/projects/assets/episode-design/normalize-raw-asset").ParseAssetWarning[];
+      rejectedItems: import("@/projects/assets/episode-design/normalize-raw-asset").RejectedAssetItem[];
+      repaired: boolean;
+    }
   | {
       ok: false;
       code:
@@ -440,8 +518,13 @@ export async function applyWorkspaceEpisodeAssetDesignGeneration(input: {
         | "FINGERPRINT_STALE"
         | "EPISODE_CONTENT_EMPTY"
         | "PARSE_FAILED"
-        | "INVALID_REQUEST";
+        | "EPISODE_ASSET_DESIGN_CONTENT_EMPTY"
+        | "EPISODE_ASSET_DESIGN_OUTPUT_INVALID"
+        | "INVALID_REQUEST"
+        | "GENERATION_NOT_FOUND";
       message: string;
+      warnings?: import("@/projects/assets/episode-design/normalize-raw-asset").ParseAssetWarning[];
+      rejectedItems?: import("@/projects/assets/episode-design/normalize-raw-asset").RejectedAssetItem[];
     }
 > {
   const detail = await getWorkspaceEpisodeAssetDesignDetail(
@@ -474,12 +557,28 @@ export async function applyWorkspaceEpisodeAssetDesignGeneration(input: {
     };
   }
 
-  const parsed = parseEpisodeAssetDesignOutput(input.rawText);
+  let rawText = typeof input.rawText === "string" ? input.rawText : "";
+  if (!rawText.trim()) {
+    const { getTextJob } = await import("@/text-generation/job-store");
+    const job = await getTextJob(input.projectId, input.generationId);
+    if (!job?.content?.trim()) {
+      return {
+        ok: false,
+        code: "GENERATION_NOT_FOUND",
+        message: "找不到可重新应用的生成结果，请重新提取",
+      };
+    }
+    rawText = job.content;
+  }
+
+  const parsed = parseEpisodeAssetDesignOutput(rawText);
   if (!parsed.ok) {
     return {
       ok: false,
-      code: "PARSE_FAILED",
+      code: parsed.code,
       message: parsed.message,
+      warnings: parsed.warnings,
+      rejectedItems: parsed.rejectedItems,
     };
   }
 
@@ -498,7 +597,7 @@ export async function applyWorkspaceEpisodeAssetDesignGeneration(input: {
   const designConversation = await buildEpisodeDesignConversationFromExtract({
     projectId: input.projectId,
     generationId: input.generationId,
-    rawText: input.rawText,
+    rawText,
     episodeNumber: detail.episode.episodeNumber,
     title: detail.episode.title,
     content: detail.episode.content,
@@ -524,7 +623,13 @@ export async function applyWorkspaceEpisodeAssetDesignGeneration(input: {
     staleUpstream: false,
   });
   await saveWorkspaceLocalEpisodeDesigns(nextStore);
-  return { ok: true, record: nextRecord };
+  return {
+    ok: true,
+    record: nextRecord,
+    warnings: parsed.warnings,
+    rejectedItems: parsed.rejectedItems,
+    repaired: parsed.repaired === true,
+  };
 }
 
 export async function getEffectiveWorkspaceAssetBundle(

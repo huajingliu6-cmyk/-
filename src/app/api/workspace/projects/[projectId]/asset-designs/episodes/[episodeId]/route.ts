@@ -3,6 +3,7 @@ import { requireWorkspaceAssetAccess } from "@/auth/require-access";
 import { getProjectRecord } from "@/projects/project-access";
 import type { EpisodeAssetDesignItem } from "@/projects/assets/episode-design/types";
 import type { EpisodeAssetDesignStatus } from "@/projects/assets/episode-design/types";
+import { parseActiveGeneration } from "@/projects/assets/episode-design/reconcile-extract-status";
 import { ensureWorkspaceInitialized } from "@/projects/workspace-sync/ensure-workspace-initialized";
 import {
   getWorkspaceEpisodeAssetDesignDetail,
@@ -107,6 +108,22 @@ export async function PUT(request: Request, context: RouteContext) {
     typeof raw.fingerprint === "string" ? raw.fingerprint.trim() : "";
   const items = parseItems(raw.items);
   const nextStatus = parseStatus(raw.status);
+  const activeGeneration =
+    raw.activeGeneration === null
+      ? null
+      : raw.activeGeneration !== undefined
+        ? parseActiveGeneration(raw.activeGeneration)
+        : undefined;
+  if (
+    raw.activeGeneration !== undefined &&
+    raw.activeGeneration !== null &&
+    activeGeneration === null
+  ) {
+    return NextResponse.json(
+      { error: "activeGeneration 无效", code: "INVALID_REQUEST" },
+      { status: 400 },
+    );
+  }
 
   if (expectedRevision === null || !Number.isInteger(expectedRevision)) {
     return NextResponse.json(
@@ -136,6 +153,7 @@ export async function PUT(request: Request, context: RouteContext) {
       fingerprint,
       items,
       ...(nextStatus ? { status: nextStatus } : {}),
+      ...(activeGeneration !== undefined ? { activeGeneration } : {}),
     });
   });
   if (guardedResult instanceof NextResponse) return guardedResult;

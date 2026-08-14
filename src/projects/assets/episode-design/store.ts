@@ -12,6 +12,7 @@ import type {
   AssetDesignPromptHistoryEntry,
   AssetDesignPromptHistorySource,
   AssetDesignPromptState,
+  EpisodeAssetActiveGeneration,
   EpisodeAssetDesignAssetType,
   EpisodeAssetDesignItem,
   EpisodeAssetDesignRecord,
@@ -172,6 +173,35 @@ function parsePromptHistoryEntry(
         : new Date().toISOString(),
     generationId: asNullableString(entry.generationId),
     source: parsePromptHistorySource(entry.source),
+  };
+}
+
+function parseActiveGenerationField(
+  raw: unknown,
+): EpisodeAssetActiveGeneration | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  if (!isRecord(raw)) return undefined;
+  const outputKind = raw.outputKind;
+  if (
+    outputKind !== "script_asset_design" &&
+    outputKind !== "episode_asset_design"
+  ) {
+    return undefined;
+  }
+  const idempotencyKey =
+    typeof raw.idempotencyKey === "string" ? raw.idempotencyKey.trim() : "";
+  const startedAt = typeof raw.startedAt === "string" ? raw.startedAt : "";
+  if (!idempotencyKey || !startedAt) return undefined;
+  return {
+    generationId: asNullableString(raw.generationId),
+    idempotencyKey,
+    outputKind,
+    startedAt,
+    updatedAt:
+      typeof raw.updatedAt === "string" && raw.updatedAt
+        ? raw.updatedAt
+        : startedAt,
   };
 }
 
@@ -337,6 +367,7 @@ function parseRecord(raw: unknown): EpisodeAssetDesignRecord | null {
         .filter((item): item is EpisodeAssetDesignItem => item !== null)
     : [];
   const designConversation = parseDesignConversation(raw.designConversation);
+  const activeGeneration = parseActiveGenerationField(raw.activeGeneration);
   return {
     episodeId: raw.episodeId,
     episodeNumber: asNumber(raw.episodeNumber, 0),
@@ -346,6 +377,9 @@ function parseRecord(raw: unknown): EpisodeAssetDesignRecord | null {
     generationId: asNullableString(raw.generationId),
     items,
     ...(designConversation ? { designConversation } : {}),
+    ...(activeGeneration !== undefined
+      ? { activeGeneration }
+      : {}),
     confirmedAt: asNullableString(raw.confirmedAt),
     confirmedBy: asNullableString(raw.confirmedBy),
     confirmedRevision:

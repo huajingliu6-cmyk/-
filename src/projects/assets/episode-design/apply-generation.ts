@@ -71,6 +71,7 @@ export function applyParsedDesignToEpisodeRecord(input: {
     revision: input.record.revision + 1,
     contentFingerprint: input.contentFingerprint,
     generationId: input.generationId,
+    activeGeneration: null,
     items: withPreservedMedia,
     ...(input.designConversation
       ? { designConversation: input.designConversation }

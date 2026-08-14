@@ -61,6 +61,17 @@ async function post(request: Request, context: RouteContext) {
   if (!prompt) {
     return NextResponse.json({ error: "缺少提示词" }, { status: 400 });
   }
+  if (
+    raw &&
+    ("stylePrompt" in raw ||
+      "visualStyle" in raw ||
+      "promptDirective" in raw)
+  ) {
+    return NextResponse.json(
+      { error: "不允许客户端覆盖项目视觉风格" },
+      { status: 400 },
+    );
+  }
   const idempotencyKey = parseIdempotencyKey(raw?.idempotencyKey);
   if (!idempotencyKey) {
     return NextResponse.json(

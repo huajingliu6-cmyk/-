@@ -76,6 +76,24 @@ export function isMediaVoiceBound(binding: MediaVoiceBinding): boolean {
 }
 
 /**
+ * Personal “确认入库”: show a second confirm when the *current* generated
+ * image has no bound voice. Other history bindings and draft.voice* alone
+ * must not suppress the prompt for an unbound current image.
+ */
+export function characterNeedsUnboundVoiceConfirm(
+  item: Pick<
+    EpisodeAssetDesignItem,
+    "assetType" | "draft" | "generatedMedia" | "libraryAssetId"
+  >,
+): boolean {
+  if (item.assetType !== "character") return false;
+  if (item.libraryAssetId?.trim()) return false;
+  const mediaId = item.generatedMedia?.currentId?.trim();
+  if (!mediaId) return false;
+  return !isMediaVoiceBound(getDesignMediaVoiceBinding(item, mediaId));
+}
+
+/**
  * PUT/merge guard: never let a stale full-items save clear an already-bound
  * media voice. Clients may replace with a new bound voiceId; explicit unbind
  * must go through the atomic media-voice PATCH.

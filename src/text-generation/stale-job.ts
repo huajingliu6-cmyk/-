@@ -1,15 +1,15 @@
 import { releaseReservation } from "@/text-generation/credits";
-import { resolveTextGenerationTimeoutMs } from "@/text-generation/generation-abort";
+import { resolveTimeoutMsForOutputKind } from "@/text-generation/generation-abort";
 import { saveTextJob } from "@/text-generation/job-store";
 import type { TextGenerationJob } from "@/text-generation/types";
 
 /** Extra grace so an in-flight timeout handler can finish writing job status. */
-const STALE_JOB_GRACE_MS = 15_000;
+export const STALE_JOB_GRACE_MS = 15_000;
 
 export function isStaleTextJob(
-  job: Pick<TextGenerationJob, "status" | "updatedAt">,
+  job: Pick<TextGenerationJob, "status" | "updatedAt" | "outputKind">,
   nowMs = Date.now(),
-  timeoutMs = resolveTextGenerationTimeoutMs(),
+  timeoutMs = resolveTimeoutMsForOutputKind(job.outputKind),
 ): boolean {
   if (job.status !== "queued" && job.status !== "running") return false;
   const updatedAtMs = Date.parse(job.updatedAt);

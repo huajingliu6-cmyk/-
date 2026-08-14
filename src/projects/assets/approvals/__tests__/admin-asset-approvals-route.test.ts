@@ -72,6 +72,7 @@ describe("admin asset-approvals history route", () => {
       name: `admin-appr-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
 

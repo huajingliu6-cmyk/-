@@ -1,4 +1,8 @@
-import type { EpisodeAssetDesignAssetType } from "@/projects/assets/episode-design/types";
+import type {
+  EpisodeAssetDesignAssetType,
+  EpisodeAssetDesignItem,
+  GeneratedMediaState,
+} from "@/projects/assets/episode-design/types";
 import type { VideoRefSafety } from "@/projects/assets/types";
 
 /** 已通过 SD 认证的图片不可再校验（客户端/服务端均可引用）。 */
@@ -6,6 +10,44 @@ export function isDesignMediaVideoRefLocked(
   safety: VideoRefSafety | null | undefined,
 ): boolean {
   return safety?.status === "ok";
+}
+
+/**
+ * Safety for the *current* generated image only.
+ * Prefer the history entry for currentId so a prior image's top-level
+ * videoRefSafety cannot fake “已校验” after the user switches media.
+ */
+export function getCurrentDesignMediaVideoRefSafety(
+  media: GeneratedMediaState | null | undefined,
+): VideoRefSafety | null {
+  const currentId = media?.currentId?.trim();
+  if (!media || !currentId) return null;
+  const historyEntry = media.history?.find((h) => h.mediaId === currentId);
+  if (historyEntry) {
+    return historyEntry.videoRefSafety ?? null;
+  }
+  if (media.videoRefSafety) return media.videoRefSafety;
+  return null;
+}
+
+/**
+ * Personal project-management “确认入库”: block characters whose *current*
+ * image has not passed SD person verification (`status === "ok"`).
+ * Scenes/props are never blocked. Risk / pending / failed / missing ≠ pass.
+ */
+export function characterNeedsUncheckedVideoRefBlock(
+  item: Pick<
+    EpisodeAssetDesignItem,
+    "assetType" | "generatedMedia" | "libraryAssetId"
+  >,
+): boolean {
+  if (item.assetType !== "character") return false;
+  if (item.libraryAssetId?.trim()) return false;
+  const mediaId = item.generatedMedia?.currentId?.trim();
+  if (!mediaId) return false;
+  return !isDesignMediaVideoRefLocked(
+    getCurrentDesignMediaVideoRefSafety(item.generatedMedia),
+  );
 }
 
 export function designVideoRefSafetyBadge(
@@ -53,7 +95,7 @@ export function formatDesignVideoRefSafetyNotice(
     case "pending":
       return `${subject}正在上传至 SD 审核资产库…`;
     case "check_failed":
-      return `${subject}人物校验未完成：${safety.reason ?? "请到管理 API 配置「移动 SD2 平台」后重试"}`;
+      return `${subject}人物校验未完成：${safety.reason ?? "请到系统管理 → API 接口配置「移动 SD2 平台」后重试"}`;
     default:
       return `${subject}校验结果未知`;
   }

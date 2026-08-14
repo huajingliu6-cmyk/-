@@ -40,9 +40,11 @@ import {
 import { createEpisodeAssetDesignIdempotencyKey } from "@/projects/assets/episode-design/prompts";
 import { mergeGeneratedMediaState } from "@/projects/assets/episode-design/generated-media-history";
 import {
+  characterNeedsUnboundVoiceConfirm,
   getDesignMediaVoiceBinding,
   isMediaVoiceBound,
 } from "@/projects/assets/episode-design/design-media-voice";
+import { characterNeedsUncheckedVideoRefBlock } from "@/projects/assets/episode-design/design-media-video-ref-labels";
 import {
   itemFromCharacterDraft,
   mergePatchedDesignItem,
@@ -51,6 +53,7 @@ import { shouldApplySavedDesignRecord } from "@/projects/assets/episode-design/u
 import {
   EPISODE_ASSET_DESIGN_STATUS_LABELS,
   type CharacterDesignItem,
+  type EpisodeAssetActiveGeneration,
   type EpisodeAssetDesignAssetType,
   type EpisodeAssetDesignItem,
   type EpisodeAssetDesignRecord,
@@ -271,6 +274,32 @@ function formatMetaTime(value: string | null | undefined): string | null {
   return date.toLocaleString("zh-CN");
 }
 
+function formatFullScriptExtractionError(
+  code: string,
+  fallbackMessage: string,
+): string {
+  switch (code) {
+    case "AI_TASK_RULE_CONTRACT_CONFLICT":
+      return "当前资产提取任务规则与固定输出格式冲突，请联系管理员修正任务规则后重试。";
+    case "MODEL_TIMEOUT":
+      return "全剧本资产提取模型生成超时，请稍后重试或更换模型。已调用模型但未在时限内完成；可点击下方按钮重试。";
+    case "EMPTY_MODEL_OUTPUT":
+      return "模型未返回任何内容，请重试提取。";
+    case "EPISODE_ASSET_DESIGN_CONTENT_EMPTY":
+      return fallbackMessage.includes("空")
+        ? fallbackMessage
+        : "模型输出为空，未能提取资产。";
+    case "EPISODE_ASSET_DESIGN_OUTPUT_INVALID":
+    case "PARSE_FAILED":
+      if (/合法 JSON|JSON 对象|代码围栏/i.test(fallbackMessage)) {
+        return `模型返回内容不是合法的资产 JSON：${fallbackMessage}`;
+      }
+      return `模型返回的 JSON 不符合资产结构：${fallbackMessage}`;
+    default:
+      return fallbackMessage || "全剧本资产提取失败，请重试。";
+  }
+}
+
 const ASSET_EXTRACTION_MODEL_OPTIONS: GlassSelectOption[] = [
   {
     id: "deepseek-v4-pro",
@@ -361,15 +390,35 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [fullScriptPending, setFullScriptPending] = useState(false);
   const [fullScriptAssetCount, setFullScriptAssetCount] = useState(0);
-  const [generating, setGenerating] = useState(false);
   const [batchExtracting, setBatchExtracting] = useState(false);
+  /** In-flight asset extract jobs keyed by episodeId (incl. full-script id). */
+  const [extractingEpisodeIds, setExtractingEpisodeIds] = useState<
+    Set<string>
+  >(() => new Set());
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [confirmingItemId, setConfirmingItemId] = useState<string | null>(null);
+  const [pendingUnboundVoiceConfirmItem, setPendingUnboundVoiceConfirmItem] =
+    useState<{ id: string; name: string } | null>(null);
+  const [pendingUncheckedVideoRefItem, setPendingUncheckedVideoRefItem] =
+    useState<{ id: string; name: string } | null>(null);
   const [savingVoiceItemIds, setSavingVoiceItemIds] = useState<Set<string>>(
     () => new Set(),
   );
   const [pageNote, setPageNote] = useState("");
+  const [extractionError, setExtractionError] = useState<{
+    code: string;
+    message: string;
+    generationId?: string | null;
+    canReapply?: boolean;
+    canRetryChunks?: boolean;
+  } | null>(null);
+  const [extractDiagnostics, setExtractDiagnostics] = useState<{
+    extracted: number;
+    repaired: number;
+    rejected: number;
+    rejectedItems: Array<{ index: number; name?: string; reason: string }>;
+  } | null>(null);
   const [confirmSummary, setConfirmSummary] = useState<string | null>(null);
   const [reextractOpen, setReextractOpen] = useState(false);
   const [modelKey, setModelKey] = useState(
@@ -403,10 +452,72 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   >(() => new Set());
   const [submitApprovalOpen, setSubmitApprovalOpen] = useState(false);
   const [projectName, setProjectName] = useState(projectId);
-  const abortRef = useRef<AbortController | null>(null);
-  const generationIdRef = useRef<string | null>(null);
-  const generatingRef = useRef(false);
+  const selectedIdRef = useRef(selectedId);
+  const extractJobsRef = useRef(
+    new Map<
+      string,
+      {
+        controller: AbortController;
+        generationId: string | null;
+        fingerprint: string;
+        revision: number;
+        items: EpisodeAssetDesignItem[];
+      }
+    >(),
+  );
+  /** Lightweight recovery polls when server says generating but this tab has no live stream. */
+  const extractPollTimersRef = useRef(new Map<string, number>());
+  const extractPollStartedAtRef = useRef(new Map<string, number>());
+  const confirmingRef = useRef(false);
   const isPersonalSpace = activeSpace.kind === "personal";
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
+  const markEpisodeExtracting = useCallback((episodeId: string, on: boolean) => {
+    setExtractingEpisodeIds((prev) => {
+      const has = prev.has(episodeId);
+      if (on && has) return prev;
+      if (!on && !has) return prev;
+      const next = new Set(prev);
+      if (on) next.add(episodeId);
+      else next.delete(episodeId);
+      return next;
+    });
+  }, []);
+
+  const stopExtractPoll = useCallback((episodeId: string) => {
+    const timerId = extractPollTimersRef.current.get(episodeId);
+    if (timerId != null) {
+      window.clearInterval(timerId);
+      extractPollTimersRef.current.delete(episodeId);
+    }
+    extractPollStartedAtRef.current.delete(episodeId);
+  }, []);
+
+  useEffect(() => {
+    const timers = extractPollTimersRef.current;
+    const startedAt = extractPollStartedAtRef.current;
+    return () => {
+      for (const timerId of timers.values()) {
+        window.clearInterval(timerId);
+      }
+      timers.clear();
+      startedAt.clear();
+    };
+  }, []);
+
+  const currentEpisodeExtracting =
+    selectedId != null &&
+    (extractingEpisodeIds.has(selectedId) ||
+      (!detailLoading && designStatus === "generating"));
+
+  const extractionBusy =
+    batchExtracting ||
+    designStatus === "generating" ||
+    currentEpisodeExtracting ||
+    extractingEpisodeIds.has(SCRIPT_ASSET_DESIGN_ID);
 
   useEffect(() => {
     const onSpaceChanged = (event: Event) => {
@@ -425,18 +536,12 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       ? searchParams.get("approvalSubmissionId")?.trim() || null
       : null;
   const ownerApprovalOpen = Boolean(ownerApprovalSubmissionId);
-  useEffect(() => {
-    generatingRef.current = generating;
-  }, [generating]);
-
   useGenerationBusy(
-    generating || batchExtracting || generatingAssetIds.size > 0,
-    `asset-design-${projectId}`,
-    generatingAssetIds.size > 0
-      ? "资产图生成"
-      : batchExtracting
-        ? "全剧本资产提取"
-        : "资产提取",
+    extractionBusy || generatingAssetIds.size > 0,
+    extractionBusy
+      ? `asset-extract-${projectId}`
+      : `asset-image-generation-${projectId}`,
+    extractionBusy ? "资产提取" : "资产图片生成",
   );
 
   useEffect(() => {
@@ -618,6 +723,17 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       if (!res.ok) throw new Error("无法加载剧集列表");
       const data = (await res.json()) as { items: EpisodeListItem[] };
       setEpisodes(data.items ?? []);
+      setExtractingEpisodeIds((prev) => {
+        const next = new Set(prev);
+        for (const ep of data.items ?? []) {
+          if (ep.designStatus === "generating") {
+            next.add(ep.episodeId);
+          } else if (!extractJobsRef.current.has(ep.episodeId)) {
+            next.delete(ep.episodeId);
+          }
+        }
+        return next;
+      });
       setSelectedId((prev) => {
         if (prev === SCRIPT_ASSET_DESIGN_ID) return prev;
         if (prev && data.items.some((ep) => ep.episodeId === prev)) return prev;
@@ -707,6 +823,73 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     [apiRoot, isPersonalSpace, projectId, surface],
   );
 
+  const startExtractPoll = useCallback(
+    (episodeId: string) => {
+      if (extractJobsRef.current.has(episodeId)) return;
+      if (extractPollTimersRef.current.has(episodeId)) return;
+
+      extractPollStartedAtRef.current.set(episodeId, Date.now());
+      markEpisodeExtracting(episodeId, true);
+
+      const tick = async () => {
+        if (extractJobsRef.current.has(episodeId)) {
+          stopExtractPoll(episodeId);
+          return;
+        }
+        const startedAt = extractPollStartedAtRef.current.get(episodeId) ?? Date.now();
+        try {
+          const res = await fetch(
+            `${apiRoot}/asset-designs/episodes/${encodeURIComponent(episodeId)}`,
+          );
+          if (!res.ok) return;
+          const payload = (await res.json()) as EpisodeDetailPayload;
+
+          if (payload.designStatus === "generating") {
+            // Keep polling — server reconcile decides failed/stale, not remount.
+            void startedAt;
+            return;
+          }
+
+          stopExtractPoll(episodeId);
+          markEpisodeExtracting(episodeId, false);
+          void loadList();
+          if (selectedIdRef.current !== episodeId) return;
+          if (payload.record.revision < revisionRef.current) return;
+
+          setDetail(payload);
+          setItems(payload.record.items);
+          itemsRef.current = payload.record.items;
+          setRevision(payload.record.revision);
+          revisionRef.current = payload.record.revision;
+          setFingerprint(payload.currentFingerprint);
+          setDesignStatus(payload.designStatus);
+          if (payload.designStatus === "failed") {
+            setPageNote("资产提取失败，请重试。");
+          } else {
+            setPageNote("");
+          }
+          if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
+            setFullScriptAssetCount(payload.record.items.length);
+            setFullScriptPending(
+              payload.designStatus === "not_started" &&
+                payload.record.items.length === 0,
+            );
+            setBatchExtracting(false);
+          }
+        } catch {
+          /* keep polling until server leaves generating */
+        }
+      };
+
+      void tick();
+      const timerId = window.setInterval(() => {
+        void tick();
+      }, 2000);
+      extractPollTimersRef.current.set(episodeId, timerId);
+    },
+    [apiRoot, loadList, markEpisodeExtracting, stopExtractPoll],
+  );
+
   const loadDetail = useCallback(
     async (episodeId: string) => {
       setDetailLoading(true);
@@ -750,43 +933,26 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         setRevision(payload.record.revision);
         revisionRef.current = payload.record.revision;
         setFingerprint(payload.currentFingerprint);
-        // Orphaned “提取中” after refresh / crashed stream — unlock the UI.
-        if (payload.designStatus === "generating" && !generatingRef.current) {
-          setDesignStatus("failed");
-          try {
-            const res = await fetch(
-              `${apiRoot}/asset-designs/episodes/${encodeURIComponent(episodeId)}`,
-              {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  expectedRevision: payload.record.revision,
-                  fingerprint: payload.currentFingerprint,
-                  items: payload.record.items,
-                  status: "failed",
-                }),
-              },
-            );
-            if (res.ok) {
-              const fixed = (await res.json()) as {
-                record?: EpisodeAssetDesignRecord;
-              };
-              if (
-                fixed.record &&
-                fixed.record.revision >= revisionRef.current
-              ) {
-                setItems(fixed.record.items);
-                itemsRef.current = fixed.record.items;
-                setRevision(fixed.record.revision);
-                revisionRef.current = fixed.record.revision;
-                setDesignStatus(fixed.record.status);
-              }
-            }
-          } catch {
-            /* keep local failed unlock even if persist fails */
+        // Restore extract UI from server status. Live streams keep their own
+        // job entry; otherwise start a lightweight poll (refresh / remount).
+        if (payload.designStatus === "generating") {
+          setDesignStatus("generating");
+          markEpisodeExtracting(episodeId, true);
+          if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
+            setBatchExtracting(true);
+          }
+          if (!extractJobsRef.current.has(episodeId)) {
+            startExtractPoll(episodeId);
+          } else {
+            stopExtractPoll(episodeId);
           }
         } else {
           setDesignStatus(payload.designStatus);
+          markEpisodeExtracting(episodeId, false);
+          stopExtractPoll(episodeId);
+          if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
+            setBatchExtracting(false);
+          }
         }
 
         let content = payload.episode.content?.replace(/\r\n/g, "\n") ?? "";
@@ -822,7 +988,15 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         setDetailLoading(false);
       }
     },
-    [apiRoot, loadApprovalMediaFlags, projectId, surface],
+    [
+      apiRoot,
+      loadApprovalMediaFlags,
+      markEpisodeExtracting,
+      projectId,
+      startExtractPoll,
+      stopExtractPoll,
+      surface,
+    ],
   );
 
   useEffect(() => {
@@ -1053,63 +1227,157 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     [apiRoot, applyRecord, selectedId],
   );
 
-  const markExtractStatus = useCallback(
-    async (
-      status: "generating" | "failed",
-      expectedRevision?: number,
-    ) => {
-      if (!selectedId || !fingerprint) return null;
-      return saveItems(items, {
-        status,
-        expectedRevision,
-        silent: true,
-        skipReloadList: true,
-      });
+  const markExtractStatusForEpisode = useCallback(
+    async (input: {
+      episodeId: string;
+      status: "generating" | "failed";
+      fingerprint: string;
+      expectedRevision: number;
+      items: EpisodeAssetDesignItem[];
+      activeGeneration?: EpisodeAssetActiveGeneration | null;
+    }): Promise<EpisodeAssetDesignRecord | null> => {
+      try {
+        const res = await fetch(
+          `${apiRoot}/asset-designs/episodes/${encodeURIComponent(input.episodeId)}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              expectedRevision: input.expectedRevision,
+              fingerprint: input.fingerprint,
+              items: input.items.map((item) => ({
+                ...item,
+                note: typeof item.note === "string" ? item.note : "",
+                resolution:
+                  item.resolution === "pending"
+                    ? "create_new"
+                    : item.resolution,
+              })),
+              status: input.status,
+              ...(input.activeGeneration !== undefined
+                ? { activeGeneration: input.activeGeneration }
+                : input.status === "failed"
+                  ? { activeGeneration: null }
+                  : {}),
+            }),
+          },
+        );
+        const payload = (await res.json()) as {
+          record?: EpisodeAssetDesignRecord;
+          error?: string;
+        };
+        if (!res.ok) throw new Error(payload.error ?? "无法更新提取状态");
+        return payload.record ?? null;
+      } catch (error) {
+        if (selectedIdRef.current === input.episodeId) {
+          setPageNote(
+            error instanceof Error ? error.message : "无法更新提取状态",
+          );
+        }
+        return null;
+      }
     },
-    [fingerprint, items, saveItems, selectedId],
+    [apiRoot],
   );
 
+  const putEpisodeExtractStatus = markExtractStatusForEpisode;
+
   const runExtract = useCallback(async () => {
-    if (!selectedId || generating || saving) return;
+    if (!selectedId || !fingerprint || saving) return;
+    if (extractionBusy) return;
+    if (extractJobsRef.current.has(selectedId)) return;
+    if (extractingEpisodeIds.has(selectedId)) return;
+
+    const extractingEpisodeId = selectedId;
+    const snapshotItems = itemsRef.current.map((item) => ({ ...item }));
+    const snapshotFingerprint = fingerprint;
+    let statusRevision = revisionRef.current;
+    const idempotencyKey = createEpisodeAssetDesignIdempotencyKey();
+    const startedAt = new Date().toISOString();
+
     setReextractOpen(false);
-    setGenerating(true);
-    setSaving(false);
     setPageNote("");
     setConfirmSummary(null);
+    markEpisodeExtracting(extractingEpisodeId, true);
+    if (selectedIdRef.current === extractingEpisodeId) {
+      setDesignStatus("generating");
+    }
+
     const controller = new AbortController();
-    abortRef.current = controller;
-    generationIdRef.current = null;
-    let statusRevision = revision;
+    extractJobsRef.current.set(extractingEpisodeId, {
+      controller,
+      generationId: null,
+      fingerprint: snapshotFingerprint,
+      revision: statusRevision,
+      items: snapshotItems,
+    });
+
     const timeoutId = window.setTimeout(() => {
       controller.abort();
     }, 180_000);
 
     try {
-      const generatingRecord = await markExtractStatus(
-        "generating",
-        statusRevision,
-      );
+      const generatingRecord = await markExtractStatusForEpisode({
+        episodeId: extractingEpisodeId,
+        status: "generating",
+        fingerprint: snapshotFingerprint,
+        expectedRevision: statusRevision,
+        items: snapshotItems,
+        activeGeneration: {
+          generationId: null,
+          idempotencyKey,
+          outputKind: "episode_asset_design",
+          startedAt,
+          updatedAt: startedAt,
+        },
+      });
       if (!generatingRecord) {
         throw new Error("无法开始提取，请刷新后重试");
       }
       statusRevision = generatingRecord.revision;
+      const job = extractJobsRef.current.get(extractingEpisodeId);
+      if (job) job.revision = statusRevision;
+      if (selectedIdRef.current === extractingEpisodeId) {
+        applyRecord(generatingRecord);
+      }
 
       const result = await streamStoryGeneration({
         projectId,
         brief: "",
         modelKey,
         targetChars: 1000,
-        idempotencyKey: createEpisodeAssetDesignIdempotencyKey(),
+        idempotencyKey,
         outputKind: "episode_asset_design",
-        episodeId: selectedId,
+        episodeId: extractingEpisodeId,
         signal: controller.signal,
         onMeta: (meta) => {
-          generationIdRef.current = meta.generationId;
+          const live = extractJobsRef.current.get(extractingEpisodeId);
+          if (live) live.generationId = meta.generationId;
+          void markExtractStatusForEpisode({
+            episodeId: extractingEpisodeId,
+            status: "generating",
+            fingerprint: snapshotFingerprint,
+            expectedRevision: statusRevision,
+            items: snapshotItems,
+            activeGeneration: {
+              generationId: meta.generationId,
+              idempotencyKey,
+              outputKind: "episode_asset_design",
+              startedAt,
+              updatedAt: new Date().toISOString(),
+            },
+          }).then((rec) => {
+            if (rec) {
+              statusRevision = rec.revision;
+              const liveJob = extractJobsRef.current.get(extractingEpisodeId);
+              if (liveJob) liveJob.revision = rec.revision;
+            }
+          });
         },
       });
 
       const applyRes = await fetch(
-        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(selectedId)}/apply-generation`,
+        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(extractingEpisodeId)}/apply-generation`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1117,7 +1385,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
             generationId: result.generationId,
             rawText: result.text,
             expectedRevision: statusRevision,
-            fingerprint,
+            fingerprint: snapshotFingerprint,
           }),
           signal: controller.signal,
         },
@@ -1129,48 +1397,86 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       if (!applyRes.ok) {
         throw new Error(applyPayload.error ?? "应用生成结果失败");
       }
-      if (applyPayload.record) {
-        applyRecord(applyPayload.record);
-      }
       notifyCreditsRefresh();
-      setPageNote("本集资产提取完成，请确认设计项。");
       await loadList();
-      await loadDetail(selectedId);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        setPageNote("已取消生成。");
-      } else if (error instanceof StoryGenerationClientError) {
-        setPageNote(error.message);
-      } else {
-        setPageNote(
-          error instanceof Error ? error.message : "提取失败，请稍后重试",
-        );
+      if (selectedIdRef.current === extractingEpisodeId) {
+        if (applyPayload.record) {
+          applyRecord(applyPayload.record);
+        }
+        setPageNote("本集资产提取完成，请确认设计项。");
+        await loadDetail(extractingEpisodeId);
       }
-      await markExtractStatus("failed", statusRevision);
+    } catch (error) {
+      const busyConflict =
+        error instanceof StoryGenerationClientError &&
+        error.code === "ASSET_EXTRACT_IN_PROGRESS";
+      if (busyConflict) {
+        if (selectedIdRef.current === extractingEpisodeId) {
+          setPageNote("资产正在提取中…");
+          setDesignStatus("generating");
+        }
+        extractJobsRef.current.delete(extractingEpisodeId);
+        markEpisodeExtracting(extractingEpisodeId, true);
+        startExtractPoll(extractingEpisodeId);
+        await loadList();
+        return;
+      }
+      const aborted =
+        error instanceof DOMException && error.name === "AbortError";
+      if (selectedIdRef.current === extractingEpisodeId) {
+        if (aborted) {
+          setPageNote("已取消生成。");
+        } else if (error instanceof StoryGenerationClientError) {
+          setPageNote(error.message);
+        } else {
+          setPageNote(
+            error instanceof Error ? error.message : "提取失败，请稍后重试",
+          );
+        }
+      }
+      const job = extractJobsRef.current.get(extractingEpisodeId);
+      await markExtractStatusForEpisode({
+        episodeId: extractingEpisodeId,
+        status: "failed",
+        fingerprint: job?.fingerprint ?? snapshotFingerprint,
+        expectedRevision: job?.revision ?? statusRevision,
+        items: job?.items ?? snapshotItems,
+        activeGeneration: null,
+      });
       await loadList();
+      if (selectedIdRef.current === extractingEpisodeId) {
+        setDesignStatus("failed");
+      }
     } finally {
       window.clearTimeout(timeoutId);
-      setGenerating(false);
-      setSaving(false);
-      abortRef.current = null;
+      if (!extractPollTimersRef.current.has(extractingEpisodeId)) {
+        extractJobsRef.current.delete(extractingEpisodeId);
+        stopExtractPoll(extractingEpisodeId);
+        markEpisodeExtracting(extractingEpisodeId, false);
+      }
     }
   }, [
     apiRoot,
     applyRecord,
+    extractionBusy,
+    extractingEpisodeIds,
     fingerprint,
-    generating,
     loadDetail,
     loadList,
-    markExtractStatus,
+    markEpisodeExtracting,
+    markExtractStatusForEpisode,
     modelKey,
     projectId,
-    revision,
     saving,
     selectedId,
+    startExtractPoll,
+    stopExtractPoll,
   ]);
 
   const handleExtract = useCallback(() => {
-    if (!selectedId || generating || saving) return;
+    if (!selectedId || saving) return;
+    if (extractionBusy) return;
+    if (extractingEpisodeIds.has(selectedId)) return;
     const hasReviewItems =
       items.length > 0 &&
       (designStatus === "review" ||
@@ -1181,16 +1487,36 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       return;
     }
     void runExtract();
-  }, [designStatus, generating, items.length, runExtract, saving, selectedId]);
+  }, [
+    designStatus,
+    extractionBusy,
+    extractingEpisodeIds,
+    items.length,
+    runExtract,
+    saving,
+    selectedId,
+  ]);
 
   const handleExtractAll = useCallback(async () => {
-    if (generating || batchExtracting || saving || confirming) return;
+    if (extractionBusy || saving || confirming) return;
+    if (extractJobsRef.current.has(SCRIPT_ASSET_DESIGN_ID)) return;
+
+    const extractingEpisodeId = SCRIPT_ASSET_DESIGN_ID;
     const controller = new AbortController();
-    abortRef.current = controller;
-    generationIdRef.current = null;
+    const idempotencyKey = createEpisodeAssetDesignIdempotencyKey();
+    const startedAt = new Date().toISOString();
+    extractJobsRef.current.set(extractingEpisodeId, {
+      controller,
+      generationId: null,
+      fingerprint: "",
+      revision: 0,
+      items: [],
+    });
     setBatchExtracting(true);
-    setGenerating(true);
+    markEpisodeExtracting(extractingEpisodeId, true);
+    setDesignStatus("generating");
     setPageNote("");
+    setExtractionError(null);
     setConfirmSummary(null);
 
     try {
@@ -1203,18 +1529,79 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         throw new Error(payload.error ?? "无法加载完整原始剧本");
       }
       const scriptDetail = (await detailRes.json()) as EpisodeDetailPayload;
+      if (scriptDetail.designStatus === "generating") {
+        // Another tab / prior session already owns the extract — sync UI, do not fail it.
+        applyRecord(scriptDetail.record);
+        setDesignStatus("generating");
+        setBatchExtracting(true);
+        markEpisodeExtracting(extractingEpisodeId, true);
+        extractJobsRef.current.delete(extractingEpisodeId);
+        startExtractPoll(extractingEpisodeId);
+        return;
+      }
+      const job = extractJobsRef.current.get(extractingEpisodeId);
+      if (job) {
+        job.fingerprint = scriptDetail.currentFingerprint;
+        job.revision = scriptDetail.record.revision;
+        job.items = scriptDetail.record.items;
+      }
+
+      const generatingRecord = await markExtractStatusForEpisode({
+        episodeId: extractingEpisodeId,
+        status: "generating",
+        fingerprint: scriptDetail.currentFingerprint,
+        expectedRevision: scriptDetail.record.revision,
+        items: scriptDetail.record.items,
+        activeGeneration: {
+          generationId: null,
+          idempotencyKey,
+          outputKind: "script_asset_design",
+          startedAt,
+          updatedAt: startedAt,
+        },
+      });
+      if (!generatingRecord) {
+        throw new Error("无法开始提取，请刷新后重试");
+      }
+      if (job) job.revision = generatingRecord.revision;
+      if (selectedIdRef.current === extractingEpisodeId) {
+        applyRecord(generatingRecord);
+      }
+
       const result = await streamStoryGeneration({
         projectId,
         brief: "",
         modelKey: assetExtractionModel,
         targetChars: 20_000,
-        idempotencyKey: createEpisodeAssetDesignIdempotencyKey(),
+        idempotencyKey,
         outputKind: "script_asset_design",
         signal: controller.signal,
         onMeta: (meta) => {
-          generationIdRef.current = meta.generationId;
+          const live = extractJobsRef.current.get(extractingEpisodeId);
+          if (live) live.generationId = meta.generationId;
+          void markExtractStatusForEpisode({
+            episodeId: extractingEpisodeId,
+            status: "generating",
+            fingerprint: scriptDetail.currentFingerprint,
+            expectedRevision: generatingRecord.revision,
+            items: scriptDetail.record.items,
+            activeGeneration: {
+              generationId: meta.generationId,
+              idempotencyKey,
+              outputKind: "script_asset_design",
+              startedAt,
+              updatedAt: new Date().toISOString(),
+            },
+          });
         },
       });
+
+      if (!result.text.trim()) {
+        throw Object.assign(new Error("模型未返回任何内容，请重试提取。"), {
+          code: "EMPTY_MODEL_OUTPUT",
+        });
+      }
+
       const applyRes = await fetch(
         `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}/apply-generation`,
         {
@@ -1223,7 +1610,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
           body: JSON.stringify({
             generationId: result.generationId,
             rawText: result.text,
-            expectedRevision: scriptDetail.record.revision,
+            expectedRevision: generatingRecord.revision,
             fingerprint: scriptDetail.currentFingerprint,
           }),
           signal: controller.signal,
@@ -1232,55 +1619,423 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       const applyPayload = (await applyRes.json()) as {
         record?: EpisodeAssetDesignRecord;
         error?: string;
+        code?: string;
+        warnings?: Array<{ code: string; message: string }>;
+        rejectedItems?: Array<{
+          index: number;
+          name?: string;
+          reason: string;
+        }>;
+        repaired?: boolean;
       };
       if (!applyRes.ok || !applyPayload.record) {
-        throw new Error(applyPayload.error ?? "应用全剧本资产结果失败");
+        const code = applyPayload.code ?? "PARSE_FAILED";
+        const live = extractJobsRef.current.get(extractingEpisodeId);
+        throw Object.assign(
+          new Error(
+            formatFullScriptExtractionError(
+              code,
+              applyPayload.error ?? "应用全剧本资产结果失败",
+            ),
+          ),
+          {
+            code,
+            generationId: live?.generationId ?? result.generationId,
+            canReapply: Boolean(live?.generationId ?? result.generationId),
+            rejectedItems: applyPayload.rejectedItems ?? [],
+          },
+        );
       }
 
-      setSelectedId(SCRIPT_ASSET_DESIGN_ID);
+      notifyCreditsRefresh();
       setFullScriptAssetCount(applyPayload.record.items.length);
       setFullScriptPending(false);
-      applyRecord(applyPayload.record);
-      notifyCreditsRefresh();
-      setPageNote("完整剧本资产已一次性提取完成，请在下方核对。");
+      setExtractionError(null);
+      const rejectedCount = applyPayload.rejectedItems?.length ?? 0;
+      const repairedCount = applyPayload.repaired
+        ? 1
+        : (applyPayload.warnings ?? []).filter((w) =>
+            /USAGE_PROMOTED|ASSET_MERGED|UNMAPPED_DESIGN_FIELD|repair/i.test(
+              w.code,
+            ),
+          ).length;
+      setExtractDiagnostics({
+        extracted: applyPayload.record.items.length,
+        repaired: repairedCount,
+        rejected: rejectedCount,
+        rejectedItems: applyPayload.rejectedItems ?? [],
+      });
+      await loadList();
+      if (selectedIdRef.current === SCRIPT_ASSET_DESIGN_ID) {
+        applyRecord(applyPayload.record);
+        setPageNote(
+          `已提取 ${applyPayload.record.items.length} 项` +
+            (repairedCount > 0 ? `，${repairedCount} 项已自动修复` : "") +
+            (rejectedCount > 0 ? `，${rejectedCount} 项需人工检查` : "") +
+            "，请在下方核对。",
+        );
+        await loadDetail(SCRIPT_ASSET_DESIGN_ID);
+      } else {
+        setPageNote("完整剧本资产提取已完成，可返回全剧本查看。");
+      }
     } catch (error) {
+      const busyConflict =
+        (error instanceof StoryGenerationClientError &&
+          error.code === "ASSET_EXTRACT_IN_PROGRESS") ||
+        (error &&
+          typeof error === "object" &&
+          "code" in error &&
+          (error as { code?: string }).code === "ASSET_EXTRACT_IN_PROGRESS");
+
+      if (busyConflict) {
+        setPageNote("资产正在提取中…");
+        setExtractionError(null);
+        setDesignStatus("generating");
+        setBatchExtracting(true);
+        markEpisodeExtracting(extractingEpisodeId, true);
+        extractJobsRef.current.delete(extractingEpisodeId);
+        startExtractPoll(extractingEpisodeId);
+        await loadList();
+        return;
+      }
+
       if (error instanceof DOMException && error.name === "AbortError") {
         setPageNote("已取消全剧本资产提取。");
+        setExtractionError(null);
+      } else if (error instanceof StoryGenerationClientError) {
+        const message = formatFullScriptExtractionError(
+          error.code,
+          error.message,
+        );
+        setExtractionError({
+          code: error.code,
+          message,
+          generationId: extractJobsRef.current.get(SCRIPT_ASSET_DESIGN_ID)
+            ?.generationId,
+          canReapply: false,
+        });
+        setPageNote("");
       } else {
-        setPageNote(error instanceof Error ? error.message : "全剧本提取失败");
+        const code =
+          error && typeof error === "object" && "code" in error
+            ? String((error as { code?: string }).code ?? "EXTRACT_FAILED")
+            : "EXTRACT_FAILED";
+        const generationId =
+          error && typeof error === "object" && "generationId" in error
+            ? String((error as { generationId?: string }).generationId ?? "")
+            : extractJobsRef.current.get(SCRIPT_ASSET_DESIGN_ID)?.generationId ??
+              "";
+        const canReapply = Boolean(
+          error &&
+            typeof error === "object" &&
+            "canReapply" in error &&
+            (error as { canReapply?: boolean }).canReapply,
+        );
+        setExtractionError({
+          code,
+          message:
+            error instanceof Error
+              ? error.message
+              : "全剧本资产提取失败，请重试。",
+          generationId: generationId || null,
+          canReapply,
+          canRetryChunks: code === "PARTIAL_CHUNKS_FAILED",
+        });
+        const rejectedItems =
+          error && typeof error === "object" && "rejectedItems" in error
+            ? ((error as { rejectedItems?: Array<{ index: number; name?: string; reason: string }> })
+                .rejectedItems ?? [])
+            : [];
+        if (rejectedItems.length > 0) {
+          setExtractDiagnostics({
+            extracted: 0,
+            repaired: 0,
+            rejected: rejectedItems.length,
+            rejectedItems,
+          });
+        }
+        setPageNote("");
       }
+      const live = extractJobsRef.current.get(extractingEpisodeId);
+      if (live?.fingerprint) {
+        await markExtractStatusForEpisode({
+          episodeId: extractingEpisodeId,
+          status: "failed",
+          fingerprint: live.fingerprint,
+          expectedRevision: live.revision,
+          items: live.items,
+          activeGeneration: null,
+        });
+      }
+      await loadList();
     } finally {
-      setBatchExtracting(false);
-      setGenerating(false);
-      setSaving(false);
-      abortRef.current = null;
-      generationIdRef.current = null;
-      await loadDetail(SCRIPT_ASSET_DESIGN_ID);
+      if (!extractPollTimersRef.current.has(extractingEpisodeId)) {
+        extractJobsRef.current.delete(extractingEpisodeId);
+        stopExtractPoll(extractingEpisodeId);
+        markEpisodeExtracting(extractingEpisodeId, false);
+        setBatchExtracting(false);
+      }
     }
   }, [
     apiRoot,
     applyRecord,
     assetExtractionModel,
-    batchExtracting,
     confirming,
-    generating,
+    extractionBusy,
     loadDetail,
+    loadList,
+    markEpisodeExtracting,
+    markExtractStatusForEpisode,
     projectId,
+    saving,
+    startExtractPoll,
+    stopExtractPoll,
+  ]);
+
+  const handleReapplyGeneration = useCallback(async () => {
+    const generationId = extractionError?.generationId;
+    if (!generationId || batchExtracting || saving) return;
+    setBatchExtracting(true);
+    try {
+      const detailRes = await fetch(
+        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}`,
+      );
+      if (!detailRes.ok) {
+        throw new Error("无法加载完整原始剧本");
+      }
+      const scriptDetail = (await detailRes.json()) as EpisodeDetailPayload;
+      const applyRes = await fetch(
+        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}/apply-generation`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            generationId,
+            expectedRevision: scriptDetail.record.revision,
+            fingerprint: scriptDetail.currentFingerprint,
+          }),
+        },
+      );
+      const applyPayload = (await applyRes.json()) as {
+        record?: EpisodeAssetDesignRecord;
+        error?: string;
+        code?: string;
+        warnings?: Array<{ code: string; message: string }>;
+        rejectedItems?: Array<{ index: number; name?: string; reason: string }>;
+        repaired?: boolean;
+      };
+      if (!applyRes.ok || !applyPayload.record) {
+        throw new Error(applyPayload.error ?? "重新应用失败");
+      }
+      setExtractionError(null);
+      setFullScriptAssetCount(applyPayload.record.items.length);
+      setFullScriptPending(false);
+      setExtractDiagnostics({
+        extracted: applyPayload.record.items.length,
+        repaired: applyPayload.repaired ? 1 : 0,
+        rejected: applyPayload.rejectedItems?.length ?? 0,
+        rejectedItems: applyPayload.rejectedItems ?? [],
+      });
+      applyRecord(applyPayload.record);
+      setPageNote(
+        `已重新应用生成结果：${applyPayload.record.items.length} 项资产。`,
+      );
+      await loadList();
+      await loadDetail(SCRIPT_ASSET_DESIGN_ID);
+    } catch (error) {
+      setExtractionError({
+        code: "REAPPLY_FAILED",
+        message: error instanceof Error ? error.message : "重新应用失败",
+        generationId,
+        canReapply: true,
+      });
+    } finally {
+      setBatchExtracting(false);
+    }
+  }, [
+    apiRoot,
+    applyRecord,
+    batchExtracting,
+    extractionError?.generationId,
+    loadDetail,
+    loadList,
     saving,
   ]);
 
-  const handleCancelGenerate = useCallback(async () => {
-    abortRef.current?.abort();
-    const genId = generationIdRef.current;
-    if (genId) {
-      await cancelStoryGeneration(projectId, genId);
+  const handleRetryFailedChunks = useCallback(async () => {
+    const generationId = extractionError?.generationId;
+    if (!generationId || batchExtracting || saving) return;
+    setBatchExtracting(true);
+    try {
+      const retryRes = await fetch(
+        `${apiRoot}/asset-designs/retry-failed-chunks`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ generationId }),
+        },
+      );
+      const retryPayload = (await retryRes.json()) as {
+        content?: string;
+        failedRemaining?: number;
+        error?: string;
+        code?: string;
+      };
+      if (!retryRes.ok || !retryPayload.content) {
+        throw new Error(retryPayload.error ?? "重试失败分块未成功");
+      }
+      const detailRes = await fetch(
+        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}`,
+      );
+      const scriptDetail = (await detailRes.json()) as EpisodeDetailPayload;
+      const applyRes = await fetch(
+        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}/apply-generation`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            generationId,
+            rawText: retryPayload.content,
+            expectedRevision: scriptDetail.record.revision,
+            fingerprint: scriptDetail.currentFingerprint,
+          }),
+        },
+      );
+      const applyPayload = (await applyRes.json()) as {
+        record?: EpisodeAssetDesignRecord;
+        error?: string;
+        rejectedItems?: Array<{ index: number; name?: string; reason: string }>;
+        repaired?: boolean;
+      };
+      if (!applyRes.ok || !applyPayload.record) {
+        throw new Error(applyPayload.error ?? "应用重试结果失败");
+      }
+      setExtractionError(
+        (retryPayload.failedRemaining ?? 0) > 0
+          ? {
+              code: "PARTIAL_CHUNKS_FAILED",
+              message: `仍有 ${retryPayload.failedRemaining} 个分块失败，可继续重试`,
+              generationId,
+              canRetryChunks: true,
+              canReapply: true,
+            }
+          : null,
+      );
+      setFullScriptPending(false);
+      setFullScriptAssetCount(applyPayload.record.items.length);
+      applyRecord(applyPayload.record);
+      setPageNote(
+        `已合并重试结果：${applyPayload.record.items.length} 项资产` +
+          ((retryPayload.failedRemaining ?? 0) > 0
+            ? `（仍有 ${retryPayload.failedRemaining} 块失败）`
+            : ""),
+      );
+      await loadList();
+      await loadDetail(SCRIPT_ASSET_DESIGN_ID);
+    } catch (error) {
+      setExtractionError({
+        code: "RETRY_CHUNKS_FAILED",
+        message: error instanceof Error ? error.message : "重试失败分块失败",
+        generationId,
+        canRetryChunks: true,
+        canReapply: true,
+      });
+    } finally {
+      setBatchExtracting(false);
     }
-    setGenerating(false);
-    setSaving(false);
-    setPageNote(batchExtracting ? "正在取消全剧本提取…" : "已取消生成。");
-    if (!batchExtracting) await markExtractStatus("failed");
+  }, [
+    apiRoot,
+    applyRecord,
+    batchExtracting,
+    extractionError?.generationId,
+    loadDetail,
+    loadList,
+    saving,
+  ]);
+
+  const handleCancelGenerate = useCallback(async (episodeIdArg?: string) => {
+    const episodeId = episodeIdArg ?? selectedId;
+    if (!episodeId) return;
+    const job = extractJobsRef.current.get(episodeId);
+    stopExtractPoll(episodeId);
+
+    if (job) {
+      job.controller.abort();
+      const genId = job.generationId;
+      if (genId) {
+        try {
+          await cancelStoryGeneration(projectId, genId);
+        } catch {
+          /* best-effort cancel */
+        }
+      }
+
+      if (episodeId !== SCRIPT_ASSET_DESIGN_ID) {
+        await putEpisodeExtractStatus({
+          episodeId,
+          status: "failed",
+          fingerprint: job.fingerprint,
+          expectedRevision: job.revision,
+          items: job.items,
+        });
+      }
+      extractJobsRef.current.delete(episodeId);
+    } else if (episodeId !== SCRIPT_ASSET_DESIGN_ID) {
+      await putEpisodeExtractStatus({
+        episodeId,
+        status: "failed",
+        fingerprint: fingerprint || "",
+        expectedRevision: revisionRef.current,
+        items: itemsRef.current,
+      });
+    } else {
+      try {
+        const res = await fetch(
+          `${apiRoot}/asset-designs/episodes/${encodeURIComponent(episodeId)}`,
+        );
+        if (res.ok) {
+          const payload = (await res.json()) as EpisodeDetailPayload;
+          await fetch(
+            `${apiRoot}/asset-designs/episodes/${encodeURIComponent(episodeId)}`,
+            {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                expectedRevision: payload.record.revision,
+                fingerprint: payload.currentFingerprint,
+                items: payload.record.items,
+                status: "failed",
+              }),
+            },
+          );
+        }
+      } catch {
+        /* best-effort cancel unlock */
+      }
+    }
+
+    if (selectedIdRef.current === episodeId) {
+      setDesignStatus("failed");
+    }
+
+    markEpisodeExtracting(episodeId, false);
+    if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
+      setBatchExtracting(false);
+      setPageNote("已取消全剧本资产提取。");
+    } else {
+      setPageNote("已取消生成。");
+    }
     await loadList();
-  }, [batchExtracting, loadList, markExtractStatus, projectId]);
+  }, [
+    apiRoot,
+    fingerprint,
+    loadList,
+    markEpisodeExtracting,
+    projectId,
+    putEpisodeExtractStatus,
+    selectedId,
+    stopExtractPoll,
+  ]);
 
   const handleConfirm = useCallback(async () => {
     if (!selectedId || !fingerprint) return;
@@ -1413,12 +2168,14 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     selectedId,
   ]);
 
-  const handleConfirmItem = useCallback(
+  const confirmItemToLibrary = useCallback(
     async (itemId: string) => {
       if (!isPersonalSpace || !selectedId || !fingerprint) return;
+      if (confirmingRef.current) return;
       const latestItems = itemsRef.current;
       const item = latestItems.find((candidate) => candidate.id === itemId);
       if (!item) return;
+      if (item.libraryAssetId?.trim()) return;
       if (
         (item.resolution === "create_new" || item.resolution === "pending") &&
         item.assetType !== "audio" &&
@@ -1428,6 +2185,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         return;
       }
 
+      confirmingRef.current = true;
       setConfirming(true);
       setConfirmingItemId(itemId);
       setPageNote("");
@@ -1502,8 +2260,11 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       } catch (error) {
         setPageNote(error instanceof Error ? error.message : "确认入库失败");
       } finally {
+        confirmingRef.current = false;
         setConfirming(false);
         setConfirmingItemId(null);
+        setPendingUnboundVoiceConfirmItem(null);
+        setPendingUncheckedVideoRefItem(null);
       }
     },
     [
@@ -1520,7 +2281,59 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     ],
   );
 
-const updateItem = useCallback(
+  const handleConfirmItem = useCallback(
+    (itemId: string) => {
+      if (!isPersonalSpace || !selectedId || !fingerprint) return;
+      if (saving || confirmingRef.current || confirming || confirmingItemId) {
+        return;
+      }
+      const latestItems = itemsRef.current;
+      const item = latestItems.find((candidate) => candidate.id === itemId);
+      if (!item) return;
+      if (item.libraryAssetId?.trim()) return;
+      if (
+        (item.resolution === "create_new" || item.resolution === "pending") &&
+        item.assetType !== "audio" &&
+        !item.generatedMedia?.currentId?.trim()
+      ) {
+        setPageNote(`无法确认：「${item.name}」尚未生成图片。`);
+        return;
+      }
+
+      // Characters: current-image person verification must pass before voice/入库.
+      if (characterNeedsUncheckedVideoRefBlock(item)) {
+        setPendingUncheckedVideoRefItem({ id: item.id, name: item.name });
+        return;
+      }
+
+      if (characterNeedsUnboundVoiceConfirm(item)) {
+        setPendingUnboundVoiceConfirmItem({ id: item.id, name: item.name });
+        return;
+      }
+
+      void confirmItemToLibrary(itemId);
+    },
+    [
+      confirmItemToLibrary,
+      confirming,
+      confirmingItemId,
+      fingerprint,
+      isPersonalSpace,
+      saving,
+      selectedId,
+    ],
+  );
+
+  const dismissUncheckedVideoRefBlock = useCallback(() => {
+    setPendingUncheckedVideoRefItem(null);
+  }, []);
+
+  const dismissUnboundVoiceConfirm = useCallback(() => {
+    if (confirmingRef.current || confirming || confirmingItemId) return;
+    setPendingUnboundVoiceConfirmItem(null);
+  }, [confirming, confirmingItemId]);
+
+  const updateItem = useCallback(
     (id: string, patch: Partial<EpisodeAssetDesignItem>) => {
       setItems((prev) =>
         prev.map((item) =>
@@ -1765,12 +2578,11 @@ const updateItem = useCallback(
     return !mediaId || !isMediaVoiceBound(getDesignMediaVoiceBinding(item, mediaId));
   });
   const canConfirm =
-    !generating &&
+    !extractionBusy &&
     !saving &&
     !confirming &&
     Boolean(selectedId) &&
     designStatus !== "stale" &&
-    designStatus !== "generating" &&
     designStatus !== "not_started" &&
     designStatus !== "failed" &&
     missingImageItems.length === 0;
@@ -1780,10 +2592,10 @@ const updateItem = useCallback(
       : undefined;
 
   const canSubmitApproval =
-    !generating && !saving && Boolean(selectedId);
+    !extractionBusy && !saving && Boolean(selectedId);
 
   const canDesign =
-    !generating &&
+    !extractionBusy &&
     !confirming &&
     (designStatus === "review" ||
       designStatus === "confirmed" ||
@@ -1798,6 +2610,27 @@ const updateItem = useCallback(
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [scriptViewerOpen]);
 
+  useEffect(() => {
+    if (!pendingUncheckedVideoRefItem) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setPendingUncheckedVideoRefItem(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [pendingUncheckedVideoRefItem]);
+
+  useEffect(() => {
+    if (!pendingUnboundVoiceConfirmItem) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (confirming || confirmingItemId) return;
+      setPendingUnboundVoiceConfirmItem(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [pendingUnboundVoiceConfirmItem, confirming, confirmingItemId]);
+
   return (
     <div className="ead" data-testid="episode-asset-design-workspace">
       <div className={`ead-layout${isAwaitingFullScriptExtraction ? " is-pending" : ""}`}>
@@ -1811,17 +2644,27 @@ const updateItem = useCallback(
                   <button
                     type="button"
                     className="amw-btn amw-btn-primary ead-extract-all-btn"
-                    disabled={
-                      generating ||
-                      batchExtracting ||
-                      saving ||
-                      confirming
-                    }
+                    disabled={extractionBusy || saving || confirming}
+                    aria-busy={extractionBusy}
                     onClick={() => void handleExtractAll()}
                     data-testid="ead-extract-all"
                   >
-                    {batchExtracting ? "提取中…" : "一键提取基本资产"}
+                    {extractionBusy
+                      ? "提取中…"
+                      : "一键提取基本资产"}
                   </button>
+                  {extractionBusy ? (
+                    <button
+                      type="button"
+                      className="amw-btn"
+                      onClick={() =>
+                        void handleCancelGenerate(SCRIPT_ASSET_DESIGN_ID)
+                      }
+                      data-testid="ead-cancel-extract-all"
+                    >
+                      取消生成
+                    </button>
+                  ) : null}
 
                   <div
                     className="ead-extract-model-select"
@@ -1832,9 +2675,7 @@ const updateItem = useCallback(
                       hideLabel
                       value={assetExtractionModel}
                       options={ASSET_EXTRACTION_MODEL_OPTIONS}
-                      disabled={
-                        generating || batchExtracting || saving || confirming
-                      }
+                      disabled={extractionBusy || saving || confirming}
                       menuPortal
                       menuSideOffset={6}
                       menuCollisionPadding={12}
@@ -1843,6 +2684,15 @@ const updateItem = useCallback(
                   </div>
                 </div>
               </div>
+              {extractionBusy ? (
+                <p
+                  className="ead-background-task-note"
+                  aria-live="polite"
+                  data-testid="ead-extract-all-background-note"
+                >
+                  正在提取全剧本资产，通常需要 2-10 分钟。请稍候，提取完成前请勿重复提交或离开后立即再开新任务。
+                </p>
+              ) : null}
             </div>
 
             <div className="ead-overview__summary" ref={summaryRef}>
@@ -1939,8 +2789,8 @@ const updateItem = useCallback(
               <button
                 type="button"
                 className="amw-btn ead-full-script-pending__button"
+                disabled={extractionBusy}
                 onClick={() => setSelectedId(SCRIPT_ASSET_DESIGN_ID)}
-                disabled={batchExtracting || generating}
               >
                 返回全剧本
               </button>
@@ -1960,7 +2810,7 @@ const updateItem = useCallback(
                   type="button"
                   className="amw-btn ead-back-full-script"
                   data-testid="ead-back-full-script"
-                  disabled={batchExtracting || generating}
+                  disabled={extractionBusy}
                   onClick={() => setSelectedId(SCRIPT_ASSET_DESIGN_ID)}
                 >
                   返回全剧本资产
@@ -1975,8 +2825,7 @@ const updateItem = useCallback(
                   disabled={
                     listLoading ||
                     episodes.length === 0 ||
-                    batchExtracting ||
-                    generating ||
+                    extractionBusy ||
                     generatingAssetIds.size > 0
                   }
                   placeholder={episodeSelectPlaceholder}
@@ -1998,8 +2847,63 @@ const updateItem = useCallback(
           {detailLoading || !detail ? (
             <div className="amw-empty">加载资产设计…</div>
           ) : isAwaitingFullScriptExtraction ? (
-            <div className="ead-pending-assets" data-testid="ead-pending-assets">
+            <div className="ead-pending-assets" data-testid="ead-pending-assets" data-full-script-count={fullScriptAssetCount}>
               <h2>尚未提取资产</h2>
+              {extractionError ? (
+                <div
+                  className="ead-pending-assets__error"
+                  role="alert"
+                  data-testid="ead-extraction-error"
+                >
+                  <p className="ead-pending-assets__error-title">资产提取失败</p>
+                  <p>{extractionError.message}</p>
+                  {extractDiagnostics && extractDiagnostics.rejectedItems.length > 0 ? (
+                    <ul data-testid="ead-rejected-items">
+                      {extractDiagnostics.rejectedItems.slice(0, 12).map((item) => (
+                        <li key={`${item.index}-${item.name ?? ""}`}>
+                          #{item.index}
+                          {item.name ? ` ${item.name}` : ""}：{item.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <div className="ead-pending-assets__error-actions">
+                    <button
+                      type="button"
+                      className="amw-btn amw-btn-primary"
+                      disabled={extractionBusy || saving || confirming}
+                      onClick={() => void handleExtractAll()}
+                      data-testid="ead-extract-all-retry"
+                    >
+                      {extractionBusy
+                        ? "提取中…"
+                        : "一键提取基本资产"}
+                    </button>
+                    {extractionError.canReapply && extractionError.generationId ? (
+                      <button
+                        type="button"
+                        className="amw-btn"
+                        disabled={extractionBusy || saving || confirming}
+                        onClick={() => void handleReapplyGeneration()}
+                        data-testid="ead-reapply-generation"
+                      >
+                        重新应用已有结果
+                      </button>
+                    ) : null}
+                    {extractionError.canRetryChunks && extractionError.generationId ? (
+                      <button
+                        type="button"
+                        className="amw-btn"
+                        disabled={extractionBusy || saving || confirming}
+                        onClick={() => void handleRetryFailedChunks()}
+                        data-testid="ead-retry-failed-chunks"
+                      >
+                        重试失败分块
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               {extractedEpisodes.length > 0 ? (
                 <div className="ead-pending-assets__recover">
                   <p>
@@ -2059,7 +2963,6 @@ const updateItem = useCallback(
                       type="button"
                       className="amw-btn ead-back-full-script"
                       data-testid="ead-back-full-script-detail"
-                      disabled={batchExtracting || generating}
                       onClick={() => setSelectedId(SCRIPT_ASSET_DESIGN_ID)}
                     >
                       返回全剧本资产
@@ -2081,15 +2984,16 @@ const updateItem = useCallback(
                 {!isFullScriptDesign ? (
                   <button
                     type="button"
-                    className="amw-btn amw-btn-primary"
-                    disabled={generating || saving || confirming}
+                    className="amw-btn amw-btn-primary ead-extract-btn"
+                    disabled={extractionBusy || saving || confirming}
+                    aria-busy={extractionBusy}
                     onClick={() => void handleExtract()}
                     data-testid="ead-extract"
                   >
-                    {generating ? "提取中…" : extractLabel}
+                    {extractionBusy ? "提取中…" : extractLabel}
                   </button>
                 ) : null}
-                {generating ? (
+                {extractionBusy ? (
                   <button
                     type="button"
                     className="amw-btn"
@@ -2103,7 +3007,12 @@ const updateItem = useCallback(
                   <button
                     type="button"
                     className="amw-btn"
-                    disabled={!selectedId || generating || saving || confirming}
+                    disabled={
+                      !selectedId ||
+                      extractionBusy ||
+                      saving ||
+                      confirming
+                    }
                     onClick={() => void saveItems(items)}
                     data-testid="ead-save"
                   >
@@ -2137,6 +3046,16 @@ const updateItem = useCallback(
                   </button>
                 )}
               </div>
+
+              {extractionBusy ? (
+                <p
+                  className="ead-background-task-note"
+                  aria-live="polite"
+                  data-testid="ead-extract-background-note"
+                >
+                  正在提取资产，预计需要 1-3 分钟。提取完成前按钮保持锁定，离开页面后再返回会从服务端恢复进度。
+                </p>
+              ) : null}
 
               {surface !== "workspace" && missingImageItems.length > 0 ? (
                 <p className="ead-warn" data-testid="ead-missing-image-warning">
@@ -2192,7 +3111,7 @@ const updateItem = useCallback(
                         <button
                           type="button"
                           className="amw-btn"
-                          disabled={generating || confirming}
+                          disabled={confirming || extractionBusy}
                           onClick={() => openCreateDialog(group.type)}
                         >
                           手动添加
@@ -2220,8 +3139,8 @@ const updateItem = useCallback(
                                   : undefined
                               }
                               disabled={
-                                generating ||
                                 confirming ||
+                                extractionBusy ||
                                 savingVoiceItemIds.has(item.id)
                               }
                               designDisabled={!canDesign}
@@ -2362,6 +3281,86 @@ const updateItem = useCallback(
                 onClick={() => void runExtract()}
               >
                 重新提取
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingUncheckedVideoRefItem ? (
+        <div
+          className="amw-overlay amw-overlay--stacked"
+          role="presentation"
+          data-testid="ead-unchecked-video-ref-block-backdrop"
+          onClick={dismissUncheckedVideoRefBlock}
+        >
+          <div
+            className="amw-dialog ead-unchecked-video-ref-block-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ead-unchecked-video-ref-block-title"
+            data-testid="ead-unchecked-video-ref-block"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 id="ead-unchecked-video-ref-block-title">人物未进行校验</h3>
+            <p className="amw-dialog-desc">人物未进行校验无法入库</p>
+            <div className="amw-dialog-actions ead-unchecked-video-ref-block-actions">
+              <button
+                type="button"
+                className="amw-btn amw-btn-primary"
+                data-testid="ead-unchecked-video-ref-block-dismiss"
+                onClick={dismissUncheckedVideoRefBlock}
+              >
+                知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingUnboundVoiceConfirmItem ? (
+        <div
+          className="amw-overlay amw-overlay--stacked"
+          role="presentation"
+          data-testid="ead-unbound-voice-confirm-backdrop"
+          onClick={dismissUnboundVoiceConfirm}
+        >
+          <div
+            className="amw-dialog ead-unbound-voice-confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ead-unbound-voice-confirm-title"
+            data-testid="ead-unbound-voice-confirm"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 id="ead-unbound-voice-confirm-title">角色未绑定音色</h3>
+            <p className="amw-dialog-desc">
+              此角色未进行音色绑定，是否继续入库？
+            </p>
+            <div className="amw-dialog-actions ead-unbound-voice-confirm-actions">
+              <button
+                type="button"
+                className="amw-btn"
+                data-testid="ead-unbound-voice-confirm-cancel"
+                disabled={Boolean(confirming || confirmingItemId)}
+                onClick={dismissUnboundVoiceConfirm}
+              >
+                否，取消
+              </button>
+              <button
+                type="button"
+                className="amw-btn amw-btn-primary"
+                data-testid="ead-unbound-voice-confirm-continue"
+                disabled={Boolean(confirming || confirmingItemId)}
+                onClick={() => {
+                  const itemId = pendingUnboundVoiceConfirmItem.id;
+                  void confirmItemToLibrary(itemId);
+                }}
+              >
+                {confirming &&
+                confirmingItemId === pendingUnboundVoiceConfirmItem.id
+                  ? "入库中…"
+                  : "是，继续入库"}
               </button>
             </div>
           </div>
@@ -2863,49 +3862,51 @@ function DesignItemCard({
               testId={`ead-voice-preview-${item.id}`}
               onStatus={setVoiceNote}
             />
-            <button
-              type="button"
-              className={`amw-btn ead-card__voice-bind${
-                voiceBoundLabel ? " is-bound" : ""
-              }${voiceLocked && !hasBoundVoice ? " is-missing" : ""}`}
-              data-testid={`ead-voice-bind-${item.id}`}
-              disabled={
-                disabled ||
-                voiceLocked ||
-                !currentMediaId ||
-                !characterVoiceId ||
-                (mediaVoice != null && isMediaVoiceBound(mediaVoice))
-              }
-              title={
-                !currentMediaId
-                  ? "请先生成图片，再为当前历史图绑定音色"
-                  : voiceLocked && !hasBoundVoice
-                    ? "审批入库时未绑定音色；请主理人在项目管理中为该角色补绑"
-                    : voiceLocked
-                      ? "已审批入库，音色仅主理人可在项目管理中更改"
-                      : mediaVoice != null && isMediaVoiceBound(mediaVoice)
-                        ? "当前历史图音色已绑定"
-                        : "将当前选择的音色绑定到当前历史图"
-              }
-              onClick={() => {
-                if (!currentMediaId || !characterVoiceId) {
-                  setVoiceNote("请先选择音色再绑定");
-                  return;
-                }
-                onBindVoice({
-                  mediaId: currentMediaId,
-                  voiceId: characterVoiceId,
-                  voiceName: mediaVoice?.voiceName ?? null,
-                });
-              }}
-            >
-              {voiceLocked && !hasBoundVoice
-                ? "未绑定"
-                : voiceBoundLabel
-                  ? "已绑定"
-                  : "绑定音色"}
-            </button>
           </div>
+        </div>
+        <div className="ead-card__voice-bind-row">
+          <button
+            type="button"
+            className={`amw-btn ead-card__voice-bind${
+              voiceBoundLabel ? " is-bound" : ""
+            }${voiceLocked && !hasBoundVoice ? " is-missing" : ""}`}
+            data-testid={`ead-voice-bind-${item.id}`}
+            disabled={
+              disabled ||
+              voiceLocked ||
+              !currentMediaId ||
+              !characterVoiceId ||
+              (mediaVoice != null && isMediaVoiceBound(mediaVoice))
+            }
+            title={
+              !currentMediaId
+                ? "请先生成图片，再为当前历史图绑定音色"
+                : voiceLocked && !hasBoundVoice
+                  ? "审批入库时未绑定音色；请主理人在项目管理中为该角色补绑"
+                  : voiceLocked
+                    ? "已审批入库，音色仅主理人可在项目管理中更改"
+                    : mediaVoice != null && isMediaVoiceBound(mediaVoice)
+                      ? "当前历史图音色已绑定"
+                      : "将当前选择的音色绑定到当前历史图"
+            }
+            onClick={() => {
+              if (!currentMediaId || !characterVoiceId) {
+                setVoiceNote("请先选择音色再绑定");
+                return;
+              }
+              onBindVoice({
+                mediaId: currentMediaId,
+                voiceId: characterVoiceId,
+                voiceName: mediaVoice?.voiceName ?? null,
+              });
+            }}
+          >
+            {voiceLocked && !hasBoundVoice
+              ? "未绑定"
+              : voiceBoundLabel
+                ? "已绑定"
+                : "绑定音色"}
+          </button>
         </div>
         {voiceNote ? (
           <p className="ead-muted ead-card__voice-note">{voiceNote}</p>
