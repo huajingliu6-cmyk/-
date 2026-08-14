@@ -27,10 +27,12 @@ export type WorkflowProjectSummary = {
   revision: number;
   nodeCount: number;
   videoShotCount: number;
-  /** ??? JobStatus ???????????? */
+  /** 兼容 JobStatus 派生状态 */
   status: "draft" | "generating" | "completed" | "failed";
-  /** ???????? progress ????? null */
+  /** 生成进度；无进度时为 null */
   generationProgress: number | null;
+  /** Canonical project visual style id; null for legacy projects. */
+  visualStyle?: import("@/projects/project-visual-style").ProjectVisualStyleId | null;
 };
 
 /**

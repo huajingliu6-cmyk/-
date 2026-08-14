@@ -30,8 +30,10 @@ describe("storyboard creation UI flow contracts", () => {
     expect(panel).toContain("修改剧本");
     expect(panel).toContain("view-script-modal");
     expect(panel).toContain("view-script-save");
-    expect(panel).not.toContain("confirm-script-btn");
-    expect(panel).not.toContain(">确认剧本<");
+    expect(panel).toContain("confirm-script-btn");
+    expect(panel).toContain('data-testid="generate-storyboard-prompts"');
+    expect(panel).toContain('title={!scriptConfirmed ? "请先确认本集剧本"');
+    expect(panel).toContain("handleConfirmScript");
     expect(panel).not.toContain(">剧本已确认<");
     expect(panel).toContain("storyboard-script-preview");
     expect(panel).toContain("canGeneratePrompts");
@@ -53,6 +55,13 @@ describe("storyboard creation UI flow contracts", () => {
     expect(panel).not.toContain(">查看剧本<");
     expect(panel).toContain(">修改剧本<");
     expect(panel).not.toContain("分镜已过期。请重新生成分镜提示词后继续");
+  });
+
+  it("uses safeRandomUUID for prompt generate idempotency on HTTP LAN", () => {
+    expect(workspace).toContain('from "@/lib/safe-random-id"');
+    expect(workspace).toContain("safeRandomUUID()");
+    expect(workspace).not.toContain("crypto.randomUUID()");
+    expect(workspace).toContain("generateStoryboard(projectId, episodeId, key)");
   });
 
   it("uses per-episode prompt generation without full-page busy lock", () => {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSessionUser } from "@/auth/require-user";
 import { AiConfigError } from "@/ai-config/errors";
 import { loadAssetBundleDraft } from "@/projects/assets/asset-bundle-store";
+import { getProjectRecord } from "@/projects/project-access";
 import {
   findProduction,
   isRecord,
@@ -15,9 +16,13 @@ import {
   mergePreserveLockedShots,
 } from "@/projects/storyboard/services/storyboard-generate";
 import { isStoryboardGeneratingLockActive } from "@/projects/storyboard/services/storyboard-generating-lock";
-import { fillShotVideoPromptsWithLlm } from "@/projects/storyboard/services/storyboard-prompt-llm";
+import {
+  fillShotVideoPromptsWithLlm,
+  StoryboardPromptFillError,
+} from "@/projects/storyboard/services/storyboard-prompt-llm";
 import { buildStoryboardPromptContext } from "@/projects/storyboard/services/storyboard-prompt-context";
 import { autoLinkStoryboardToLibrary } from "@/projects/storyboard/services/shot-library-match";
+import { requireProjectVisualStyleDirective } from "@/projects/project-visual-style";
 
 type RouteContext = {
   params: Promise<{ projectId: string; episodeId: string }>;
@@ -25,6 +30,19 @@ type RouteContext = {
 
 /** Whole-episode LLM prompt fill often exceeds 60s. */
 export const maxDuration = 600;
+
+function storyboardPromptErrorMessage(code: string, fallback: string): string {
+  switch (code) {
+    case "STORYBOARD_MODEL_RESPONSE_EMPTY":
+      return "模型未返回分镜提示词正文";
+    case "STORYBOARD_MODEL_RESPONSE_UNPARSEABLE":
+      return "模型返回无法解析为分镜提示词";
+    case "STORYBOARD_PROMPTS_NOT_MATCHED":
+      return "模型返回中未匹配到任何镜头提示词";
+    default:
+      return fallback;
+  }
+}
 
 export async function POST(request: Request, context: RouteContext) {
   const session = await requireSessionUser();
@@ -51,6 +69,16 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const body = await parseJsonBody(request);
+  if (body !== null && isRecord(body)) {
+    // Never trust client style overrides.
+    if ("stylePrompt" in body || "visualStyle" in body) {
+      return NextResponse.json(
+        { error: "不允许客户端覆盖项目视觉风格" },
+        { status: 400 },
+      );
+    }
+  }
+
   const idempotencyKey =
     body !== null && isRecord(body) && typeof body.idempotencyKey === "string"
       ? body.idempotencyKey
@@ -61,8 +89,12 @@ export async function POST(request: Request, context: RouteContext) {
     production.activeStoryboard?.generationJobId === idempotencyKey
   ) {
     return NextResponse.json({
+      ok: true,
       production,
       activeStoryboard: production.activeStoryboard,
+      generatedCount: 0,
+      unmatchedCount: 0,
+      unmatchedShotIds: [],
     });
   }
 
@@ -78,9 +110,20 @@ export async function POST(request: Request, context: RouteContext) {
     props: [],
     audios: [],
   };
+  const project = await getProjectRecord(projectId);
+  const styleResolved = requireProjectVisualStyleDirective({
+    visualStyle: project?.visualStyle,
+    highlights: project?.highlights,
+  });
+  if (!styleResolved.ok) {
+    return NextResponse.json({ error: styleResolved.error }, { status: 400 });
+  }
   const promptContext = buildStoryboardPromptContext({
     scriptText,
     libraryAssets,
+    visualStyle: styleResolved.styleId,
+    highlights: project?.highlights,
+    visualStyleDirective: styleResolved.directive,
   });
 
   const now = new Date().toISOString();
@@ -114,8 +157,9 @@ export async function POST(request: Request, context: RouteContext) {
 
     const withLibraryLinks = autoLinkStoryboardToLibrary(merged, libraryAssets);
 
-    const withPrompts = await fillShotVideoPromptsWithLlm({
+    const fillResult = await fillShotVideoPromptsWithLlm({
       projectId,
+      episodeId,
       userId: session.user.id,
       storyboard: withLibraryLinks,
       salt:
@@ -126,9 +170,14 @@ export async function POST(request: Request, context: RouteContext) {
     });
 
     const activeStoryboard = {
-      ...withPrompts,
-      generationJobId: idempotencyKey ?? withPrompts.generationJobId,
+      ...fillResult.storyboard,
+      generationJobId: idempotencyKey ?? fillResult.storyboard.generationJobId,
     };
+
+    const partialNote =
+      fillResult.warningCode === "STORYBOARD_PROMPTS_PARTIALLY_MATCHED"
+        ? `已生成 ${fillResult.generatedCount} 个镜头，${fillResult.unmatchedCount} 个镜头未匹配，可重试未完成镜头。`
+        : null;
 
     currentProduction = await persistProduction(currentWorkspace, {
       ...currentProduction,
@@ -136,24 +185,38 @@ export async function POST(request: Request, context: RouteContext) {
       currentStep: 2,
       status: "storyboard_incomplete",
       storyboardStale: false,
-      generationError: null,
+      generationError: partialNote,
       revision: currentProduction.revision + 1,
       lastEditedAt: now,
       updatedAt: now,
     });
 
     return NextResponse.json({
+      ok: true,
       production: currentProduction,
       activeStoryboard: currentProduction.activeStoryboard,
+      generatedCount: fillResult.generatedCount,
+      unmatchedCount: fillResult.unmatchedCount,
+      unmatchedShotIds: fillResult.unmatchedShotIds,
+      ...(fillResult.warningCode
+        ? { warningCode: fillResult.warningCode }
+        : {}),
     });
   } catch (error) {
+    const fillCode =
+      error instanceof StoryboardPromptFillError ? error.code : undefined;
     const message =
-      error instanceof AiConfigError
-        ? error.message
-        : error instanceof Error
+      error instanceof StoryboardPromptFillError
+        ? storyboardPromptErrorMessage(error.code, error.message)
+        : error instanceof AiConfigError
           ? error.message
-          : "分镜生成失败";
-    const status = error instanceof AiConfigError ? 400 : 500;
+          : error instanceof Error
+            ? error.message
+            : "分镜生成失败";
+    const status =
+      error instanceof AiConfigError || error instanceof StoryboardPromptFillError
+        ? 400
+        : 500;
     currentProduction = await persistProduction(currentWorkspace, {
       ...currentProduction,
       status: "generation_failed",
@@ -164,8 +227,11 @@ export async function POST(request: Request, context: RouteContext) {
     });
     return NextResponse.json(
       {
+        ok: false,
         error: message,
-        code: error instanceof AiConfigError ? error.code : undefined,
+        code:
+          fillCode ??
+          (error instanceof AiConfigError ? error.code : undefined),
         production: currentProduction,
       },
       { status },

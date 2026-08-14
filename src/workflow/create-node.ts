@@ -1,3 +1,4 @@
+import { safeRandomUUID } from "@/lib/safe-random-id";
 import type {
   CharacterNodeData,
   CharacterVariant,
@@ -7,11 +8,11 @@ import type {
 } from "./types";
 
 export function createNodeId(type: WorkflowNodeType) {
-  return `${type}-${crypto.randomUUID().slice(0, 8)}`;
+  return `${type}-${safeRandomUUID().slice(0, 8)}`;
 }
 
 function createDefaultCharacterVariant(): CharacterVariant {
-  const id = `variant-${crypto.randomUUID().slice(0, 8)}`;
+  const id = `variant-${safeRandomUUID().slice(0, 8)}`;
   return {
     id,
     name: "默认形象",

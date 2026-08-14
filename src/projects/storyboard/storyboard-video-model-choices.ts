@@ -79,3 +79,9 @@ export function parseStoryboardVideoStylePreset(
   const found = STORYBOARD_VIDEO_STYLE_OPTIONS.find((o) => o.id === value);
   return found ? found.id : "";
 }
+
+export function labelForStoryboardVideoStylePreset(
+  id: StoryboardVideoStylePresetId,
+): string {
+  return STORYBOARD_VIDEO_STYLE_OPTIONS.find((o) => o.id === id)?.label ?? id;
+}

@@ -4,6 +4,12 @@ import { AiConfigError } from "@/ai-config/errors";
 import { buildImmutableOutputContract } from "@/ai-config/output-contracts";
 import { getEffectivePublishedRule } from "@/ai-config/task-rules-store";
 import { regenerateVideoPromptForShot } from "@/projects/storyboard/services/storyboard-generate";
+import { matchStoryboardPrompts } from "@/projects/storyboard/services/match-storyboard-prompts";
+import {
+  parseBracketShotBlocks,
+  parseStoryboardModelResponse,
+  type StoryboardResponseParser,
+} from "@/projects/storyboard/services/parse-storyboard-model-response";
 import {
   parseDurationSecondsFromVideoPrompt,
   STORYBOARD_PROMPT_DURATION_MAX,
@@ -34,6 +40,32 @@ export type StoryboardPromptContext = {
   scenes?: Array<{ name: string; location?: string }>;
   props?: Array<{ name: string }>;
   audios?: Array<{ name: string }>;
+  /** Server-built visual style directive; never from client stylePrompt. */
+  visualStyleDirective?: string;
+};
+
+export type StoryboardPromptErrorCode =
+  | "STORYBOARD_MODEL_RESPONSE_EMPTY"
+  | "STORYBOARD_MODEL_RESPONSE_UNPARSEABLE"
+  | "STORYBOARD_PROMPTS_NOT_MATCHED";
+
+export class StoryboardPromptFillError extends Error {
+  readonly code: StoryboardPromptErrorCode;
+
+  constructor(code: StoryboardPromptErrorCode, message: string) {
+    super(message);
+    this.name = "StoryboardPromptFillError";
+    this.code = code;
+  }
+}
+
+export type FillShotVideoPromptsResult = {
+  storyboard: StoryboardDocument;
+  generatedCount: number;
+  unmatchedCount: number;
+  unmatchedShotIds: string[];
+  parser: StoryboardResponseParser | null;
+  warningCode?: "STORYBOARD_PROMPTS_PARTIALLY_MATCHED";
 };
 
 function createProviderFromResolved(
@@ -70,7 +102,7 @@ function assertTextModality(resolved: {
   ) {
     throw new AiConfigError(
       "AI_CAPABILITY_MODALITY_MISMATCH",
-      "分镜提示词接到了文生图接口。请到「管理 API」将「分镜提示词」文本模型配置正确。",
+      "分镜提示词接到了文生图接口。请到「系统管理 → API 接口」将「分镜提示词」文本模型配置正确。",
     );
   }
 }
@@ -92,8 +124,10 @@ function listUnlockedTargets(
 function applyPromptMap(
   storyboard: StoryboardDocument,
   prompts: Map<string, string>,
-  saltPrefix: string,
+  options?: { fillMissingWithTemplate?: boolean; saltPrefix?: string },
 ): StoryboardDocument {
+  const fillMissing = Boolean(options?.fillMissingWithTemplate);
+  const saltPrefix = options?.saltPrefix ?? "storyboard";
   return {
     ...storyboard,
     scenes: storyboard.scenes.map((scene) => {
@@ -103,6 +137,7 @@ function applyPromptMap(
         shots: scene.shots.map((shot) => {
           if (shot.promptLocked || shot.locked) return shot;
           const fromLlm = prompts.get(shot.id)?.trim();
+          if (!fromLlm && !fillMissing) return shot;
           const next =
             fromLlm ||
             regenerateVideoPromptForShot(
@@ -174,11 +209,15 @@ function buildBatchUserPrompt(
     ].join("\n");
   });
 
+  const styleBlock = context?.visualStyleDirective?.trim()
+    ? ["", context.visualStyleDirective.trim(), ""]
+    : [""];
+
   return [
     "请严格遵守系统中的任务规则，为下列每个 shotId 生成完整 videoPrompt。",
     `画幅：${aspect}`,
     `时长：每个分镜总时长须在 ${STORYBOARD_PROMPT_DURATION_MIN}—${STORYBOARD_PROMPT_DURATION_MAX} 秒；按剧情合理安排，禁止注水硬拉长；标题头总时长必须与时间轴一致。`,
-    "",
+    ...styleBlock,
     "本集完整剧本：",
     script || "（未提供剧本正文，仅根据镜头摘录编写）",
     "",
@@ -187,7 +226,11 @@ function buildBatchUserPrompt(
     "已拆好的镜头列表（必须覆盖每一个 shotId；videoPrompt 正文须符合任务规则的分镜格式，不得写成一行摘要）：",
     ...shotBlocks,
     "",
-    "输出时仅返回 IMMUTABLE_OUTPUT_CONTRACT 规定的 JSON；每个 videoPrompt 内写完整分镜正文；相邻镜头之间的交接卡写入前一镜 videoPrompt 末尾。",
+    "输出要求（优先）：只返回合法 JSON，不要 Markdown 代码块，不要解释：",
+    '{"shots":[{"shotId":"<输入shotId原样>","videoPrompt":"<完整分镜正文>"}]}',
+    "每个输入镜头必须返回一条；shotId 必须原样；videoPrompt 不能为空；不得遗漏镜头。",
+    "每个 videoPrompt 内写完整分镜正文；相邻镜头之间的交接卡写入前一镜 videoPrompt 末尾。",
+    "输出格式要求不能覆盖或删除项目视觉风格约束。",
   ].join("\n");
 }
 
@@ -199,145 +242,68 @@ function buildSingleUserPrompt(
   return buildBatchUserPrompt([{ shot, sceneTitle }], context);
 }
 
-function extractJsonObject(raw: string): unknown {
-  const trimmed = raw.trim();
-  const fence = /^```(?:json)?\s*([\s\S]*?)```$/i.exec(trimmed);
-  const body = fence ? fence[1]!.trim() : trimmed;
-  const start = body.indexOf("{");
-  const end = body.lastIndexOf("}");
-  const arrStart = body.indexOf("[");
-  const arrEnd = body.lastIndexOf("]");
-  if (
-    arrStart >= 0 &&
-    (start < 0 || arrStart < start) &&
-    arrEnd > arrStart
-  ) {
-    return JSON.parse(body.slice(arrStart, arrEnd + 1)) as unknown;
-  }
-  if (start < 0 || end <= start) {
-    throw new Error("模型未返回 JSON 对象");
-  }
-  return JSON.parse(body.slice(start, end + 1)) as unknown;
-}
-
-function readRowShotId(row: Record<string, unknown>): string {
-  for (const key of ["shotId", "shot_id", "id"]) {
-    const value = row[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return "";
-}
-
-function readRowVideoPrompt(row: Record<string, unknown>): string {
-  for (const key of ["videoPrompt", "prompt", "text", "content"]) {
-    const value = row[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return "";
-}
-
-function asPromptRows(parsed: unknown): Record<string, unknown>[] {
-  if (Array.isArray(parsed)) {
-    return parsed.filter(
-      (row): row is Record<string, unknown> =>
-        Boolean(row) && typeof row === "object" && !Array.isArray(row),
-    );
-  }
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("提示词 JSON 格式无效");
-  }
-  const root = parsed as Record<string, unknown>;
-  const promptsRaw =
-    root.prompts ?? root.items ?? root.shots ?? root.data ?? null;
-  if (!Array.isArray(promptsRaw)) {
-    throw new Error("缺少 prompts 数组");
-  }
-  return promptsRaw.filter(
-    (row): row is Record<string, unknown> =>
-      Boolean(row) && typeof row === "object" && !Array.isArray(row),
-  );
+/**
+ * @deprecated Prefer parseStoryboardModelResponse + matchStoryboardPrompts.
+ * Kept for existing unit tests / callers.
+ */
+export function parseRuleNativePromptBlocks(raw: string): string[] {
+  return parseBracketShotBlocks(raw).map((p) => p.videoPrompt);
 }
 
 /**
- * Parse admin-rule native blocks like `[分镜01｜总时长：12秒｜画幅：9:16]...`
- * including following handoff cards until the next shot header.
+ * @deprecated Prefer parseStoryboardModelResponse + matchStoryboardPrompts.
+ * Kept for existing unit tests / callers.
  */
-export function parseRuleNativePromptBlocks(raw: string): string[] {
-  const text = raw
-    .replace(/^```(?:text|markdown|md)?\s*/i, "")
-    .replace(/```$/i, "")
-    .trim();
-  if (!text) return [];
-
-  const headerRe = /\[分镜\s*0*(\d+)/gi;
-  const matches: Array<{ index: number }> = [];
-  let m: RegExpExecArray | null;
-  while ((m = headerRe.exec(text)) !== null) {
-    matches.push({ index: m.index });
-  }
-  if (matches.length === 0) return [];
-
-  const blocks: string[] = [];
-  for (let i = 0; i < matches.length; i += 1) {
-    const start = matches[i]!.index;
-    const end =
-      i + 1 < matches.length ? matches[i + 1]!.index : text.length;
-    const block = text.slice(start, end).trim();
-    if (block) blocks.push(block);
-  }
-  return blocks;
-}
-
-/** Parse model JSON — or rule-native [分镜NN] text — into shotId → videoPrompt. */
 export function parsePromptMap(
   raw: string,
   expectedIds: Set<string>,
   orderedIds?: string[],
 ): Map<string, string> {
+  const parsed = parseStoryboardModelResponse(raw);
+  const targets = (orderedIds ?? [...expectedIds]).map((id, index) => ({
+    id,
+    shotNumber: index + 1,
+  })).filter((t) => expectedIds.has(t.id));
+  const matched = matchStoryboardPrompts({
+    targets,
+    prompts: parsed.prompts,
+    singleShotFallback: targets.length === 1,
+  });
+  return matched.matched;
+}
+
+function logPromptDiagnostics(input: {
+  projectId: string;
+  episodeId?: string;
+  requestShotCount: number;
+  rawLength: number;
+  parser: StoryboardResponseParser | null;
+  parsedCount: number;
+  matchedCount: number;
+  unmatchedCount: number;
+  duplicateIdCount: number;
+  rawPreview?: string;
+}): void {
   try {
-    const rows = asPromptRows(extractJsonObject(raw));
-    const map = new Map<string, string>();
-    for (const row of rows) {
-      const shotId = readRowShotId(row);
-      const videoPrompt = readRowVideoPrompt(row);
-      if (!shotId || !expectedIds.has(shotId) || !videoPrompt) continue;
-      map.set(shotId, videoPrompt);
-    }
-
-    // Models sometimes invent shot ids or omit them — fall back to input order.
-    if (
-      map.size === 0 &&
-      orderedIds &&
-      orderedIds.length > 0 &&
-      rows.length === orderedIds.length
-    ) {
-      for (let i = 0; i < orderedIds.length; i += 1) {
-        const shotId = orderedIds[i]!;
-        const videoPrompt = readRowVideoPrompt(rows[i]!);
-        if (!videoPrompt) continue;
-        map.set(shotId, videoPrompt);
-      }
-    }
-    if (map.size > 0) return map;
+    const payload = {
+      scope: "storyboard-prompt-llm",
+      projectId: input.projectId,
+      episodeId: input.episodeId ?? null,
+      requestShotCount: input.requestShotCount,
+      rawLength: input.rawLength,
+      parser: input.parser,
+      parsedCount: input.parsedCount,
+      matchedCount: input.matchedCount,
+      unmatchedCount: input.unmatchedCount,
+      duplicateIdCount: input.duplicateIdCount,
+      ...(process.env.NODE_ENV !== "production" && input.rawPreview
+        ? { rawPreview: input.rawPreview.slice(0, 1000) }
+        : {}),
+    };
+    console.info("[storyboard-prompt]", JSON.stringify(payload));
   } catch {
-    // Fall through to rule-native text parsing.
+    /* logging must not affect generation */
   }
-
-  if (orderedIds && orderedIds.length > 0) {
-    const blocks = parseRuleNativePromptBlocks(raw);
-    if (blocks.length > 0) {
-      const map = new Map<string, string>();
-      const count = Math.min(blocks.length, orderedIds.length);
-      for (let i = 0; i < count; i += 1) {
-        const shotId = orderedIds[i]!;
-        if (!expectedIds.has(shotId)) continue;
-        map.set(shotId, blocks[i]!);
-      }
-      if (map.size > 0) return map;
-    }
-  }
-
-  return new Map();
 }
 
 async function streamProviderText(
@@ -372,21 +338,26 @@ async function resolveStoryboardPromptRuntime() {
   return resolved;
 }
 
-async function buildSystemPrompt(): Promise<{
+async function buildSystemPrompt(visualStyleDirective?: string): Promise<{
   systemPrompt: string;
   taskRuleSource: "builtin" | "custom";
   taskRuleVersion: number | null;
 }> {
   const rule = await getEffectivePublishedRule(CAPABILITY_ID);
   const contract = buildImmutableOutputContract(CAPABILITY_ID);
+  const style = visualStyleDirective?.trim();
   return {
     systemPrompt: [
       contract,
-      "重要约束：JSON 只是把结果挂到 shotId 的外壳。prompts[].videoPrompt 的正文必须严格遵守下方任务规则（分镜标题头、挂载、场景基调、人物站位、分秒时间轴、景别/焦距/角度/运镜、台词逐字、声音、连续性，以及相邻分镜交接卡）。禁止把 videoPrompt 压成「景别/运镜/人物」一行摘要。",
+      style || null,
+      "重要约束：JSON 只是把结果挂到 shotId 的外壳。shots[].videoPrompt（或 prompts[].videoPrompt）的正文必须严格遵守下方任务规则（分镜标题头、挂载、场景基调、人物站位、分秒时间轴、景别/焦距/角度/运镜、台词逐字、声音、连续性，以及相邻分镜交接卡）。禁止把 videoPrompt 压成「景别/运镜/人物」一行摘要。",
       `时长硬约束：每个分镜总时长 ${STORYBOARD_PROMPT_DURATION_MIN}—${STORYBOARD_PROMPT_DURATION_MAX} 秒且不得超过 ${STORYBOARD_PROMPT_DURATION_MAX} 秒；按剧情需要安排，禁止把短情节强制拉长凑满；标题头「总时长：N秒」须与时间轴一致。`,
+      "输出格式要求不能覆盖或删除项目视觉风格约束；全部分镜必须使用同一项目风格。",
       "[TASK_RULES]",
       rule.content,
-    ].join("\n\n"),
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
     taskRuleSource: rule.source,
     taskRuleVersion: rule.version,
   };
@@ -448,15 +419,33 @@ export async function fillShotVideoPromptsWithLlm(input: {
   storyboard: StoryboardDocument;
   salt?: string;
   context?: StoryboardPromptContext;
-}): Promise<StoryboardDocument> {
+  episodeId?: string;
+}): Promise<FillShotVideoPromptsResult> {
   const targets = listUnlockedTargets(input.storyboard);
-  if (targets.length === 0) return input.storyboard;
+  if (targets.length === 0) {
+    return {
+      storyboard: input.storyboard,
+      generatedCount: 0,
+      unmatchedCount: 0,
+      unmatchedShotIds: [],
+      parser: null,
+    };
+  }
 
   const salt = input.salt ?? `episode:${input.storyboard.id}`;
   const resolved = await resolveStoryboardPromptRuntime();
 
   if (resolved.profile.provider === "mock") {
-    return applyPromptMap(input.storyboard, new Map(), salt);
+    return {
+      storyboard: applyPromptMap(input.storyboard, new Map(), {
+        fillMissingWithTemplate: true,
+        saltPrefix: salt,
+      }),
+      generatedCount: targets.length,
+      unmatchedCount: 0,
+      unmatchedShotIds: [],
+      parser: null,
+    };
   }
 
   const provider = createProviderFromResolved(
@@ -465,7 +454,7 @@ export async function fillShotVideoPromptsWithLlm(input: {
   );
   const providerModelId = resolved.profile.model || "mock-storyboard-prompt";
   const { systemPrompt, taskRuleSource, taskRuleVersion } =
-    await buildSystemPrompt();
+    await buildSystemPrompt(input.context?.visualStyleDirective);
   const userPrompt = buildBatchUserPrompt(targets, input.context);
   const raw = await streamProviderText(
     provider,
@@ -473,25 +462,101 @@ export async function fillShotVideoPromptsWithLlm(input: {
     userPrompt,
     providerModelId,
   );
-  const expected = new Set(targets.map((t) => t.shot.id));
-  const orderedIds = targets.map((t) => t.shot.id);
-  let prompts = new Map<string, string>();
-  let parseError: string | null = null;
-  try {
-    prompts = parsePromptMap(raw, expected, orderedIds);
-  } catch (err) {
-    parseError = err instanceof Error ? err.message : "提示词 JSON 解析失败";
-    prompts = new Map();
-  }
 
   if (!raw.trim()) {
-    throw new Error("模型未返回分镜提示词正文");
+    logPromptDiagnostics({
+      projectId: input.projectId,
+      episodeId: input.episodeId,
+      requestShotCount: targets.length,
+      rawLength: 0,
+      parser: null,
+      parsedCount: 0,
+      matchedCount: 0,
+      unmatchedCount: targets.length,
+      duplicateIdCount: 0,
+    });
+    throw new StoryboardPromptFillError(
+      "STORYBOARD_MODEL_RESPONSE_EMPTY",
+      "模型未返回分镜提示词正文",
+    );
   }
-  if (prompts.size === 0) {
-    throw new Error(
-      parseError
-        ? `模型返回无法解析为分镜提示词（${parseError}）`
-        : "模型返回中未匹配到任何镜头提示词，请检查任务规则输出格式，或确认返回了 shotId/videoPrompt JSON，或 [分镜01] 正文",
+
+  const parsed = parseStoryboardModelResponse(raw);
+  if (parsed.prompts.length === 0) {
+    logPromptDiagnostics({
+      projectId: input.projectId,
+      episodeId: input.episodeId,
+      requestShotCount: targets.length,
+      rawLength: raw.length,
+      parser: parsed.parser,
+      parsedCount: 0,
+      matchedCount: 0,
+      unmatchedCount: targets.length,
+      duplicateIdCount: parsed.diagnostics.duplicateIdCount,
+      rawPreview: raw,
+    });
+    try {
+      console.error(
+        "[storyboard-prompt] unparseable response preview",
+        JSON.stringify({
+          projectId: input.projectId,
+          episodeId: input.episodeId ?? null,
+          rawLength: raw.length,
+          parser: parsed.parser,
+          preview: raw.slice(0, 1000),
+        }),
+      );
+    } catch {
+      /* ignore */
+    }
+    // Persist raw for admin/debug history; never return it to the client.
+    await maybeSaveJob({
+      projectId: input.projectId,
+      userId: input.userId,
+      brief: userPrompt,
+      content: `[UNPARSEABLE]\n${raw.slice(0, 200_000)}`,
+      modelKey: resolved.profile.id,
+      displayModelName: resolved.profile.label || resolved.profile.model,
+      providerModelId,
+      taskRuleSource,
+      taskRuleVersion,
+    });
+    throw new StoryboardPromptFillError(
+      parsed.diagnostics.invalidCount > 0 || parsed.parser
+        ? "STORYBOARD_MODEL_RESPONSE_UNPARSEABLE"
+        : "STORYBOARD_PROMPTS_NOT_MATCHED",
+      parsed.diagnostics.invalidCount > 0 || parsed.parser
+        ? "模型返回无法解析为分镜提示词"
+        : "模型返回中未匹配到任何镜头提示词",
+    );
+  }
+
+  const match = matchStoryboardPrompts({
+    targets: targets.map((t) => ({
+      id: t.shot.id,
+      shotNumber: t.shot.shotNumber,
+    })),
+    prompts: parsed.prompts,
+    singleShotFallback: targets.length === 1,
+  });
+
+  logPromptDiagnostics({
+    projectId: input.projectId,
+    episodeId: input.episodeId,
+    requestShotCount: targets.length,
+    rawLength: raw.length,
+    parser: parsed.parser,
+    parsedCount: parsed.prompts.length,
+    matchedCount: match.generatedCount,
+    unmatchedCount: match.unmatchedCount,
+    duplicateIdCount: parsed.diagnostics.duplicateIdCount,
+    rawPreview: raw,
+  });
+
+  if (match.generatedCount === 0) {
+    throw new StoryboardPromptFillError(
+      "STORYBOARD_PROMPTS_NOT_MATCHED",
+      "模型返回中未匹配到任何镜头提示词",
     );
   }
 
@@ -499,7 +564,7 @@ export async function fillShotVideoPromptsWithLlm(input: {
     projectId: input.projectId,
     userId: input.userId,
     brief: userPrompt,
-    content: raw || JSON.stringify([...prompts.entries()]),
+    content: raw.slice(0, 200_000),
     modelKey: resolved.profile.id,
     displayModelName: resolved.profile.label || resolved.profile.model,
     providerModelId,
@@ -507,7 +572,21 @@ export async function fillShotVideoPromptsWithLlm(input: {
     taskRuleVersion,
   });
 
-  return applyPromptMap(input.storyboard, prompts, salt);
+  const storyboard = applyPromptMap(input.storyboard, match.matched, {
+    fillMissingWithTemplate: false,
+    saltPrefix: salt,
+  });
+
+  return {
+    storyboard,
+    generatedCount: match.generatedCount,
+    unmatchedCount: match.unmatchedCount,
+    unmatchedShotIds: match.unmatchedShotIds,
+    parser: parsed.parser,
+    ...(match.unmatchedCount > 0
+      ? { warningCode: "STORYBOARD_PROMPTS_PARTIALLY_MATCHED" as const }
+      : {}),
+  };
 }
 
 /**
@@ -520,6 +599,7 @@ export async function regenerateShotVideoPromptWithLlm(input: {
   sceneTitle: string;
   salt: string;
   context?: StoryboardPromptContext;
+  episodeId?: string;
 }): Promise<string> {
   if (input.shot.promptLocked || input.shot.locked) {
     throw new Error("请先解除提示词锁定");
@@ -540,7 +620,7 @@ export async function regenerateShotVideoPromptWithLlm(input: {
   );
   const providerModelId = resolved.profile.model || "mock-storyboard-prompt";
   const { systemPrompt, taskRuleSource, taskRuleVersion } =
-    await buildSystemPrompt();
+    await buildSystemPrompt(input.context?.visualStyleDirective);
   const userPrompt = buildSingleUserPrompt(
     input.shot,
     input.sceneTitle,
@@ -552,35 +632,52 @@ export async function regenerateShotVideoPromptWithLlm(input: {
     userPrompt,
     providerModelId,
   );
-  let prompt = "";
-  let parseError: string | null = null;
-  try {
-    const map = parsePromptMap(raw, new Set([input.shot.id]), [input.shot.id]);
-    prompt = map.get(input.shot.id)?.trim() ?? "";
-  } catch (err) {
-    parseError = err instanceof Error ? err.message : "提示词 JSON 解析失败";
-    prompt = "";
+
+  if (!raw.trim()) {
+    throw new StoryboardPromptFillError(
+      "STORYBOARD_MODEL_RESPONSE_EMPTY",
+      "模型未返回可用的镜头提示词",
+    );
   }
+
+  const parsed = parseStoryboardModelResponse(raw);
+  const match = matchStoryboardPrompts({
+    targets: [{ id: input.shot.id, shotNumber: input.shot.shotNumber }],
+    prompts: parsed.prompts,
+    singleShotFallback: true,
+  });
+  let prompt = match.matched.get(input.shot.id)?.trim() ?? "";
+
   if (!prompt) {
-    // Accept bare rule-native / plain text if model ignored JSON for single-shot.
-    const blocks = parseRuleNativePromptBlocks(raw);
-    if (blocks[0]) {
-      prompt = blocks[0];
-    } else {
-      const bare = raw
-        .replace(/^```(?:json|text|markdown|md)?\s*/i, "")
-        .replace(/```$/i, "")
-        .trim();
-      if (bare && !bare.startsWith("{") && !bare.startsWith("[")) {
-        prompt = bare;
-      }
+    // Last resort: bare non-JSON text for single-shot.
+    const bare = raw
+      .replace(/^```(?:json|text|markdown|md)?\s*/i, "")
+      .replace(/```$/i, "")
+      .trim();
+    if (bare && !bare.startsWith("{") && !bare.startsWith("[")) {
+      prompt = bare;
     }
   }
+
+  logPromptDiagnostics({
+    projectId: input.projectId,
+    episodeId: input.episodeId,
+    requestShotCount: 1,
+    rawLength: raw.length,
+    parser: parsed.parser,
+    parsedCount: parsed.prompts.length,
+    matchedCount: prompt ? 1 : 0,
+    unmatchedCount: prompt ? 0 : 1,
+    duplicateIdCount: parsed.diagnostics.duplicateIdCount,
+    rawPreview: raw,
+  });
+
   if (!prompt) {
-    throw new Error(
-      parseError
-        ? `模型返回无法解析为镜头提示词（${parseError}）`
-        : "模型未返回可用的镜头提示词",
+    throw new StoryboardPromptFillError(
+      parsed.prompts.length === 0
+        ? "STORYBOARD_MODEL_RESPONSE_UNPARSEABLE"
+        : "STORYBOARD_PROMPTS_NOT_MATCHED",
+      "模型未返回可用的镜头提示词",
     );
   }
 

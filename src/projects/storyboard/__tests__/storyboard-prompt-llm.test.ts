@@ -92,7 +92,7 @@ describe("storyboard-prompt-llm", () => {
       salt: "salt-a",
     });
 
-    const prompts = filled.scenes.flatMap((s) =>
+    const prompts = filled.storyboard.scenes.flatMap((s) =>
       s.shots.map((sh) => sh.videoPrompt),
     );
     expect(prompts.length).toBeGreaterThan(0);

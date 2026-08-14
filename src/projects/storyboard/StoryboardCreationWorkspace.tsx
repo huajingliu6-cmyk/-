@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useChipBounce } from "@/shell/useChipBounce";
+import { safeRandomUUID } from "@/lib/safe-random-id";
 import type { ScriptEpisode } from "@/projects/script/types";
 import {
   autoMatchStoryboardAssets,
@@ -272,7 +273,7 @@ export function StoryboardCreationWorkspace({
         projectId,
         episodeId,
         run: async () => {
-          const key = crypto.randomUUID();
+          const key = safeRandomUUID();
           try {
             const updated = await generateStoryboard(projectId, episodeId, key);
             handleProductionChange(updated);
@@ -280,6 +281,12 @@ export function StoryboardCreationWorkspace({
               throw new Error(
                 updated.generationError || "分镜提示词生成失败",
               );
+            }
+            if (
+              updated.generationError?.includes("已生成") &&
+              updated.generationError.includes("未匹配")
+            ) {
+              setSaveNote(updated.generationError);
             }
             if (updated.status === "storyboard_generating") {
               await waitForEpisodePromptSettled(

@@ -134,7 +134,7 @@ async function uploadMultipart(params: {
 
   const apiKey = normalizeSd2ApiKey(params.apiKey);
   if (!apiKey) {
-    throw Object.assign(new Error("SD2 API Key 为空，请到「管理 API → 移动 SD2 平台」重新填写"), {
+    throw Object.assign(new Error("SD2 API Key 为空，请到「系统管理 → API 接口 → 移动 SD2 平台」重新填写"), {
       code: "SD2_API_KEY_MISSING",
     });
   }

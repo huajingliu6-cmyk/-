@@ -140,7 +140,9 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
     useState<ScriptImportApiResponse | null>(null);
   const [uiNote, setUiNote] = useState("");
   const importSeqRef = useRef(0);
+  const splitRequestSeqRef = useRef(0);
   const splitGenerationIdRef = useRef<string | null>(null);
+  const splitInFlightRef = useRef(false);
 
   const selectedEpisode =
     episodes.find((ep) => ep.id === selectedId) ?? null;
@@ -252,6 +254,10 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
   const handleScriptFile = useCallback(
     async (file: File) => {
       const seq = ++importSeqRef.current;
+      splitRequestSeqRef.current += 1;
+      splitInFlightRef.current = false;
+      setSplitGenerating(false);
+      setSplitStage("");
       setUiNote("");
       setImporting(true);
       const lower = file.name.toLowerCase();
@@ -310,17 +316,118 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
     setUiNote("已取消导入，当前草稿未修改。");
   }, []);
 
+  const runLocalSplit = useCallback(
+    async (options?: {
+      body?: Record<string, unknown>;
+      stageMessage?: string;
+    }): Promise<string> => {
+      if (splitInFlightRef.current) {
+        throw new Error("分集进行中，请稍候");
+      }
+      const seq = ++splitRequestSeqRef.current;
+      const importSeqAtStart = importSeqRef.current;
+      splitInFlightRef.current = true;
+      setSplitOpen(false);
+      setSplitGenerating(true);
+      setSplitStage(
+        options?.stageMessage ?? "正在自动生成分集方案…",
+      );
+      splitGenerationIdRef.current = null;
+
+      let responseHandled = false;
+      try {
+        const res = await fetch(
+          `/api/projects/${encodeURIComponent(projectId)}/script-draft/local-split`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(options?.body ?? {}),
+          },
+        );
+        const payload = (await res.json()) as {
+          error?: string;
+          draft?: ScriptDraft;
+          warnings?: string[];
+          mode?: string;
+        };
+        if (
+          seq !== splitRequestSeqRef.current ||
+          importSeqAtStart !== importSeqRef.current
+        ) {
+          throw new Error("已取消");
+        }
+        if (payload.draft) {
+          applyDraftToState(payload.draft, draftSetters);
+        }
+        if (!res.ok) {
+          responseHandled = true;
+          const message = payload.error ?? "本地分集失败";
+          if (!payload.draft) {
+            setEpisodeSplit((prev) => ({
+              ...(prev ?? emptyEpisodeSplitState()),
+              status: "failed",
+              generationId: null,
+              errorMessage: message,
+            }));
+          }
+          throw new Error(message);
+        }
+        const warn =
+          payload.warnings && payload.warnings.length > 0
+            ? `（${payload.warnings.slice(0, 2).join("；")}）`
+            : "";
+        const modeHint =
+          payload.mode === "blocks"
+            ? "（按段落均分）"
+            : payload.mode === "title"
+              ? "（按标题）"
+              : "";
+        return `本地分集完成${modeHint}，请核对各集后确认剧本。${warn}`;
+      } catch (error) {
+        if (
+          seq !== splitRequestSeqRef.current ||
+          importSeqAtStart !== importSeqRef.current
+        ) {
+          throw error instanceof Error ? error : new Error("已取消");
+        }
+        const message =
+          error instanceof Error ? error.message : "分集失败，请稍后重试";
+        if (
+          !responseHandled &&
+          message !== "已取消" &&
+          message !== "分集进行中，请稍候"
+        ) {
+          setEpisodeSplit((prev) => ({
+            ...(prev ?? emptyEpisodeSplitState()),
+            status: "failed",
+            generationId: null,
+            errorMessage: message,
+          }));
+        }
+        throw error instanceof Error ? error : new Error(message);
+      } finally {
+        if (seq === splitRequestSeqRef.current) {
+          splitInFlightRef.current = false;
+          setSplitGenerating(false);
+          setSplitStage("");
+        }
+      }
+    },
+    [draftSetters, projectId],
+  );
+
   const handleConfirmImport = useCallback(async () => {
-    if (!importPreview) return;
+    if (!importPreview || confirmingImport || splitInFlightRef.current) return;
     setConfirmingImport(true);
     setUiNote("");
+    const preview = importPreview;
     try {
-      const sourceImportMeta = buildSourceImportFromPreview(importPreview);
+      const sourceImportMeta = buildSourceImportFromPreview(preview);
       const nextSourceFile: ScriptSourceFile = {
-        id: `file-${importPreview.sha256.slice(0, 12)}`,
-        name: importPreview.fileName,
-        type: scriptSourceFileTypeFromFormat(importPreview.format),
-        size: importPreview.byteLength,
+        id: `file-${preview.sha256.slice(0, 12)}`,
+        name: preview.fileName,
+        type: scriptSourceFileTypeFromFormat(preview.format),
+        size: preview.byteLength,
         status: "uploaded",
       };
       const resetSplit = emptyEpisodeSplitState();
@@ -332,8 +439,8 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
           body: JSON.stringify({
             projectId,
             sourceFile: nextSourceFile,
-            sourceText: importPreview.sourceText,
-            preambleNotes: importPreview.preamble || null,
+            sourceText: preview.sourceText,
+            preambleNotes: preview.preamble || null,
             sourceImport: sourceImportMeta,
             novelTask,
             episodes: [],
@@ -355,190 +462,77 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
       if (payload.draft) {
         applyDraftToState(payload.draft, draftSetters);
       } else {
+        setSourceFile(nextSourceFile);
+        setSourceText(preview.sourceText);
+        setPreambleNotes(preview.preamble || null);
+        setSourceImport(sourceImportMeta);
         setEpisodes([]);
         setSelectedId(null);
         setEpisodeSplit(resetSplit);
         setProposedEpisodes([]);
       }
       setImportPreview(null);
-      setUiNote(
-        importPreview.format === "docx"
-          ? "DOCX 源文本已保存。请点击「分集」进行本地分集。"
-          : importPreview.format === "md"
-            ? "Markdown 源文本已保存。请点击「分集」进行本地分集。"
-            : "TXT 源文本已保存。请点击「分集」进行本地分集。",
-      );
+      setConfirmingImport(false);
+      try {
+        const note = await runLocalSplit({
+          body: {},
+          stageMessage: "剧本已导入，正在自动分集…",
+        });
+        setUiNote(note);
+      } catch (splitError) {
+        const message =
+          splitError instanceof Error
+            ? splitError.message
+            : "本地分集失败";
+        if (message !== "已取消" && message !== "分集进行中，请稍候") {
+          setUiNote(`自动分集失败，请点击重新分集。${message}`);
+        }
+      }
     } catch (error) {
       setUiNote(error instanceof Error ? error.message : "保存失败");
-    } finally {
       setConfirmingImport(false);
     }
   }, [
+    confirmingImport,
     draftSetters,
     importPreview,
     novelOpen,
     novelTask,
     projectId,
+    runLocalSplit,
     splitConfig,
   ]);
 
-  const persistEpisodeSplitGenerating = useCallback(
-    async (generationId: string | null) => {
-      const nextSplit: ScriptEpisodeSplitState = {
-        ...(episodeSplit ?? emptyEpisodeSplitState()),
-        status: "generating",
-        generationId,
-        errorMessage: null,
-      };
-      const res = await fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/script-draft`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            projectId,
-            sourceFile,
-            sourceText,
-            preambleNotes,
-            sourceImport,
-            novelTask,
-            episodes,
-            selectedId,
-            listPage,
-            splitConfig,
-            novelOpen,
-            episodeSplit: nextSplit,
-          }),
-        },
-      );
-      const payload = (await res.json()) as { draft?: ScriptDraft };
-      if (payload.draft) {
-        applyDraftToState(payload.draft, draftSetters);
-      } else {
-        setEpisodeSplit(nextSplit);
-      }
-    },
-    [
-      draftSetters,
-      episodeSplit,
-      episodes,
-      listPage,
-      novelOpen,
-      novelTask,
-      preambleNotes,
-      projectId,
-      selectedId,
-      sourceFile,
-      sourceImport,
-      sourceText,
-      splitConfig,
-    ],
-  );
-
   const handleStartSplit = useCallback(async () => {
-    if (splitGenerating || !sourceText?.trim()) {
-      if (!sourceText?.trim()) {
-        setUiNote("请先导入并确认剧本源文本后再分集。");
-      }
+    if (splitInFlightRef.current || confirmingImport || importing) return;
+    if (!sourceText?.trim()) {
+      setUiNote("剧本导入后会自动分集。若已导入仍失败，请点击重新分集。");
       return;
     }
-    setSplitOpen(false);
-    setSplitGenerating(true);
-    setSplitStage("本地分集处理中：正在按标题/段落切分…");
     setUiNote("");
-    splitGenerationIdRef.current = null;
-
     try {
-      await persistEpisodeSplitGenerating(null);
-      setSplitStage("本地分集处理中：正在生成分集方案…");
-      const res = await fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/script-draft/local-split`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sourceFingerprint: episodeSplit.sourceFingerprint ?? undefined,
-          }),
-        },
-      );
-      const payload = (await res.json()) as {
-        error?: string;
-        draft?: ScriptDraft;
-        warnings?: string[];
-        mode?: string;
-      };
-      if (!res.ok) {
-        throw new Error(payload.error ?? "本地分集失败");
-      }
-      if (payload.draft) {
-        applyDraftToState(payload.draft, draftSetters);
-      }
-      const warn =
-        payload.warnings && payload.warnings.length > 0
-          ? `（${payload.warnings.slice(0, 2).join("；")}）`
-          : "";
-      setUiNote(
-        `本地分集完成${payload.mode === "blocks" ? "（按段落均分）" : "（按标题）"}，请核对各集后确认剧本。${warn}`,
-      );
+      const note = await runLocalSplit({
+        body: {},
+        stageMessage: "正在自动生成分集方案…",
+      });
+      setUiNote(note);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "分集失败，请稍后重试";
-      setUiNote(message);
-      const failedSplit: ScriptEpisodeSplitState = {
-        ...(episodeSplit ?? emptyEpisodeSplitState()),
-        status: "failed",
-        generationId: null,
-        errorMessage: message,
-      };
-      setEpisodeSplit(failedSplit);
-      try {
-        await fetch(
-          `/api/projects/${encodeURIComponent(projectId)}/script-draft`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              projectId,
-              sourceFile,
-              sourceText,
-              preambleNotes,
-              sourceImport,
-              novelTask,
-              episodes,
-              selectedId,
-              listPage,
-              splitConfig,
-              novelOpen,
-              episodeSplit: failedSplit,
-            }),
-          },
-        );
-      } catch {
-        /* keep local failed state */
+      if (message !== "已取消" && message !== "分集进行中，请稍候") {
+        setUiNote(`自动分集失败，请点击重新分集。${message}`);
       }
-    } finally {
-      setSplitGenerating(false);
-      setSplitStage("");
     }
   }, [
-    draftSetters,
-    episodeSplit,
-    episodes,
-    listPage,
-    novelOpen,
-    novelTask,
-    persistEpisodeSplitGenerating,
-    preambleNotes,
-    projectId,
-    selectedId,
-    sourceFile,
-    sourceImport,
+    confirmingImport,
+    importing,
+    runLocalSplit,
     sourceText,
-    splitConfig,
-    splitGenerating,
   ]);
 
   const handleCancelSplit = useCallback(async () => {
+    splitRequestSeqRef.current += 1;
+    splitInFlightRef.current = false;
     setSplitGenerating(false);
     setSplitStage("");
     const resetSplit = emptyEpisodeSplitState();
@@ -593,7 +587,7 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
 
   const handleConfirmSplit = useCallback(() => {
     setSplitOpen(false);
-    setUiNote("手动分集规则仅作备用，请优先使用「分集」本地分集。");
+    setUiNote("手动分集规则仅作备用；确认导入后将自动生成分集方案。");
     void splitScriptEpisodes({
       projectId,
       ...splitConfig,
@@ -850,9 +844,6 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
     !splitGenerating &&
     !importing &&
     !confirmingImport;
-  const splitDone =
-    (episodeSplit.status === "review" && proposedEpisodes.length > 0) ||
-    (episodeSplit.status === "confirmed" && hasFormalEpisodes);
   const replacing = hasFormalEpisodes || Boolean(sourceText?.trim());
   const showSplitReview =
     splitInReview ||
@@ -864,7 +855,7 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
     ? undefined
     : splitInReview
       ? "确认分集方案并进入资产设计"
-      : "请先导入源文本并完成本地分集";
+      : "请先导入源文本；确认导入后将自动生成分集方案";
 
   return (
     <div className="scw-script">
@@ -889,7 +880,13 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
             <button
               type="button"
               className={`scs-btn scs-btn-primary scs-head__save ${saveBounce.bounceClass}`}
-              disabled={saving || !hydrated || importing || confirmingImport}
+              disabled={
+                saving ||
+                !hydrated ||
+                importing ||
+                confirmingImport ||
+                splitGenerating
+              }
               onClick={() => {
                 saveBounce.trigger();
                 void handleSavePage();
@@ -906,20 +903,18 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
             <h2>剧本输入</h2>
             <ScriptUploadPanel
               file={sourceFile}
-              canSplit={canSplit}
-              splitDone={splitDone}
               importing={importing || confirmingImport || splitGenerating}
               onScriptFile={(file) => {
                 void handleScriptFile(file);
               }}
               onClientError={(message) => {
                 importSeqRef.current += 1;
+                splitRequestSeqRef.current += 1;
+                splitInFlightRef.current = false;
+                setSplitGenerating(false);
+                setSplitStage("");
                 setImportPreview(null);
                 setUiNote(message);
-              }}
-              onOpenSplit={() => {
-                splitBounce.trigger();
-                void handleStartSplit();
               }}
             />
             {splitGenerating ? (
@@ -976,7 +971,7 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
                       ? "请在中间选择集数，右侧核对正文。"
                       : hasFormalEpisodes
                         ? "已进入剧本读取处理，请在中间选择集数。"
-                        : "请先完成本地分集。",
+                        : "剧本导入后会自动分集。",
                 );
               }}
             />
@@ -1090,7 +1085,7 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
             <span className="scs-req-star" aria-hidden>
               *
             </span>
-            先导入源文本、本地分集并确认方案
+            确认导入后将自动分集，核对方案后再确认剧本
           </p>
         ) : null}
         <button

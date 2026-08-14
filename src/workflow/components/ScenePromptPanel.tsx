@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ArrowUp } from "lucide-react";
+import { safeRandomUUID } from "@/lib/safe-random-id";
 import { GlassSendButton, glass } from "@/workflow/components/glass-ui";
 import {
   GenerationHistoryButton,
@@ -78,7 +79,7 @@ export function ScenePromptPanel({ nodeId }: Props) {
         prompt: trimmed,
       });
       const viewpoint = {
-        id: `vp-${crypto.randomUUID().slice(0, 8)}`,
+        id: `vp-${safeRandomUUID().slice(0, 8)}`,
         tag: "custom" as const,
         label: "AI 生成",
         assetId: result.asset.id,

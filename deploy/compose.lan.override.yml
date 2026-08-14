@@ -1,13 +1,21 @@
 ﻿# LAN overlay: build from this enterprise-spaces tree (current feature work).
+# Prefer starting from infinite-canvas/deploy/start-lan.ps1 which always pairs
+# compose.remote.yml + compose.lan.override.yml and stamps BUILD_REVISION.
 services:
   web:
     build:
       context: ..
       dockerfile: Dockerfile.lan
+      args:
+        BUILD_SOURCE: infinite-canvas-enterprise-spaces
+        BUILD_REVISION: ${BUILD_REVISION:-unknown}
     environment:
       AUTH_SECRET: ${AUTH_SECRET:-infinite-canvas-dev-secret-change-me}
       AI_CONFIG_ENCRYPTION_KEY: ${AI_CONFIG_ENCRYPTION_KEY:-}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      BUILD_SOURCE: infinite-canvas-enterprise-spaces
+      BUILD_REVISION: ${BUILD_REVISION:-unknown}
+      SCRIPT_ASSET_DESIGN_TIMEOUT_MS: "${SCRIPT_ASSET_DESIGN_TIMEOUT_MS:-600000}"
     ports:
       - "${WEB_PORT:-3080}:3000"
   api:

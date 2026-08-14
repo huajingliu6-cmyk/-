@@ -91,6 +91,7 @@ describe("script-draft import-txt + persist", () => {
       name: "s1",
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const text = "第1集：初遇\n甲\n\n第2集：冲突\n乙\n\n第3集：转折\n丙";
@@ -128,6 +129,7 @@ describe("script-draft import-txt + persist", () => {
       name: "s2",
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const ok = await importTxt(
@@ -175,6 +177,7 @@ describe("script-draft import-txt + persist", () => {
       name: "s3",
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const pid = project.projectId;
@@ -212,6 +215,7 @@ describe("script-draft import-txt + persist", () => {
       name: "s4",
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const pid = project.projectId;
@@ -429,6 +433,7 @@ describe("script-draft import-txt + persist", () => {
       name: "s5",
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await saveScriptDraft({
@@ -468,6 +473,7 @@ describe("script-draft import-txt + persist", () => {
       name: "pa",
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     vi.mocked(requireSessionUser).mockResolvedValue({
@@ -478,6 +484,7 @@ describe("script-draft import-txt + persist", () => {
       name: "pb",
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     vi.mocked(requireSessionUser).mockResolvedValue({

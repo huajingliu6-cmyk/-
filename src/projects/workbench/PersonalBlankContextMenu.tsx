@@ -3,6 +3,11 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Plus } from "lucide-react";
+import {
+  clampPersonalBlankMenuPosition,
+  PERSONAL_BLANK_MENU_HEIGHT,
+  PERSONAL_BLANK_MENU_WIDTH,
+} from "@/projects/workbench/personal-blank-context";
 
 export type PersonalBlankContextMenuState = {
   x: number;
@@ -15,9 +20,6 @@ type Props = {
   onClose: () => void;
   onCreate: () => void;
 };
-
-const MENU_WIDTH = 200;
-const MENU_HEIGHT = 52;
 
 export function PersonalBlankContextMenu({
   menu,
@@ -48,10 +50,13 @@ export function PersonalBlankContextMenu({
   }, [menu, onClose]);
 
   if (!menu || typeof document === "undefined") return null;
-  const pos = {
-    left: Math.max(8, Math.min(menu.x, window.innerWidth - MENU_WIDTH - 8)),
-    top: Math.max(8, Math.min(menu.y, window.innerHeight - MENU_HEIGHT - 8)),
-  };
+  const pos = clampPersonalBlankMenuPosition(menu.x, menu.y, {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }, {
+    width: PERSONAL_BLANK_MENU_WIDTH,
+    height: PERSONAL_BLANK_MENU_HEIGHT,
+  });
 
   return createPortal(
     <div
@@ -65,7 +70,7 @@ export function PersonalBlankContextMenu({
       <button
         type="button"
         role="menuitem"
-        className="wb-context-menu__item"
+        className={`wb-context-menu__item${!canCreate ? " is-disabled" : ""}`}
         disabled={!canCreate}
         data-testid="personal-blank-ctx-create"
         onClick={() => {

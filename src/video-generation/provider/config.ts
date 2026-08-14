@@ -261,7 +261,7 @@ export function assertHttpVideoConfigReady(
     return {
       ok: false,
       code: "MISSING_HTTP_VIDEO_ENDPOINT",
-      message: "未配置视频镜头 API 地址，请管理员在「管理 API」中填写",
+      message: "未配置视频镜头 API 地址，请管理员在「系统管理 → API 接口」中填写",
     };
   }
   if (isInvalidGenerationApiUrl(config.httpApiUrl ?? "")) {
@@ -279,7 +279,7 @@ export function assertHttpVideoConfigReady(
         ok: false,
         code: "MISSING_HTTP_VIDEO_API_KEY",
         message:
-          "未配置有效的视频镜头 API Key（不要把接口地址填进密钥栏）。请管理员在「管理 API」中填写方舟 Key 并保存",
+          "未配置有效的视频镜头 API Key（不要把接口地址填进密钥栏）。请管理员在「系统管理 → API 接口」中填写方舟 Key 并保存",
       };
     }
   }

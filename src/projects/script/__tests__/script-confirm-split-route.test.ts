@@ -132,6 +132,7 @@ describe("script confirm-split route", () => {
       name: "split-test",
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const sourceText =
@@ -151,6 +152,7 @@ describe("script confirm-split route", () => {
       name: "split-test-2",
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const sourceText =
@@ -182,6 +184,7 @@ describe("script confirm-split route", () => {
       name: "split-test-3",
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const sourceText =
@@ -208,6 +211,7 @@ describe("script confirm-split route", () => {
       name: "split-test-4",
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     const sourceText =

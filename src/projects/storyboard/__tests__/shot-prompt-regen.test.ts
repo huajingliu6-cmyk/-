@@ -259,6 +259,7 @@ describe("shot prompt regenerate + NOT_REQUIRED", () => {
       name: `regen-${Date.now()}`,
       creationSource: "story",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
 

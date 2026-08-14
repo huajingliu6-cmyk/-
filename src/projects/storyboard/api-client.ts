@@ -184,9 +184,14 @@ export async function generateStoryboard(
       body: JSON.stringify({ idempotencyKey }),
     },
   );
-  const data = (await res.json()) as {
+  const data = (await res.json().catch(() => ({}))) as {
     production?: EpisodeProduction;
     error?: string;
+    code?: string;
+    warningCode?: string;
+    generatedCount?: number;
+    unmatchedCount?: number;
+    unmatchedShotIds?: string[];
   };
   if (!res.ok) {
     if (res.status === 409 && data.production) {
@@ -196,11 +201,42 @@ export async function generateStoryboard(
       );
     }
     // Failed generate persists generation_failed on the production — sync it.
-    if (data.production) return data.production;
+    if (data.production) {
+      const code = data.code;
+      if (code === "STORYBOARD_MODEL_RESPONSE_EMPTY") {
+        data.production = {
+          ...data.production,
+          generationError: data.error ?? "模型未返回分镜提示词正文",
+        };
+      } else if (code === "STORYBOARD_MODEL_RESPONSE_UNPARSEABLE") {
+        data.production = {
+          ...data.production,
+          generationError: data.error ?? "模型返回无法解析为分镜提示词",
+        };
+      } else if (code === "STORYBOARD_PROMPTS_NOT_MATCHED") {
+        data.production = {
+          ...data.production,
+          generationError: data.error ?? "模型返回中未匹配到任何镜头提示词",
+        };
+      }
+      return data.production;
+    }
     throw new Error(data.error ?? `请求失败 (${res.status})`);
   }
   if (!data.production) {
     throw new Error("分镜生成响应无效");
+  }
+  if (
+    data.warningCode === "STORYBOARD_PROMPTS_PARTIALLY_MATCHED" &&
+    typeof data.generatedCount === "number" &&
+    typeof data.unmatchedCount === "number"
+  ) {
+    return {
+      ...data.production,
+      generationError:
+        data.production.generationError ||
+        `已生成 ${data.generatedCount} 个镜头，${data.unmatchedCount} 个镜头未匹配，可重试未完成镜头。`,
+    };
   }
   return data.production;
 }

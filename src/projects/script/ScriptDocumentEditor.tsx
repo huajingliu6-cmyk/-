@@ -35,7 +35,7 @@ export function ScriptDocumentEditor({
         <div className="scs-status-card">
           <p className="scs-hint" style={{ margin: 0 }}>
             {hasSourceText && splitStatus !== "confirmed"
-              ? "源文本已导入。请使用「分集」生成方案，在中间选择集数后于此处核对正文。"
+              ? "源文本已导入。确认导入后将自动生成分集方案；在中间选择集数后于此处核对正文。"
               : "请在中间选择某一集后，在此阅读与修改正文。"}
           </p>
         </div>

@@ -80,6 +80,7 @@ describe("story text-generations integration", () => {
       name: "s1",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
     await saveStoryDraft({
@@ -180,6 +181,7 @@ describe("story text-generations integration", () => {
       name: "s2",
       creationSource: "script-upload",
       projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
 

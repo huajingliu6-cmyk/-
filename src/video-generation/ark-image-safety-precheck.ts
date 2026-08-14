@@ -211,7 +211,7 @@ export async function callArkVisionImagePrecheck(params: {
     return {
       status: "check_failed",
       checkedAt: now,
-      reason: "未配置方舟图片预检（可在管理 API 配置 video-ref-precheck）",
+      reason: "未配置方舟图片预检（可在系统管理 → API 接口配置 video-ref-precheck）",
       modelId: params.runtime.modelId,
     };
   }
@@ -262,12 +262,12 @@ export async function callArkVisionImagePrecheck(params: {
       let reason = `预检请求失败（${res.status}）`;
       if (/not activated|未开通|activate the model/i.test(arkMsg)) {
         reason =
-          "预检模型未开通：请到火山方舟控制台开通图片理解模型，并在「管理 API → 视频参考图预检」填写可用模型 ID";
+          "预检模型未开通：请到火山方舟控制台开通图片理解模型，并在「系统管理 → API 接口 → 视频参考图预检」填写可用模型 ID";
       } else if (
         /does not exist|do not have access|模型不存在|无访问权限/i.test(arkMsg)
       ) {
         reason =
-          "预检模型不可用：请到方舟控制台复制可用 VLM / 推理接入点 ID，填入「管理 API → 视频参考图预检 → 模型」";
+          "预检模型不可用：请到方舟控制台复制可用 VLM / 推理接入点 ID，填入「系统管理 → API 接口 → 视频参考图预检 → 模型」";
       } else if (arkMsg) {
         reason = `预检请求失败（${res.status}）：${arkMsg.slice(0, 80)}`;
       }

@@ -240,8 +240,8 @@ export async function generateCharacterMedia(
     if (!endpoint) {
       throw new Error(
         request.kind === "appearance"
-          ? "未配置角色外貌 API 地址，请管理员在「管理 API」中填写"
-          : "未配置角色声音 API 地址，请管理员在「管理 API」中填写",
+          ? "未配置角色外貌 API 地址，请管理员在「系统管理 → API 接口」中填写"
+          : "未配置角色声音 API 地址，请管理员在「系统管理 → API 接口」中填写",
       );
     }
 
@@ -317,7 +317,7 @@ export async function generateCharacterMedia(
       provider: "mock",
       mode: "mock",
       notice:
-        "当前为本地演示生成（未连接真实图片服务）。管理员可在右上角账户 → 管理 API 中接入外貌生成接口。",
+        "当前为本地演示生成（未连接真实图片服务）。管理员可在「系统管理 → API 接口」接入外貌生成接口。",
     };
   }
 
@@ -343,6 +343,6 @@ export async function generateCharacterMedia(
     provider: "mock",
     mode: "mock",
     notice:
-      "当前为本地演示生成（未连接真实声音模型）。管理员可在右上角账户 → 管理 API 中接入声音生成接口。",
+      "当前为本地演示生成（未连接真实声音模型）。管理员可在「系统管理 → API 接口」接入声音生成接口。",
   };
 }
