@@ -23,14 +23,14 @@ const revision =
   "unknown";
 const source =
   (process.env.BUILD_SOURCE || "").trim() ||
-  "infinite-canvas-enterprise-spaces";
+  "infinite-canvas";
 const builtAt = new Date().toISOString();
 
 const info = {
   source,
   revision,
   builtAt,
-  worktree: "infinite-canvas-enterprise-spaces",
+  worktree: "infinite-canvas",
 };
 
 if (!existsSync(publicDir)) {
