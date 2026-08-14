@@ -37,6 +37,8 @@ export function AuthenticatedAppShell({
   const auth = useAuthUser();
   const router = useRouter();
   const pathname = usePathname();
+  const isAdminConsole =
+    pathname === "/app/admin" || pathname.startsWith("/app/admin/");
 
   useEffect(() => {
     // 仅确认 guest 时踢回；loading 期间不要误判
@@ -62,8 +64,8 @@ export function AuthenticatedAppShell({
     <div className="shell-app flex h-full min-h-full flex-col overflow-hidden bg-[#070811]">
       {auth.status === "authenticated" ? (
         <>
-          <AuthenticatedHeader user={auth.user} />
-          <GenerationBusyGuard />
+          {isAdminConsole ? null : <AuthenticatedHeader user={auth.user} />}
+          {isAdminConsole ? null : <GenerationBusyGuard />}
         </>
       ) : (
         <ShellHeaderPlaceholder />

@@ -11,21 +11,12 @@ import {
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import dynamic from "next/dynamic";
 import type { AuthUser } from "@/auth/types";
 import {
   confirmGenerationLeaveIfNeeded,
   isGenerationBusy,
 } from "@/shell/generation-busy";
 import { useAuthSession } from "@/shell/AuthSessionProvider";
-
-const ApiManagePanelLazy = dynamic(
-  () =>
-    import("@/auth/ApiManagePanel").then((mod) => ({
-      default: mod.ApiManagePanel,
-    })),
-  { ssr: false },
-);
 
 type AuthUserMenuProps = {
   /** Prefer shell-provided user to avoid a duplicate /api/auth/me. */
@@ -39,7 +30,6 @@ export function AuthUserMenu({ user: initialUser }: AuthUserMenuProps) {
   const [user, setUser] = useState(initialUser);
   const [menuOpen, setMenuOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  const [apiOpen, setApiOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [displayName, setDisplayName] = useState(
     () => initialUser.displayName || initialUser.username,
@@ -69,17 +59,6 @@ export function AuthUserMenu({ user: initialUser }: AuthUserMenuProps) {
     window.addEventListener("pointerdown", onPointerDown, true);
     return () => window.removeEventListener("pointerdown", onPointerDown, true);
   }, [menuOpen]);
-
-  useEffect(() => {
-    const onOpenApiManage = () => {
-      setMenuOpen(false);
-      setAccountOpen(false);
-      setApiOpen(true);
-    };
-    window.addEventListener("lumina:open-api-manage", onOpenApiManage);
-    return () =>
-      window.removeEventListener("lumina:open-api-manage", onOpenApiManage);
-  }, []);
 
   const onLogout = async () => {
     if (isGenerationBusy()) {
@@ -245,11 +224,11 @@ export function AuthUserMenu({ user: initialUser }: AuthUserMenuProps) {
                       className="account-dialog__button account-dialog__button--secondary account-dialog__api-button"
                       onClick={() => {
                         setAccountOpen(false);
-                        setApiOpen(true);
+                        router.push("/app/admin");
                       }}
                     >
                       <Shield aria-hidden />
-                      {"管理 API"}
+                      {"系统管理"}
                     </button>
                   )}
                 </aside>
@@ -423,11 +402,11 @@ export function AuthUserMenu({ user: initialUser }: AuthUserMenuProps) {
                 className="flex w-full items-center gap-2 border-t border-zinc-800 px-3 py-2.5 text-left text-xs text-amber-100 hover:bg-zinc-900"
                 onClick={() => {
                   setMenuOpen(false);
-                  setApiOpen(true);
+                  router.push("/app/admin");
                 }}
               >
-                <KeyRound className="h-3.5 w-3.5 text-amber-300" />
-                管理 API
+                <Shield className="h-3.5 w-3.5 text-amber-300" />
+                系统管理
               </button>
             )}
           </div>
@@ -435,8 +414,6 @@ export function AuthUserMenu({ user: initialUser }: AuthUserMenuProps) {
       </div>
 
       {accountDialog}
-
-      <ApiManagePanelLazy open={apiOpen} onClose={() => setApiOpen(false)} />
     </>
   );
 }

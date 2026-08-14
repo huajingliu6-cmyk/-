@@ -1,14 +1,23 @@
-﻿# Redirect LAN build/run to enterprise-spaces worktree where credit+UI updates landed.
+﻿# Redirect LAN build/run to enterprise-spaces worktree (REQUIRED for recent fixes).
+# Always pair with compose.remote.yml:
+#   docker compose --env-file .env.lan -f compose.remote.yml -f compose.lan.override.yml up -d --build
 services:
   web:
     build:
       context: ../../infinite-canvas-enterprise-spaces
       dockerfile: Dockerfile.lan
+      args:
+        BUILD_SOURCE: infinite-canvas-enterprise-spaces
+        BUILD_REVISION: ${BUILD_REVISION:-unknown}
     environment:
       AUTH_SECRET: ${AUTH_SECRET:-infinite-canvas-dev-secret-change-me}
       AI_CONFIG_ENCRYPTION_KEY: ${AI_CONFIG_ENCRYPTION_KEY:-}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
-      # LAN: expose host desktop voice library (read-only mount) for 音色选择
+      BUILD_SOURCE: infinite-canvas-enterprise-spaces
+      BUILD_REVISION: ${BUILD_REVISION:-unknown}
+      # Full-script asset extract timeout (ms). Default 600000 = 10 minutes.
+      SCRIPT_ASSET_DESIGN_TIMEOUT_MS: "${SCRIPT_ASSET_DESIGN_TIMEOUT_MS:-600000}"
+      # LAN: expose host desktop voice library (read-only mount) for voice picker
       LOCAL_VOICE_LIBRARY_DIR: /var/lib/infinite-canvas/local-voice-library
       LOCAL_VOICE_LIBRARY_ALLOW_IN_REMOTE: "true"
     volumes:

@@ -160,7 +160,7 @@ export default function ProjectsPage() {
         return;
       }
       if (action === "rules") {
-        window.dispatchEvent(new CustomEvent("lumina:open-api-manage"));
+        router.push("/app/admin?view=rules");
         return;
       }
       if (action === "rename") {
@@ -188,7 +188,7 @@ export default function ProjectsPage() {
         }
       }
     },
-    [openProject, projects],
+    [openProject, projects, router],
   );
 
   const submitRename = useCallback(async () => {

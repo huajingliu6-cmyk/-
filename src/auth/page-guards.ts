@@ -5,6 +5,7 @@ import {
   requireProjectManagementAccess,
   requireProjectManagementProjectAccess,
   requireStoryboardAccess,
+  requireSystemAdmin,
   requireVideoCanvasAccess,
   requireWorkspaceAssetAccess,
   requireWorkspaceProjectAccess,
@@ -21,6 +22,15 @@ export async function assertAuthenticatedPage() {
     redirect("/?login=1");
   }
   return session.user;
+}
+
+export async function assertSystemAdminPage() {
+  await assertAuthenticatedPage();
+  const gated = await requireSystemAdmin();
+  if (!gated.ok) {
+    redirect(`${APP_WORKBENCH_PATH}?denied=system-admin`);
+  }
+  return gated.user;
 }
 
 export async function assertProjectManagementPage() {
