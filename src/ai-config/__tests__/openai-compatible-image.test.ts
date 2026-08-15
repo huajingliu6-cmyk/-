@@ -3,7 +3,9 @@ import {
   mapImageSize,
   normalizeImageAspectRatio,
   resolveOpenAiCompatibleImageEndpoint,
+  resolveOpenAiCompatibleImageEditEndpoint,
   generateOpenAiCompatibleImages,
+  editOpenAiCompatibleImages,
 } from "@/ai-config/openai-compatible-image";
 
 describe("openai-compatible image endpoint", () => {
@@ -147,6 +149,158 @@ describe("openai-compatible image endpoint", () => {
       quality: "low",
     });
 
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("openai-compatible image edits", () => {
+  it("resolves edits endpoint from base and generations URLs", () => {
+    expect(
+      resolveOpenAiCompatibleImageEditEndpoint("https://image.codesonline.dev/v1"),
+    ).toBe("https://image.codesonline.dev/v1/images/edits");
+    expect(
+      resolveOpenAiCompatibleImageEditEndpoint(
+        "https://image.codesonline.dev/v1/images/generations",
+      ),
+    ).toBe("https://image.codesonline.dev/v1/images/edits");
+    expect(
+      resolveOpenAiCompatibleImageEditEndpoint(
+        "https://image.codesonline.dev/v1/images/edits",
+      ),
+    ).toBe("https://image.codesonline.dev/v1/images/edits");
+  });
+
+  it("rejects dedicated text2image endpoints without falling back", () => {
+    expect(() =>
+      resolveOpenAiCompatibleImageEditEndpoint(
+        "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis",
+      ),
+    ).toThrow(/不支持图生图/);
+    try {
+      resolveOpenAiCompatibleImageEditEndpoint(
+        "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis",
+      );
+    } catch (error) {
+      expect(error).toMatchObject({ code: "IMAGE_EDIT_NOT_SUPPORTED" });
+    }
+  });
+
+  it("posts multipart /images/edits with image + image[] and numbered prompt", async () => {
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const png2 = Buffer.from(png);
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe("https://image.codesonline.dev/v1/images/edits");
+      expect(init?.method).toBe("POST");
+      const body = init?.body;
+      expect(body).toBeInstanceOf(FormData);
+      const form = body as FormData;
+      expect(String(form.get("prompt"))).toContain("第1张至第2张");
+      expect(String(form.get("prompt"))).toContain("保留第1张的人脸");
+      expect(form.get("n")).toBe("2");
+      expect(form.get("quality")).toBe("high");
+      expect(form.get("size")).toBe("16:9");
+      expect(form.get("upscale")).toBe("4k");
+      expect(form.get("model")).toBe("gpt-image-2");
+      expect(form.get("aspect_ratio")).toBeNull();
+      expect(form.get("resolution")).toBeNull();
+      const image = form.get("image");
+      expect(image).toBeInstanceOf(Blob);
+      const imageBuf = Buffer.from(await (image as Blob).arrayBuffer());
+      expect(imageBuf.equals(png)).toBe(true);
+      const extras = form.getAll("image[]");
+      expect(extras).toHaveLength(1);
+      const extraBuf = Buffer.from(await (extras[0] as Blob).arrayBuffer());
+      expect(extraBuf.equals(png2)).toBe(true);
+      return Response.json({
+        data: [
+          { b64_json: Buffer.from("out1").toString("base64") },
+          { b64_json: Buffer.from("out2").toString("base64") },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await editOpenAiCompatibleImages({
+      endpoint: "https://image.codesonline.dev/v1",
+      apiKey: "k",
+      model: "gpt-image-2",
+      prompt: "保留第1张的人脸",
+      aspectRatio: "16:9",
+      resolution: "4K",
+      quality: "high",
+      count: 2,
+      images: [
+        { buffer: png, mimeType: "image/png", fileName: "ref1.png" },
+        { buffer: png2, mimeType: "image/png", fileName: "ref2.png" },
+      ],
+    });
+
+    expect(result.images).toHaveLength(2);
+    expect(result.images[0]?.buffer.toString()).toBe("out1");
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps /images/edits endpoint when switching models and surfaces model_not_allowed", async () => {
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const models = [
+      "gpt-image-2",
+      "gpt-image-2-adobe",
+      "gemini-banana-2.0-pro",
+    ] as const;
+
+    for (const model of models) {
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        expect(url).toBe("https://image.codesonline.dev/v1/images/edits");
+        const form = init?.body as FormData;
+        expect(form.get("model")).toBe(model);
+        expect(form.get("image")).toBeInstanceOf(Blob);
+        expect(form.getAll("image[]")).toHaveLength(0);
+        return Response.json({
+          data: [{ b64_json: Buffer.from("ok").toString("base64") }],
+        });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      await editOpenAiCompatibleImages({
+        endpoint: "https://image.codesonline.dev/v1",
+        apiKey: "k",
+        model,
+        prompt: "改一下",
+        images: [{ buffer: png, mimeType: "image/png", fileName: "a.png" }],
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      vi.unstubAllGlobals();
+    }
+
+    const denied = vi.fn(async () =>
+      Response.json(
+        {
+          error: {
+            code: "model_not_allowed",
+            message: "model not allowed",
+          },
+        },
+        { status: 403 },
+      ),
+    );
+    vi.stubGlobal("fetch", denied);
+    await expect(
+      editOpenAiCompatibleImages({
+        endpoint: "https://image.codesonline.dev/v1",
+        apiKey: "k",
+        model: "gemini-banana-2.0-pro",
+        prompt: "改一下",
+        images: [{ buffer: png, mimeType: "image/png", fileName: "a.png" }],
+      }),
+    ).rejects.toThrow(
+      "当前 API Key 无权调用模型：gemini-banana-2.0-pro，请更换模型或联系管理员配置权限。",
+    );
+    expect(denied).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });
 });

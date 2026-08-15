@@ -78,6 +78,7 @@ export async function POST(request: Request, context: RouteContext) {
       expectedRevision,
       userId: gated.user.id,
       fingerprint,
+      requireGeneratedMedia: project.approvalEnabled,
       ...(itemId ? { itemId } : {}),
     }),
   );

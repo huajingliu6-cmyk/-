@@ -112,7 +112,7 @@ export function NotificationBell() {
     requestClose();
     if (note.type === "asset_approval_submitted") {
       router.push(
-        `/app/projects/${encodeURIComponent(note.projectId)}/assets/design?approvalSubmissionId=${encodeURIComponent(note.submissionId)}&episodeId=${encodeURIComponent(note.episodeId)}`,
+        `/app/projects/${encodeURIComponent(note.projectId)}/assets/library?approvalSubmissionId=${encodeURIComponent(note.submissionId)}&episodeId=${encodeURIComponent(note.episodeId)}`,
       );
       return;
     }
@@ -121,7 +121,7 @@ export function NotificationBell() {
       note.type === "asset_approval_rejected"
     ) {
       router.push(
-        `/app/workspace/projects/${encodeURIComponent(note.projectId)}/assets/design?episodeId=${encodeURIComponent(note.episodeId)}`,
+        `/app/workspace/projects/${encodeURIComponent(note.projectId)}/assets/library?episodeId=${encodeURIComponent(note.episodeId)}`,
       );
       return;
     }

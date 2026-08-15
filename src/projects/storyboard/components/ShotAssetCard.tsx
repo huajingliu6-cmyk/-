@@ -14,6 +14,8 @@ type Props = {
   disabled?: boolean;
   onRemove?: () => void;
   onSelectMedia?: (mediaId: string) => void;
+  /** 右键打开图生图二次编辑（仅有图时） */
+  onEditAsset?: (asset: PickerAsset) => void;
 };
 
 function safetyBadge(status: PickerAsset["videoRefSafetyStatus"]): {
@@ -47,6 +49,7 @@ export function ShotAssetCard({
   disabled,
   onRemove,
   onSelectMedia,
+  onEditAsset,
 }: Props) {
   const [broken, setBroken] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -65,6 +68,13 @@ export function ShotAssetCard({
         className={`sbw-asset-card__thumb is-${asset.kind}${
           canOpenLightbox ? " is-zoomable" : ""
         }`}
+        data-testid={`shot-asset-thumb-${asset.id}`}
+        onContextMenu={(event) => {
+          if (!showImage || disabled || !onEditAsset) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onEditAsset(asset);
+        }}
       >
         {showImage ? (
           <button

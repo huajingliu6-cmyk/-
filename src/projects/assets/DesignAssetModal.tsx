@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Download, History, ShieldCheck } from "lucide-react";
+import { Download, History, ImagePlus, ShieldCheck, X } from "lucide-react";
 import type {
   AssetDesignPromptHistoryEntry,
   EpisodeAssetDesignItem,
@@ -37,11 +37,19 @@ import {
   formatDesignImagePreviewTitle,
   type DesignImageGenerationOptions,
 } from "@/projects/assets/episode-design/image-generation-options";
+import { DEFAULT_DESIGN_PROMPT_MODEL_ID } from "@/projects/assets/episode-design/design-prompt-models";
 import {
-  DEFAULT_DESIGN_PROMPT_MODEL_ID,
-  DESIGN_PROMPT_MODELS,
-  type DesignPromptModelId,
-} from "@/projects/assets/episode-design/design-prompt-models";
+  DEFAULT_DESIGN_IMAGE_MODEL_ID,
+  DESIGN_IMAGE_MODELS,
+  isDesignImageModelId,
+  type DesignImageModelId,
+} from "@/projects/assets/episode-design/image-generation-models";
+import {
+  DESIGN_MULTI_ANGLE_MODES,
+  isDesignMultiAngleMode,
+  type DesignMultiAngleMode,
+} from "@/projects/assets/episode-design/multi-angle-prompts";
+import { validateProjectAssetImageFileClient } from "@/projects/assets/upload-asset-image";
 import {
   GlassSelect,
   type GlassSelectOption,
@@ -65,11 +73,59 @@ const DESIGN_IMAGE_COUNT_OPTIONS: GlassSelectOption[] =
     label: `${value}张`,
   }));
 
-const DESIGN_PROMPT_MODEL_OPTIONS: GlassSelectOption[] =
-  DESIGN_PROMPT_MODELS.map((model) => ({
+const DESIGN_IMAGE_MODEL_OPTIONS: GlassSelectOption[] =
+  DESIGN_IMAGE_MODELS.map((model) => ({
     id: model.id,
     label: model.label,
   }));
+
+const MULTI_ANGLE_NONE = "__none__";
+
+const DESIGN_MULTI_ANGLE_OPTIONS: GlassSelectOption[] = [
+  { id: MULTI_ANGLE_NONE, label: "选择角度…" },
+  ...DESIGN_MULTI_ANGLE_MODES.map((mode) => ({
+    id: mode.id,
+    label: mode.label,
+  })),
+];
+
+const REFERENCE_SLOT_COUNT = 6;
+
+type ReferenceSlot =
+  | {
+      source: "generated";
+      mediaId: string;
+      previewUrl: string;
+    }
+  | {
+      source: "upload";
+      file: File;
+      previewUrl: string;
+    }
+  | null;
+
+function emptyReferenceSlots(): ReferenceSlot[] {
+  return Array.from({ length: REFERENCE_SLOT_COUNT }, () => null);
+}
+
+function compactReferenceSlots(slots: ReferenceSlot[]): ReferenceSlot[] {
+  const filled = slots.filter((slot): slot is NonNullable<ReferenceSlot> =>
+    Boolean(slot),
+  );
+  return [
+    ...filled,
+    ...Array.from(
+      { length: Math.max(0, REFERENCE_SLOT_COUNT - filled.length) },
+      () => null,
+    ),
+  ].slice(0, REFERENCE_SLOT_COUNT);
+}
+
+function revokeUploadPreview(slot: ReferenceSlot) {
+  if (slot?.source === "upload" && slot.previewUrl.startsWith("blob:")) {
+    URL.revokeObjectURL(slot.previewUrl);
+  }
+}
 
 export type DesignAssetModalProps = {
   open: boolean;
@@ -101,6 +157,10 @@ export type DesignAssetModalProps = {
     itemId: string,
     progress: AssetGenerationProgress | null,
   ) => void;
+  /** Asset-library context keeps the prompt/generation surface but removes image-to-image editing. */
+  hideImageEdit?: boolean;
+  /** Development preview uses the same progress/disabled animation without auth-backed generation. */
+  previewMode?: boolean;
 };
 
 function apiBase(
@@ -149,6 +209,8 @@ function DesignAssetModalBody({
   onAssetGenerated,
   onItemPatched,
   onGenerationProgress,
+  hideImageEdit = false,
+  previewMode = false,
 }: DesignAssetModalBodyProps) {
   const titleId = useId();
   const formalPrompt = resolveFormalDesignPromptText(item);
@@ -156,27 +218,20 @@ function DesignAssetModalBody({
   const serverPromptGenerating = item.designPrompt?.status === "generating";
 
   const [promptText, setPromptText] = useState(formalPrompt);
-  const syncedFormalPromptRef = useRef(formalPrompt);
-  if (formalPrompt !== syncedFormalPromptRef.current) {
-    syncedFormalPromptRef.current = formalPrompt;
+  const [syncedFormalPrompt, setSyncedFormalPrompt] = useState(formalPrompt);
+  if (formalPrompt !== syncedFormalPrompt) {
+    setSyncedFormalPrompt(formalPrompt);
     if (formalPrompt) {
       setPromptText(formalPrompt);
     } else if (!serverPromptGenerating) {
       setPromptText("");
     }
   }
-  const [promptModelId, setPromptModelId] = useState<DesignPromptModelId>(
-    DEFAULT_DESIGN_PROMPT_MODEL_ID,
-  );
   const [promptHistory, setPromptHistory] = useState<
     AssetDesignPromptHistoryEntry[]
   >(item.designPrompt?.history ?? []);
   const [loadingPrompt, setLoadingPrompt] = useState(false);
   const promptBusy = loadingPrompt || serverPromptGenerating;
-  const [requirementOpen, setRequirementOpen] = useState(false);
-  const [requirementDraft, setRequirementDraft] = useState("");
-  const [requirementError, setRequirementError] = useState("");
-  const requirementFieldId = useId();
   const [generatingAsset, setGeneratingAsset] = useState(false);
   const generateBusy = generatingAsset || isGeneratingAsset;
   const autoPromptKeyRef = useRef<string | null>(null);
@@ -190,6 +245,18 @@ function DesignAssetModalBody({
   const [notice, setNotice] = useState("");
   const [imageOptions, setImageOptions] = useState<DesignImageGenerationOptions>(
     DEFAULT_DESIGN_IMAGE_OPTIONS,
+  );
+  const [imageModelId, setImageModelId] = useState<DesignImageModelId>(
+    DEFAULT_DESIGN_IMAGE_MODEL_ID,
+  );
+  const [multiAngleSelect, setMultiAngleSelect] = useState(MULTI_ANGLE_NONE);
+  const [imageEditOpen, setImageEditOpen] = useState(false);
+  const [imageEditPrompt, setImageEditPrompt] = useState("");
+  const [referenceSlots, setReferenceSlots] = useState<ReferenceSlot[]>(
+    emptyReferenceSlots,
+  );
+  const referenceFileInputRefs = useRef<Array<HTMLInputElement | null>>(
+    Array.from({ length: REFERENCE_SLOT_COUNT }, () => null),
   );
   const [precheckBusy, setPrecheckBusy] = useState(false);
   const [videoRefSafety, setVideoRefSafety] = useState<VideoRefSafety | null>(
@@ -361,132 +428,99 @@ function DesignAssetModalBody({
     };
   }, []);
 
-  const regeneratePrompt = useCallback(
-    async (userRequirement: string) => {
-      setLoadingPrompt(true);
-      setError("");
-      setCopyNote("");
-      setRequirementError("");
+  const autoGenerateFormalPrompt = useCallback(async () => {
+    setLoadingPrompt(true);
+    setError("");
+    setCopyNote("");
+    onItemPatched?.(item.id, {
+      ...item,
+      designPrompt: {
+        status: "generating",
+        text: resolveFormalDesignPromptText(item) || "",
+        generationId: item.designPrompt?.generationId ?? null,
+        sourceFingerprint: item.designPrompt?.sourceFingerprint ?? null,
+        generatedAt: item.designPrompt?.generatedAt ?? null,
+        updatedAt: new Date().toISOString(),
+        errorMessage: null,
+        history: item.designPrompt?.history ?? promptHistory,
+      },
+    });
+    try {
+      const result = await requestFormalDesignPromptGenerate({
+        surface,
+        projectId,
+        episodeId,
+        item,
+        userRequirement: "",
+        promptModelId: DEFAULT_DESIGN_PROMPT_MODEL_ID,
+      });
+      const now = new Date().toISOString();
+      const history =
+        result.history.length > 0
+          ? result.history
+          : pushLocalPromptHistory(promptHistory, {
+              text: result.text,
+              generatedAt: now,
+              generationId: result.generationId,
+              source: "regenerate",
+            });
+      setPromptText(result.text);
+      setPromptHistory(history);
+      setSyncedPromptHistoryLen(history.length);
+      setStaleHint(false);
+      onPromptUpdatedRef.current(item.id, result.text, {
+        history,
+        generationId: result.generationId,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "提示词生成失败");
       onItemPatched?.(item.id, {
         ...item,
         designPrompt: {
-          status: "generating",
+          status: "failed",
           text: resolveFormalDesignPromptText(item) || "",
           generationId: item.designPrompt?.generationId ?? null,
           sourceFingerprint: item.designPrompt?.sourceFingerprint ?? null,
           generatedAt: item.designPrompt?.generatedAt ?? null,
           updatedAt: new Date().toISOString(),
-          errorMessage: null,
+          errorMessage: e instanceof Error ? e.message : "提示词生成失败",
           history: item.designPrompt?.history ?? promptHistory,
         },
       });
-      try {
-        const result = await requestFormalDesignPromptGenerate({
-          surface,
-          projectId,
-          episodeId,
-          item,
-          userRequirement,
-          promptModelId,
-        });
-        const now = new Date().toISOString();
-        const history =
-          result.history.length > 0
-            ? result.history
-            : pushLocalPromptHistory(promptHistory, {
-                text: result.text,
-                generatedAt: now,
-                generationId: result.generationId,
-                source: "regenerate",
-              });
-        setPromptText(result.text);
-        setPromptHistory(history);
-        setSyncedPromptHistoryLen(history.length);
-        setStaleHint(false);
-        setRequirementOpen(false);
-        setRequirementDraft("");
-        onPromptUpdatedRef.current(item.id, result.text, {
-          history,
-          generationId: result.generationId,
-        });
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "提示词生成失败");
-        onItemPatched?.(item.id, {
-          ...item,
-          designPrompt: {
-            status: "failed",
-            text: resolveFormalDesignPromptText(item) || "",
-            generationId: item.designPrompt?.generationId ?? null,
-            sourceFingerprint: item.designPrompt?.sourceFingerprint ?? null,
-            generatedAt: item.designPrompt?.generatedAt ?? null,
-            updatedAt: new Date().toISOString(),
-            errorMessage: e instanceof Error ? e.message : "提示词生成失败",
-            history: item.designPrompt?.history ?? promptHistory,
-          },
-        });
-      } finally {
-        setLoadingPrompt(false);
-      }
-    },
-    [
-      item,
-      surface,
-      projectId,
-      episodeId,
-      promptHistory,
-      promptModelId,
-      onItemPatched,
-    ],
-  );
+    } finally {
+      setLoadingPrompt(false);
+    }
+  }, [item, surface, projectId, episodeId, promptHistory, onItemPatched]);
 
-  const regeneratePromptRef = useRef(regeneratePrompt);
+  const autoGenerateFormalPromptRef = useRef(autoGenerateFormalPrompt);
   useEffect(() => {
-    regeneratePromptRef.current = regeneratePrompt;
-  }, [regeneratePrompt]);
+    autoGenerateFormalPromptRef.current = autoGenerateFormalPrompt;
+  }, [autoGenerateFormalPrompt]);
 
-  /** Missing formal prompt: auto-generate once per item+fingerprint+model. */
+  /** Missing formal prompt: auto-generate once per item+fingerprint. */
   useEffect(() => {
     if (!formalPromptMissing) return;
     if (promptText.trim()) return;
-    const key = designPromptAutoGenKey(item, promptModelId);
+    const key = designPromptAutoGenKey(item, DEFAULT_DESIGN_PROMPT_MODEL_ID);
     if (autoPromptKeyRef.current === key) return;
     autoPromptKeyRef.current = key;
     if (serverPromptGenerating) return;
-    void regeneratePromptRef.current("");
-  }, [
-    formalPromptMissing,
-    promptText,
-    item,
-    promptModelId,
-    serverPromptGenerating,
-  ]);
+    void autoGenerateFormalPromptRef.current();
+  }, [formalPromptMissing, promptText, item, serverPromptGenerating]);
 
-  const openRequirementDialog = useCallback(() => {
-    setRequirementDraft("");
-    setRequirementError("");
-    setRequirementOpen(true);
+  const revokeAllUploadPreviews = useCallback((slots: ReferenceSlot[]) => {
+    for (const slot of slots) revokeUploadPreview(slot);
   }, []);
 
-  const handlePromptGenerateClick = useCallback(() => {
-    if (formalPromptMissing) {
-      void regeneratePrompt("");
-      return;
-    }
-    openRequirementDialog();
-  }, [formalPromptMissing, regeneratePrompt, openRequirementDialog]);
-
-  const submitRequirement = useCallback(() => {
-    const trimmed = requirementDraft.trim();
-    if (!trimmed) {
-      setRequirementError("请输入素材要求");
-      return;
-    }
-    if (trimmed.length > 800) {
-      setRequirementError("素材要求最多 800 字");
-      return;
-    }
-    void regeneratePrompt(trimmed);
-  }, [requirementDraft, regeneratePrompt]);
+  const referenceSlotsRef = useRef(referenceSlots);
+  useEffect(() => {
+    referenceSlotsRef.current = referenceSlots;
+  }, [referenceSlots]);
+  useEffect(() => {
+    return () => {
+      revokeAllUploadPreviews(referenceSlotsRef.current);
+    };
+  }, [revokeAllUploadPreviews]);
 
   const handleCopy = useCallback(async () => {
     setCopyNote("");
@@ -549,8 +583,27 @@ function DesignAssetModalBody({
     }
   };
 
-  const handleGenerate = useCallback(async () => {
+  const handleGenerate = useCallback(async (opts?: {
+    multiAngleMode?: DesignMultiAngleMode;
+  }) => {
     if (generateBusy) return;
+    const multiAngleMode = opts?.multiAngleMode;
+    const isMultiAngle = Boolean(multiAngleMode);
+    const activePrompt = imageEditOpen || isMultiAngle
+      ? imageEditPrompt.trim()
+      : promptText.trim();
+    if (!isMultiAngle && !activePrompt) {
+      setError(imageEditOpen ? "请填写二次编辑要求" : "提示词为空，无法生成");
+      return;
+    }
+    if ((imageEditOpen || isMultiAngle) && !referenceSlots.some(Boolean)) {
+      setError(isMultiAngle ? "请先生成或上传场景参考图" : "缺少参考图片");
+      return;
+    }
+    if (isMultiAngle && !referenceSlots[0]) {
+      setError("请先生成或上传场景参考图");
+      return;
+    }
     setGeneratingAsset(true);
     onGeneratingAssetChange?.(item.id, true);
     setError("");
@@ -564,18 +617,68 @@ function DesignAssetModalBody({
       const urls = apiBase(surface, projectId, episodeId, item.id);
       reportProgress({ stage: "submitted", percent: 22 });
       reportProgress({ stage: "generating", percent: 38 });
-      const res = await fetch(urls.generate, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: promptText,
-          idempotencyKey: safeRandomUUID(),
-          confirmPaidGeneration: false,
-          quality: imageOptions.quality,
-          aspectRatio: imageOptions.aspectRatio,
-          count: imageOptions.count,
-        }),
-      });
+
+      if (previewMode) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 1400);
+        });
+        const now = new Date().toISOString();
+        const history = pushLocalPromptHistory(promptHistory, {
+          text: activePrompt,
+          generatedAt: now,
+          generationId: null,
+          source: "generate_asset",
+        });
+        setPromptHistory(history);
+        setSyncedPromptHistoryLen(history.length);
+        onPromptUpdated(item.id, activePrompt, { history });
+        reportProgress({ stage: "completed", percent: 100 });
+        scheduleProgressClear(900);
+        setNotice(`已生成 ${imageOptions.count} 张 · ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio}`);
+        setShowImageHistory(true);
+        return;
+      }
+
+      let res: Response;
+      if (imageEditOpen || isMultiAngle) {
+        const form = new FormData();
+        form.set("mode", "image_to_image");
+        form.set("model", imageModelId);
+        form.set("prompt", activePrompt);
+        form.set("idempotencyKey", safeRandomUUID());
+        form.set("quality", imageOptions.quality);
+        form.set("aspectRatio", imageOptions.aspectRatio);
+        form.set("count", String(imageOptions.count));
+        if (multiAngleMode) {
+          form.set("multiAngleMode", multiAngleMode);
+        }
+        const slotsToSend = multiAngleMode
+          ? referenceSlots.slice(0, 1)
+          : referenceSlots;
+        slotsToSend.forEach((slot, index) => {
+          if (!slot) return;
+          if (slot.source === "generated") {
+            form.set(`referenceMediaId[${index}]`, slot.mediaId);
+          } else {
+            form.set(`referenceImage[${index}]`, slot.file);
+          }
+        });
+        res = await fetch(urls.generate, { method: "POST", body: form });
+      } else {
+        res = await fetch(urls.generate, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: activePrompt,
+            model: imageModelId,
+            idempotencyKey: safeRandomUUID(),
+            confirmPaidGeneration: false,
+            quality: imageOptions.quality,
+            aspectRatio: imageOptions.aspectRatio,
+            count: imageOptions.count,
+          }),
+        });
+      }
       const payload = (await res.json()) as {
         error?: string;
         code?: string;
@@ -590,6 +693,7 @@ function DesignAssetModalBody({
       }
       reportProgress({ stage: "saving", percent: 88 });
       const media = payload.generatedMedia ?? null;
+      const nextMediaId = media?.currentId ?? payload.mediaId ?? null;
       if (media?.currentId) {
         setPickedMediaId(media.currentId);
         setSyncedMediaCurrentId(media.currentId);
@@ -603,19 +707,41 @@ function DesignAssetModalBody({
           mergeMediaIdLists(prev, [payload.mediaId!]),
         );
       }
+      if ((imageEditOpen || isMultiAngle) && nextMediaId) {
+        setReferenceSlots((prev) => {
+          const kept = prev.slice(1);
+          return compactReferenceSlots([
+            {
+              source: "generated",
+              mediaId: nextMediaId,
+              previewUrl: getProjectAssetImageUrl(projectId, nextMediaId, {
+                revision: Date.now(),
+              }),
+            },
+            ...kept,
+          ]);
+        });
+      }
+      if (isMultiAngle) {
+        setMultiAngleSelect(MULTI_ANGLE_NONE);
+      }
       const safety =
         payload.videoRefSafety ?? media?.videoRefSafety ?? null;
       setVideoRefSafety(safety);
       const now = new Date().toISOString();
       const history = pushLocalPromptHistory(promptHistory, {
-        text: promptText,
+        text: activePrompt || promptText,
         generatedAt: now,
         generationId: item.designPrompt?.generationId ?? null,
         source: "generate_asset",
       });
       setPromptHistory(history);
       setSyncedPromptHistoryLen(history.length);
-      onPromptUpdated(item.id, promptText, { history });
+      if (!imageEditOpen && !isMultiAngle) {
+        onPromptUpdated(item.id, activePrompt, { history });
+      } else {
+        onPromptUpdated(item.id, promptText, { history });
+      }
       onAssetGenerated(item.id, media);
       reportProgress({ stage: "completed", percent: 100 });
       scheduleProgressClear(900);
@@ -629,6 +755,9 @@ function DesignAssetModalBody({
       setError(message);
       reportProgress({ stage: "failed", percent: 0, message });
       scheduleProgressClear(2200);
+      if (isMultiAngle) {
+        setMultiAngleSelect(MULTI_ANGLE_NONE);
+      }
     } finally {
       setGeneratingAsset(false);
       onGeneratingAssetChange?.(item.id, false);
@@ -639,16 +768,37 @@ function DesignAssetModalBody({
     projectId,
     episodeId,
     promptText,
+    imageEditOpen,
+    imageEditPrompt,
+    referenceSlots,
+    imageModelId,
     promptHistory,
     imageOptions,
     generateBusy,
     onGeneratingAssetChange,
     onPromptUpdated,
     onAssetGenerated,
-    onGenerationProgress,
     reportProgress,
     scheduleProgressClear,
+    previewMode,
   ]);
+
+  const handleMultiAngleChange = useCallback(
+    (value: string) => {
+      if (value === MULTI_ANGLE_NONE || !isDesignMultiAngleMode(value)) {
+        setMultiAngleSelect(MULTI_ANGLE_NONE);
+        return;
+      }
+      if (!referenceSlots[0]) {
+        setError("请先生成或上传场景参考图");
+        setMultiAngleSelect(MULTI_ANGLE_NONE);
+        return;
+      }
+      setMultiAngleSelect(value);
+      void handleGenerate({ multiAngleMode: value });
+    },
+    [handleGenerate, referenceSlots],
+  );
 
   const handleVideoRefPrecheck = useCallback(async () => {
     if (precheckBusy || generateBusy || !currentMediaId) return;
@@ -686,6 +836,7 @@ function DesignAssetModalBody({
     precheckBusy,
     generateBusy,
     currentMediaId,
+    videoRefSafety,
     surface,
     projectId,
     episodeId,
@@ -694,6 +845,10 @@ function DesignAssetModalBody({
   ]);
 
   const audioDisabled = item.assetType === "audio";
+  const imageEditEnabled = Boolean(currentMediaId) && !audioDisabled;
+  const activePrompt = imageEditOpen
+    ? imageEditPrompt.trim()
+    : promptText.trim();
   const styleBrief =
     item.assetType === "character"
       ? "超写实真人影视摄影质感的虚构角色参考（禁止复刻现实可识别个人）"
@@ -707,10 +862,86 @@ function DesignAssetModalBody({
     : `点击「生成资产」将按 ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio} · ${imageOptions.count}张 生成${styleBrief}`;
   const generateTitle = audioDisabled
     ? "当前未配置该类型的音频生成能力"
-    : `文生图 · ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio} · ${imageOptions.count}张 · ${styleBrief}`;
+    : imageEditOpen
+      ? `图生图 · ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio} · ${imageOptions.count}张`
+      : `文生图 · ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio} · ${imageOptions.count}张 · ${styleBrief}`;
   const previewTitle = formatDesignImagePreviewTitle(imageOptions);
   const precheckLabel =
     item.assetType === "character" ? "人物校验" : "参考图校验";
+  const filledReferenceCount = referenceSlots.filter(Boolean).length;
+
+  const handleReferenceSlotUpload = useCallback(
+    (clickIndex: number, fileList: FileList | null) => {
+      const file = fileList?.[0];
+      if (!file) return;
+      const validationError = validateProjectAssetImageFileClient(file);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
+      setError("");
+      const previewUrl = URL.createObjectURL(file);
+      setReferenceSlots((prev) => {
+        const next = [...prev];
+        const firstEmpty = next.findIndex((slot) => !slot);
+        const target =
+          next[clickIndex] != null
+            ? clickIndex
+            : firstEmpty === -1
+              ? clickIndex
+              : clickIndex > firstEmpty
+                ? firstEmpty
+                : clickIndex;
+        revokeUploadPreview(next[target] ?? null);
+        next[target] = { source: "upload", file, previewUrl };
+        return compactReferenceSlots(next);
+      });
+      const input = referenceFileInputRefs.current[clickIndex];
+      if (input) input.value = "";
+    },
+    [],
+  );
+
+  const removeReferenceSlot = useCallback((index: number) => {
+    setReferenceSlots((prev) => {
+      const next = [...prev];
+      revokeUploadPreview(next[index] ?? null);
+      next[index] = null;
+      return compactReferenceSlots(next);
+    });
+  }, []);
+
+  const toggleImageEditPanel = useCallback(() => {
+    if (!imageEditEnabled || generateBusy) return;
+    setImageEditOpen((open) => {
+      if (open) return false;
+      const previewUrl = currentMediaId
+        ? previewObjectUrl ??
+          getProjectAssetImageUrl(projectId, currentMediaId, {
+            revision: currentMediaId,
+          })
+        : null;
+      setReferenceSlots(
+        compactReferenceSlots([
+          currentMediaId && previewUrl
+            ? {
+                source: "generated",
+                mediaId: currentMediaId,
+                previewUrl,
+              }
+            : null,
+          ...Array.from({ length: REFERENCE_SLOT_COUNT - 1 }, () => null),
+        ]),
+      );
+      return true;
+    });
+  }, [
+    imageEditEnabled,
+    generateBusy,
+    currentMediaId,
+    previewObjectUrl,
+    projectId,
+  ]);
 
   const safetyForPreview = useMemo(() => {
     if (!currentMediaId) return videoRefSafety;
@@ -726,6 +957,207 @@ function DesignAssetModalBody({
   const safetyBadge = designVideoRefSafetyBadge(safetyForPreview);
   const precheckLocked = isDesignMediaVideoRefLocked(safetyForPreview);
 
+  const previewBlock = (
+    <div
+      className={
+        previewObjectUrl
+          ? "ead-preview-frame ead-preview-frame--zoomable"
+          : "ead-preview-frame"
+      }
+      data-testid="design-image-preview"
+      role={previewObjectUrl ? "button" : undefined}
+      tabIndex={previewObjectUrl ? 0 : undefined}
+      aria-label={previewObjectUrl ? "点击放大预览" : undefined}
+      onClick={() => {
+        if (previewObjectUrl) setLightboxOpen(true);
+      }}
+      onKeyDown={(e) => {
+        if (!previewObjectUrl) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setLightboxOpen(true);
+        }
+      }}
+    >
+      {previewLoading ? (
+        <p className="ead-muted">正在加载预览…</p>
+      ) : previewObjectUrl ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element -- blob preview URL */}
+          <img src={previewObjectUrl} alt={`${item.name} 生成预览`} />
+          <span className="ead-preview-hint">点击放大</span>
+          {safetyBadge ? (
+            <span
+              className={`ead-safety-badge is-${safetyBadge.tone}`}
+              data-testid="design-video-ref-safety"
+              data-safety-status={safetyForPreview?.status}
+              title={safetyForPreview?.reason ?? safetyBadge.label}
+            >
+              {safetyBadge.label}
+            </span>
+          ) : null}
+        </>
+      ) : (
+        <p className="ead-muted">
+          {currentMediaId
+            ? "预览加载失败，可尝试重新生成或下载排查"
+            : emptyPreviewHint}
+        </p>
+      )}
+    </div>
+  );
+
+  const imageOptionsBlock = !audioDisabled ? (
+    <div
+      className="ead-generation-options"
+      data-testid="design-image-generation-options"
+    >
+      <div
+        className="ead-generation-option"
+        data-testid="design-image-quality"
+      >
+        <GlassSelect
+          label="画质"
+          value={imageOptions.quality}
+          disabled={generateBusy}
+          options={DESIGN_IMAGE_QUALITY_OPTIONS}
+          menuPortal
+          menuSideOffset={6}
+          menuCollisionPadding={12}
+          onChange={(value) => {
+            setImageOptions((prev) => ({
+              ...prev,
+              quality: value as DesignImageGenerationOptions["quality"],
+            }));
+          }}
+        />
+      </div>
+
+      <div
+        className="ead-generation-option"
+        data-testid="design-image-aspect-ratio"
+      >
+        <GlassSelect
+          label="比例"
+          value={imageOptions.aspectRatio}
+          disabled={generateBusy}
+          options={DESIGN_IMAGE_RATIO_OPTIONS}
+          menuPortal
+          menuSideOffset={6}
+          menuCollisionPadding={12}
+          onChange={(value) => {
+            setImageOptions((prev) => ({
+              ...prev,
+              aspectRatio:
+                value as DesignImageGenerationOptions["aspectRatio"],
+            }));
+          }}
+        />
+      </div>
+
+      <div
+        className="ead-generation-option"
+        data-testid="design-image-count"
+      >
+        <GlassSelect
+          label="张数"
+          value={String(imageOptions.count)}
+          disabled={generateBusy}
+          options={DESIGN_IMAGE_COUNT_OPTIONS}
+          menuPortal
+          menuSideOffset={6}
+          menuCollisionPadding={12}
+          onChange={(value) => {
+            const count = Number(value);
+
+            if (
+              !DESIGN_IMAGE_COUNTS.includes(
+                count as DesignImageGenerationOptions["count"],
+              )
+            ) {
+              return;
+            }
+
+            setImageOptions((prev) => ({
+              ...prev,
+              count: count as DesignImageGenerationOptions["count"],
+            }));
+          }}
+        />
+      </div>
+
+      <div
+        className="ead-generation-option"
+        data-testid="design-image-model"
+      >
+        <GlassSelect
+          label="模型"
+          value={imageModelId}
+          options={DESIGN_IMAGE_MODEL_OPTIONS}
+          disabled={generateBusy}
+          menuPortal
+          menuSideOffset={6}
+          menuCollisionPadding={12}
+          onChange={(value) => {
+            if (isDesignImageModelId(value)) {
+              setImageModelId(value);
+            }
+          }}
+        />
+      </div>
+    </div>
+  ) : null;
+
+  const imageHistoryBlock = showImageHistory ? (
+    <div
+      className="ead-history-strip ead-history-strip--images"
+      data-testid="design-image-history"
+    >
+      {imageHistoryIds.length === 0 ? (
+        <p className="ead-muted">暂无图片生成历史</p>
+      ) : (
+        [...imageHistoryIds].reverse().map((id) => {
+          const active = id === currentMediaId;
+          return (
+            <button
+              key={id}
+              type="button"
+              className={
+                active ? "ead-history-thumb is-active" : "ead-history-thumb"
+              }
+              onClick={() => {
+                setPickedMediaId(id);
+                const fromHistory =
+                  item.generatedMedia?.history?.find(
+                    (h) => h.mediaId === id,
+                  )?.videoRefSafety ?? null;
+                setVideoRefSafety(fromHistory);
+                if (item.assetType === "character" && onItemPatched) {
+                  onItemPatched(
+                    item.id,
+                    withDesignCurrentMediaAndVoiceMirror(item, id),
+                  );
+                }
+              }}
+              title={id}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={getProjectAssetImageUrl(projectId, id, {
+                  revision: id,
+                })}
+                alt=""
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.opacity = "0.25";
+                }}
+              />
+            </button>
+          );
+        })
+      )}
+    </div>
+  ) : null;
+
   return (
     <>
       <div
@@ -735,11 +1167,15 @@ function DesignAssetModalBody({
         data-testid="design-asset-modal"
       >
         <div
+          className={`ead-modal-stage${imageEditOpen ? " is-image-editing" : ""}`}
+          data-testid="design-modal-stage"
+          onClick={(e) => e.stopPropagation()}
+        >
+        <div
           className="ead-modal ead-modal--wide"
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
-          onClick={(e) => e.stopPropagation()}
         >
           <header className="ead-modal__head">
             <h2 id={titleId}>设计素材 · {item.name}</h2>
@@ -836,49 +1272,24 @@ function DesignAssetModalBody({
                   尚未生成
                 </p>
               ) : null}
-              <div
-                className="ead-prompt-actions"
-                data-testid="design-prompt-actions"
-              >
-                <button
-                  type="button"
-                  className="amw-btn ead-prompt-actions__regenerate"
-                  data-testid="design-regenerate-prompt"
-                  disabled={promptBusy || generateBusy}
-                  onClick={handlePromptGenerateClick}
-                >
-                  {promptBusy
-                    ? "生成中…"
-                    : formalPromptMissing
-                      ? "生成提示词"
-                      : "重新生成提示词"}
-                </button>
-
+              {!hideImageEdit ? (
                 <div
-                  className="ead-prompt-actions__model"
-                  data-testid="design-prompt-model"
+                  className="ead-prompt-copy-row"
+                  data-testid="design-prompt-copy-row"
                 >
-                  <GlassSelect
-                    label="提示词模型"
-                    hideLabel
-                    value={promptModelId}
-                    options={DESIGN_PROMPT_MODEL_OPTIONS}
-                    disabled={promptBusy || generateBusy}
-                    menuPortal
-                    menuSideOffset={6}
-                    menuCollisionPadding={12}
-                    onChange={(value) => {
-                      if (
-                        DESIGN_PROMPT_MODELS.some(
-                          (model) => model.id === value,
-                        )
-                      ) {
-                        setPromptModelId(value as DesignPromptModelId);
-                      }
-                    }}
-                  />
+                  <button
+                    type="button"
+                    className="amw-btn amw-btn-primary"
+                    data-testid="design-copy"
+                    disabled={
+                      !promptText.trim() || promptBusy || generateBusy
+                    }
+                    onClick={() => void handleCopy()}
+                  >
+                    一键复制
+                  </button>
                 </div>
-              </div>
+              ) : null}
             </div>
 
             <div className="ead-modal__col">
@@ -947,135 +1358,11 @@ function DesignAssetModalBody({
                   ) : null}
                 </div>
               </div>
-              {!audioDisabled ? (
-                <div
-                  className="ead-generation-options"
-                  data-testid="design-image-generation-options"
-                >
-                  <div
-                    className="ead-generation-option"
-                    data-testid="design-image-quality"
-                  >
-                    <GlassSelect
-                      label="画质"
-                      value={imageOptions.quality}
-                      disabled={generateBusy}
-                      options={DESIGN_IMAGE_QUALITY_OPTIONS}
-                      menuPortal
-                      menuSideOffset={6}
-                      menuCollisionPadding={12}
-                      onChange={(value) => {
-                        setImageOptions((prev) => ({
-                          ...prev,
-                          quality:
-                            value as DesignImageGenerationOptions["quality"],
-                        }));
-                      }}
-                    />
-                  </div>
 
-                  <div
-                    className="ead-generation-option"
-                    data-testid="design-image-aspect-ratio"
-                  >
-                    <GlassSelect
-                      label="比例"
-                      value={imageOptions.aspectRatio}
-                      disabled={generateBusy}
-                      options={DESIGN_IMAGE_RATIO_OPTIONS}
-                      menuPortal
-                      menuSideOffset={6}
-                      menuCollisionPadding={12}
-                      onChange={(value) => {
-                        setImageOptions((prev) => ({
-                          ...prev,
-                          aspectRatio:
-                            value as DesignImageGenerationOptions["aspectRatio"],
-                        }));
-                      }}
-                    />
-                  </div>
+              {previewBlock}
 
-                  <div
-                    className="ead-generation-option"
-                    data-testid="design-image-count"
-                  >
-                    <GlassSelect
-                      label="张数"
-                      value={String(imageOptions.count)}
-                      disabled={generateBusy}
-                      options={DESIGN_IMAGE_COUNT_OPTIONS}
-                      menuPortal
-                      menuSideOffset={6}
-                      menuCollisionPadding={12}
-                      onChange={(value) => {
-                        const count = Number(value);
+              {imageOptionsBlock}
 
-                        if (
-                          !DESIGN_IMAGE_COUNTS.includes(
-                            count as DesignImageGenerationOptions["count"],
-                          )
-                        ) {
-                          return;
-                        }
-
-                        setImageOptions((prev) => ({
-                          ...prev,
-                          count:
-                            count as DesignImageGenerationOptions["count"],
-                        }));
-                      }}
-                    />
-                  </div>
-                </div>
-              ) : null}
-              <div
-                className={
-                  previewObjectUrl
-                    ? "ead-preview-frame ead-preview-frame--zoomable"
-                    : "ead-preview-frame"
-                }
-                data-testid="design-image-preview"
-                role={previewObjectUrl ? "button" : undefined}
-                tabIndex={previewObjectUrl ? 0 : undefined}
-                aria-label={previewObjectUrl ? "点击放大预览" : undefined}
-                onClick={() => {
-                  if (previewObjectUrl) setLightboxOpen(true);
-                }}
-                onKeyDown={(e) => {
-                  if (!previewObjectUrl) return;
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setLightboxOpen(true);
-                  }
-                }}
-              >
-                {previewLoading ? (
-                  <p className="ead-muted">正在加载预览…</p>
-                ) : previewObjectUrl ? (
-                  <>
-                    {/* eslint-disable-next-line @next/next/no-img-element -- blob preview URL */}
-                    <img src={previewObjectUrl} alt={`${item.name} 生成预览`} />
-                    <span className="ead-preview-hint">点击放大</span>
-                    {safetyBadge ? (
-                      <span
-                        className={`ead-safety-badge is-${safetyBadge.tone}`}
-                        data-testid="design-video-ref-safety"
-                        data-safety-status={safetyForPreview?.status}
-                        title={safetyForPreview?.reason ?? safetyBadge.label}
-                      >
-                        {safetyBadge.label}
-                      </span>
-                    ) : null}
-                  </>
-                ) : (
-                  <p className="ead-muted">
-                    {currentMediaId
-                      ? "预览加载失败，可尝试重新生成或下载排查"
-                      : emptyPreviewHint}
-                  </p>
-                )}
-              </div>
               {safetyForPreview?.status === "likely_real_person" ? (
                 <p
                   className="ead-safety-warn"
@@ -1088,65 +1375,8 @@ function DesignAssetModalBody({
                     : ""}
                 </p>
               ) : null}
-              {showImageHistory ? (
-                <div
-                  className="ead-history-strip ead-history-strip--images"
-                  data-testid="design-image-history"
-                >
-                  {imageHistoryIds.length === 0 ? (
-                    <p className="ead-muted">暂无图片生成历史</p>
-                  ) : (
-                    [...imageHistoryIds].reverse().map((id) => {
-                      const active = id === currentMediaId;
-                      return (
-                        <button
-                          key={id}
-                          type="button"
-                          className={
-                            active
-                              ? "ead-history-thumb is-active"
-                              : "ead-history-thumb"
-                          }
-                          onClick={() => {
-                            setPickedMediaId(id);
-                            const fromHistory =
-                              item.generatedMedia?.history?.find(
-                                (h) => h.mediaId === id,
-                              )?.videoRefSafety ?? null;
-                            setVideoRefSafety(fromHistory);
-                            if (
-                              item.assetType === "character" &&
-                              onItemPatched
-                            ) {
-                              onItemPatched(
-                                item.id,
-                                withDesignCurrentMediaAndVoiceMirror(
-                                  item,
-                                  id,
-                                ),
-                              );
-                            }
-                          }}
-                          title={id}
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={getProjectAssetImageUrl(projectId, id, {
-                              revision: id,
-                            })}
-                            alt=""
-                            onError={(e) => {
-                              (
-                                e.currentTarget as HTMLImageElement
-                              ).style.opacity = "0.25";
-                            }}
-                          />
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              ) : null}
+
+              {imageHistoryBlock}
             </div>
           </div>
 
@@ -1173,38 +1403,192 @@ function DesignAssetModalBody({
               {error}
             </p>
           ) : null}
-          <footer className="ead-modal__foot">
-            <button
-              type="button"
-              className="amw-btn amw-btn-primary"
-              data-testid="design-copy"
-              disabled={
-                !promptText.trim() || promptBusy || generateBusy
-              }
-              onClick={() => void handleCopy()}
-            >
-              一键复制
-            </button>
-            <button
-              type="button"
-              className="amw-btn amw-btn-primary"
-              data-testid="design-generate-asset"
-              disabled={
-                promptBusy ||
-                generateBusy ||
-                !promptText.trim() ||
-                audioDisabled
-              }
-              title={generateBusy ? "资产生成中…" : generateTitle}
-              onClick={() => void handleGenerate()}
-            >
-              {generateBusy
-                ? "生成中…"
-                : audioDisabled
-                  ? "生成资产（未配置）"
-                  : "生成资产"}
-            </button>
+          <footer
+            className={`ead-modal__foot${hideImageEdit ? " ead-modal__foot--split" : ""}`}
+          >
+            {hideImageEdit ? (
+              <button
+                type="button"
+                className="amw-btn amw-btn-primary"
+                data-testid="design-copy"
+                disabled={!promptText.trim() || promptBusy || generateBusy}
+                onClick={() => void handleCopy()}
+              >
+                一键复制
+              </button>
+            ) : (
+              <button
+                type="button"
+                className={`amw-btn${imageEditOpen || imageEditEnabled ? " amw-btn-primary" : ""}`}
+                data-testid="design-image-edit-toggle"
+                disabled={!imageEditEnabled || generateBusy}
+                aria-pressed={imageEditOpen}
+                title={
+                  imageEditEnabled
+                    ? imageEditOpen
+                      ? "关闭二次编辑"
+                      : "打开二次编辑"
+                    : "生成图片后可进行二次编辑"
+                }
+                onClick={toggleImageEditPanel}
+              >
+                二次编辑
+              </button>
+            )}
+            {!imageEditOpen ? (
+              <button
+                type="button"
+                className="amw-btn amw-btn-primary"
+                data-testid="design-generate-asset"
+                disabled={
+                  promptBusy ||
+                  generateBusy ||
+                  !activePrompt ||
+                  audioDisabled
+                }
+                title={generateBusy ? "资产生成中…" : generateTitle}
+                onClick={() => void handleGenerate()}
+              >
+                {generateBusy
+                  ? "生成中…"
+                  : audioDisabled
+                    ? "生成资产（未配置）"
+                    : "生成资产"}
+              </button>
+            ) : null}
           </footer>
+        </div>
+        {!hideImageEdit && imageEditOpen ? (
+          <aside
+            className="ead-image-edit-panel"
+            data-testid="design-image-edit-panel"
+            aria-label="二次编辑"
+          >
+            <div className="ead-image-edit-panel__head">二次编辑</div>
+            <div
+              className="ead-reference-slots"
+              data-testid="design-reference-slots"
+            >
+              {referenceSlots.map((slot, index) => (
+                <div
+                  key={`ref-slot-${index}`}
+                  className={`ead-reference-slot${slot ? " is-filled" : ""}`}
+                  data-testid={`design-reference-slot-${index + 1}`}
+                >
+                  <button
+                    type="button"
+                    className="ead-reference-slot__hit"
+                    disabled={generateBusy}
+                    title={slot ? `替换第${index + 1}张参考图` : `上传第${index + 1}张参考图`}
+                    onClick={() => {
+                      referenceFileInputRefs.current[index]?.click();
+                    }}
+                  >
+                    <span className="ead-reference-slot__index" aria-hidden>
+                      {index + 1}
+                    </span>
+                    {slot ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={slot.previewUrl}
+                        alt={`参考图 ${index + 1}`}
+                      />
+                    ) : (
+                      <ImagePlus
+                        className="ead-reference-slot__empty-icon"
+                        aria-hidden
+                      />
+                    )}
+                  </button>
+                  {slot ? (
+                    <button
+                      type="button"
+                      className="ead-reference-slot__remove"
+                      data-testid={`design-reference-slot-remove-${index + 1}`}
+                      title={`删除第${index + 1}张参考图`}
+                      disabled={generateBusy}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeReferenceSlot(index);
+                      }}
+                    >
+                      <X className="h-3.5 w-3.5" aria-hidden />
+                    </button>
+                  ) : null}
+                  <input
+                    ref={(el) => {
+                      referenceFileInputRefs.current[index] = el;
+                    }}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                    className="ead-reference-slot__file"
+                    data-testid={`design-reference-slot-file-${index + 1}`}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => {
+                      handleReferenceSlotUpload(index, e.target.files);
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+            <label className="amw-field">
+              <span>二次编辑要求</span>
+              <textarea
+                className="amw-textarea"
+                data-testid="design-image-edit-prompt"
+                aria-label="二次编辑要求"
+                placeholder="例如：保留第1张的人脸，使用第2张的服装，参考第3张的灯光和背景"
+                value={imageEditPrompt}
+                rows={8}
+                disabled={generateBusy}
+                onChange={(e) => setImageEditPrompt(e.target.value)}
+              />
+            </label>
+            {item.assetType === "scene" ? (
+              <div
+                className="ead-multi-angle"
+                data-testid="design-multi-angle"
+              >
+                <GlassSelect
+                  label="多角度生图"
+                  value={multiAngleSelect}
+                  options={DESIGN_MULTI_ANGLE_OPTIONS}
+                  disabled={generateBusy || !referenceSlots[0]}
+                  menuPortal
+                  menuSideOffset={6}
+                  menuCollisionPadding={12}
+                  onChange={handleMultiAngleChange}
+                />
+                {!referenceSlots[0] ? (
+                  <p
+                    className="ead-muted"
+                    data-testid="design-multi-angle-hint"
+                  >
+                    请先生成或上传场景参考图
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+            <div className="ead-image-edit-panel__foot">
+              <button
+                type="button"
+                className="amw-btn amw-btn-primary"
+                data-testid="design-generate-asset"
+                disabled={
+                  promptBusy ||
+                  generateBusy ||
+                  !activePrompt ||
+                  audioDisabled ||
+                  filledReferenceCount === 0
+                }
+                title={generateBusy ? "资产生成中…" : generateTitle}
+                onClick={() => void handleGenerate()}
+              >
+                {generateBusy ? "生成中…" : "生成资产"}
+              </button>
+            </div>
+          </aside>
+        ) : null}
         </div>
       </div>
       <DesignImageLightbox
@@ -1212,83 +1596,6 @@ function DesignAssetModalBody({
         alt={`${item.name} 放大预览`}
         onClose={() => setLightboxOpen(false)}
       />
-      {requirementOpen ? (
-        <div
-          className="amw-overlay amw-overlay--stacked"
-          role="presentation"
-          data-testid="design-regenerate-requirement-overlay"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !loadingPrompt) {
-              setRequirementOpen(false);
-            }
-          }}
-        >
-          <div
-            className="amw-dialog ead-requirement-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={`${requirementFieldId}-title`}
-          >
-            <h3 id={`${requirementFieldId}-title`}>重新生成提示词</h3>
-            <p className="amw-dialog-desc">
-              输入素材要求。将基于当前资产「{item.name}」并结合你的要求重新生成提示词。
-            </p>
-            <div className="amw-fields amw-fields--stack">
-              <div className="amw-field">
-                <label htmlFor={requirementFieldId}>输入素材要求</label>
-                <textarea
-                  id={requirementFieldId}
-                  className="amw-textarea"
-                  rows={5}
-                  value={requirementDraft}
-                  disabled={loadingPrompt}
-                  placeholder="例如：更正式的西装、侧光、半身构图…"
-                  data-testid="design-regenerate-requirement-input"
-                  onChange={(e) => {
-                    setRequirementDraft(e.target.value);
-                    if (requirementError) setRequirementError("");
-                  }}
-                  onKeyDown={(e) => {
-                    if (
-                      e.key === "Enter" &&
-                      (e.metaKey || e.ctrlKey) &&
-                      !loadingPrompt
-                    ) {
-                      e.preventDefault();
-                      submitRequirement();
-                    }
-                  }}
-                />
-              </div>
-              {requirementError ? (
-                <p className="amw-field-error" role="alert">
-                  {requirementError}
-                </p>
-              ) : null}
-            </div>
-            <div className="amw-dialog-actions">
-              <button
-                type="button"
-                className="amw-btn"
-                disabled={loadingPrompt}
-                data-testid="design-regenerate-requirement-cancel"
-                onClick={() => setRequirementOpen(false)}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="amw-btn amw-btn-primary"
-                disabled={loadingPrompt}
-                data-testid="design-regenerate-requirement-submit"
-                onClick={submitRequirement}
-              >
-                {loadingPrompt ? "生成中…" : "生成提示词"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </>
   );
 }

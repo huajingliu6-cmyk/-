@@ -25,6 +25,17 @@ describe("storyboard creation UI flow contracts", () => {
     expect(workspace).not.toContain("保存草稿");
   });
 
+  it("keeps the existing storyboard actions visible in the new layout", () => {
+    const preview = readSrc("src/app/storyboard-layout-preview/page.tsx");
+    const css = readSrc("src/projects/storyboard/storyboard-workspace.css");
+    expect(preview).toContain("storyboard-global-settings-btn");
+    expect(panel).toContain("view-script-btn");
+    expect(panel).toContain("EpisodeVideoGenerationButton");
+    expect(css).toMatch(
+      /\.sbw-panel--storyboard-workspace > \.sbw-panel__head\s*\{[\s\S]*?display:\s*flex/,
+    );
+  });
+
   it("uses view-script modal and soft reminder after script change", () => {
     expect(panel).toContain("view-script-btn");
     expect(panel).toContain("修改剧本");

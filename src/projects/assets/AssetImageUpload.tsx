@@ -29,6 +29,8 @@ type Props = {
   projectId?: string;
   /** When set, choosing a file uploads immediately (after ensurePersisted). */
   assetId?: string | null;
+  /** Replace this owned media key while keeping assetId as the parent asset. */
+  uploadTargetId?: string | null;
   /** Ensure the asset row exists in assets.json before upload. */
   ensurePersisted?: () => Promise<void>;
   disabled?: boolean;
@@ -43,6 +45,9 @@ type Props = {
   replaceOnly?: boolean;
   /** Adapt select-button text/chrome to image luminance */
   adaptiveContrast?: boolean;
+  actionLabel?: string;
+  /** Generated sub-media replacement must not rewrite the parent image metadata. */
+  preserveValueOnUpload?: boolean;
 };
 
 function revokeIfBlob(url: string | null | undefined) {
@@ -59,6 +64,7 @@ export function AssetImageUpload({
   onChange,
   projectId,
   assetId,
+  uploadTargetId,
   ensurePersisted,
   disabled = false,
   revision = 0,
@@ -67,6 +73,8 @@ export function AssetImageUpload({
   compact = false,
   replaceOnly = false,
   adaptiveContrast = false,
+  actionLabel = "选择图片",
+  preserveValueOnUpload = false,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
@@ -94,7 +102,6 @@ export function AssetImageUpload({
 
   useEffect(() => {
     if (!adaptiveContrast || !previewSrc) {
-      setImageTone("dark");
       return;
     }
 
@@ -189,13 +196,17 @@ export function AssetImageUpload({
       return;
     }
 
-    revokeIfBlob(previousBlob);
-    onChange({
-      fileName: previousDurable.fileName ?? file.name,
-      objectUrl: blobUrl,
-      mimeType: previousDurable.mimeType ?? (file.type || null),
-      pendingFile: null,
-    });
+    if (preserveValueOnUpload) {
+      revokeIfBlob(blobUrl);
+    } else {
+      revokeIfBlob(previousBlob);
+      onChange({
+        fileName: previousDurable.fileName ?? file.name,
+        objectUrl: blobUrl,
+        mimeType: previousDurable.mimeType ?? (file.type || null),
+        pendingFile: null,
+      });
+    }
 
     void (async () => {
       setBusy(true);
@@ -207,25 +218,30 @@ export function AssetImageUpload({
           projectId,
           assetId,
           file,
+          { targetMediaId: uploadTargetId },
         );
-        revokeIfBlob(blobUrl);
+        if (!preserveValueOnUpload) revokeIfBlob(blobUrl);
         const nextRevision = revision + 1;
         onRevisionChange?.(nextRevision);
-        onChange({
-          fileName: uploaded.imageFileName,
-          objectUrl: null,
-          mimeType: uploaded.imageMimeType,
-          pendingFile: null,
-        });
+        if (!preserveValueOnUpload) {
+          onChange({
+            fileName: uploaded.imageFileName,
+            objectUrl: null,
+            mimeType: uploaded.imageMimeType,
+            pendingFile: null,
+          });
+        }
       } catch (err) {
-        revokeIfBlob(blobUrl);
-        // Restore previous durable metadata; never keep a failed blob as final src.
-        onChange({
-          fileName: previousDurable.fileName,
-          objectUrl: null,
-          mimeType: previousDurable.mimeType,
-          pendingFile: null,
-        });
+        if (!preserveValueOnUpload) {
+          revokeIfBlob(blobUrl);
+          // Restore previous durable metadata; never keep a failed blob as final src.
+          onChange({
+            fileName: previousDurable.fileName,
+            objectUrl: null,
+            mimeType: previousDurable.mimeType,
+            pendingFile: null,
+          });
+        }
         setError(err instanceof Error ? err.message : "上传图片失败");
       } finally {
         setBusy(false);
@@ -301,7 +317,7 @@ export function AssetImageUpload({
           disabled={disabled || busy}
           onClick={() => inputRef.current?.click()}
         >
-          {busy ? "处理中…" : "选择图片"}
+          {busy ? "处理中…" : actionLabel}
         </button>
         {!replaceOnly ? (
           <button

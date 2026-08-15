@@ -27,6 +27,7 @@ export async function requestInMemoryProjectApi(
       projectMode: ProjectRecord["projectMode"];
       highlights?: string;
       visualStyle?: ProjectRecord["visualStyle"];
+      approvalEnabled?: boolean;
       passwordEnabled: boolean;
     };
     const now = new Date(1_800_000_000_000 + state.sequence * 1_000).toISOString();
@@ -41,6 +42,7 @@ export async function requestInMemoryProjectApi(
       status: "draft",
       highlights: input.highlights?.trim() ?? "",
       visualStyle: input.visualStyle ?? null,
+      approvalEnabled: input.approvalEnabled === true,
       passwordEnabled: input.passwordEnabled,
       passwordHash: null,
       passwordSalt: null,

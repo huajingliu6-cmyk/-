@@ -119,4 +119,11 @@ describe("asset library three-pane workspace contracts", () => {
     expect(prop).not.toContain("handleSave");
     expect(prop).not.toContain("useChipBounce");
   });
+
+  it("voice selector prefers local library and has no system placeholders", () => {
+    expect(voiceSelector).toContain("本地音频库");
+    expect(voiceSelector).toContain("项目音色");
+    expect(voiceSelector).not.toContain("系统音色");
+    expect(voiceSelector).not.toContain("VOICE_CATALOG");
+  });
 });

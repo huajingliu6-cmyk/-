@@ -55,6 +55,12 @@ function buildMediaOptions(
     primaryMediaId?: string | null;
     approvedMediaIds?: string[];
     revision?: number;
+    voiceId?: string | null;
+    voiceName?: string | null;
+    mediaVoices?: Record<
+      string,
+      { voiceId: string | null; voiceName: string | null }
+    >;
   },
   projectId: string,
 ): AssetMediaOption[] {
@@ -69,13 +75,23 @@ function buildMediaOptions(
     asset.primaryMediaId?.trim() ||
     asset.imageFileName?.trim() ||
     mediaIds[0]!;
-  return mediaIds.map((mediaId) => ({
-    mediaId,
-    thumbUrl: getProjectAssetImageUrl(projectId, mediaId, {
-      revision: `${mediaId}:${asset.revision ?? 1}`,
-    }),
-    isPrimary: mediaId === primary,
-  }));
+  const defaultVoiceLabel = asset.voiceId?.trim()
+    ? asset.voiceName?.trim() || asset.voiceId.trim()
+    : null;
+  return mediaIds.map((mediaId) => {
+    const mediaVoice = asset.mediaVoices?.[mediaId];
+    const voiceLabel = mediaVoice?.voiceId?.trim()
+      ? mediaVoice.voiceName?.trim() || mediaVoice.voiceId.trim()
+      : defaultVoiceLabel;
+    return {
+      mediaId,
+      thumbUrl: getProjectAssetImageUrl(projectId, mediaId, {
+        revision: `${mediaId}:${asset.revision ?? 1}`,
+      }),
+      isPrimary: mediaId === primary,
+      ...(voiceLabel ? { voiceLabel } : {}),
+    };
+  });
 }
 
 function toSummaryItem(
@@ -87,6 +103,11 @@ function toSummaryItem(
     primaryMediaId?: string | null;
     approvedMediaIds?: string[];
     voiceId?: string | null;
+    voiceName?: string | null;
+    mediaVoices?: Record<
+      string,
+      { voiceId: string | null; voiceName: string | null }
+    >;
     videoRefSafety?: { status?: string } | null;
   },
   projectId: string,
@@ -100,6 +121,9 @@ function toSummaryItem(
   const storageKey = resolveAssetImageStorageKey(asset);
   const safetyStatus = asset.videoRefSafety?.status;
   const mediaOptions = buildMediaOptions(asset, projectId);
+  const voiceLabel = asset.voiceId?.trim()
+    ? asset.voiceName?.trim() || asset.voiceId.trim()
+    : null;
   return {
     id: asset.id,
     name: asset.name,
@@ -115,7 +139,10 @@ function toSummaryItem(
       : null,
     ...(mediaOptions.length > 0 ? { mediaOptions } : {}),
     ...(options?.includeVoiceBound
-      ? { voiceBound: Boolean(asset.voiceId?.trim()) }
+      ? {
+          voiceBound: Boolean(asset.voiceId?.trim()),
+          ...(voiceLabel ? { voiceLabel } : {}),
+        }
       : {}),
     ...(safetyStatus
       ? {

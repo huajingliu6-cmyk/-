@@ -28,7 +28,7 @@ export default function ProjectAssetsRedirectPage() {
         }
         if (!cancelled) {
           router.replace(
-            `${projectManagementPath(projectId)}/assets/design`,
+            `${projectManagementPath(projectId)}/assets/library`,
           );
         }
       } catch {

@@ -18,8 +18,8 @@ describe("storyboard asset mediaOptions", () => {
           clothing: "",
           age: "",
           gender: "",
-          voiceId: null,
-          voiceName: null,
+          voiceId: "voice_default",
+          voiceName: "默认音色",
           voiceStyle: null,
           imageFileName: "gen_a",
           imageObjectUrl: null,
@@ -27,6 +27,9 @@ describe("storyboard asset mediaOptions", () => {
           status: "completed",
           primaryMediaId: "gen_a",
           approvedMediaIds: ["gen_a", "gen_b", "gen_c"],
+          mediaVoices: {
+            gen_b: { voiceId: "voice_b", voiceName: "历史图音色" },
+          },
         },
       ],
       scenes: [],
@@ -41,6 +44,15 @@ describe("storyboard asset mediaOptions", () => {
       summary?.characters[0]?.mediaOptions?.find((m) => m.mediaId === "gen_a")
         ?.isPrimary,
     ).toBe(true);
+    expect(summary?.characters[0]?.voiceLabel).toBe("默认音色");
+    expect(
+      summary?.characters[0]?.mediaOptions?.find((m) => m.mediaId === "gen_a")
+        ?.voiceLabel,
+    ).toBe("默认音色");
+    expect(
+      summary?.characters[0]?.mediaOptions?.find((m) => m.mediaId === "gen_b")
+        ?.voiceLabel,
+    ).toBe("历史图音色");
   });
 
   it("omits mediaOptions when only one image", () => {

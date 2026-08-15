@@ -1,5 +1,5 @@
 /**
- * OpenAI-compatible image generation helpers (images/generations).
+ * OpenAI-compatible image generation helpers (images/generations + images/edits).
  * Used by canvas character/scene gen and episode asset design 「生成资产」.
  */
 
@@ -18,6 +18,15 @@ export type OpenAiCompatibleImageRequest = {
   count?: number;
   /** Extra metadata fields some proxies accept */
   extra?: Record<string, unknown>;
+};
+
+export type OpenAiCompatibleImageEditRequest = OpenAiCompatibleImageRequest & {
+  /** One or more reference images (max 6). First → `image`, rest → `image[]`. */
+  images: Array<{
+    buffer: Buffer;
+    mimeType: string;
+    fileName: string;
+  }>;
 };
 
 export type OpenAiCompatibleImageResult = {
@@ -64,6 +73,41 @@ export function resolveOpenAiCompatibleImageEndpoint(apiUrl: string): string {
     return trimmed;
   }
   return `${trimmed}/images/generations`;
+}
+
+/**
+ * Resolve OpenAI-compatible `/images/edits` endpoint.
+ * - Already `/images/edits`: keep
+ * - `/images/generations`: replace with `/images/edits`
+ * - Base `/v1` (or similar): append `/images/edits`
+ * - Dedicated text2image / synthesis routes: IMAGE_EDIT_NOT_SUPPORTED (no generations fallback)
+ */
+export function resolveOpenAiCompatibleImageEditEndpoint(apiUrl: string): string {
+  const trimmed = apiUrl.trim().replace(/\/+$/, "");
+  if (!trimmed) {
+    throw Object.assign(new Error("未配置图生图 API 地址"), {
+      code: "IMAGE_EDIT_NOT_SUPPORTED",
+      status: 400,
+    });
+  }
+  const lower = trimmed.toLowerCase();
+  if (lower.includes("/images/edits")) {
+    return trimmed;
+  }
+  if (lower.includes("/images/generations")) {
+    return trimmed.replace(/\/images\/generations/gi, "/images/edits");
+  }
+  if (
+    lower.includes("/text2image/") ||
+    lower.includes("/image-generation/") ||
+    lower.includes("/image-synthesis")
+  ) {
+    throw Object.assign(new Error("当前图片接口不支持图生图编辑"), {
+      code: "IMAGE_EDIT_NOT_SUPPORTED",
+      status: 400,
+    });
+  }
+  return `${trimmed}/images/edits`;
 }
 
 export function normalizeImageAspectRatio(aspectRatio?: string): string {
@@ -430,6 +474,94 @@ export async function generateOpenAiCompatibleImages(
     }
     throw new Error(
       `文生图服务返回错误（${res.status}）：${detail}（请求 ${resolvedUrl}）`,
+    );
+  }
+
+  return parseImagesSuccessResponse(res, resolvedUrl);
+}
+
+/**
+ * OpenAI-compatible `/images/edits` (image-to-image). Multipart only.
+ * Codesonline-compatible: first image as `image`, additional as repeated `image[]`.
+ * Does not fall back to `/images/generations`.
+ */
+export async function editOpenAiCompatibleImages(
+  params: OpenAiCompatibleImageEditRequest,
+): Promise<OpenAiCompatibleImagesResult> {
+  const images = params.images.slice(0, 6);
+  if (images.length === 0) {
+    throw new Error("图生图至少需要 1 张参考图");
+  }
+
+  const resolvedUrl = resolveOpenAiCompatibleImageEditEndpoint(params.endpoint);
+  const aspect = normalizeImageAspectRatio(params.aspectRatio);
+  const tier = normalizeImageResolutionTier(params.resolution);
+  const quality = normalizeQuality(params.quality);
+  const count = clampImageCount(params.count);
+  const userPrompt = params.prompt.trim();
+  const numberedPrompt = `以下参考图按上传顺序编号为第1张至第${images.length}张。用户提示词中的“第N张”均指对应序号的参考图。\n\n${userPrompt}`;
+
+  const form = new FormData();
+  form.set("model", params.model || "gpt-image-2");
+  form.set("prompt", numberedPrompt);
+  form.set("n", String(count));
+  form.set("size", aspect);
+  form.set("quality", quality);
+  if (tier === "2k") form.set("upscale", "2k");
+  if (tier === "4k") form.set("upscale", "4k");
+
+  const first = images[0]!;
+  form.append(
+    "image",
+    new Blob([new Uint8Array(first.buffer)], {
+      type: first.mimeType || "image/png",
+    }),
+    first.fileName || "reference-1.png",
+  );
+  for (const image of images.slice(1)) {
+    form.append(
+      "image[]",
+      new Blob([new Uint8Array(image.buffer)], {
+        type: image.mimeType || "image/png",
+      }),
+      image.fileName || "reference.png",
+    );
+  }
+
+  const res = await fetch(resolvedUrl, {
+    method: "POST",
+    headers: {
+      ...(params.apiKey ? { Authorization: `Bearer ${params.apiKey}` } : {}),
+    },
+    body: form,
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    let detail = text.slice(0, 240) || res.statusText;
+    try {
+      const parsed = JSON.parse(text) as {
+        error?: { code?: string; message?: string };
+      };
+      const code = parsed.error?.code ?? "";
+      const message = parsed.error?.message ?? "";
+      if (code === "model_not_allowed" || /无权调用模型/.test(message)) {
+        const modelName = params.model || "gpt-image-2";
+        throw new Error(
+          `当前 API Key 无权调用模型：${modelName}，请更换模型或联系管理员配置权限。`,
+        );
+      }
+      if (message) detail = message;
+    } catch (e) {
+      if (
+        e instanceof Error &&
+        e.message.includes("当前 API Key 无权调用模型")
+      ) {
+        throw e;
+      }
+    }
+    throw new Error(
+      `图生图服务返回错误（${res.status}）：${detail}（请求 ${resolvedUrl}）`,
     );
   }
 

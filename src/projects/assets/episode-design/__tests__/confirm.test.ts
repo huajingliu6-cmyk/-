@@ -237,6 +237,54 @@ describe("confirmEpisodeAssetDesign", () => {
     if (!result.ok) expect(result.code).toBe("RESOLUTION_PENDING");
   });
 
+  it("saves extracted draft assets without images when approval is disabled", async () => {
+    await seedRecord({
+      episodeId: "ep_no_approval",
+      episodeNumber: 2,
+      status: "review",
+      revision: 1,
+      contentFingerprint: fingerprint,
+      generationId: "g2",
+      items: [
+        {
+          id: "i_draft",
+          assetType: "prop",
+          name: "旧钥匙",
+          resolution: "create_new",
+          source: "ai",
+          draft: {
+            description: "一把磨损的铜钥匙",
+            propType: "线索",
+            usage: "开启暗门",
+            usageInEpisode: "第二集",
+            evidence: "",
+          },
+        },
+      ],
+      confirmedAt: null,
+      confirmedBy: null,
+      confirmedRevision: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const result = await confirmEpisodeAssetDesign({
+      projectId: "p1",
+      episodeId: "ep_no_approval",
+      expectedRevision: 1,
+      userId: "u1",
+      fingerprint,
+      requireGeneratedMedia: false,
+    });
+    expect(result.ok).toBe(true);
+    const bundle = await loadAssetBundleDraft("p1");
+    expect(bundle?.props[0]).toMatchObject({
+      name: "旧钥匙",
+      imageFileName: null,
+      imageMimeType: null,
+      status: "draft",
+    });
+  });
+
   it("is idempotent when already confirmed at same revision", async () => {
     const record: EpisodeAssetDesignRecord = {
       episodeId: "ep1",

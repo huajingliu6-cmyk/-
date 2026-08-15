@@ -51,6 +51,30 @@ describe("shot-prompt-mount", () => {
     ).toBe("挂载：@人物-江宸｜@场景-办公室");
   });
 
+  it("places each character voice immediately after its character mount", () => {
+    expect(
+      buildMountLine([
+        {
+          id: "c1",
+          kind: "character",
+          name: "张桂兰",
+          imageUrl: "/img/zhang.png",
+          voiceLabel: "桂兰音色",
+        },
+        {
+          id: "c2",
+          kind: "character",
+          name: "李木匠",
+          imageUrl: "/img/li.png",
+          voiceLabel: "沉稳男声",
+        },
+        { id: "s1", kind: "scene", name: "老宅", imageUrl: "/img/home.png" },
+      ]),
+    ).toBe(
+      "挂载：@人物【图:c1:张桂兰】-张桂兰｜@音色-桂兰音色｜@人物【图:c2:李木匠】-李木匠｜@音色-沉稳男声｜@场景【图:s1:老宅】-老宅",
+    );
+  });
+
   it("inserts mount line after shot header", () => {
     const prompt = `[分镜01｜总时长：3秒｜画幅：9:16]
 场景基调：暗沉办公室。`;

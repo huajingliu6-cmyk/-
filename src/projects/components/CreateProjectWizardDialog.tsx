@@ -55,6 +55,7 @@ type Phase = "form" | "advance";
 const INITIAL = {
   creationSource: null as ProjectCreationSource | null,
   name: "",
+  approvalEnabled: false,
   passwordEnabled: false,
   projectPassword: "",
   highlights: "",
@@ -291,6 +292,7 @@ export function CreateProjectWizardDialog({
           projectMode: state.projectMode,
           highlights: state.highlights,
           visualStyle: state.visualStyle,
+          approvalEnabled: state.approvalEnabled,
           passwordEnabled: state.passwordEnabled,
           projectPassword: state.passwordEnabled
             ? state.projectPassword
@@ -519,7 +521,7 @@ export function CreateProjectWizardDialog({
                 </button>
               </div>
               <div className="cpw-error" id={`${titleId}-source-err`}>
-                {errors.creationSource ?? ""}
+                {errors.creationSource}
               </div>
 
               <div
@@ -528,130 +530,128 @@ export function CreateProjectWizardDialog({
               >
                 <div className="cpw-form-shell__inner">
                   <div className="cpw-form">
-                    <div className="cpw-field cpw-field--stagger-1">
-                      <label className="cpw-label" htmlFor={nameId}>
-                        项目名称
-                        <span className="cpw-req" aria-hidden>
-                          *
-                        </span>
-                      </label>
-                      <input
-                        ref={nameRef}
-                        id={nameId}
-                        className={`cpw-input${errors.name ? " is-invalid" : ""}${
-                          state.shakeKey === "name" ? " is-shake" : ""
-                        }`}
-                        placeholder="请输入项目名称"
-                        value={state.name}
-                        aria-invalid={Boolean(errors.name)}
-                        aria-describedby={`${nameId}-err`}
-                        onChange={(e) =>
-                          setState((s) => ({
-                            ...s,
-                            name: e.target.value,
-                            fieldErrors: { ...s.fieldErrors, name: undefined },
-                          }))
-                        }
-                        onBlur={() => {
-                          if (!state.hasAttemptedSubmit) return;
-                          const next = validateCreateProjectForm({
-                            creationSource: state.creationSource,
-                            name: state.name,
-                            projectMode: state.projectMode,
-                            passwordEnabled: state.passwordEnabled,
-                            projectPassword: state.projectPassword,
-                            highlights: state.highlights,
-                            visualStyle: state.visualStyle,
-                          });
-                          setState((s) => ({
-                            ...s,
-                            fieldErrors: {
-                              ...s.fieldErrors,
-                              name: next.name,
-                            },
-                          }));
-                        }}
-                      />
-                      <div className="cpw-error" id={`${nameId}-err`}>
-                        {errors.name ?? ""}
-                      </div>
-                    </div>
-
-                    <div className="cpw-field cpw-field--stagger-2">
-                      <label className="cpw-check">
+                    <div className="cpw-field-row cpw-field-row--name-pass">
+                      <div className="cpw-field cpw-field--stagger-1">
+                        <label className="cpw-label" htmlFor={nameId}>
+                          项目名称
+                          <span className="cpw-req" aria-hidden>
+                            *
+                          </span>
+                        </label>
                         <input
-                          type="checkbox"
-                          checked={state.passwordEnabled}
-                          onChange={(e) => {
-                            const enabled = e.target.checked;
+                          ref={nameRef}
+                          id={nameId}
+                          className={`cpw-input${errors.name ? " is-invalid" : ""}${
+                            state.shakeKey === "name" ? " is-shake" : ""
+                          }`}
+                          placeholder="请输入项目名称"
+                          value={state.name}
+                          aria-invalid={Boolean(errors.name)}
+                          aria-describedby={`${nameId}-err`}
+                          onChange={(e) =>
                             setState((s) => ({
                               ...s,
-                              passwordEnabled: enabled,
-                              projectPassword: enabled ? s.projectPassword : "",
+                              name: e.target.value,
+                              fieldErrors: { ...s.fieldErrors, name: undefined },
+                            }))
+                          }
+                          onBlur={() => {
+                            if (!state.hasAttemptedSubmit) return;
+                            const next = validateCreateProjectForm({
+                              creationSource: state.creationSource,
+                              name: state.name,
+                              projectMode: state.projectMode,
+                              passwordEnabled: state.passwordEnabled,
+                              projectPassword: state.projectPassword,
+                              highlights: state.highlights,
+                              visualStyle: state.visualStyle,
+                            });
+                            setState((s) => ({
+                              ...s,
                               fieldErrors: {
                                 ...s.fieldErrors,
-                                password: undefined,
+                                name: next.name,
                               },
                             }));
                           }}
                         />
-                        设置项目访问密码
-                      </label>
-                      {state.passwordEnabled ? (
-                        <>
-                          <div className="cpw-password-row">
-                            <input
-                              ref={passwordRef}
-                              id={passwordId}
-                              type={state.showPassword ? "text" : "password"}
-                              className={`cpw-input${
-                                errors.password ? " is-invalid" : ""
-                              }`}
-                              placeholder="请输入项目访问密码"
-                              value={state.projectPassword}
-                              autoComplete="new-password"
-                              aria-invalid={Boolean(errors.password)}
-                              aria-describedby={`${passwordId}-err`}
-                              onChange={(e) =>
-                                setState((s) => ({
-                                  ...s,
-                                  projectPassword: e.target.value,
-                                  fieldErrors: {
-                                    ...s.fieldErrors,
-                                    password: undefined,
-                                  },
-                                }))
-                              }
-                            />
-                            <button
-                              type="button"
-                              className="cpw-eye"
-                              aria-label={
-                                state.showPassword ? "隐藏密码" : "显示密码"
-                              }
-                              onClick={() =>
-                                setState((s) => ({
-                                  ...s,
-                                  showPassword: !s.showPassword,
-                                }))
-                              }
-                            >
-                              {state.showPassword ? (
-                                <EyeOff className="h-4 w-4" aria-hidden />
-                              ) : (
-                                <Eye className="h-4 w-4" aria-hidden />
-                              )}
-                            </button>
-                          </div>
-                          <div className="cpw-error" id={`${passwordId}-err`}>
-                            {errors.password ?? ""}
-                          </div>
-                        </>
-                      ) : (
-                        <div className="cpw-error" aria-hidden>
-                          {" "}
+                        <div className="cpw-error" id={`${nameId}-err`}>
+                          {errors.name}
                         </div>
-                      )}
+                      </div>
+
+                      <div className="cpw-field cpw-field--stagger-2 cpw-field--password">
+                        <label className="cpw-check">
+                          <input
+                            type="checkbox"
+                            checked={state.passwordEnabled}
+                            onChange={(e) => {
+                              const enabled = e.target.checked;
+                              setState((s) => ({
+                                ...s,
+                                passwordEnabled: enabled,
+                                projectPassword: enabled ? s.projectPassword : "",
+                                fieldErrors: {
+                                  ...s.fieldErrors,
+                                  password: undefined,
+                                },
+                              }));
+                            }}
+                          />
+                          设置项目访问密码
+                        </label>
+                        {state.passwordEnabled ? (
+                          <>
+                            <div className="cpw-password-row">
+                              <input
+                                ref={passwordRef}
+                                id={passwordId}
+                                type={state.showPassword ? "text" : "password"}
+                                className={`cpw-input${
+                                  errors.password ? " is-invalid" : ""
+                                }`}
+                                placeholder="请输入项目访问密码"
+                                value={state.projectPassword}
+                                autoComplete="new-password"
+                                aria-invalid={Boolean(errors.password)}
+                                aria-describedby={`${passwordId}-err`}
+                                onChange={(e) =>
+                                  setState((s) => ({
+                                    ...s,
+                                    projectPassword: e.target.value,
+                                    fieldErrors: {
+                                      ...s.fieldErrors,
+                                      password: undefined,
+                                    },
+                                  }))
+                                }
+                              />
+                              <button
+                                type="button"
+                                className="cpw-eye"
+                                aria-label={
+                                  state.showPassword ? "隐藏密码" : "显示密码"
+                                }
+                                onClick={() =>
+                                  setState((s) => ({
+                                    ...s,
+                                    showPassword: !s.showPassword,
+                                  }))
+                                }
+                              >
+                                {state.showPassword ? (
+                                  <EyeOff className="h-4 w-4" aria-hidden />
+                                ) : (
+                                  <Eye className="h-4 w-4" aria-hidden />
+                                )}
+                              </button>
+                            </div>
+                            <div className="cpw-error" id={`${passwordId}-err`}>
+                              {errors.password}
+                            </div>
+                          </>
+                        ) : null}
+                      </div>
                     </div>
 
                     <div
@@ -695,34 +695,7 @@ export function CreateProjectWizardDialog({
                         />
                       </div>
                       <div className="cpw-error" data-testid="cpw-visual-style-error">
-                        {errors.visualStyle ?? ""}
-                      </div>
-                    </div>
-
-                    <div className="cpw-field cpw-field--stagger-3">
-                      <div className="cpw-label-row">
-                        <label className="cpw-label" htmlFor={highlightsId}>
-                          项目要点
-                        </label>
-                        <span className="cpw-hint">
-                          可选，仅项目主理人可以修改
-                        </span>
-                      </div>
-                      <textarea
-                        id={highlightsId}
-                        className="cpw-textarea"
-                        placeholder="填写故事方向、人物关系、制作要求或其他重要信息"
-                        value={state.highlights}
-                        rows={4}
-                        onChange={(e) =>
-                          setState((s) => ({
-                            ...s,
-                            highlights: e.target.value,
-                          }))
-                        }
-                      />
-                      <div className="cpw-error">
-                        {errors.highlights ?? ""}
+                        {errors.visualStyle}
                       </div>
                     </div>
 
@@ -798,7 +771,56 @@ export function CreateProjectWizardDialog({
                         </button>
                       </div>
                       <div className="cpw-error" id={`${titleId}-mode-err`}>
-                        {errors.projectMode ?? ""}
+                        {errors.projectMode}
+                      </div>
+                    </div>
+
+                    <div className="cpw-field cpw-field--stagger-4">
+                      <label className="cpw-check cpw-approval-option">
+                        <input
+                          type="checkbox"
+                          checked={state.approvalEnabled}
+                          onChange={(event) =>
+                            setState((current) => ({
+                              ...current,
+                              approvalEnabled: event.target.checked,
+                            }))
+                          }
+                        />
+                        <span>
+                          <strong>审批系统</strong>
+                          <small>若勾选则加入项目的审批系统</small>
+                        </span>
+                      </label>
+                      <p className="cpw-approval-hint">
+                        默认关闭；关闭后所有协作者共享一致的创作权限。
+                      </p>
+                    </div>
+
+                    <div className="cpw-field cpw-field--stagger-4">
+                      <div className="cpw-label-row">
+                        <label className="cpw-label" htmlFor={highlightsId}>
+                          项目要点
+                        </label>
+                        <span className="cpw-hint">
+                          可选，仅项目主理人可以修改
+                        </span>
+                      </div>
+                      <textarea
+                        id={highlightsId}
+                        className="cpw-textarea"
+                        placeholder="填写故事方向、人物关系、制作要求或其他重要信息"
+                        value={state.highlights}
+                        rows={2}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            highlights: e.target.value,
+                          }))
+                        }
+                      />
+                      <div className="cpw-error">
+                        {errors.highlights}
                       </div>
                     </div>
                   </div>

@@ -6,7 +6,10 @@ import {
   saveEpisodeAssetDesignItems,
 } from "@/projects/assets/episode-design/episode-design-api";
 import { generateDesignAssetImage } from "@/projects/assets/episode-design/generate-design-asset-image";
-import { deleteProjectAssetImageFile } from "@/projects/assets/asset-image-storage";
+import {
+  deleteProjectAssetImageFile,
+  readProjectAssetImageFile,
+} from "@/projects/assets/asset-image-storage";
 import {
   appendGeneratedMediaGenerations,
   appendPromptHistory,
@@ -14,16 +17,16 @@ import {
 import { syncManagementToWorkspace } from "@/projects/workspace-sync/sync-management-to-workspace";
 import { guardEpisodeAssetDesignRemoteData } from "@/projects/assets/episode-design/route-remote-guard";
 import {
-  parseIdempotencyKey,
   releaseGenerationCredits,
   reserveImageGenerationCredits,
   settleGenerationCredits,
 } from "@/credits/generation-billing";
 import { estimateAssetImageCredits } from "@/credits/generation-pricing";
 import {
-  DEFAULT_DESIGN_IMAGE_OPTIONS,
-  parseDesignImageGenerationOptions,
-} from "@/projects/assets/episode-design/image-generation-options";
+  isItemGeneratedMediaId,
+  parseGenerateAssetRequest,
+} from "@/projects/assets/episode-design/parse-generate-asset-request";
+import { buildMultiAngleEditPrompt } from "@/projects/assets/episode-design/multi-angle-prompts";
 
 type RouteContext = {
   params: Promise<{ projectId: string; episodeId: string; itemId: string }>;
@@ -47,54 +50,25 @@ async function post(request: Request, context: RouteContext) {
     return NextResponse.json({ error: "项目不存在" }, { status: 404 });
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "无效请求" }, { status: 400 });
-  }
-  const raw =
-    typeof body === "object" && body !== null && !Array.isArray(body)
-      ? (body as Record<string, unknown>)
-      : null;
-  const prompt = typeof raw?.prompt === "string" ? raw.prompt.trim() : "";
-  if (!prompt) {
-    return NextResponse.json({ error: "缺少提示词" }, { status: 400 });
-  }
-  if (
-    raw &&
-    ("stylePrompt" in raw ||
-      "visualStyle" in raw ||
-      "promptDirective" in raw)
-  ) {
+  const parsed = await parseGenerateAssetRequest(request);
+  if (!parsed.ok) {
     return NextResponse.json(
-      { error: "不允许客户端覆盖项目视觉风格" },
-      { status: 400 },
-    );
-  }
-  const idempotencyKey = parseIdempotencyKey(raw?.idempotencyKey);
-  if (!idempotencyKey) {
-    return NextResponse.json(
-      { error: "缺少 idempotencyKey", code: "IDEMPOTENCY_KEY_REQUIRED" },
-      { status: 400 },
+      {
+        error: parsed.error.error,
+        ...(parsed.error.code ? { code: parsed.error.code } : {}),
+      },
+      { status: parsed.error.status },
     );
   }
 
-  const hasOptionFields =
-    raw != null &&
-    ("quality" in raw || "aspectRatio" in raw || "count" in raw);
-  const options = hasOptionFields
-    ? parseDesignImageGenerationOptions(raw)
-    : DEFAULT_DESIGN_IMAGE_OPTIONS;
-  if (!options) {
-    return NextResponse.json(
-      {
-        error: "画质、画面比例或生成张数无效（张数须为 1–4）",
-        code: "INVALID_IMAGE_OPTIONS",
-      },
-      { status: 400 },
-    );
-  }
+  const {
+    mode,
+    prompt,
+    idempotencyKey,
+    options,
+    model: requestedModel,
+    multiAngleMode,
+  } = parsed.value;
 
   const detail = await getEpisodeAssetDesignDetail(projectId, episodeId);
   if (!detail.ok) {
@@ -118,6 +92,68 @@ async function post(request: Request, context: RouteContext) {
     );
   }
 
+  if (multiAngleMode && item.assetType !== "scene") {
+    return NextResponse.json(
+      {
+        error: "多角度生图仅支持场景资产",
+        code: "MULTI_ANGLE_SCENE_ONLY",
+      },
+      { status: 400 },
+    );
+  }
+
+  const referenceSlots = multiAngleMode
+    ? parsed.value.referenceSlots.slice(0, 1)
+    : parsed.value.referenceSlots;
+  const referenceImages: Array<{
+    buffer: Buffer;
+    mimeType: import("@/projects/assets/asset-image-storage").ProjectAssetImageMime;
+    fileName: string;
+  }> = [];
+  if (mode === "image_to_image") {
+    for (const slot of referenceSlots) {
+      if (slot.kind === "upload") {
+        referenceImages.push(slot.image);
+        continue;
+      }
+      if (!isItemGeneratedMediaId(item, slot.mediaId)) {
+        return NextResponse.json(
+          {
+            error: "参考图必须属于当前资产的已生成图片",
+            code: "REFERENCE_MEDIA_FORBIDDEN",
+          },
+          { status: 403 },
+        );
+      }
+      const file = await readProjectAssetImageFile(projectId, slot.mediaId);
+      if (!file) {
+        return NextResponse.json(
+          {
+            error: "无法读取参考图片",
+            code: "REFERENCE_IMAGE_NOT_FOUND",
+          },
+          { status: 404 },
+        );
+      }
+      referenceImages.push(file);
+    }
+    if (referenceImages.length === 0) {
+      return NextResponse.json(
+        {
+          error: multiAngleMode
+            ? "请先生成或上传场景参考图"
+            : "图生图至少需要 1 张参考图",
+          code: "REFERENCE_IMAGE_REQUIRED",
+        },
+        { status: 400 },
+      );
+    }
+  }
+
+  const effectivePrompt = multiAngleMode
+    ? buildMultiAngleEditPrompt(multiAngleMode, prompt)
+    : prompt;
+
   const reserved = await reserveImageGenerationCredits({
     projectId,
     actorUserId: gated.user.id,
@@ -134,10 +170,15 @@ async function post(request: Request, context: RouteContext) {
       projectId,
       assetType: item.assetType,
       assetName: item.name,
-      prompt,
+      prompt: effectivePrompt,
       quality: options.quality,
       aspectRatio: options.aspectRatio,
       count: options.count,
+      model: requestedModel,
+      useRawPrompt: Boolean(multiAngleMode),
+      ...(mode === "image_to_image"
+        ? { referenceImages }
+        : {}),
     });
   } catch (error) {
     await releaseGenerationCredits({
@@ -174,7 +215,7 @@ async function post(request: Request, context: RouteContext) {
     item.generatedMedia,
     generated.images.map((image) => ({
       mediaId: image.mediaId,
-      prompt,
+      prompt: effectivePrompt,
       generatedAt: now,
       promptFingerprint: generated.promptFingerprint,
       mimeType: image.mimeType,
@@ -185,21 +226,24 @@ async function post(request: Request, context: RouteContext) {
     i.id === itemId
       ? {
           ...i,
-          designPrompt: {
-            status: "ready" as const,
-            text: prompt,
-            generationId: i.designPrompt?.generationId ?? null,
-            sourceFingerprint: i.designPrompt?.sourceFingerprint ?? null,
-            generatedAt: i.designPrompt?.generatedAt ?? now,
-            updatedAt: now,
-            errorMessage: null,
-            history: appendPromptHistory(i.designPrompt?.history, {
-              text: prompt,
-              generatedAt: now,
-              generationId: i.designPrompt?.generationId ?? null,
-              source: "generate_asset",
-            }),
-          },
+          designPrompt:
+            mode === "image_to_image"
+              ? i.designPrompt
+              : {
+                  status: "ready" as const,
+                  text: prompt,
+                  generationId: i.designPrompt?.generationId ?? null,
+                  sourceFingerprint: i.designPrompt?.sourceFingerprint ?? null,
+                  generatedAt: i.designPrompt?.generatedAt ?? now,
+                  updatedAt: now,
+                  errorMessage: null,
+                  history: appendPromptHistory(i.designPrompt?.history, {
+                    text: prompt,
+                    generatedAt: now,
+                    generationId: i.designPrompt?.generationId ?? null,
+                    source: "generate_asset",
+                  }),
+                },
           generatedMedia,
         }
       : i,

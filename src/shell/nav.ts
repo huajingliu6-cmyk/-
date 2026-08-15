@@ -57,9 +57,9 @@ export function workspaceProjectAssetsPath(projectId: string): string {
   return `${workspaceProjectPath(projectId)}/assets`;
 }
 
-/** 工作台资产设计 */
+/** @deprecated 资产设计已合并到资产管理页。 */
 export function workspaceProjectAssetsDesignPath(projectId: string): string {
-  return `${workspaceProjectAssetsPath(projectId)}/design`;
+  return workspaceProjectAssetsLibraryPath(projectId);
 }
 
 /** 工作台资产库 */

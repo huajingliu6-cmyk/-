@@ -6,7 +6,6 @@ import {
   type GlassSelectGroup,
 } from "@/shell/glass-select";
 import {
-  VOICE_CATALOG,
   findVoiceOption,
   withSelectedLocalVoice,
 } from "@/projects/assets/voice-catalog";
@@ -101,11 +100,6 @@ export function VoiceSelector({
       label: "项目音色",
       emptyHint: "暂无项目音色。请优先从「本地音频库」选择可播放文件。",
       options: projectVoices.map(toOption),
-    },
-    {
-      id: "system",
-      label: "系统音色（占位）",
-      options: VOICE_CATALOG.map(toOption),
     },
   ];
 

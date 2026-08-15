@@ -4,9 +4,9 @@ import { useChipBounce } from "@/shell/useChipBounce";
 import type { AssetTabId } from "@/projects/assets/types";
 
 const TABS: Array<{ id: AssetTabId; label: string }> = [
-  { id: "character", label: "角色管理" },
-  { id: "scene", label: "场景管理" },
-  { id: "prop", label: "道具管理" },
+  { id: "character", label: "角色" },
+  { id: "scene", label: "场景" },
+  { id: "prop", label: "道具" },
 ];
 
 type Props = {

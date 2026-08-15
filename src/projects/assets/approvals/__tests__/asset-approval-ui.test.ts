@@ -31,9 +31,9 @@ describe("asset approval UI contracts", () => {
     expect(workspace).toMatch(/surface === "workspace"[\s\S]*ead-submit-approval/);
   });
 
-  it("management keeps 确认本集资产", () => {
-    expect(workspace).toContain("确认本集资产");
-    expect(workspace).toContain('data-testid="ead-confirm"');
+  it("management no longer shows 确认本集资产", () => {
+    expect(workspace).not.toContain("确认本集资产");
+    expect(workspace).not.toContain('data-testid="ead-confirm"');
   });
 
   it("submit modal has three columns and checkboxes", () => {
@@ -67,7 +67,7 @@ describe("asset approval UI contracts", () => {
     expect(header).toContain("NotificationBell");
     expect(bell).toContain("notification-unread-badge");
     expect(bell).toContain("approvalSubmissionId");
-    expect(bell).toContain("/assets/design?");
+    expect(bell).toContain("/assets/library?");
     expect(bell).toContain("keepUnreadWhilePending");
     expect(bell).toContain("asset_approval_approved");
     expect(bell).toContain("asset_approval_rejected");
@@ -93,9 +93,17 @@ describe("asset approval UI contracts", () => {
     expect(workspace).not.toContain("dismissedApprovalSubmissionId");
   });
 
-  it("workspace confirm route blocks formal入库", () => {
+  it("keeps approval modals available when extraction runs headlessly", () => {
+    expect(workspace).toContain("const approvalModals");
+    expect(workspace).toContain("if (headless) return approvalModals");
+    expect(workspace).not.toContain("if (headless) return null");
+    expect(workspace).toContain("submitApprovalRequestId");
+  });
+
+  it("workspace confirm route only blocks projects with approval enabled", () => {
     expect(confirmRoute).toContain("WORKSPACE_CONFIRM_REQUIRES_APPROVAL");
     expect(confirmRoute).toContain("403");
-    expect(confirmRoute).not.toContain("confirmWorkspaceEpisodeAssetDesign");
+    expect(confirmRoute).toContain("project.approvalEnabled");
+    expect(confirmRoute).toContain("confirmWorkspaceEpisodeAssetDesign");
   });
 });

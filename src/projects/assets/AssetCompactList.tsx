@@ -22,6 +22,7 @@ type Props = {
   items: AssetCompactListItemData[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onEdit?: (id: string) => void;
   emptyMessage: string;
   testId?: string;
 };
@@ -32,6 +33,7 @@ export function AssetCompactList({
   items,
   selectedId,
   onSelect,
+  onEdit,
   emptyMessage,
   testId = "asset-compact-list",
 }: Props) {
@@ -53,6 +55,11 @@ export function AssetCompactList({
             title={title}
             data-testid={`asset-compact-item-${item.id}`}
             onClick={() => onSelect(item.id)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              onSelect(item.id);
+              onEdit?.(item.id);
+            }}
           >
             <span className="asset-compact-list__thumb" aria-hidden>
               <AssetListThumb

@@ -10,6 +10,7 @@ import {
 import {
   listAccessibleWorkspaceProjectIds,
   resolveEffectiveProjectRole,
+  resolveProjectAccess,
 } from "@/auth/effective-role";
 import { getSystemRole, workspaceFeaturesForRole } from "@/auth/roles";
 import type { AuthUser } from "@/auth/types";
@@ -103,6 +104,27 @@ describe("effective project roles and workspace routing helpers", () => {
     ]);
     expect(workspaceFeaturesForRole("PROJECT_OWNER")).toContain("storyboard");
     expect(workspaceFeaturesForRole("CARD_ENGINEER")).not.toContain("video");
+    expect(
+      (await resolveProjectAccess(engineer, project.projectId))?.features,
+    ).toContain("video");
+
+    const reviewedProject = await createProjectRecord(owner.id, {
+      name: `reviewed-${Date.now()}`,
+      creationSource: "story",
+      projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
+      approvalEnabled: true,
+      passwordEnabled: false,
+    });
+    await addCardEngineer({
+      projectId: reviewedProject.projectId,
+      userId: engineer.id,
+      createdBy: owner.id,
+    });
+    expect(
+      (await resolveProjectAccess(engineer, reviewedProject.projectId))
+        ?.features,
+    ).not.toContain("video");
   });
 
   it("workspace list only includes assigned projects for card engineers", async () => {

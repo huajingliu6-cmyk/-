@@ -118,40 +118,33 @@ describe("design prompt model selection", () => {
     );
   });
 
-  it("places regenerate + GlassSelect model under the prompt textarea", () => {
+  it("places one-click copy under the prompt textarea and removes regenerate UI", () => {
     const textareaIdx = modal.indexOf('data-testid="design-prompt-textarea"');
-    const actionsIdx = modal.indexOf('data-testid="design-prompt-actions"');
-    const regenerateIdx = modal.indexOf('data-testid="design-regenerate-prompt"');
-    const modelIdx = modal.indexOf('data-testid="design-prompt-model"');
+    const copyRowIdx = modal.indexOf('data-testid="design-prompt-copy-row"');
     const footIdx = modal.indexOf('className="ead-modal__foot"');
 
     expect(textareaIdx).toBeGreaterThan(-1);
-    expect(actionsIdx).toBeGreaterThan(textareaIdx);
-    expect(regenerateIdx).toBeGreaterThan(actionsIdx);
-    expect(modelIdx).toBeGreaterThan(regenerateIdx);
-    expect(footIdx).toBeGreaterThan(modelIdx);
+    expect(copyRowIdx).toBeGreaterThan(textareaIdx);
+    expect(footIdx).toBeGreaterThan(copyRowIdx);
 
     expect(modal).toContain("GlassSelect");
-    expect(modal).toContain("promptModelId");
-    expect(modal).toContain("promptModelId,");
-    expect(modal).toContain("DESIGN_PROMPT_MODEL_OPTIONS");
-    expect(modal).toContain("menuPortal");
     expect(modal).toContain("DEFAULT_DESIGN_PROMPT_MODEL_ID");
-    expect(modal).toContain("DESIGN_PROMPT_MODELS");
+    expect(modal).toContain("menuPortal");
+    expect(modal).not.toContain('data-testid="design-prompt-actions"');
+    expect(modal).not.toContain('data-testid="design-regenerate-prompt"');
+    expect(modal).not.toContain('data-testid="design-prompt-model"');
+    expect(modal).not.toContain("DESIGN_PROMPT_MODEL_OPTIONS");
+    expect(modal).not.toContain("重新生成提示词");
+    expect(modal).toContain("promptModelId: DEFAULT_DESIGN_PROMPT_MODEL_ID");
     expect(DESIGN_PROMPT_MODELS[0]?.label).toBe("Deepseek V4 Pro");
-
-    const regenerateMatches = modal.match(
-      /data-testid="design-regenerate-prompt"/g,
-    );
-    expect(regenerateMatches).toHaveLength(1);
 
     const footEnd = modal.indexOf("</footer>", footIdx);
     const footSlice = modal.slice(footIdx, footEnd);
-    expect(footSlice).toContain("design-copy");
+    expect(footSlice).toContain("design-image-edit-toggle");
+    expect(footSlice).toContain("二次编辑");
     expect(footSlice).toContain("design-generate-asset");
+    expect(footSlice).not.toContain("design-copy");
     expect(footSlice).not.toContain("design-regenerate-prompt");
-    expect(footSlice).not.toContain("重新生成提示词");
-    expect(modal).toContain("生成提示词");
     expect(modal).not.toContain('data-testid="design-extract-info"');
     expect(modal).not.toContain("资产提取信息");
   });

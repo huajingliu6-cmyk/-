@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { workspaceProjectAssetsDesignPath } from "@/shell/nav";
+import { workspaceProjectAssetsLibraryPath } from "@/shell/nav";
 import { RouteLoadingOverlay } from "@/shell/RouteLoadingOverlay";
 
-/** 工作台 /assets：有资产权限者（含 CE）进入资产设计 */
+/** 工作台 /assets：有资产权限者（含 CE）进入统一资产库。 */
 export default function WorkspaceProjectAssetsRedirectPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
@@ -28,7 +28,7 @@ export default function WorkspaceProjectAssetsRedirectPage() {
           return;
         }
         if (cancelled) return;
-        router.replace(workspaceProjectAssetsDesignPath(projectId));
+        router.replace(workspaceProjectAssetsLibraryPath(projectId));
       } catch {
         if (!cancelled) setError("无法校验权限");
       }

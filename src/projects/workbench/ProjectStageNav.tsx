@@ -40,7 +40,7 @@ export function ProjectStageNav({
           {
             id: "assets",
             label: "项目资产",
-            href: `/app/projects/${encodedProjectId}/assets/design`,
+            href: `/app/projects/${encodedProjectId}/assets/library`,
             activePrefix: `/app/projects/${encodedProjectId}/assets`,
           },
           {

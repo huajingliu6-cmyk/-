@@ -30,6 +30,7 @@ function normalizeRemoteProjectRecord(
     ...record,
     highlights: typeof record.highlights === "string" ? record.highlights : "",
     visualStyle: parseProjectVisualStyleId(record.visualStyle),
+    approvalEnabled: record.approvalEnabled === true,
   };
 }
 
@@ -41,6 +42,7 @@ function normalizeRemoteProjectPublic(
     ...project,
     highlights: typeof project.highlights === "string" ? project.highlights : "",
     visualStyle: parseProjectVisualStyleId(project.visualStyle),
+    approvalEnabled: project.approvalEnabled === true,
   };
 }
 
@@ -114,6 +116,7 @@ export async function getProjectPublicRemote(
     status: record.status,
     highlights: record.highlights,
     visualStyle: record.visualStyle ?? null,
+    approvalEnabled: record.approvalEnabled,
     passwordEnabled: record.passwordEnabled,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,

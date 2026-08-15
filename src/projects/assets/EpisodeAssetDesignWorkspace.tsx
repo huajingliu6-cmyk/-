@@ -109,12 +109,24 @@ import type {
 } from "@/projects/assets/types";
 import "./asset-workspace.css";
 
-type EpisodeListItem = {
+export type AssetExtractionEpisode = {
   episodeId: string;
   episodeNumber: number;
   title: string;
   designStatus: EpisodeAssetDesignStatus;
   itemCount: number;
+};
+
+type EpisodeListItem = AssetExtractionEpisode;
+
+export type AssetExtractionRequest =
+  | { id: number; mode: "full-script" }
+  | { id: number; mode: "selected-episode"; episodeId: string };
+
+export type AssetExtractionProgress = {
+  percent: number;
+  title: string;
+  label: string;
 };
 
 type PendingMediaEntry = {
@@ -137,6 +149,27 @@ type EpisodeDetailPayload = {
 
 type Props = {
   projectId: string;
+  /** Hide approval-only controls while the shared collaboration flow is active. */
+  showApprovalUi?: boolean;
+  /** Reuse the design workspace inline without duplicating the library toolbar. */
+  embeddedInLibrary?: boolean;
+  /** Increment to request a full-script extraction from the parent toolbar. */
+  extractRequestId?: number;
+  extractionModel?: string;
+  /** Run extraction logic without rendering the legacy design workspace. */
+  headless?: boolean;
+  extractionRequest?: AssetExtractionRequest | null;
+  approvalEnabled?: boolean;
+  /** Open the workspace approval picker from the unified asset toolbar. */
+  submitApprovalRequestId?: number;
+  onEpisodesChange?: (episodes: AssetExtractionEpisode[]) => void;
+  /** Expose the currently loaded extraction items to the unified asset library. */
+  onItemsChange?: (items: EpisodeAssetDesignItem[], episodeId: string) => void;
+  onExtractionBusyChange?: (busy: boolean) => void;
+  onExtractionProgressChange?: (
+    progress: AssetExtractionProgress | null,
+  ) => void;
+  onExtractionComplete?: () => void;
 };
 
 const GROUPS: Array<{
@@ -360,7 +393,22 @@ function extractionStreamPercent(textLength: number, targetChars: number): numbe
   return Math.min(22, 10 + Math.floor(streamedRatio * 12));
 }
 
-export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
+export function EpisodeAssetDesignWorkspace({
+  projectId,
+  showApprovalUi = true,
+  embeddedInLibrary = false,
+  extractRequestId = 0,
+  extractionModel,
+  headless = false,
+  extractionRequest = null,
+  approvalEnabled = true,
+  submitApprovalRequestId = 0,
+  onEpisodesChange,
+  onItemsChange,
+  onExtractionBusyChange,
+  onExtractionProgressChange,
+  onExtractionComplete,
+}: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -441,8 +489,14 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     STORY_TEXT_MODELS[0]?.id ?? "balanced-default",
   );
   const [assetExtractionModel, setAssetExtractionModel] = useState(
-    "deepseek-v4-pro",
+    extractionModel ?? "deepseek-v4-pro",
   );
+  const activeAssetExtractionModel =
+    headless && extractionModel ? extractionModel : assetExtractionModel;
+  const handledExtractRequestIdRef = useRef(0);
+  const handledExternalRequestIdRef = useRef(0);
+  const handledSubmitApprovalRequestIdRef = useRef(0);
+  const pendingEpisodeRequestRef = useRef<AssetExtractionRequest | null>(null);
   const [assetSummaryPanel, setAssetSummaryPanel] =
     useState<AssetSummaryPanel>(null);
   const summaryRef = useRef<HTMLDivElement | null>(null);
@@ -525,6 +579,14 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
 
+  useEffect(() => {
+    onEpisodesChange?.(episodes);
+  }, [episodes, onEpisodesChange]);
+
+  useEffect(() => {
+    onItemsChange?.(items, selectedId);
+  }, [items, onItemsChange, selectedId]);
+
   const markEpisodeExtracting = useCallback((episodeId: string, on: boolean) => {
     setExtractingEpisodeIds((prev) => {
       const has = prev.has(episodeId);
@@ -568,6 +630,10 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     designStatus === "generating" ||
     currentEpisodeExtracting ||
     extractingEpisodeIds.has(SCRIPT_ASSET_DESIGN_ID);
+
+  useEffect(() => {
+    onExtractionBusyChange?.(extractionBusy);
+  }, [extractionBusy, onExtractionBusyChange]);
 
   useEffect(() => {
     const onSpaceChanged = (event: Event) => {
@@ -1546,6 +1612,37 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
 
   const putEpisodeExtractStatus = markExtractStatusForEpisode;
 
+  const finalizeExtraction = useCallback(
+    async (input: {
+      episodeId: string;
+      record: EpisodeAssetDesignRecord;
+      fingerprint: string;
+    }): Promise<boolean> => {
+      if (!approvalEnabled) {
+        const response = await fetch(
+          `${apiRoot}/asset-designs/episodes/${encodeURIComponent(input.episodeId)}/confirm`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              expectedRevision: input.record.revision,
+              fingerprint: input.fingerprint,
+            }),
+          },
+        );
+        const payload = (await response.json()) as { error?: string };
+        if (!response.ok) {
+          setPageNote(payload.error ?? "提取结果同步失败");
+          return false;
+        }
+        await loadBundle();
+      }
+      onExtractionComplete?.();
+      return true;
+    },
+    [apiRoot, approvalEnabled, loadBundle, onExtractionComplete],
+  );
+
   const runExtract = useCallback(async () => {
     if (!selectedId || !fingerprint || saving) return;
     if (extractionBusy) return;
@@ -1675,15 +1772,28 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       notifyCreditsRefresh();
       await loadList();
       if (applyPayload.record) {
+        const synced = await finalizeExtraction({
+          episodeId: extractingEpisodeId,
+          record: applyPayload.record,
+          fingerprint: snapshotFingerprint,
+        });
         if (selectedIdRef.current === extractingEpisodeId) {
           applyRecord(applyPayload.record);
-          setPageNote("本集资产提取完成，请确认设计项。");
+          setPageNote(
+            approvalEnabled
+              ? "本集资产提取完成，已进入审批流程。"
+              : synced
+                ? "本集资产已提取并同步到资产管理。"
+                : "本集资产已提取，但同步到资产管理失败。",
+          );
           await loadDetail(extractingEpisodeId);
         }
-        void kickOffFormalDesignPrompts(
-          applyPayload.record,
-          extractingEpisodeId,
-        );
+        if (approvalEnabled) {
+          void kickOffFormalDesignPrompts(
+            applyPayload.record,
+            extractingEpisodeId,
+          );
+        }
       }
     } catch (error) {
       const busyConflict =
@@ -1740,6 +1850,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     applyRecord,
     extractionBusy,
     extractingEpisodeIds,
+    finalizeExtraction,
     fingerprint,
     kickOffFormalDesignPrompts,
     loadDetail,
@@ -1747,6 +1858,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     markEpisodeExtracting,
     markExtractStatusForEpisode,
     modelKey,
+    approvalEnabled,
     projectId,
     saving,
     selectedId,
@@ -1856,7 +1968,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       const result = await streamStoryGeneration({
         projectId,
         brief: "",
-        modelKey: assetExtractionModel,
+        modelKey: activeAssetExtractionModel,
         targetChars: 20_000,
         idempotencyKey,
         outputKind: "script_asset_design",
@@ -1959,25 +2071,44 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         rejectedItems: applyPayload.rejectedItems ?? [],
       });
       await loadList();
+      const synced = await finalizeExtraction({
+        episodeId: SCRIPT_ASSET_DESIGN_ID,
+        record: applyPayload.record,
+        fingerprint: scriptDetail.currentFingerprint,
+      });
       if (selectedIdRef.current === SCRIPT_ASSET_DESIGN_ID) {
         applyRecord(applyPayload.record);
-        void kickOffFormalDesignPrompts(
-          applyPayload.record,
-          SCRIPT_ASSET_DESIGN_ID,
-        );
+        if (approvalEnabled) {
+          void kickOffFormalDesignPrompts(
+            applyPayload.record,
+            SCRIPT_ASSET_DESIGN_ID,
+          );
+        }
         setPageNote(
           `已提取 ${applyPayload.record.items.length} 项` +
             (repairedCount > 0 ? `，${repairedCount} 项已自动修复` : "") +
             (rejectedCount > 0 ? `，${rejectedCount} 项需人工检查` : "") +
-            "，请在下方核对。",
+            (approvalEnabled
+              ? "，已进入审批流程。"
+              : synced
+                ? "，已同步到资产管理。"
+                : "，但同步到资产管理失败。"),
         );
         await loadDetail(SCRIPT_ASSET_DESIGN_ID);
       } else {
-        setPageNote("完整剧本资产提取已完成，可返回全剧本查看。");
-        void kickOffFormalDesignPrompts(
-          applyPayload.record,
-          SCRIPT_ASSET_DESIGN_ID,
+        setPageNote(
+          approvalEnabled
+            ? "完整剧本资产提取已完成，已进入审批流程。"
+            : synced
+              ? "完整剧本资产已提取并同步到资产管理。"
+              : "完整剧本资产已提取，但同步到资产管理失败。",
         );
+        if (approvalEnabled) {
+          void kickOffFormalDesignPrompts(
+            applyPayload.record,
+            SCRIPT_ASSET_DESIGN_ID,
+          );
+        }
       }
     } catch (error) {
       const busyConflict =
@@ -2081,9 +2212,11 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   }, [
     apiRoot,
     applyRecord,
-    assetExtractionModel,
+    approvalEnabled,
+    activeAssetExtractionModel,
     confirming,
     extractionBusy,
+    finalizeExtraction,
     kickOffFormalDesignPrompts,
     loadDetail,
     loadList,
@@ -2590,8 +2723,61 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       projectId,
       saveItems,
       selectedId,
-    ],
+  ],
   );
+
+  useEffect(() => {
+    if (!embeddedInLibrary || extractRequestId <= 0) return;
+    if (handledExtractRequestIdRef.current === extractRequestId) return;
+    handledExtractRequestIdRef.current = extractRequestId;
+    void handleExtractAll();
+  }, [embeddedInLibrary, extractRequestId, handleExtractAll]);
+
+  useEffect(() => {
+    if (!headless || !extractionRequest) return;
+    if (handledExternalRequestIdRef.current === extractionRequest.id) return;
+    handledExternalRequestIdRef.current = extractionRequest.id;
+    queueMicrotask(() => {
+      if (extractionRequest.mode === "full-script") {
+        pendingEpisodeRequestRef.current = null;
+        void handleExtractAll();
+        return;
+      }
+      pendingEpisodeRequestRef.current = extractionRequest;
+      setSelectedId(extractionRequest.episodeId);
+    });
+  }, [extractionRequest, handleExtractAll, headless]);
+
+  useEffect(() => {
+    if (
+      !headless ||
+      !showApprovalUi ||
+      surface !== "workspace" ||
+      submitApprovalRequestId <= 0 ||
+      handledSubmitApprovalRequestIdRef.current === submitApprovalRequestId
+    ) {
+      return;
+    }
+    handledSubmitApprovalRequestIdRef.current = submitApprovalRequestId;
+    queueMicrotask(() => setSubmitApprovalOpen(true));
+  }, [headless, showApprovalUi, submitApprovalRequestId, surface]);
+
+  useEffect(() => {
+    const request = pendingEpisodeRequestRef.current;
+    if (!headless || request?.mode !== "selected-episode") return;
+    if (selectedId !== request.episodeId) return;
+    if (detailLoading || detail?.record.episodeId !== request.episodeId) return;
+    if (extractionBusy) return;
+    pendingEpisodeRequestRef.current = null;
+    queueMicrotask(() => void runExtract());
+  }, [
+    detail,
+    detailLoading,
+    extractionBusy,
+    headless,
+    runExtract,
+    selectedId,
+  ]);
 
   const handleConfirmItem = useCallback(
     (itemId: string) => {
@@ -2876,32 +3062,6 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     isFullScriptDesign &&
     designStatus === "not_started" &&
     items.length === 0;
-  const missingImageItems = items.filter(
-    (item) =>
-      (item.resolution === "create_new" || item.resolution === "pending") &&
-      item.assetType !== "audio" &&
-      !item.generatedMedia?.currentId?.trim(),
-  );
-  const unboundVoiceItems = items.filter((item) => {
-    if (item.resolution !== "create_new" || item.assetType !== "character") {
-      return false;
-    }
-    const mediaId = item.generatedMedia?.currentId?.trim();
-    return !mediaId || !isMediaVoiceBound(getDesignMediaVoiceBinding(item, mediaId));
-  });
-  const canConfirm =
-    !extractionBusy &&
-    !saving &&
-    !confirming &&
-    Boolean(selectedId) &&
-    designStatus !== "stale" &&
-    designStatus !== "not_started" &&
-    designStatus !== "failed" &&
-    missingImageItems.length === 0;
-  const confirmDisabledReason =
-    missingImageItems.length > 0
-      ? `请先为${missingImageItems.map((item) => item.name).join("、")}生成图片`
-      : undefined;
 
   const canSubmitApproval =
     !extractionBusy && !saving && Boolean(selectedId);
@@ -2950,6 +3110,24 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       : "正在生成资产图片";
 
   useEffect(() => {
+    onExtractionProgressChange?.(
+      assetPageLocked
+        ? {
+            percent: workflowProgressPercent ?? 0,
+            title: assetLockTitle,
+            label: workflowProgressLabel,
+          }
+        : null,
+    );
+  }, [
+    assetLockTitle,
+    assetPageLocked,
+    onExtractionProgressChange,
+    workflowProgressLabel,
+    workflowProgressPercent,
+  ]);
+
+  useEffect(() => {
     if (!scriptViewerOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setScriptViewerOpen(false);
@@ -2979,8 +3157,57 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [pendingUnboundVoiceConfirmItem, confirming, confirmingItemId]);
 
+  const approvalModals = (
+    <>
+      {showApprovalUi && surface === "workspace" && selectedId ? (
+        <SubmitApprovalModal
+          open={submitApprovalOpen}
+          projectId={projectId}
+          projectName={projectName}
+          episodeId={selectedId}
+          episodeNumber={detail?.episode.episodeNumber ?? 0}
+          onClose={() => setSubmitApprovalOpen(false)}
+          onSubmitted={(message) => {
+            setPageNote(message);
+            setConfirmSummary(message);
+            if (selectedId) void loadApprovalMediaFlags(selectedId);
+          }}
+        />
+      ) : null}
+
+      {showApprovalUi &&
+      surface === "project_management" &&
+      ownerApprovalSubmissionId ? (
+        <OwnerApproveModal
+          open={ownerApprovalOpen}
+          projectId={projectId}
+          projectName={projectName}
+          submissionId={ownerApprovalSubmissionId}
+          episodeNumber={detail?.episode.episodeNumber}
+          onClose={() => {
+            const next = new URLSearchParams(searchParams.toString());
+            next.delete("approvalSubmissionId");
+            const qs = next.toString();
+            router.replace(qs ? `${pathname}?${qs}` : pathname);
+          }}
+          onApproved={(message) => {
+            setPageNote(message);
+            if (selectedId) void loadDetail(selectedId);
+            if (selectedId) void loadApprovalMediaFlags(selectedId);
+            void loadBundle();
+          }}
+        />
+      ) : null}
+    </>
+  );
+
+  if (headless) return approvalModals;
+
   return (
-    <div className="ead" data-testid="episode-asset-design-workspace">
+    <div
+      className={`ead${embeddedInLibrary ? " ead--library-embedded" : ""}`}
+      data-testid="episode-asset-design-workspace"
+    >
       <div className="ead-content-shell">
         <div
           className={`ead-layout${isAwaitingFullScriptExtraction ? " is-pending" : ""}`}
@@ -3357,7 +3584,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
                     {saving ? "保存中…" : "保存本集资产"}
                   </button>
                 ) : null}
-                {surface === "workspace" ? (
+                {showApprovalUi && surface === "workspace" ? (
                   <button
                     type="button"
                     className={`amw-btn${canSubmitApproval ? " amw-btn-primary" : ""}`}
@@ -3367,22 +3594,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
                   >
                     提交审批素材
                   </button>
-                ) : (
-                  <button
-                    type="button"
-                    className={`amw-btn${canConfirm ? " amw-btn-primary" : ""}`}
-                    disabled={!canConfirm}
-                    title={confirmDisabledReason}
-                    onClick={() => void handleConfirm()}
-                    data-testid="ead-confirm"
-                  >
-                    {confirming
-                      ? "确认中…"
-                      : isFullScriptDesign
-                        ? "确认全剧本资产"
-                        : "确认本集资产"}
-                  </button>
-                )}
+                ) : null}
               </div>
 
               {extractionBusy ? (
@@ -3392,20 +3604,6 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
                   data-testid="ead-extract-background-note"
                 >
                   正在提取资产，预计需要 1-3 分钟。提取完成前按钮保持锁定，离开页面后再返回会从服务端恢复进度。
-                </p>
-              ) : null}
-
-              {surface !== "workspace" && missingImageItems.length > 0 ? (
-                <p className="ead-warn" data-testid="ead-missing-image-warning">
-                  无法确认：{missingImageItems.map((item) => item.name).join("、")}
-                  尚未生成图片。生成图片后才能确认入库。
-                </p>
-              ) : null}
-              {surface !== "workspace" &&
-              missingImageItems.length === 0 &&
-              unboundVoiceItems.length > 0 ? (
-                <p className="ead-warn" data-testid="ead-unbound-voice-warning">
-                  提醒：{unboundVoiceItems.length} 个角色尚未绑定音色，可先绑定，或确认入库后在资产库补充。
                 </p>
               ) : null}
 
@@ -3480,22 +3678,25 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
                                 savingVoiceItemIds.has(item.id)
                               }
                               designDisabled={!canDesign}
-                              deleteLocked={
-                                surface === "workspace" &&
-                                isApprovedEpisodeDesignItem(item)
-                              }
-                              approvalUi={
-                                isPersonalSpace
-                                  ? "none"
-                                  : designCardApprovalUi(
+                               deleteLocked={
+                                 showApprovalUi &&
+                                 surface === "workspace" &&
+                                 isApprovedEpisodeDesignItem(item)
+                               }
+                               approvalUi={
+                                 !showApprovalUi || isPersonalSpace
+                                   ? "none"
+                                   : designCardApprovalUi(
                                       item,
                                       pendingApprovalMediaIds,
                                       approvedApprovalMediaIds,
                                     )
                               }
-                              showPersonalConfirm={
-                                isPersonalSpace && surface === "project_management"
-                              }
+                               showPersonalConfirm={
+                                 showApprovalUi &&
+                                 isPersonalSpace &&
+                                 surface === "project_management"
+                               }
                               confirming={confirmingItemId === item.id}
                               onConfirm={() => void handleConfirmItem(item.id)}
                               onChange={(patch) => updateItem(item.id, patch)}
@@ -3923,43 +4124,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         }}
       />
 
-      {surface === "workspace" && selectedId ? (
-        <SubmitApprovalModal
-          open={submitApprovalOpen}
-          projectId={projectId}
-          projectName={projectName}
-          episodeId={selectedId}
-          episodeNumber={detail?.episode.episodeNumber ?? 0}
-          onClose={() => setSubmitApprovalOpen(false)}
-          onSubmitted={(message) => {
-            setPageNote(message);
-            setConfirmSummary(message);
-            if (selectedId) void loadApprovalMediaFlags(selectedId);
-          }}
-        />
-      ) : null}
-
-      {surface === "project_management" && ownerApprovalSubmissionId ? (
-        <OwnerApproveModal
-          open={ownerApprovalOpen}
-          projectId={projectId}
-          projectName={projectName}
-          submissionId={ownerApprovalSubmissionId}
-          episodeNumber={detail?.episode.episodeNumber}
-          onClose={() => {
-            const next = new URLSearchParams(searchParams.toString());
-            next.delete("approvalSubmissionId");
-            const qs = next.toString();
-            router.replace(qs ? `${pathname}?${qs}` : pathname);
-          }}
-          onApproved={(message) => {
-            setPageNote(message);
-            if (selectedId) void loadDetail(selectedId);
-            if (selectedId) void loadApprovalMediaFlags(selectedId);
-            void loadBundle();
-          }}
-        />
-      ) : null}
+      {approvalModals}
     </div>
   );
 }

@@ -9,6 +9,7 @@ import {
   persistProduction,
 } from "@/projects/storyboard/api-helpers";
 import type {
+  SceneCharacterPlacement,
   ShotAssetRequirement,
   StoryboardShot,
 } from "@/projects/storyboard/types";
@@ -17,6 +18,10 @@ import {
   getShotVideoPrompt,
   isShotConfirmReady,
 } from "@/projects/storyboard/shot-completeness";
+import {
+  parseSceneCharacterPlacements,
+  pruneSceneCharacterPlacements,
+} from "@/projects/storyboard/scene-character-placements";
 
 type RouteContext = {
   params: Promise<{ projectId: string; episodeId: string; shotId: string }>;
@@ -175,6 +180,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         "propAssetIds" in body ||
         "sceneAssetId" in body ||
         "assetMediaIds" in body ||
+        "sceneCharacterPlacements" in body ||
         "requirements" in body;
       if (mutatingAssets) {
         return NextResponse.json({ error: "镜头已锁定" }, { status: 409 });
@@ -268,6 +274,23 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
   }
 
+  const prospectiveCharacterIds =
+    characterAssetIds ?? originalShot.characterAssetIds;
+  let placementsFromBody: SceneCharacterPlacement[] | undefined;
+  if ("sceneCharacterPlacements" in body) {
+    const parsedPlacements = parseSceneCharacterPlacements(
+      body.sceneCharacterPlacements,
+      prospectiveCharacterIds,
+    );
+    if (parsedPlacements === null) {
+      return NextResponse.json(
+        { error: "人物位置数据无效", code: "INVALID_SCENE_PLACEMENTS" },
+        { status: 400 },
+      );
+    }
+    placementsFromBody = parsedPlacements;
+  }
+
   let found = false;
   const now = new Date().toISOString();
 
@@ -337,6 +360,21 @@ export async function PATCH(request: Request, context: RouteContext) {
       next.assetMediaIds = pruneAssetMediaIds(next.assetMediaIds, keepIds);
       if (requirements) next.requirements = requirements;
 
+      if (placementsFromBody !== undefined) {
+        next.sceneCharacterPlacements =
+          !next.sceneAssetId || placementsFromBody.length === 0
+            ? undefined
+            : placementsFromBody;
+      } else {
+        next.sceneCharacterPlacements = pruneSceneCharacterPlacements(
+          next.sceneCharacterPlacements,
+          next.characterAssetIds,
+        );
+        if (!next.sceneAssetId) {
+          next.sceneCharacterPlacements = undefined;
+        }
+      }
+
       if (typeof body.durationSeconds === "number" && body.durationSeconds >= 0) {
         next.durationSeconds = body.durationSeconds;
       }
@@ -385,6 +423,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     propAssetIds !== null ||
     "sceneAssetId" in body ||
     assetMediaIdsParsed !== undefined ||
+    "sceneCharacterPlacements" in body ||
     requirements !== null ||
     (typeof body.durationSeconds === "number" && body.durationSeconds >= 0) ||
     (typeof body.order === "number" && body.order >= 0) ||

@@ -32,6 +32,7 @@ type ProjectRecord struct {
 	Status          string  `json:"status"`
 	Highlights      string  `json:"highlights"`
 	VisualStyle     *string `json:"visualStyle"`
+	ApprovalEnabled bool    `json:"approvalEnabled"`
 	PasswordEnabled bool    `json:"passwordEnabled"`
 	PasswordHash    *string `json:"passwordHash"`
 	PasswordSalt    *string `json:"passwordSalt"`
@@ -49,6 +50,7 @@ type projectPublic struct {
 	Status          string  `json:"status"`
 	Highlights      string  `json:"highlights"`
 	VisualStyle     *string `json:"visualStyle"`
+	ApprovalEnabled bool    `json:"approvalEnabled"`
 	PasswordEnabled bool    `json:"passwordEnabled"`
 	CreatedAt       string  `json:"createdAt"`
 	UpdatedAt       string  `json:"updatedAt"`
@@ -244,6 +246,7 @@ func (handler *Projects) create(writer http.ResponseWriter, request *http.Reques
 		ProjectMode     string  `json:"projectMode"`
 		Highlights      string  `json:"highlights"`
 		VisualStyle     string  `json:"visualStyle"`
+		ApprovalEnabled bool    `json:"approvalEnabled"`
 		PasswordEnabled bool    `json:"passwordEnabled"`
 		ProjectPassword *string `json:"projectPassword"`
 		IdempotencyKey  string  `json:"idempotencyKey"`
@@ -299,7 +302,7 @@ func (handler *Projects) create(writer http.ResponseWriter, request *http.Reques
 	project := ProjectRecord{
 		ProjectID: projectID, RootFolderID: projectID, Name: input.Name, OwnerID: ownerID,
 		CreationSource: input.CreationSource, ProjectMode: input.ProjectMode, Status: "draft",
-		Highlights: input.Highlights, VisualStyle: &visualStyle, PasswordEnabled: input.PasswordEnabled,
+		Highlights: input.Highlights, VisualStyle: &visualStyle, ApprovalEnabled: input.ApprovalEnabled, PasswordEnabled: input.PasswordEnabled,
 		PasswordHash: passwordHash, PasswordSalt: passwordSalt, CreatedAt: now, UpdatedAt: now,
 	}
 	result, err := handler.mutateCatalog(request, func(catalog *projectCatalog) (any, bool, error) {
@@ -492,8 +495,9 @@ func publicProject(project ProjectRecord) projectPublic {
 		ProjectID: project.ProjectID, RootFolderID: project.RootFolderID, Name: project.Name,
 		OwnerID: project.OwnerID, CreationSource: project.CreationSource, ProjectMode: project.ProjectMode,
 		Status: project.Status, Highlights: project.Highlights, VisualStyle: project.VisualStyle,
+		ApprovalEnabled: project.ApprovalEnabled,
 		PasswordEnabled: project.PasswordEnabled,
-		CreatedAt: project.CreatedAt, UpdatedAt: project.UpdatedAt,
+		CreatedAt:       project.CreatedAt, UpdatedAt: project.UpdatedAt,
 	}
 }
 

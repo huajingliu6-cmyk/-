@@ -1,6 +1,8 @@
 "use client";
 
+import { Download, History, X } from "lucide-react";
 import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ShotVideoUiStatus } from "@/projects/storyboard/shot-video-status";
 import type { ShotGenerationSnapshot } from "@/projects/storyboard/resolve-shot-video";
 import {
@@ -30,6 +32,7 @@ type Props = {
   successGenerations?: ShotGenerationSnapshot[];
   /** Extra in-flight frames shown beside completed previews */
   pendingSlots?: PendingPreviewSlot[];
+  workspaceMode?: boolean;
 };
 
 const STATUS_LABEL: Record<ShotVideoUiStatus, string> = {
@@ -122,6 +125,7 @@ export function ShotVideoPreview({
   historyVideos = [],
   successGenerations = [],
   pendingSlots = [],
+  workspaceMode = false,
 }: Props) {
   const videos = useMemo(
     () => mergeHistory(projectId, historyVideos, successGenerations),
@@ -146,6 +150,154 @@ export function ShotVideoPreview({
 
   const facingError =
     status === "failed" ? classifyVideoProviderError(errorMessage) : null;
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  if (workspaceMode) {
+    const latest = videos[0] ?? null;
+    const pending = activePending[0] ?? (showLegacyPending
+      ? { id: "current", status, progress, errorMessage }
+      : null);
+
+    return (
+      <section
+        className="sbw-shot-preview is-workspace"
+        data-video-status={status}
+      >
+        <div className="sbw-shot-preview__head">
+          <div>
+            <h4>最新视频</h4>
+            <span className="sbw-hint">当前分镜生成结果</span>
+          </div>
+          <button
+            type="button"
+            className="sbw-btn sbw-shot-preview__history-btn"
+            onClick={() => setHistoryOpen(true)}
+            data-testid="shot-video-history-btn"
+          >
+            <History size={15} />
+            历史
+          </button>
+        </div>
+
+        <div className="sbw-shot-preview__workspace-frame">
+          {pending ? (
+            <div className="sbw-shot-preview__empty is-loading">
+              <span className="sbw-shot-preview__spinner" aria-hidden />
+              <p>视频生成中，请稍候</p>
+              <p className="sbw-hint">{STATUS_LABEL[pending.status]}</p>
+              {typeof pending.progress === "number" &&
+              Number.isFinite(pending.progress) ? (
+                <p className="sbw-hint">{Math.round(pending.progress)}%</p>
+              ) : null}
+            </div>
+          ) : latest ? (
+            <>
+              <a
+                className="sbw-shot-preview__download is-icon"
+                href={latest.downloadUrl}
+                download
+                title="下载视频"
+                aria-label="下载视频"
+              >
+                <Download size={15} />
+              </a>
+              <ShotVideoMedia key={latest.videoUrl} src={latest.videoUrl} />
+            </>
+          ) : status === "failed" ? (
+            <div className="sbw-shot-preview__empty is-error">
+              <VideoFailureCopy errorMessage={errorMessage} />
+            </div>
+          ) : (
+            <div className="sbw-shot-preview__empty">
+              <span className="sbw-shot-preview__icon" aria-hidden>
+                ▶
+              </span>
+              <p>本镜头尚未生成视频</p>
+            </div>
+          )}
+        </div>
+
+        <div className="sbw-shot-preview__workspace-meta">
+          <span className="sbw-badge">{STATUS_LABEL[status]}</span>
+          {latest ? (
+            <span className="sbw-hint">
+              {latest.versionLabel}
+              {latest.completedAt
+                ? ` · ${new Date(latest.completedAt).toLocaleString()}`
+                : ""}
+            </span>
+          ) : null}
+          {contentStale || status === "stale" ? (
+            <p className="sbw-hint">当前镜头已修改，视频内容需要再次生成。</p>
+          ) : null}
+          {status === "failed" && facingError && latest ? (
+            <p className="sbw-note is-error">最近一次生成失败：{facingError.message}</p>
+          ) : null}
+        </div>
+
+        {historyOpen
+          ? createPortal(
+              <div
+                className="sbw-modal-backdrop"
+                role="dialog"
+                aria-modal="true"
+                aria-label="本分镜视频历史"
+                data-testid="shot-video-history-dialog"
+              >
+                <div className="sbw-modal sbw-shot-history-modal">
+                  <div className="sbw-modal__head">
+                    <div>
+                      <h3>本分镜生成历史</h3>
+                      <span className="sbw-hint">共 {videos.length} 个版本</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="sbw-playback__icon-btn"
+                      title="关闭"
+                      aria-label="关闭"
+                      onClick={() => setHistoryOpen(false)}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="sbw-modal__body sbw-shot-history-modal__grid">
+                    {videos.length > 0 ? (
+                      videos.map((item) => (
+                        <article key={item.id} className="sbw-shot-history-card">
+                          <div className="sbw-shot-preview__frame">
+                            <a
+                              className="sbw-shot-preview__download is-icon"
+                              href={item.downloadUrl}
+                              download
+                              title="下载视频"
+                              aria-label="下载视频"
+                            >
+                              <Download size={14} />
+                            </a>
+                            <ShotVideoMedia key={item.videoUrl} src={item.videoUrl} />
+                          </div>
+                          <div className="sbw-shot-history-card__meta">
+                            <strong>{item.versionLabel}</strong>
+                            <span>
+                              {item.completedAt
+                                ? new Date(item.completedAt).toLocaleString()
+                                : "生成时间未知"}
+                            </span>
+                          </div>
+                        </article>
+                      ))
+                    ) : (
+                      <div className="sbw-empty">暂无历史生成视频</div>
+                    )}
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            )
+          : null}
+      </section>
+    );
+  }
 
   return (
     <section className="sbw-shot-preview" data-video-status={status}>

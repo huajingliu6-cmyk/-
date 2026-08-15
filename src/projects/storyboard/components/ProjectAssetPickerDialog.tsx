@@ -14,6 +14,8 @@ export type PickerAsset = {
   mediaOptions?: AssetMediaOption[];
   /** 仅人物：是否已绑定音色 */
   voiceBound?: boolean;
+  /** 仅人物：默认音色显示名。 */
+  voiceLabel?: string | null;
   /** Seedance 参考图预检 */
   videoRefSafetyStatus?:
     | "pending"

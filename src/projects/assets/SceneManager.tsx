@@ -11,31 +11,46 @@ import { AssetDetailImage } from "@/projects/assets/AssetDetailImage";
 import { AssetDetailLayout } from "@/projects/assets/AssetDetailLayout";
 import { AssetImageUpload } from "@/projects/assets/AssetImageUpload";
 import { AssetLibraryLayout } from "@/projects/assets/AssetLibraryLayout";
+import { LibraryAssetPromptModal } from "@/projects/assets/LibraryAssetPromptModal";
 import { SceneCreateDialog } from "@/projects/assets/SceneCreateDialog";
 import { deriveSceneStatus, sceneDisplayStatus } from "@/projects/assets/status";
 import { resolveAssetImageSrc } from "@/projects/assets/asset-image-url";
 import { persistThenUploadAssetImage } from "@/projects/assets/upload-asset-image";
-import type { SceneAsset } from "@/projects/assets/types";
+import type { EpisodeAssetDesignItem } from "@/projects/assets/episode-design/types";
+import {
+  findLibraryDesignItem,
+  type LibraryPromptAsset,
+} from "@/projects/assets/library-asset-prompt";
+import type { SceneAsset, SceneDraftInput } from "@/projects/assets/types";
 
 type Props = {
   projectId: string;
+  context?: "management" | "workspace";
   scenes: SceneAsset[];
   canEdit: boolean;
   onChange: (next: SceneAsset[]) => void;
   onPersist: (next: SceneAsset[]) => Promise<void>;
+  designItems?: EpisodeAssetDesignItem[];
+  designEpisodeId?: string;
+  onDesignItemChange?: (item: EpisodeAssetDesignItem) => void;
 };
 
 export function SceneManager({
   projectId,
+  context = "management",
   scenes,
   canEdit,
   onChange,
   onPersist,
+  designItems,
+  designEpisodeId,
+  onDesignItemChange,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(
     scenes[0]?.id ?? null,
   );
   const [createOpen, setCreateOpen] = useState(false);
+  const [imageEditorId, setImageEditorId] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [imageRevisions, setImageRevisions] = useState<Record<string, number>>(
     {},
@@ -53,6 +68,71 @@ export function SceneManager({
         revision: imageRevisions[selected.id] ?? 0,
       })
     : null;
+
+  const handleDialogSubmit = (draft: SceneDraftInput) => {
+    const pendingFile = draft.pendingImageFile ?? null;
+    if (draft.imageObjectUrl?.startsWith("blob:")) {
+      URL.revokeObjectURL(draft.imageObjectUrl);
+    }
+
+    const created: SceneAsset = {
+      id: `scene_${Date.now()}`,
+      projectId,
+      name: draft.name,
+      sceneType: "",
+      description: draft.description,
+      timeOfDay: draft.timeOfDay,
+      location: "",
+      style: "",
+      imageFileName: null,
+      imageObjectUrl: null,
+      imageMimeType: null,
+      status: "draft",
+    };
+    created.status = deriveSceneStatus(created);
+    const next = [...scenes, created];
+    onChange(next);
+    setSelectedId(created.id);
+    setCreateOpen(false);
+    setNote("已创建场景，正在保存…");
+    void (async () => {
+      try {
+        const uploaded = await persistThenUploadAssetImage({
+          projectId,
+          assetId: created.id,
+          pendingFile,
+          persist: () => onPersist(next),
+        });
+        if (uploaded) {
+          const withImage: SceneAsset = {
+            ...created,
+            imageFileName: uploaded.imageFileName,
+            imageMimeType: uploaded.imageMimeType,
+            imageObjectUrl: null,
+            status: deriveSceneStatus({
+              ...created,
+              imageFileName: uploaded.imageFileName,
+              imageObjectUrl: null,
+            }),
+          };
+          const uploadedNext = next.map((item) =>
+            item.id === created.id ? withImage : item,
+          );
+          onChange(uploadedNext);
+          setImageRevisions((previous) => ({
+            ...previous,
+            [created.id]: (previous[created.id] ?? 0) + 1,
+          }));
+          await onPersist(uploadedNext);
+          setNote("已创建并保存场景图片。");
+        } else {
+          setNote("已创建并保存场景。");
+        }
+      } catch (error) {
+        setNote(error instanceof Error ? error.message : "保存失败");
+      }
+    })();
+  };
 
   return (
     <>
@@ -78,6 +158,15 @@ export function SceneManager({
             projectId={projectId}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            onEdit={
+              canEdit
+                ? (id) => {
+                    setSelectedId(id);
+                    setCreateOpen(false);
+                    setImageEditorId(id);
+                  }
+                : undefined
+            }
             emptyMessage="暂无场景资产。"
             testId="scene-compact-list"
             items={scenes.map((s) => {
@@ -193,6 +282,7 @@ export function SceneManager({
                   disabled={!canEdit}
                   projectId={projectId}
                   assetId={selected.id}
+                  actionLabel="替换场景"
                   ensurePersisted={async () => {
                     await onPersist(scenes);
                   }}
@@ -227,69 +317,29 @@ export function SceneManager({
       <SceneCreateDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onSubmit={(draft) => {
-          const pendingFile = draft.pendingImageFile ?? null;
-          if (draft.imageObjectUrl?.startsWith("blob:")) {
-            URL.revokeObjectURL(draft.imageObjectUrl);
-          }
-          const created: SceneAsset = {
-            id: `scene_${Date.now()}`,
-            projectId,
-            name: draft.name,
-            sceneType: "",
-            description: draft.description,
-            timeOfDay: draft.timeOfDay,
-            location: "",
-            style: "",
-            imageFileName: null,
-            imageObjectUrl: null,
-            imageMimeType: null,
-            status: "draft",
-          };
-          created.status = deriveSceneStatus(created);
-          const next = [...scenes, created];
-          onChange(next);
-          setSelectedId(created.id);
-          setCreateOpen(false);
-          setNote("已创建场景，正在保存…");
-          void (async () => {
-            try {
-              const uploaded = await persistThenUploadAssetImage({
-                projectId,
-                assetId: created.id,
-                pendingFile,
-                persist: () => onPersist(next),
-              });
-              if (uploaded) {
-                const withImage: SceneAsset = {
-                  ...created,
-                  imageFileName: uploaded.imageFileName,
-                  imageMimeType: uploaded.imageMimeType,
-                  imageObjectUrl: null,
-                  status: deriveSceneStatus({
-                    ...created,
-                    imageFileName: uploaded.imageFileName,
-                    imageObjectUrl: null,
-                  }),
-                };
-                const uploadedNext = next.map((s) =>
-                  s.id === created.id ? withImage : s,
-                );
-                onChange(uploadedNext);
-                setImageRevisions((prev) => ({
-                  ...prev,
-                  [created.id]: (prev[created.id] ?? 0) + 1,
-                }));
-                await onPersist(uploadedNext);
-                setNote("已创建并保存场景图片。");
-              } else {
-                setNote("已创建并保存场景。");
-              }
-            } catch (err: unknown) {
-              setNote(err instanceof Error ? err.message : "保存失败");
-            }
-          })();
-        }}
+        onSubmit={handleDialogSubmit}
+      />
+
+      <LibraryAssetPromptModal
+        key={`${imageEditorId ?? "closed"}:${designEpisodeId ?? ""}`}
+        open={Boolean(imageEditorId)}
+        projectId={projectId}
+        context={context}
+        episodeId={designEpisodeId}
+        kind="scene"
+        asset={
+          scenes.find((item) => item.id === imageEditorId) as
+            | LibraryPromptAsset
+            | null
+        }
+        designItem={findLibraryDesignItem(
+          scenes.find((item) => item.id === imageEditorId) as
+            | LibraryPromptAsset
+            | null,
+          designItems,
+        )}
+        onClose={() => setImageEditorId(null)}
+        onItemChange={onDesignItemChange}
       />
     </>
   );

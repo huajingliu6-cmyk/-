@@ -11,31 +11,46 @@ import { AssetDetailImage } from "@/projects/assets/AssetDetailImage";
 import { AssetDetailLayout } from "@/projects/assets/AssetDetailLayout";
 import { AssetImageUpload } from "@/projects/assets/AssetImageUpload";
 import { AssetLibraryLayout } from "@/projects/assets/AssetLibraryLayout";
+import { LibraryAssetPromptModal } from "@/projects/assets/LibraryAssetPromptModal";
 import { PropCreateDialog } from "@/projects/assets/PropCreateDialog";
 import { derivePropStatus, propDisplayStatus } from "@/projects/assets/status";
 import { resolveAssetImageSrc } from "@/projects/assets/asset-image-url";
 import { persistThenUploadAssetImage } from "@/projects/assets/upload-asset-image";
+import type { EpisodeAssetDesignItem } from "@/projects/assets/episode-design/types";
+import {
+  findLibraryDesignItem,
+  type LibraryPromptAsset,
+} from "@/projects/assets/library-asset-prompt";
 import type { PropAsset, PropDraftInput } from "@/projects/assets/types";
 
 type Props = {
   projectId: string;
+  context?: "management" | "workspace";
   props: PropAsset[];
   canEdit: boolean;
   onChange: (next: PropAsset[]) => void;
   onPersist: (next: PropAsset[]) => Promise<void>;
+  designItems?: EpisodeAssetDesignItem[];
+  designEpisodeId?: string;
+  onDesignItemChange?: (item: EpisodeAssetDesignItem) => void;
 };
 
 export function PropManager({
   projectId,
+  context = "management",
   props: propItems,
   canEdit,
   onChange,
   onPersist,
+  designItems,
+  designEpisodeId,
+  onDesignItemChange,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(
     propItems[0]?.id ?? null,
   );
   const [createOpen, setCreateOpen] = useState(false);
+  const [imageEditorId, setImageEditorId] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [imageRevisions, setImageRevisions] = useState<Record<string, number>>(
     {},
@@ -47,11 +62,18 @@ export function PropManager({
     onChange(propItems.map((p) => (p.id === withStatus.id ? withStatus : p)));
   };
 
-  const handleCreate = (draft: PropDraftInput) => {
+  const previewSrc = selected
+    ? resolveAssetImageSrc(projectId, selected, {
+        revision: imageRevisions[selected.id] ?? 0,
+      })
+    : null;
+
+  const handleDialogSubmit = (draft: PropDraftInput) => {
     const pendingFile = draft.pendingImageFile ?? null;
     if (draft.imageObjectUrl?.startsWith("blob:")) {
       URL.revokeObjectURL(draft.imageObjectUrl);
     }
+
     const created: PropAsset = {
       id: `prop_${Date.now()}`,
       projectId,
@@ -90,30 +112,24 @@ export function PropManager({
               imageObjectUrl: null,
             }),
           };
-          const uploadedNext = next.map((p) =>
-            p.id === created.id ? withImage : p,
+          const uploadedNext = next.map((item) =>
+            item.id === created.id ? withImage : item,
           );
           onChange(uploadedNext);
-          setImageRevisions((prev) => ({
-            ...prev,
-            [created.id]: (prev[created.id] ?? 0) + 1,
+          setImageRevisions((previous) => ({
+            ...previous,
+            [created.id]: (previous[created.id] ?? 0) + 1,
           }));
           await onPersist(uploadedNext);
           setNote("已创建并保存道具图片。");
         } else {
           setNote("已创建并保存道具。");
         }
-      } catch (err: unknown) {
-        setNote(err instanceof Error ? err.message : "保存失败");
+      } catch (error) {
+        setNote(error instanceof Error ? error.message : "保存失败");
       }
     })();
   };
-
-  const previewSrc = selected
-    ? resolveAssetImageSrc(projectId, selected, {
-        revision: imageRevisions[selected.id] ?? 0,
-      })
-    : null;
 
   return (
     <>
@@ -139,6 +155,15 @@ export function PropManager({
             projectId={projectId}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            onEdit={
+              canEdit
+                ? (id) => {
+                    setSelectedId(id);
+                    setCreateOpen(false);
+                    setImageEditorId(id);
+                  }
+                : undefined
+            }
             emptyMessage="暂无道具资产。"
             testId="prop-compact-list"
             items={propItems.map((p) => {
@@ -243,6 +268,7 @@ export function PropManager({
                   disabled={!canEdit}
                   projectId={projectId}
                   assetId={selected.id}
+                  actionLabel="替换道具"
                   ensurePersisted={async () => {
                     await onPersist(propItems);
                   }}
@@ -277,7 +303,29 @@ export function PropManager({
       <PropCreateDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onSubmit={handleCreate}
+        onSubmit={handleDialogSubmit}
+      />
+
+      <LibraryAssetPromptModal
+        key={`${imageEditorId ?? "closed"}:${designEpisodeId ?? ""}`}
+        open={Boolean(imageEditorId)}
+        projectId={projectId}
+        context={context}
+        episodeId={designEpisodeId}
+        kind="prop"
+        asset={
+          propItems.find((item) => item.id === imageEditorId) as
+            | LibraryPromptAsset
+            | null
+        }
+        designItem={findLibraryDesignItem(
+          propItems.find((item) => item.id === imageEditorId) as
+            | LibraryPromptAsset
+            | null,
+          designItems,
+        )}
+        onClose={() => setImageEditorId(null)}
+        onItemChange={onDesignItemChange}
       />
     </>
   );

@@ -2,7 +2,10 @@ import { createHash, randomUUID } from "crypto";
 import { resolveAiCapabilityRuntimeConfig } from "@/ai-config/resolve";
 import type { AiCapabilityId } from "@/ai-config/capabilities";
 import { buildAssembledImagePrompt } from "@/ai-config/prompt-assembly";
-import { generateOpenAiCompatibleImages } from "@/ai-config/openai-compatible-image";
+import {
+  editOpenAiCompatibleImages,
+  generateOpenAiCompatibleImages,
+} from "@/ai-config/openai-compatible-image";
 import {
   normalizeDeclaredImageMime,
   sniffProjectAssetImageMime,
@@ -21,6 +24,7 @@ import {
   type DesignImageCount,
   type DesignImageQuality,
 } from "@/projects/assets/episode-design/image-generation-options";
+import type { DesignImageModelId } from "@/projects/assets/episode-design/image-generation-models";
 
 /** @deprecated Prefer DEFAULT_DESIGN_IMAGE_OPTIONS.aspectRatio */
 export const DESIGN_ASSET_IMAGE_ASPECT_RATIO =
@@ -115,8 +119,9 @@ export type DesignAssetImageGenerationResult = {
 };
 
 /**
- * Text-to-image for episode asset design items.
+ * Text-to-image / image-to-image for episode asset design items.
  * Defaults: high / 16:9 / 1 — keeps legacy callers compatible.
+ * When `referenceImages` is set, always uses `/images/edits` (never falls back to generations).
  */
 export async function generateDesignAssetImage(input: {
   projectId: string;
@@ -126,12 +131,26 @@ export async function generateDesignAssetImage(input: {
   quality?: DesignImageQuality;
   aspectRatio?: DesignImageAspectRatio;
   count?: DesignImageCount;
+  /** Client override; falls back to capability config.model when omitted. */
+  model?: DesignImageModelId;
+  /**
+   * When true, send `prompt` as-is to the image API (multi-angle templates).
+   * Still uses /images/edits when referenceImages is set.
+   */
+  useRawPrompt?: boolean;
+  /** Image-to-image references (1–6). Always uses /images/edits when set. */
+  referenceImages?: Array<{
+    buffer: Buffer;
+    mimeType: ProjectAssetImageMime;
+    fileName: string;
+  }>;
 }): Promise<DesignAssetImageGenerationResult> {
   const quality = input.quality ?? DEFAULT_DESIGN_IMAGE_OPTIONS.quality;
   const aspectRatio =
     input.aspectRatio ?? DEFAULT_DESIGN_IMAGE_OPTIONS.aspectRatio;
   const requestedCount = input.count ?? DEFAULT_DESIGN_IMAGE_OPTIONS.count;
   const resolution = designImageQualityToResolution(quality);
+  const referenceImages = (input.referenceImages ?? []).slice(0, 6);
 
   const capabilityId = capabilityForDesignAssetType(input.assetType);
   if (!capabilityId) {
@@ -141,33 +160,45 @@ export async function generateDesignAssetImage(input: {
     });
   }
 
-  const project = await getProjectRecord(input.projectId);
-  const styleResolved = requireProjectVisualStyleDirective({
-    visualStyle: project?.visualStyle,
-    highlights: project?.highlights,
-  });
-  if (!styleResolved.ok) {
-    throw Object.assign(new Error(styleResolved.error), {
-      code: "PROJECT_VISUAL_STYLE_REQUIRED",
-      status: 400,
+  let finalPrompt: string;
+  if (input.useRawPrompt) {
+    finalPrompt = input.prompt.trim();
+    if (!finalPrompt) {
+      throw Object.assign(new Error("缺少提示词"), {
+        code: "PROMPT_REQUIRED",
+        status: 400,
+      });
+    }
+  } else {
+    const project = await getProjectRecord(input.projectId);
+    const styleResolved = requireProjectVisualStyleDirective({
+      visualStyle: project?.visualStyle,
+      highlights: project?.highlights,
     });
-  }
+    if (!styleResolved.ok) {
+      throw Object.assign(new Error(styleResolved.error), {
+        code: "PROJECT_VISUAL_STYLE_REQUIRED",
+        status: 400,
+      });
+    }
 
-  const assembled = await buildAssembledImagePrompt({
-    capabilityId,
-    userPrompt: `${styleResolved.directive}\n\n${input.prompt}`,
-    platformRule: designAssetPlatformRule(
-      input.assetType,
-      aspectRatio,
-      quality,
-    ),
-  });
-  const finalPrompt = assembled.finalPrompt;
+    const assembled = await buildAssembledImagePrompt({
+      capabilityId,
+      userPrompt: `${styleResolved.directive}\n\n${input.prompt}`,
+      platformRule: designAssetPlatformRule(
+        input.assetType,
+        aspectRatio,
+        quality,
+      ),
+    });
+    finalPrompt = assembled.finalPrompt;
+  }
   const fp = promptFingerprint(finalPrompt);
 
   const resolved = await resolveAiCapabilityRuntimeConfig(capabilityId);
   const config = resolved.profile;
   const endpoint = config.apiUrl.trim();
+  const effectiveModel = input.model ?? config.model;
 
   let mode: "mock" | "http";
   let notice: string;
@@ -179,35 +210,56 @@ export async function generateDesignAssetImage(input: {
         "未配置文生图 API 地址，请管理员在「系统管理 → API 接口」中接入对应图片模型",
       );
     }
-    const generated = await generateOpenAiCompatibleImages({
-      endpoint,
-      apiKey: config.apiKey,
-      prompt: finalPrompt,
-      model: config.model || undefined,
-      aspectRatio,
-      resolution,
-      quality,
-      count: requestedCount,
-      extra: {
-        characterName: input.assetName,
-        kind: input.assetType,
-      },
-    });
+    const generated = referenceImages.length > 0
+      ? await editOpenAiCompatibleImages({
+          endpoint,
+          apiKey: config.apiKey,
+          prompt: finalPrompt,
+          model: effectiveModel || undefined,
+          aspectRatio,
+          resolution,
+          quality,
+          count: requestedCount,
+          images: referenceImages,
+          extra: {
+            characterName: input.assetName,
+            kind: input.assetType,
+          },
+        })
+      : await generateOpenAiCompatibleImages({
+          endpoint,
+          apiKey: config.apiKey,
+          prompt: finalPrompt,
+          model: effectiveModel || undefined,
+          aspectRatio,
+          resolution,
+          quality,
+          count: requestedCount,
+          extra: {
+            characterName: input.assetName,
+            kind: input.assetType,
+          },
+        });
     rawImages = generated.images.slice(0, 4);
     mode = "http";
-    notice = `已生成 ${rawImages.length} 张 · ${DESIGN_IMAGE_QUALITY_LABELS[quality]} · ${aspectRatio}`;
+    notice = referenceImages.length > 0
+      ? `已二次编辑生成 ${rawImages.length} 张 · ${DESIGN_IMAGE_QUALITY_LABELS[quality]} · ${aspectRatio}`
+      : `已生成 ${rawImages.length} 张 · ${DESIGN_IMAGE_QUALITY_LABELS[quality]} · ${aspectRatio}`;
   } else {
     rawImages = Array.from({ length: requestedCount }, () => ({
       buffer: MOCK_PNG,
       mimeType: "image/png",
     }));
     mode = "mock";
-    notice =
-      "当前为本地演示图（未连接真实文生图）。管理员可在「系统管理 → API 接口」接入角色/场景/道具图片模型。";
+    notice = referenceImages.length > 0
+      ? "当前为本地演示图（未连接真实图生图）。管理员可在「系统管理 → API 接口」接入角色/场景/道具图片模型。"
+      : "当前为本地演示图（未连接真实文生图）。管理员可在「系统管理 → API 接口」接入角色/场景/道具图片模型。";
   }
 
   if (rawImages.length === 0) {
-    throw new Error("文生图服务未返回图片");
+    throw new Error(
+      referenceImages.length > 0 ? "图生图服务未返回图片" : "文生图服务未返回图片",
+    );
   }
 
   const written: Array<{ mediaId: string; mimeType: ProjectAssetImageMime }> =

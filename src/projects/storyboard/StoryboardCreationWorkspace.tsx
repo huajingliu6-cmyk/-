@@ -58,6 +58,7 @@ function toPickerAssets(summary: AssetsSummary | null): PickerAsset[] {
       thumbUrl: a.thumbUrl,
       ...(a.mediaOptions?.length ? { mediaOptions: a.mediaOptions } : {}),
       voiceBound: a.voiceBound === true,
+      voiceLabel: a.voiceLabel ?? null,
       videoRefSafetyStatus: a.videoRefSafetyStatus ?? null,
     })),
     ...summary.props.map((a) => ({
@@ -525,6 +526,10 @@ export function StoryboardCreationWorkspace({
               production={production}
               assets={pickerAssets}
               onProductionChange={handleProductionChange}
+              onAssetsRefresh={async () => {
+                const data = await fetchStoryboardWorkspace(projectId);
+                setAssetsSummary(data.assetsSummary);
+              }}
               onNote={setSaveNote}
               onScriptDraftChange={setScriptDraft}
               videoDefaults={workspace?.videoDefaults}

@@ -5,6 +5,7 @@ import type {
   StoryboardShot,
 } from "@/projects/storyboard/types";
 import { normalizeAssetName } from "@/projects/storyboard/hash";
+import { placementsFingerprintPayload } from "@/projects/storyboard/scene-character-placements";
 
 export function getShotVideoPrompt(shot: StoryboardShot): string {
   return shot.videoPrompt?.trim() || shot.promptDraft?.trim() || "";
@@ -57,6 +58,7 @@ export function computeShotVideoContentHash(shot: StoryboardShot): string {
       .map((r) => `${r.requirementId}:${r.resolution}:${r.selectedAssetId ?? ""}`)
       .sort()
       .join("|"),
+    placementsFingerprintPayload(shot.sceneCharacterPlacements),
   ].join("\n");
   let hash = 0;
   for (let i = 0; i < payload.length; i += 1) {

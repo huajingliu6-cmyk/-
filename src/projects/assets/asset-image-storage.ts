@@ -15,6 +15,7 @@ import type {
 import { type ProjectAssetImageMime } from "@/projects/assets/asset-image-constants";
 import {
   deleteRemoteAssetImage,
+  getRemoteAssetImage,
   imageStorageKey,
   putRemoteAssetImage,
 } from "@/projects/assets/remote-asset-blob-store";
@@ -156,6 +157,60 @@ export async function readProjectAssetImageMeta(
     } catch {
       return null;
     }
+  }
+}
+
+function extensionForProjectAssetImageMime(
+  mimeType: ProjectAssetImageMime,
+): string {
+  if (mimeType === "image/jpeg") return "jpg";
+  if (mimeType === "image/webp") return "webp";
+  return "png";
+}
+
+/**
+ * Read design / draft asset image bytes (local disk or remote blob).
+ * Returns null when the id is unsafe or the file is missing.
+ */
+export async function readProjectAssetImageFile(
+  projectId: string,
+  mediaId: string,
+): Promise<{
+  buffer: Buffer;
+  mimeType: ProjectAssetImageMime;
+  fileName: string;
+} | null> {
+  if (isRemoteDataOnly()) {
+    if (!isSafeProjectAssetImageId(projectId) || !isSafeProjectAssetImageId(mediaId)) {
+      return null;
+    }
+    const blob = await getRemoteAssetImage(projectId, mediaId);
+    if (!blob) return null;
+    const sniffed = sniffProjectAssetImageMime(blob.body);
+    const declared = normalizeDeclaredImageMime(blob.contentType);
+    const mimeType = sniffed ?? declared ?? "image/png";
+    return {
+      buffer: blob.body,
+      mimeType,
+      fileName: `${mediaId}.${extensionForProjectAssetImageMime(mimeType)}`,
+    };
+  }
+
+  const filePath = resolveAssetImageFilePath(projectId, mediaId);
+  if (!filePath) return null;
+  try {
+    const buffer = await fs.readFile(filePath);
+    const meta = await readProjectAssetImageMeta(projectId, mediaId);
+    const sniffed = sniffProjectAssetImageMime(buffer);
+    const declared = normalizeDeclaredImageMime(meta?.mimeType);
+    const mimeType = sniffed ?? declared ?? "image/png";
+    return {
+      buffer,
+      mimeType,
+      fileName: `${mediaId}.${extensionForProjectAssetImageMime(mimeType)}`,
+    };
+  } catch {
+    return null;
   }
 }
 

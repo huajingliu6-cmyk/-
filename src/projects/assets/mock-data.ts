@@ -1,5 +1,4 @@
 import type { ProjectAssetBundle } from "@/projects/assets/types";
-import { VOICE_CATALOG } from "@/projects/assets/voice-catalog";
 
 function id(prefix: string, n: number): string {
   return `${prefix}_${n}`;
@@ -7,9 +6,6 @@ function id(prefix: string, n: number): string {
 
 /** 确定性示例数据，便于 UI 演示 */
 export function buildMockAssetBundle(projectId: string): ProjectAssetBundle {
-  const gentle = VOICE_CATALOG[0]!;
-  const mature = VOICE_CATALOG[2]!;
-
   return {
     projectId,
     characters: [
@@ -23,9 +19,9 @@ export function buildMockAssetBundle(projectId: string): ProjectAssetBundle {
         clothing: "浅色长裙，偶着旅人披风。",
         age: "24",
         gender: "女",
-        voiceId: gentle.id,
-        voiceName: gentle.name,
-        voiceStyle: gentle.style,
+        voiceId: null,
+        voiceName: null,
+        voiceStyle: null,
         imageFileName: null,
         imageObjectUrl: null,
         imageMimeType: null,
@@ -41,9 +37,9 @@ export function buildMockAssetBundle(projectId: string): ProjectAssetBundle {
         clothing: "深色劲装。",
         age: "27",
         gender: "男",
-        voiceId: mature.id,
-        voiceName: mature.name,
-        voiceStyle: mature.style,
+        voiceId: null,
+        voiceName: null,
+        voiceStyle: null,
         imageFileName: null,
         imageObjectUrl: null,
         imageMimeType: null,

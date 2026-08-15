@@ -149,6 +149,7 @@ describe("create project form validation", () => {
       expect(ok.value.name).toBe("Demo");
       expect(ok.value.projectPassword).toBe("secret");
       expect(ok.value.visualStyle).toBe("live_action_cinematic");
+      expect(ok.value.approvalEnabled).toBe(false);
     }
 
     const badPwd = parseCreateProjectBody({
@@ -160,5 +161,18 @@ describe("create project form validation", () => {
       visualStyle: "live_action_cinematic",
     });
     expect(badPwd.ok).toBe(false);
+  });
+
+  it("审批系统默认关闭，仅显式勾选时开启", () => {
+    const enabled = parseCreateProjectBody({
+      name: "审批项目",
+      creationSource: "script-upload",
+      projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
+      passwordEnabled: false,
+      approvalEnabled: true,
+    });
+    expect(enabled.ok).toBe(true);
+    if (enabled.ok) expect(enabled.value.approvalEnabled).toBe(true);
   });
 });

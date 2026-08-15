@@ -31,16 +31,34 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(workspace).not.toContain("ead-card--character-portrait");
   });
 
-  it("DesignAssetModal wired with copy and generate actions", () => {
+  it("DesignAssetModal wired with copy, generate and image edit panel", () => {
     expect(workspace).toContain("DesignAssetModal");
     expect(workspace).toContain("designModalItem");
     expect(workspace).toContain('"/workspace/"');
     expect(modal).toContain("一键复制");
     expect(modal).toContain("生成资产");
-    expect(modal).toContain("输入素材要求");
-    expect(modal).toContain("ead-requirement-dialog");
+    expect(modal).toContain("二次编辑");
+    expect(modal).toContain("ead-modal-stage");
+    expect(modal).toContain("ead-image-edit-panel");
+    expect(modal).toContain("imageEditOpen");
+    expect(modal).toContain("image_to_image");
+    expect(modal).toContain("referenceMediaId[${index}]");
+    expect(modal).toContain("referenceImage[${index}]");
+    expect(modal).toContain("ead-reference-slots");
+    expect(modal).toContain("REFERENCE_SLOT_COUNT");
+    expect(modal).toContain("ImagePlus");
+    expect(modal).toContain("compactReferenceSlots");
     expect(modal).toContain("ead-modal");
     expect(modal).toContain("design-image-preview");
+    expect(modal).toContain("const previewBlock");
+    expect(modal).toContain("{previewBlock}");
+    expect(modal).toContain("{imageOptionsBlock}");
+    expect(modal).toContain("{imageHistoryBlock}");
+    expect(modal).toContain("design-image-model");
+    expect(modal).toContain("imageModelId");
+    expect(modal).toContain("model: imageModelId");
+    expect(modal).toContain('form.set("model", imageModelId)');
+    expect(modal).toContain("DESIGN_IMAGE_MODELS");
     expect(modal).toContain("design-download");
     expect(modal).toContain("DesignImageLightbox");
     expect(modal).toContain("点击放大");
@@ -48,15 +66,35 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(modal).not.toContain(
       'className="ead-generation-option__select"',
     );
-    expect(modal).toContain("design-prompt-actions");
-    expect(modal).toContain("design-prompt-model");
-    expect(modal).toContain("promptModelId");
-    expect(modal.match(/data-testid="design-regenerate-prompt"/g)).toHaveLength(
-      1,
-    );
+    expect(modal).not.toContain("design-regenerate-prompt");
+    expect(modal).not.toContain('data-testid="design-prompt-model"');
+    expect(modal).not.toContain("重新生成提示词");
+    expect(modal).not.toContain("ead-requirement-dialog");
+    expect(modal).not.toContain("输入素材要求");
+    expect(modal).toContain("design-prompt-copy-row");
+    expect(modal).toContain("design-image-edit-toggle");
+    expect(modal).toContain("imageEditEnabled");
+    expect(modal).toContain("design-multi-angle");
+    expect(modal).toContain('item.assetType === "scene"');
+    expect(modal).toContain("handleMultiAngleChange");
+    expect(modal).not.toContain("主卡片");
+    expect(modal).not.toContain("副卡片");
+    const previewIdx = modal.indexOf("{previewBlock}");
+    const optionsIdx = modal.indexOf("{imageOptionsBlock}");
+    const historyIdx = modal.indexOf("{imageHistoryBlock}");
+    expect(previewIdx).toBeGreaterThan(-1);
+    expect(optionsIdx).toBeGreaterThan(previewIdx);
+    expect(historyIdx).toBeGreaterThan(optionsIdx);
+    const textareaIdx = modal.indexOf('data-testid="design-prompt-textarea"');
+    const copyRowIdx = modal.indexOf('data-testid="design-prompt-copy-row"');
     const footIdx = modal.indexOf('className="ead-modal__foot"');
-    expect(footIdx).toBeGreaterThan(-1);
-    expect(modal.slice(footIdx)).not.toContain("design-regenerate-prompt");
+    expect(textareaIdx).toBeGreaterThan(-1);
+    expect(copyRowIdx).toBeGreaterThan(textareaIdx);
+    expect(footIdx).toBeGreaterThan(copyRowIdx);
+    expect(modal.slice(footIdx, footIdx + 800)).toContain("二次编辑");
+    expect(modal.slice(footIdx, footIdx + 800)).not.toContain(
+      'data-testid="design-copy"',
+    );
   });
 
   it("includes card and modal layout styles", () => {
@@ -66,12 +104,21 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(css).not.toContain(".ead-card--character-portrait");
     expect(css).toContain(".asset-compact-list");
     expect(css).toContain(".ead-modal-backdrop");
+    expect(css).toContain(".ead-modal-stage");
+    expect(css).toContain(".ead-modal-stage.is-image-editing");
+    expect(css).toContain(".ead-image-edit-panel");
+    expect(css).toContain(".ead-reference-slots");
+    expect(css).toContain(".ead-reference-slot");
+    expect(css).toContain(".ead-prompt-copy-row");
     expect(css).toContain(".ead-card__design-btn");
     expect(css).toContain(".ead-card__media-wrap");
     expect(css).toContain("aspect-ratio: 16 / 9");
     expect(css).toContain(".ead-card__media-delete");
     expect(css).toContain("padding: 72px 14px 12px");
     expect(css).toContain(".ead-unbound-voice-confirm-dialog");
+    expect(css).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
+    expect(css).toContain("height: clamp(260px, 30vw, 360px)");
+    expect(css).toContain("min-height: 260px");
   });
 
   it("wires unbound-voice second confirm outside design cards", () => {

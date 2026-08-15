@@ -5,37 +5,12 @@ import type {
 } from "@/projects/assets/types";
 import { decodeLocalVoiceId, isLocalVoiceId, localVoiceDisplayName } from "@/projects/assets/local-voice-id";
 
-/** 本阶段配置数据；后续由 VoiceProvider 对接语音平台 */
-export const VOICE_CATALOG: VoiceOption[] = [
-  {
-    id: voice("gentle-female"),
-    name: "温柔女声",
-    style: "系统·女声·温柔",
-    label: "温柔女声",
-  },
-  {
-    id: voice("young-male"),
-    name: "年轻男声",
-    style: "系统·男声·清朗",
-    label: "年轻男声",
-  },
-  {
-    id: voice("mature-male"),
-    name: "成熟男声",
-    style: "系统·男声·低沉",
-    label: "成熟男声",
-  },
-  {
-    id: voice("narrator-doc"),
-    name: "旁白音色",
-    style: "系统·旁白·纪录片",
-    label: "旁白音色",
-  },
-];
-
-function voice(slug: string): string {
-  return `voice_${slug}`;
-}
+/**
+ * Legacy system placeholder catalog (no longer offered in VoiceSelector).
+ * Kept empty so UI cannot pick placeholder voices; `isSystemCatalogVoiceId`
+ * still rejects historically bound `voice_*` ids during video generation.
+ */
+export const VOICE_CATALOG: VoiceOption[] = [];
 
 /** 将音频管理中的「音色」资产映射为可选 VoiceOption */
 export function voiceOptionsFromAudios(audios: AudioAsset[]): VoiceOption[] {

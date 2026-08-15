@@ -30,7 +30,10 @@ describe("design asset generation remote routes", () => {
   it("persists generated media into the corresponding design document", () => {
     for (const route of [managementRoute, workspaceRoute]) {
       expect(route).toContain("generateDesignAssetImage");
-      expect(route).toContain("appendGeneratedMediaGeneration");
+      expect(route).toContain("appendGeneratedMediaGenerations");
+      expect(route).toContain("parseGenerateAssetRequest");
+      expect(route).toContain("readProjectAssetImageFile");
+      expect(route).toContain('mode === "image_to_image"');
     }
     expect(managementRoute).toContain("saveEpisodeAssetDesignItems");
     expect(workspaceRoute).toContain("saveWorkspaceEpisodeAssetDesignItems");

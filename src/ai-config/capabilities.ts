@@ -146,7 +146,7 @@ export const AI_CAPABILITIES: readonly AiCapabilityDefinition[] = [
     modality: "text",
     status: "active",
     surface: "AssetDesignWorkspace / script-asset-extraction",
-    route: "/app/workspace/projects/[id]/assets/design",
+    route: "/app/workspace/projects/[id]/assets/library",
     buttonText: "一键提取",
     allowedRoles: ["PROJECT_OWNER", "CARD_ENGINEER"],
     requiresCredits: true,

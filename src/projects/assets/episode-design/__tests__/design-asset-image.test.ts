@@ -119,12 +119,25 @@ describe("design asset image generation contract", () => {
       "utf-8",
     );
     expect(modal).toContain("design-image-preview");
+    expect(modal).toContain("const previewBlock");
+    expect(modal).toContain("{previewBlock}");
+    expect(modal).toContain("{imageOptionsBlock}");
+    expect(modal).toContain("{imageHistoryBlock}");
     expect(modal).toContain("design-download");
     expect(modal).toContain("design-prompt-history");
     expect(modal).toContain("design-image-history");
     expect(modal).toContain("design-image-quality");
     expect(modal).toContain("design-image-aspect-ratio");
     expect(modal).toContain("design-image-count");
+    expect(modal).toContain("design-image-model");
+    expect(modal).toContain("imageModelId");
+    expect(modal).toContain("model: imageModelId");
+    expect(modal).toContain('form.set("model", imageModelId)');
+    expect(modal).toContain("DESIGN_IMAGE_MODELS");
+    expect(modal).toContain("design-multi-angle");
+    expect(modal).toContain('item.assetType === "scene"');
+    expect(modal).toContain('form.set("multiAngleMode", multiAngleMode)');
+    expect(modal).toContain("referenceSlots.slice(0, 1)");
     expect(modal).toContain("GlassSelect");
     expect(modal).toContain("menuPortal");
     expect(modal).not.toContain(
@@ -134,10 +147,74 @@ describe("design asset image generation contract", () => {
     expect(modal).toContain("quality: imageOptions.quality");
     expect(modal).toContain("aspectRatio: imageOptions.aspectRatio");
     expect(modal).toContain("count: imageOptions.count");
+    expect(modal).toContain('form.set("mode", "image_to_image")');
+    expect(modal).toContain("referenceMediaId[${index}]");
+    expect(modal).toContain("referenceImage[${index}]");
+    expect(modal).toContain("setShowImageHistory(true)");
     expect(modal).toContain("生成资产");
+    expect(modal).toContain("二次编辑");
     expect(modal).toContain("generateBusy");
     expect(modal).toContain("onGeneratingAssetChange");
     expect(modal).toContain('? "生成中…"');
+    const previewIdx = modal.indexOf("{previewBlock}");
+    const optionsIdx = modal.indexOf("{imageOptionsBlock}");
+    expect(optionsIdx).toBeGreaterThan(previewIdx);
+  });
+
+  it("generateDesignAssetImage wires edits when referenceImages is present", () => {
+    const design = readFileSync(
+      path.join(
+        process.cwd(),
+        "src/projects/assets/episode-design/generate-design-asset-image.ts",
+      ),
+      "utf-8",
+    );
+    expect(design).toContain("editOpenAiCompatibleImages");
+    expect(design).toContain("referenceImages");
+    expect(design).toContain("generateOpenAiCompatibleImages");
+    expect(design).toContain("const effectiveModel = input.model ?? config.model");
+    expect(design).toContain("model: effectiveModel || undefined");
+    expect(design).toContain("useRawPrompt");
+  });
+
+  it("shares design image model whitelist and routes pass requested model", () => {
+    const models = readFileSync(
+      path.join(
+        process.cwd(),
+        "src/projects/assets/episode-design/image-generation-models.ts",
+      ),
+      "utf-8",
+    );
+    expect(models).toContain("gpt-image-2");
+    expect(models).toContain("gpt-image-2-adobe");
+    expect(models).toContain("gemini-banana-2.0-pro");
+    expect(models).toContain("DEFAULT_DESIGN_IMAGE_MODEL_ID");
+    expect(models).toContain("isDesignImageModelId");
+
+    const parse = readFileSync(
+      path.join(
+        process.cwd(),
+        "src/projects/assets/episode-design/parse-generate-asset-request.ts",
+      ),
+      "utf-8",
+    );
+    expect(parse).toContain("INVALID_IMAGE_MODEL");
+    expect(parse).toContain("parseRequestedModel");
+    expect(parse).toContain("multiAngleMode");
+    expect(parse).toContain("MULTI_ANGLE_TEMPLATE_FORBIDDEN");
+
+    for (const routePath of [
+      "src/app/api/projects/[projectId]/asset-designs/episodes/[episodeId]/items/[itemId]/generate-asset/route.ts",
+      "src/app/api/workspace/projects/[projectId]/asset-designs/episodes/[episodeId]/items/[itemId]/generate-asset/route.ts",
+    ]) {
+      const route = readFileSync(path.join(process.cwd(), routePath), "utf-8");
+      expect(route).toContain("model: requestedModel");
+      expect(route).toContain("appendGeneratedMediaGenerations");
+      expect(route).toContain("buildMultiAngleEditPrompt");
+      expect(route).toContain("useRawPrompt: Boolean(multiAngleMode)");
+      expect(route).toContain("MULTI_ANGLE_SCENE_ONLY");
+      expect(route).toContain("referenceSlots.slice(0, 1)");
+    }
   });
 
   it("image generation entrypoints call buildAssembledImagePrompt", () => {

@@ -12,6 +12,7 @@ type Props = {
   characters: CharacterAsset[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onEdit?: (id: string) => void;
   onCreate: () => void;
   canEdit: boolean;
   imageRevisions?: Record<string, number>;
@@ -30,6 +31,7 @@ export function CharacterList({
   characters,
   selectedId,
   onSelect,
+  onEdit,
   onCreate,
   canEdit,
   imageRevisions = {},
@@ -40,6 +42,7 @@ export function CharacterList({
       projectId={projectId}
       selectedId={selectedId}
       onSelect={onSelect}
+      onEdit={onEdit}
       emptyMessage="暂无角色。点击「新建角色」开始准备资产。"
       testId="character-card-grid"
       items={characters.map((c) => {

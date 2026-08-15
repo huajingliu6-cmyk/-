@@ -1,26 +1,7 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { Suspense } from "react";
-import { useParams } from "next/navigation";
-import { WorkspaceAssetsPage } from "@/projects/assets/WorkspaceAssetsPage";
-import { RouteLoadingOverlay } from "@/shell/RouteLoadingOverlay";
-
-const EpisodeAssetDesignWorkspace = dynamic(
-  () =>
-    import("@/projects/assets/EpisodeAssetDesignWorkspace").then((mod) => ({
-      default: mod.EpisodeAssetDesignWorkspace,
-    })),
-  {
-    ssr: false,
-    loading: () => (
-      <RouteLoadingOverlay
-        title="正在加载资产设计…"
-        description="按需加载资产提取与设计工作区"
-      />
-    ),
-  },
-);
+import { redirect, useParams } from "next/navigation";
+import { workspaceProjectAssetsLibraryPath } from "@/shell/nav";
 
 export default function WorkspaceProjectAssetsDesignPage() {
   const params = useParams<{ projectId: string }>();
@@ -34,20 +15,5 @@ export default function WorkspaceProjectAssetsDesignPage() {
     );
   }
 
-  return (
-    <div data-testid="workspace-assets-design-page">
-      <WorkspaceAssetsPage projectId={projectId} module="design" showDesign>
-        <Suspense
-          fallback={
-            <RouteLoadingOverlay
-              title="正在加载资产设计…"
-              description="正在准备剧本资产提取与设计工作区"
-            />
-          }
-        >
-          <EpisodeAssetDesignWorkspace projectId={projectId} />
-        </Suspense>
-      </WorkspaceAssetsPage>
-    </div>
-  );
+  redirect(workspaceProjectAssetsLibraryPath(projectId));
 }

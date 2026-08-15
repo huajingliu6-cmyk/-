@@ -25,10 +25,8 @@ export function ShotVideoGenerationButton({
   onClick,
   paramsSlot,
 }: Props) {
-  let label = "生成本镜头视频";
-  if (contentStale) label = "重新生成本镜头视频";
-  else if (failed) label = "重试本镜头视频";
-  else if (hasSucceeded) label = "重新生成本镜头视频";
+  let label = "生成视频";
+  if (contentStale || failed || hasSucceeded) label = "再次生成";
 
   return (
     <div className="sbw-shot-video-actions">

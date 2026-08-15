@@ -27,6 +27,8 @@ export type ProjectRecord = {
    * Legacy projects without a style resolve to null — never silently default.
    */
   visualStyle: ProjectVisualStyleId | null;
+  /** 是否启用项目级审批流程；缺省为关闭。 */
+  approvalEnabled: boolean;
   passwordEnabled: boolean;
   /** scrypt 哈希；passwordEnabled 为 false 时为 null */
   passwordHash: string | null;
@@ -46,6 +48,7 @@ export type ProjectPublic = {
   status: ProjectLifecycleStatus;
   highlights: string;
   visualStyle: ProjectVisualStyleId | null;
+  approvalEnabled?: boolean;
   passwordEnabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -58,6 +61,8 @@ export type CreateProjectInput = {
   highlights?: string;
   /** Required canonical style id for new projects. */
   visualStyle: ProjectVisualStyleId;
+  /** 默认 false：关闭审批，协作者共享创作权限。 */
+  approvalEnabled?: boolean;
   passwordEnabled: boolean;
   /** 仅当 passwordEnabled 时提交；服务端哈希后丢弃原文 */
   projectPassword?: string | null;

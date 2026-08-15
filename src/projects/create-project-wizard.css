@@ -21,11 +21,11 @@
 .cpw-card {
   position: relative;
   display: flex;
-  width: min(760px, calc(100vw - 40px));
-  max-height: 84svh;
+  width: min(720px, calc(100vw - 40px));
+  max-height: 92svh;
   flex-direction: column;
   overflow: hidden;
-  border-radius: 20px;
+  border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: linear-gradient(
     145deg,
@@ -63,26 +63,26 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding: 20px 22px 8px;
+  padding: 14px 18px 4px;
 }
 
 .cpw-header h2 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 650;
 }
 
 .cpw-header p {
-  margin: 6px 0 0;
-  font-size: 13px;
-  line-height: 1.45;
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
   color: rgba(255, 255, 255, 0.48);
 }
 
 .cpw-close {
   display: inline-flex;
-  height: 36px;
-  width: 36px;
+  height: 32px;
+  width: 32px;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
@@ -108,27 +108,29 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 8px 22px 8px;
+  padding: 4px 18px 4px;
 }
 
 .cpw-sources {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  margin-top: 8px;
+  gap: 10px;
+  margin-top: 4px;
 }
 
 .cpw-source {
   position: relative;
-  display: flex;
-  min-height: 112px;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  border-radius: 15px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  row-gap: 2px;
+  align-items: start;
+  min-height: 0;
+  border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.04);
-  padding: 16px;
+  padding: 10px 12px;
   text-align: left;
   color: inherit;
   transition:
@@ -160,34 +162,40 @@
 
 .cpw-source__icon {
   display: flex;
-  height: 34px;
-  width: 34px;
+  grid-row: 1 / span 2;
+  align-self: center;
+  height: 28px;
+  width: 28px;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.08);
   color: #c4b5fd;
 }
 
 .cpw-source__title {
-  font-size: 15px;
+  grid-column: 2;
+  padding-right: 22px;
+  font-size: 14px;
   font-weight: 650;
   color: #fff;
 }
 
 .cpw-source__desc {
-  font-size: 12px;
-  line-height: 1.45;
+  grid-column: 2;
+  padding-right: 8px;
+  font-size: 11px;
+  line-height: 1.35;
   color: rgba(255, 255, 255, 0.48);
 }
 
 .cpw-source__check {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 8px;
+  right: 8px;
   display: flex;
-  height: 22px;
-  width: 22px;
+  height: 18px;
+  width: 18px;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
@@ -220,8 +228,8 @@
 .cpw-form {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding-top: 18px;
+  gap: 10px;
+  padding-top: 10px;
   opacity: 0;
   transform: translateY(14px);
   filter: blur(6px);
@@ -231,11 +239,31 @@
   animation: cpw-form-in 0.38s ease-out both;
 }
 
+.cpw-field-row {
+  display: grid;
+  gap: 10px;
+}
+
+.cpw-field-row--name-pass {
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  align-items: start;
+}
+
 .cpw-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  min-height: 4.5rem;
+  gap: 4px;
+  min-height: 0;
+}
+
+.cpw-field--password {
+  justify-content: flex-end;
+  padding-top: 1.35rem;
+}
+
+.cpw-field--password:has(.cpw-password-row) {
+  padding-top: 0;
+  justify-content: flex-start;
 }
 
 .cpw-field--stagger-1 {
@@ -278,12 +306,12 @@
 .cpw-input,
 .cpw-textarea {
   width: 100%;
-  border-radius: 11px;
+  border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.05);
-  padding: 10px 12px;
+  padding: 8px 10px;
   color: #fff;
-  font-size: 14px;
+  font-size: 13px;
   outline: none;
   transition:
     border-color 0.15s ease,
@@ -308,16 +336,21 @@
 }
 
 .cpw-textarea {
-  min-height: 6.5rem;
-  max-height: 10rem;
+  min-height: 3.25rem;
+  max-height: 7rem;
   resize: vertical;
-  line-height: 1.5;
+  line-height: 1.4;
 }
 
 .cpw-error {
-  min-height: 1.1rem;
-  font-size: 12px;
+  min-height: 0;
+  font-size: 11px;
+  line-height: 1.3;
   color: #fb7185;
+}
+
+.cpw-error:empty {
+  display: none;
 }
 
 .cpw-check {
@@ -333,6 +366,43 @@
   width: 16px;
   height: 16px;
   accent-color: #8b5cf6;
+}
+
+.cpw-approval-option {
+  align-items: flex-start;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 9px 10px;
+}
+
+.cpw-approval-option input {
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+.cpw-approval-option span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cpw-approval-option strong {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cpw-approval-option small,
+.cpw-approval-hint {
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.cpw-approval-hint {
+  margin: 0 0 0 2px;
 }
 
 .cpw-password-row {
@@ -365,20 +435,20 @@
 .cpw-modes {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 8px;
 }
 
 .cpw-mode {
   position: relative;
   display: flex;
-  min-height: 96px;
+  min-height: 0;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
-  border-radius: 14px;
+  gap: 4px;
+  border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.04);
-  padding: 14px;
+  padding: 10px 12px;
   text-align: left;
   color: inherit;
   transition:
@@ -405,8 +475,8 @@
 .cpw-mode__title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  gap: 6px;
+  font-size: 13px;
   font-weight: 650;
   color: #fff;
 }
@@ -422,8 +492,8 @@
 }
 
 .cpw-mode__desc {
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 11px;
+  line-height: 1.35;
   color: rgba(255, 255, 255, 0.48);
 }
 
@@ -445,16 +515,16 @@
     rgba(12, 13, 22, 0),
     rgba(12, 13, 22, 0.96) 30%
   );
-  padding: 14px 22px 18px;
+  padding: 10px 18px 14px;
 }
 
 .cpw-next {
-  min-width: 7.5rem;
-  height: 42px;
+  min-width: 7rem;
+  height: 38px;
   border: none;
-  border-radius: 11px;
-  padding: 0 18px;
-  font-size: 14px;
+  border-radius: 10px;
+  padding: 0 16px;
+  font-size: 13px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.78);
   background: rgba(255, 255, 255, 0.1);
@@ -610,13 +680,18 @@
 @media (max-width: 640px) {
   .cpw-card {
     width: calc(100vw - 24px);
-    max-height: 88svh;
-    border-radius: 18px;
+    max-height: 92svh;
+    border-radius: 16px;
   }
 
   .cpw-sources,
-  .cpw-modes {
+  .cpw-modes,
+  .cpw-field-row--name-pass {
     grid-template-columns: 1fr;
+  }
+
+  .cpw-field--password {
+    padding-top: 0;
   }
 
   .cpw-footer {

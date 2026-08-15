@@ -13,6 +13,7 @@ import {
   PROJECT_ASSET_IMAGE_MAX_BYTES,
   deleteProjectAssetImageFile,
   findImageableAssetInDraft,
+  isSafeProjectAssetImageId,
   normalizeDeclaredImageMime,
   patchImageableAssetImageMeta,
   resolveAssetImageFilePath,
@@ -199,6 +200,26 @@ export async function PUT(request: Request, context: RouteContext) {
     return notFound("资产不属于当前项目");
   }
 
+  const requestedTargetMediaId = new URL(request.url).searchParams
+    .get("targetMediaId")
+    ?.trim();
+  const targetMediaId = requestedTargetMediaId || assetId;
+  const ownedMediaIds = new Set(
+    [
+      assetId,
+      resolveAssetImageStorageKey(found.asset),
+      found.asset.primaryMediaId,
+      ...(found.asset.approvedMediaIds ?? []),
+    ].filter((id): id is string => typeof id === "string" && Boolean(id)),
+  );
+  if (
+    !isSafeProjectAssetImageId(targetMediaId) ||
+    !ownedMediaIds.has(targetMediaId)
+  ) {
+    return notFound("目标图片不属于当前资产");
+  }
+  const patchAssetMetadata = targetMediaId === assetId;
+
   let form: FormData;
   try {
     form = await request.formData();
@@ -255,44 +276,51 @@ export async function PUT(request: Request, context: RouteContext) {
 
   if (remoteOnly) {
     try {
-      const previousBlob = await getRemoteAssetImage(projectId, assetId);
-      await putRemoteAssetImage({ projectId, assetId, mimeType: sniffed, body: buffer });
+      const previousBlob = await getRemoteAssetImage(projectId, targetMediaId);
+      await putRemoteAssetImage({
+        projectId,
+        assetId: targetMediaId,
+        mimeType: sniffed,
+        body: buffer,
+      });
       try {
-        const patched = await patchImageableAssetImageMeta({
-          projectId,
-          assetId,
-          imageFileName: displayName,
-          imageMimeType: sniffed,
-        });
-        if (patched === "not_found") {
-          if (previousBlob) {
-            await putRemoteAssetImage({
-              projectId,
-              assetId,
-              mimeType: previousBlob.contentType,
-              body: previousBlob.body,
-            });
-          } else {
-            await deleteRemoteAssetImage(projectId, assetId);
+        if (patchAssetMetadata) {
+          const patched = await patchImageableAssetImageMeta({
+            projectId,
+            assetId,
+            imageFileName: displayName,
+            imageMimeType: sniffed,
+          });
+          if (patched === "not_found") {
+            if (previousBlob) {
+              await putRemoteAssetImage({
+                projectId,
+                assetId: targetMediaId,
+                mimeType: previousBlob.contentType,
+                body: previousBlob.body,
+              });
+            } else {
+              await deleteRemoteAssetImage(projectId, targetMediaId);
+            }
+            return notFound("资产不属于当前项目");
           }
-          return notFound("资产不属于当前项目");
         }
       } catch (error) {
         if (previousBlob) {
           await putRemoteAssetImage({
             projectId,
-            assetId,
+            assetId: targetMediaId,
             mimeType: previousBlob.contentType,
             body: previousBlob.body,
           });
         } else {
-          await deleteRemoteAssetImage(projectId, assetId);
+          await deleteRemoteAssetImage(projectId, targetMediaId);
         }
         throw error;
       }
       await synchronizeAssetMediaDownstream(projectId);
       return NextResponse.json({
-        assetId,
+        assetId: targetMediaId,
         imageFileName: displayName,
         imageMimeType: sniffed,
         sizeBytes: buffer.byteLength,
@@ -305,34 +333,38 @@ export async function PUT(request: Request, context: RouteContext) {
   try {
     const written = await writeProjectAssetImageFile({
       projectId,
-      assetId,
+      assetId: targetMediaId,
       buffer,
       mimeType: sniffed,
     });
-    const patched = await patchImageableAssetImageMeta({
-      projectId,
-      assetId,
-      imageFileName: displayName,
-      imageMimeType: written.mimeType,
-    });
-    if (patched === "not_found") {
-      return notFound("资产不属于当前项目");
+    if (patchAssetMetadata) {
+      const patched = await patchImageableAssetImageMeta({
+        projectId,
+        assetId,
+        imageFileName: displayName,
+        imageMimeType: written.mimeType,
+      });
+      if (patched === "not_found") {
+        return notFound("资产不属于当前项目");
+      }
     }
     await synchronizeAssetMediaDownstream(projectId);
     let videoRefSafety = null;
-    try {
-      videoRefSafety = await runAndPersistAssetVideoRefPrecheck({
-        projectId,
-        assetId,
-      });
-    } catch (err) {
-      console.error(
-        `[video-ref-precheck] failed for ${projectId}/${assetId}:`,
-        err,
-      );
+    if (patchAssetMetadata) {
+      try {
+        videoRefSafety = await runAndPersistAssetVideoRefPrecheck({
+          projectId,
+          assetId,
+        });
+      } catch (err) {
+        console.error(
+          `[video-ref-precheck] failed for ${projectId}/${assetId}:`,
+          err,
+        );
+      }
     }
     return NextResponse.json({
-      assetId,
+      assetId: targetMediaId,
       imageFileName: displayName,
       imageMimeType: written.mimeType,
       sizeBytes: written.sizeBytes,

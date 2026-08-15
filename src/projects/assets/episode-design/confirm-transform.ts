@@ -76,11 +76,11 @@ function createCharacterAsset(
   item: EpisodeAssetDesignItem & { assetType: "character" },
   createId: () => string,
 ): CharacterAsset {
-  const mediaId = item.generatedMedia?.currentId?.trim() ?? "";
+  const mediaId = item.generatedMedia?.currentId?.trim() || null;
   const mediaEntry = item.generatedMedia?.history?.find(
     (entry) => entry.mediaId === mediaId,
   );
-  const binding = getDesignMediaVoiceBinding(item, mediaId);
+  const binding = getDesignMediaVoiceBinding(item, mediaId ?? "");
   const voiceBound = isMediaVoiceBound(binding);
   return {
     id: createId(), projectId, name: item.name, role: item.draft.role,
@@ -89,12 +89,15 @@ function createCharacterAsset(
     voiceId: voiceBound ? binding.voiceId : null,
     voiceName: voiceBound ? binding.voiceName : null,
     voiceStyle: null,
-    ...(voiceBound
+    ...(voiceBound && mediaId
       ? { mediaVoices: { [mediaId]: { voiceId: binding.voiceId, voiceName: binding.voiceName } } }
       : {}),
     imageFileName: mediaId, imageObjectUrl: null,
-    imageMimeType: mediaEntry?.mimeType ?? item.generatedMedia?.mimeType ?? "image/png",
-    approvedMediaIds: [mediaId], primaryMediaId: mediaId, status: "completed",
+    imageMimeType: mediaId
+      ? mediaEntry?.mimeType ?? item.generatedMedia?.mimeType ?? "image/png"
+      : null,
+    ...(mediaId ? { approvedMediaIds: [mediaId], primaryMediaId: mediaId } : {}),
+    status: mediaId ? "completed" : "draft",
   };
 }
 
@@ -103,7 +106,7 @@ function createSceneAsset(
   item: EpisodeAssetDesignItem & { assetType: "scene" },
   createId: () => string,
 ): SceneAsset {
-  const mediaId = item.generatedMedia?.currentId?.trim() ?? "";
+  const mediaId = item.generatedMedia?.currentId?.trim() || null;
   const mediaEntry = item.generatedMedia?.history?.find(
     (entry) => entry.mediaId === mediaId,
   );
@@ -112,8 +115,11 @@ function createSceneAsset(
     description: item.draft.description, timeOfDay: item.draft.timeOfDay,
     location: item.draft.location, style: item.draft.style,
     imageFileName: mediaId, imageObjectUrl: null,
-    imageMimeType: mediaEntry?.mimeType ?? item.generatedMedia?.mimeType ?? "image/png",
-    approvedMediaIds: [mediaId], primaryMediaId: mediaId, status: "completed",
+    imageMimeType: mediaId
+      ? mediaEntry?.mimeType ?? item.generatedMedia?.mimeType ?? "image/png"
+      : null,
+    ...(mediaId ? { approvedMediaIds: [mediaId], primaryMediaId: mediaId } : {}),
+    status: mediaId ? "completed" : "draft",
   };
 }
 
@@ -122,7 +128,7 @@ function createPropAsset(
   item: EpisodeAssetDesignItem & { assetType: "prop" },
   createId: () => string,
 ): PropAsset {
-  const mediaId = item.generatedMedia?.currentId?.trim() ?? "";
+  const mediaId = item.generatedMedia?.currentId?.trim() || null;
   const mediaEntry = item.generatedMedia?.history?.find(
     (entry) => entry.mediaId === mediaId,
   );
@@ -130,8 +136,11 @@ function createPropAsset(
     id: createId(), projectId, name: item.name, propType: item.draft.propType,
     usage: item.draft.usage, description: item.draft.description,
     imageFileName: mediaId, imageObjectUrl: null,
-    imageMimeType: mediaEntry?.mimeType ?? item.generatedMedia?.mimeType ?? "image/png",
-    approvedMediaIds: [mediaId], primaryMediaId: mediaId, status: "completed",
+    imageMimeType: mediaId
+      ? mediaEntry?.mimeType ?? item.generatedMedia?.mimeType ?? "image/png"
+      : null,
+    ...(mediaId ? { approvedMediaIds: [mediaId], primaryMediaId: mediaId } : {}),
+    status: mediaId ? "completed" : "draft",
   };
 }
 
@@ -156,6 +165,8 @@ export function transformEpisodeAssetDesignConfirmation(input: {
   fingerprint: string;
   /** Personal projects may confirm one card without closing the whole record. */
   itemId?: string;
+  /** Approval-free projects may save extracted draft assets before image generation. */
+  requireGeneratedMedia?: boolean;
   store: ProjectEpisodeAssetDesignStore;
   bundle: ProjectAssetBundle;
   now?: string;
@@ -212,6 +223,7 @@ export function transformEpisodeAssetDesignConfirmation(input: {
     if (
       item.resolution === "create_new" &&
       item.assetType !== "audio" &&
+      input.requireGeneratedMedia !== false &&
       !item.generatedMedia?.currentId?.trim()
     ) {
       return {

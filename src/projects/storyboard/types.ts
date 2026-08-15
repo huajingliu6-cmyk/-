@@ -75,6 +75,17 @@ export type ShotCompletenessStatus =
   | "locked"
   | "confirmed";
 
+/** 场景参考图上的人物摆放（镜头级数据） */
+export type SceneCharacterPlacement = {
+  characterAssetId: string;
+  /** 0=左，1=右 */
+  x: number;
+  /** 0=上，1=下 */
+  y: number;
+  scale?: number;
+  depth?: number;
+};
+
 export type StoryboardShot = {
   id: string;
   shotNumber: number;
@@ -125,6 +136,11 @@ export type StoryboardShot = {
    * 缺省时使用资产主图（primaryMediaId / imageFileName）。
    */
   assetMediaIds?: Record<string, string>;
+  /**
+   * 场景图上的人物摆放（镜头级，不写入场景资产库）。
+   * x/y 为相对场景图片显示区域的归一化坐标 [0,1]。
+   */
+  sceneCharacterPlacements?: SceneCharacterPlacement[];
   requirements: ShotAssetRequirement[];
   manuallyEdited: boolean;
   /** 锁定提示词，批量生成不得覆盖 */
@@ -281,6 +297,8 @@ export type AssetMediaOption = {
   thumbUrl: string;
   /** 是否为资产当前主图 */
   isPrimary?: boolean;
+  /** 仅人物：该图片实际使用的音色显示名。 */
+  voiceLabel?: string | null;
 };
 
 export type AssetSummaryItem = {
@@ -295,6 +313,8 @@ export type AssetSummaryItem = {
   mediaOptions?: AssetMediaOption[];
   /** 仅人物：是否已绑定音色（有 voiceId） */
   voiceBound?: boolean;
+  /** 仅人物：默认音色显示名。 */
+  voiceLabel?: string | null;
   /** Seedance 参考图预检 */
   videoRefSafetyStatus?:
     | "pending"

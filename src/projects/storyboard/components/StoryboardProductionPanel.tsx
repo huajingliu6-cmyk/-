@@ -15,6 +15,7 @@ import {
 import { EpisodeVideoGenerationButton } from "@/projects/storyboard/components/EpisodeVideoGenerationButton";
 import { ShotSceneRequiredDialog } from "@/projects/storyboard/components/ShotSceneRequiredDialog";
 import { StoryboardShotAccordion } from "@/projects/storyboard/components/StoryboardShotAccordion";
+import { StoryboardPlaybackBar } from "@/projects/storyboard/components/StoryboardPlaybackBar";
 import type { PickerAsset } from "@/projects/storyboard/components/ProjectAssetPickerDialog";
 import {
   VideoGenerationConfirmationDialog,
@@ -41,6 +42,7 @@ type Props = {
   production: EpisodeProduction;
   assets: PickerAsset[];
   onProductionChange: (production: EpisodeProduction) => void;
+  onAssetsRefresh?: () => Promise<void> | void;
   onNote: (note: string) => void;
   onScriptDraftChange?: (text: string | null) => void;
   canGenerateVideo?: boolean;
@@ -51,6 +53,12 @@ type Props = {
   promptGenError?: string;
   promptQueueHint?: string;
   onRequestPromptGenerate?: (opts?: { force?: boolean }) => void;
+  /** Development-only local interactions used by the layout preview route. */
+  previewMode?: boolean;
+  previewVideosByShotId?: Record<
+    string,
+    import("@/projects/storyboard/shot-video-history").ShotVideoHistoryItem[]
+  >;
 };
 
 export function StoryboardProductionPanel({
@@ -58,6 +66,7 @@ export function StoryboardProductionPanel({
   production,
   assets,
   onProductionChange,
+  onAssetsRefresh,
   onNote,
   onScriptDraftChange,
   canGenerateVideo = true,
@@ -66,6 +75,8 @@ export function StoryboardProductionPanel({
   promptGenError,
   promptQueueHint,
   onRequestPromptGenerate,
+  previewMode = false,
+  previewVideosByShotId,
 }: Props) {
   const idempotencyRef = useRef<string>(safeRandomUUID());
   const batchKeyRef = useRef<string>(safeRandomUUID());
@@ -76,8 +87,8 @@ export function StoryboardProductionPanel({
   const [showInvalidateDialog, setShowInvalidateDialog] = useState(false);
   const [batchBusy, setBatchBusy] = useState(false);
   const [panelNote, setPanelNote] = useState("");
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [seededBoardId, setSeededBoardId] = useState<string | null>(null);
+  const [activeShotId, setActiveShotId] = useState<string | null>(null);
   const [focusShotId, setFocusShotId] = useState<string | null>(null);
   const [videoDialogOpen, setVideoDialogOpen] = useState(false);
   const [sceneBlockDialogOpen, setSceneBlockDialogOpen] = useState(false);
@@ -94,7 +105,16 @@ export function StoryboardProductionPanel({
     t2vModelId: string;
     r2vModelId: string;
     usesSd2RealPersonCertification?: boolean;
-  } | null>(null);
+  } | null>(() =>
+    previewMode
+      ? {
+          providerId: "mock",
+          allowPaidGeneration: false,
+          t2vModelId: "preview",
+          r2vModelId: "preview",
+        }
+      : null,
+  );
   const cardRefs = useRef<Map<string, HTMLElement>>(new Map());
 
   const storyboard = production.activeStoryboard;
@@ -105,6 +125,11 @@ export function StoryboardProductionPanel({
   const flat = useMemo(
     () => (storyboard ? listFlatShots(storyboard.scenes) : []),
     [storyboard],
+  );
+  const playbackShots = useMemo(() => flat.map((row) => row.shot), [flat]);
+  const activeRow = useMemo(
+    () => flat.find((row) => row.shot.id === activeShotId) ?? flat[0] ?? null,
+    [activeShotId, flat],
   );
   const shotCount = flat.length;
   const totalDuration = useMemo(
@@ -130,6 +155,7 @@ export function StoryboardProductionPanel({
   );
 
   useEffect(() => {
+    if (previewMode) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -142,7 +168,7 @@ export function StoryboardProductionPanel({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [previewMode]);
 
   /**
    * If the browser loses the long-running generate request (refresh / HMR / tab
@@ -216,9 +242,7 @@ export function StoryboardProductionPanel({
 
   if (storyboard && seededBoardId !== storyboard.id) {
     setSeededBoardId(storyboard.id);
-    // Keep all shots collapsed on first paint — expanding one card pulls
-    // video-history and mounts heavy editors; users expand on demand.
-    setExpanded({});
+    setActiveShotId(flat[0]?.shot.id ?? null);
     setFocusShotId(null);
   }
 
@@ -234,7 +258,7 @@ export function StoryboardProductionPanel({
   const focusIncompleteShot = useCallback(
     (shotId: string, message: string) => {
       setFocusShotId(shotId);
-      setExpanded((prev) => ({ ...prev, [shotId]: true }));
+      setActiveShotId(shotId);
       setPanelNote(message);
       onNote(message);
       requestAnimationFrame(() => {
@@ -247,7 +271,7 @@ export function StoryboardProductionPanel({
 
   const focusShotScene = useCallback((shotId: string) => {
     setFocusShotId(shotId);
-    setExpanded((prev) => ({ ...prev, [shotId]: true }));
+    setActiveShotId(shotId);
     setSceneBlockDialogOpen(false);
     setVideoDialogOpen(false);
     setBatchBusy(false);
@@ -531,6 +555,16 @@ export function StoryboardProductionPanel({
     setBatchBusy(true);
     setPanelNote("");
     try {
+      if (previewMode) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 700);
+        });
+        setPanelNote("已提交本集全部分镜的视频生成任务（预览模式）。");
+        onNote("本集视频生成任务已提交。");
+        setVideoDialogOpen(false);
+        return;
+      }
+
       let currentStoryboard = storyboard;
       if (production.status !== "storyboard_done" || !storyboard.confirmedAt) {
         const firstLocal = flat.find((row) => !isShotConfirmReady(row.shot));
@@ -627,6 +661,7 @@ export function StoryboardProductionPanel({
     onProductionChange,
     production.episodeId,
     production.status,
+    previewMode,
     projectId,
     storyboard,
     validSceneIds,
@@ -662,7 +697,7 @@ export function StoryboardProductionPanel({
         : "暂不可生成";
 
   return (
-    <div className="sbw-panel">
+    <div className="sbw-panel sbw-panel--storyboard-workspace">
       <div className="sbw-panel__head sbw-panel__head--row">
         <div>
           <h2>分镜创作</h2>
@@ -687,6 +722,14 @@ export function StoryboardProductionPanel({
           >
             修改剧本
           </button>
+          {storyboard ? (
+            <EpisodeVideoGenerationButton
+              enabled={episodeVideoEnabled}
+              disabledReason={episodeVideoDisabledReason}
+              busy={batchBusy}
+              onClick={handleRequestBatchGenerate}
+            />
+          ) : null}
         </div>
       </div>
 
@@ -791,24 +834,6 @@ export function StoryboardProductionPanel({
               重试
             </button>
           ) : null}
-          <button
-            type="button"
-            className="sbw-btn"
-            disabled={!storyboard}
-            onClick={() =>
-              setExpanded(
-                Object.fromEntries(flat.map((r) => [r.shot.id, false])),
-              )
-            }
-          >
-            全部收起
-          </button>
-          <EpisodeVideoGenerationButton
-            enabled={episodeVideoEnabled}
-            disabledReason={episodeVideoDisabledReason}
-            busy={batchBusy}
-            onClick={handleRequestBatchGenerate}
-          />
         </div>
 
         {incompleteCount > 0 && storyboard ? (
@@ -833,37 +858,73 @@ export function StoryboardProductionPanel({
             )}
           </div>
         ) : (
-          <div className="sbw-shot-list">
-            {flat.map((row) => (
+          <div className="sbw-shot-list sbw-shot-list--workspace">
+            {activeRow ? (
               <StoryboardShotAccordion
-                key={row.shot.id}
+                key={activeRow.shot.id}
                 projectId={projectId}
                 episodeId={production.episodeId}
                 storyboardRevision={storyboard.revision}
                 episodeConfirmed={confirmed}
                 canGenerateVideo={canGenerateVideo}
-                shot={row.shot}
-                expanded={expanded[row.shot.id] === true}
-                onToggle={() =>
-                  setExpanded((prev) => ({
-                    ...prev,
-                    [row.shot.id]: !prev[row.shot.id],
-                  }))
-                }
+                shot={activeRow.shot}
+                expanded
+                workspaceMode
+                onToggle={() => undefined}
                 assets={assets}
                 onProductionChange={onProductionChange}
-                highlightUnresolved={focusShotId === row.shot.id}
-                openScenePickerToken={scenePickerTokens[row.shot.id] ?? 0}
+                onAssetsRefresh={onAssetsRefresh}
+                highlightUnresolved={focusShotId === activeRow.shot.id}
+                openScenePickerToken={scenePickerTokens[activeRow.shot.id] ?? 0}
                 videoConfig={videoConfig}
                 videoDefaults={videoDefaults}
+                previewMode={previewMode}
+                previewHistoryVideos={previewVideosByShotId?.[activeRow.shot.id] ?? []}
+                onPreviewShotChange={(nextShot) => {
+                  if (!storyboard) return;
+                  const nextStoryboard = {
+                    ...storyboard,
+                    scenes: storyboard.scenes.map((scene) => ({
+                      ...scene,
+                      shots: scene.shots.map((candidate) =>
+                        candidate.id === nextShot.id ? nextShot : candidate,
+                      ),
+                    })),
+                  };
+                  onProductionChange({
+                    ...production,
+                    activeStoryboard: nextStoryboard,
+                    revision: production.revision + 1,
+                    updatedAt: new Date().toISOString(),
+                  });
+                }}
                 cardRef={(el) => {
-                  if (el) cardRefs.current.set(row.shot.id, el);
-                  else cardRefs.current.delete(row.shot.id);
+                  if (el) cardRefs.current.set(activeRow.shot.id, el);
+                  else cardRefs.current.delete(activeRow.shot.id);
                 }}
               />
-            ))}
+            ) : null}
           </div>
         )}
+
+        {storyboard && flat.length > 0 ? (
+          <StoryboardPlaybackBar
+            projectId={projectId}
+            episodeId={production.episodeId}
+            shots={playbackShots}
+            workspaceMode
+            selectedShotId={activeRow?.shot.id ?? null}
+            onSelectShot={(shotId) => {
+              setActiveShotId(shotId);
+              setFocusShotId(null);
+            }}
+            previewVideosByShotId={previewVideosByShotId}
+            initialAspectRatio={
+              videoDefaults?.aspectRatio ??
+              (STORYBOARD_VIDEO_ASPECT_RATIO === "9:16" ? "9:16" : "16:9")
+            }
+          />
+        ) : null}
 
         {panelNote ? <p className="sbw-note">{panelNote}</p> : null}
       </div>

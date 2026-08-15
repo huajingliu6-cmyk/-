@@ -39,6 +39,7 @@ export async function GET(_request: Request, context: RouteContext) {
       rootFolderId: project.rootFolderId,
       name: project.name,
       status: project.status,
+      approvalEnabled: project.approvalEnabled,
     },
     draft,
     effectiveRole: gated.access.role,

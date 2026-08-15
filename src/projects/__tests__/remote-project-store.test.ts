@@ -23,6 +23,7 @@ vi.mock("@/persistence/remote-data-client", () => ({
         projectMode: input.projectMode,
         status: "draft",
         highlights: input.highlights ?? "",
+        approvalEnabled: input.approvalEnabled === true,
         passwordEnabled: input.passwordEnabled,
         createdAt: "2026-08-02T00:00:00.000Z",
         updatedAt: "2026-08-02T00:00:00.000Z",
@@ -67,11 +68,14 @@ describe("remote project store", () => {
       name: "远端项目",
       creationSource: "story",
       projectMode: "canvas",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: true,
+      approvalEnabled: true,
       projectPassword: "secret",
     });
 
     expect(project).not.toHaveProperty("passwordHash");
+    expect(project.approvalEnabled).toBe(true);
     expect(api.calls[0]?.path).toBe("/v1/projects");
     expect(new Headers(api.calls[0]?.init?.headers).get("x-actor-id")).toBe(
       "owner-1",
@@ -83,6 +87,7 @@ describe("remote project store", () => {
       name: "列表项目",
       creationSource: "story",
       projectMode: "canvas",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
 
@@ -95,6 +100,7 @@ describe("remote project store", () => {
       name: "要点项目",
       creationSource: "story",
       projectMode: "canvas",
+      visualStyle: "live_action_cinematic",
       passwordEnabled: false,
     });
 

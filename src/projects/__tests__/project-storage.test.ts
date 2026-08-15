@@ -35,6 +35,8 @@ describe("project storage + password safety", () => {
       creationSource: "story",
       projectMode: "canvas",
       highlights: "赛博雨夜",
+      visualStyle: "live_action_cinematic",
+      approvalEnabled: true,
       passwordEnabled: true,
       projectPassword: "access-secret",
     });
@@ -44,6 +46,7 @@ describe("project storage + password safety", () => {
     expect(publicProject.rootFolderId).toBe(publicProject.projectId);
     expect(publicProject.status).toBe("draft");
     expect(publicProject.passwordEnabled).toBe(true);
+    expect(publicProject.approvalEnabled).toBe(true);
     expect("passwordHash" in publicProject).toBe(false);
 
     const record = await getProjectRecord(publicProject.projectId);
@@ -71,6 +74,7 @@ describe("project storage + password safety", () => {
     const record = await getProjectRecord(project.projectId);
     expect(record!.passwordHash).toBeNull();
     expect(record!.passwordSalt).toBeNull();
+    expect(record!.approvalEnabled).toBe(false);
   });
 
   it("allows the same project name for different owners", async () => {

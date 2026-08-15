@@ -1,6 +1,9 @@
 import { promises as fs } from "fs";
 import { randomUUID } from "crypto";
-import { isRemoteDataOnly } from "@/persistence/remote-data-client";
+import {
+  isRemoteDataOnly,
+  isRemoteRevisionConflict,
+} from "@/persistence/remote-data-client";
 import {
   normalizeAssetBundleDraft,
   sanitizeAssetBundleForPersist,
@@ -13,7 +16,15 @@ import type {
   SceneAsset,
 } from "@/projects/assets/types";
 import { upsertEpisodeRecord } from "@/projects/assets/episode-design/store";
-import { loadWorkspaceLocalEpisodeDesigns } from "@/projects/workspace-sync/store";
+import {
+  transformEpisodeAssetDesignConfirmation,
+  type ConfirmEpisodeAssetDesignResult,
+} from "@/projects/assets/episode-design/confirm-transform";
+import { runProjectAssetTransaction } from "@/projects/assets/remote-transaction-client";
+import {
+  loadWorkspaceLocalEpisodeDesigns,
+  loadWorkspaceLocalEpisodeDesignsDocument,
+} from "@/projects/workspace-sync/store";
 import type {
   EpisodeAssetDesignItem,
   EpisodeAssetDesignRecord,
@@ -21,32 +32,84 @@ import type {
 import { getEffectiveWorkspaceAssetBundle } from "@/projects/workspace-sync/workspace-episode-design-api";
 import { getWorkspaceEpisodeAssetDesignDetail } from "@/projects/workspace-sync/workspace-episode-design-api";
 import {
+  loadWorkspaceAssetsRemoteDocument,
+  workspaceAssetsRemoteIdentity,
+  workspaceEpisodeDesignsRemoteIdentity,
+} from "@/projects/workspace-sync/remote-store";
+import {
   workspaceAssetsPath,
   workspaceEpisodeAssetDesignsPath,
 } from "@/projects/workspace-sync/paths";
 
 export type ConfirmWorkspaceEpisodeAssetDesignResult =
-  | {
-      ok: true;
-      counts: { created: number; linked: number; ignored: number };
-      createdAssets: Array<{
-        itemId: string;
-        assetId: string;
-        assetType: EpisodeAssetDesignItem["assetType"];
-      }>;
-      record: EpisodeAssetDesignRecord;
+  ConfirmEpisodeAssetDesignResult;
+
+const MAX_REMOTE_WRITE_ATTEMPTS = 6;
+
+async function confirmWorkspaceEpisodeAssetDesignRemote(input: {
+  projectId: string;
+  episodeId: string;
+  expectedRevision: number;
+  userId: string;
+  fingerprint: string;
+}): Promise<ConfirmWorkspaceEpisodeAssetDesignResult> {
+  for (let attempt = 0; attempt < MAX_REMOTE_WRITE_ATTEMPTS; attempt += 1) {
+    const detail = await getWorkspaceEpisodeAssetDesignDetail(
+      input.projectId,
+      input.episodeId,
+    );
+    if (!detail.ok) {
+      return {
+        ok: false,
+        code: "EPISODE_DESIGN_NOT_FOUND",
+        message: "该集资产设计记录不存在",
+      };
     }
-  | {
-      ok: false;
-      code:
-        | "EPISODE_DESIGN_NOT_FOUND"
-        | "REVISION_CONFLICT"
-        | "FINGERPRINT_STALE"
-        | "RESOLUTION_PENDING"
-        | "ASSET_NOT_FOUND"
-        | "ALREADY_CONFIRMED";
-      message: string;
-    };
+
+    const [effectiveBundle, designDocument, assetDocument] = await Promise.all([
+      getEffectiveWorkspaceAssetBundle(input.projectId),
+      loadWorkspaceLocalEpisodeDesignsDocument(input.projectId),
+      loadWorkspaceAssetsRemoteDocument(input.projectId),
+    ]);
+    const effectiveStore = upsertEpisodeRecord(designDocument.value, {
+      ...detail.record,
+      staleUpstream: false,
+    });
+    const transformed = transformEpisodeAssetDesignConfirmation({
+      ...input,
+      store: effectiveStore,
+      bundle: sanitizeAssetBundleForPersist(effectiveBundle),
+      requireGeneratedMedia: false,
+    });
+    if (!transformed.writeRequired) return transformed.result;
+
+    try {
+      await runProjectAssetTransaction({
+        writes: [
+          {
+            ...workspaceEpisodeDesignsRemoteIdentity(input.projectId),
+            expectedRevision: designDocument.remoteRevision ?? 0,
+            value: transformed.nextStore,
+          },
+          {
+            ...workspaceAssetsRemoteIdentity(input.projectId),
+            expectedRevision: assetDocument?.revision ?? 0,
+            value: transformed.nextBundle,
+          },
+        ],
+      });
+      return transformed.result;
+    } catch (error) {
+      if (!isRemoteRevisionConflict(error)) throw error;
+    }
+  }
+
+  return {
+    ok: false,
+    code: "REVISION_CONFLICT",
+    message: "资产设计版本已变更，请刷新后重试",
+  };
+}
 
 async function fileExists(p: string): Promise<boolean> {
   try {
@@ -202,7 +265,7 @@ export async function confirmWorkspaceEpisodeAssetDesign(input: {
   fingerprint: string;
 }): Promise<ConfirmWorkspaceEpisodeAssetDesignResult> {
   if (isRemoteDataOnly()) {
-    throw new Error("REMOTE_WORKSPACE_ASSET_CONFIRM_NOT_MIGRATED");
+    return confirmWorkspaceEpisodeAssetDesignRemote(input);
   }
   const detail = await getWorkspaceEpisodeAssetDesignDetail(
     input.projectId,

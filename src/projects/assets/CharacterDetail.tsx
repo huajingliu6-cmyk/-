@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { UserRound } from "lucide-react";
+import { Plus, Sparkles, UserRound } from "lucide-react";
 import { useChipBounce } from "@/shell/useChipBounce";
 import { AssetBasicInfo } from "@/projects/assets/AssetBasicInfo";
 import { AssetDetailImage } from "@/projects/assets/AssetDetailImage";
@@ -21,9 +21,14 @@ import {
   resolveAssetImageStorageKey,
 } from "@/projects/assets/asset-image-url";
 import { mergeMediaIdLists } from "@/projects/assets/episode-design/generated-media-history";
+import {
+  LibraryCharacterLookEditor,
+  type CharacterLookSaveResult,
+} from "@/projects/assets/LibraryCharacterLookEditor";
 
 type Props = {
   projectId: string;
+  context?: "management" | "workspace";
   character: CharacterAsset | null;
   canEdit: boolean;
   note: string;
@@ -35,6 +40,8 @@ type Props = {
   onPreviewStatus?: (message: string) => void;
   onImageRevision?: (assetId: string, next: number) => void;
   ensurePersisted?: () => Promise<void>;
+  controlledMediaId?: string | null;
+  onActiveMediaChange?: (mediaId: string | null) => void;
 };
 
 function resolveCharacterUploadedMediaId(
@@ -50,7 +57,7 @@ function resolveCharacterUploadedMediaId(
     : null;
 }
 
-function resolveCharacterPrimaryMediaId(
+export function resolveCharacterPrimaryMediaId(
   character: CharacterAsset,
 ): string | null {
   return (
@@ -59,7 +66,7 @@ function resolveCharacterPrimaryMediaId(
   );
 }
 
-function listCharacterMediaIds(character: CharacterAsset): string[] {
+export function listCharacterMediaIds(character: CharacterAsset): string[] {
   const uploadedMediaId = resolveCharacterUploadedMediaId(character);
   return mergeMediaIdLists(
     character.approvedMediaIds,
@@ -91,6 +98,7 @@ function resolveVoiceForMedia(
 
 export function CharacterDetail({
   projectId,
+  context = "management",
   character,
   canEdit,
   note,
@@ -102,9 +110,12 @@ export function CharacterDetail({
   onPreviewStatus,
   onImageRevision,
   ensurePersisted,
+  controlledMediaId,
+  onActiveMediaChange,
 }: Props) {
   const saveBounce = useChipBounce();
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
+  const [lookEditorOpen, setLookEditorOpen] = useState(false);
 
   const mediaIds = useMemo(
     () => (character ? listCharacterMediaIds(character) : []),
@@ -141,9 +152,14 @@ export function CharacterDetail({
   }
 
   const activeMediaId =
-    selectedMediaId && mediaIds.includes(selectedMediaId)
+    controlledMediaId && mediaIds.includes(controlledMediaId)
+      ? controlledMediaId
+      : selectedMediaId && mediaIds.includes(selectedMediaId)
       ? selectedMediaId
-      : preferredMediaId ?? resolveAssetImageStorageKey(character) ?? null;
+      : preferredMediaId ??
+        (character.imageFileName
+          ? resolveAssetImageStorageKey(character)
+          : null);
   const activeVoice = activeMediaId
     ? resolveVoiceForMedia(character, activeMediaId)
     : { voiceId: character.voiceId, voiceName: character.voiceName };
@@ -184,6 +200,19 @@ export function CharacterDetail({
       videoRefSafety: null,
     });
     setSelectedMediaId(mediaId);
+    onActiveMediaChange?.(mediaId);
+  };
+
+  const saveLook = (result: CharacterLookSaveResult) => {
+    const next = {
+      ...character,
+      approvedMediaIds: result.approvedMediaIds,
+      primaryMediaId: result.primaryMediaId,
+    };
+    onChange(next);
+    setSelectedMediaId(result.mediaId);
+    onActiveMediaChange?.(result.mediaId);
+    onImageRevision?.(character.id, imageRevision + 1);
   };
 
   const previewSrc = activeMediaId
@@ -264,7 +293,8 @@ export function CharacterDetail({
   );
 
   return (
-    <AssetDetailLayout
+    <>
+      <AssetDetailLayout
       title="角色详情"
       aria-label="角色详情"
       className="character-detail"
@@ -296,6 +326,11 @@ export function CharacterDetail({
           disabled={!canEdit}
           projectId={projectId}
           assetId={character.id}
+          uploadTargetId={activeMediaId}
+          preserveValueOnUpload={Boolean(
+            activeMediaId && activeMediaId !== character.id,
+          )}
+          actionLabel="替换形象"
           ensurePersisted={ensurePersisted}
           revision={imageRevision}
           onRevisionChange={(next) => onImageRevision?.(character.id, next)}
@@ -315,51 +350,80 @@ export function CharacterDetail({
         />
       }
       previewContent={
-        mediaIds.length > 1 ? (
-          <div
-            className="ead-history-strip ead-history-strip--images ead-history-strip--compact"
-            data-testid="character-media-history"
-          >
-            {mediaIds.map((id) => {
-              const active = id === activeMediaId;
+        <section className="character-looks" data-testid="character-looks">
+          <header className="character-looks__head">
+            <div>
+              <span className="character-looks__eyebrow">角色造型</span>
+              <strong>{mediaIds.length} 个造型</strong>
+            </div>
+            {activeMediaId &&
+            activeMediaId !== resolveCharacterPrimaryMediaId(character) ? (
+              <button
+                type="button"
+                className="amw-btn character-looks__primary-action"
+                disabled={!canEdit}
+                onClick={() => setPrimaryMedia(activeMediaId)}
+              >
+                设为主造型
+              </button>
+            ) : null}
+          </header>
 
+          <div className="character-looks__rail" role="list">
+            {mediaIds.map((id, index) => {
+              const active = id === activeMediaId;
+              const primary = id === resolveCharacterPrimaryMediaId(character);
               return (
                 <button
                   key={id}
                   type="button"
-                  className={
-                    active
-                      ? "ead-history-thumb is-active"
-                      : "ead-history-thumb"
-                  }
-                  title={id}
-                  onClick={() => setSelectedMediaId(id)}
+                  role="listitem"
+                  className={`character-look-card${
+                    active ? " is-active" : ""
+                  }`}
+                  title={primary ? "主造型" : `造型 ${index + 1}`}
+                  onClick={() => {
+                    setSelectedMediaId(id);
+                    onActiveMediaChange?.(id);
+                  }}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={getProjectAssetImageUrl(projectId, id, {
-                      revision: id,
-                    })}
-                    alt=""
-                  />
+                  <span className="character-look-card__media">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={getProjectAssetImageUrl(projectId, id, {
+                        revision: id,
+                      })}
+                      alt=""
+                    />
+                    {primary ? (
+                      <span className="character-look-card__badge">主造型</span>
+                    ) : null}
+                  </span>
+                  <span className="character-look-card__label">
+                    {primary ? "人物主体" : `角色造型 ${index + 1}`}
+                  </span>
                 </button>
               );
             })}
 
-            {activeMediaId &&
-            activeMediaId !==
-              resolveCharacterPrimaryMediaId(character) ? (
-              <button
-                type="button"
-                className="amw-btn"
-                disabled={!canEdit}
-                onClick={() => setPrimaryMedia(activeMediaId)}
-              >
-                设为主图
-              </button>
-            ) : null}
+            <button
+              type="button"
+              role="listitem"
+              className="character-look-card character-look-card--add"
+              disabled={!canEdit}
+              onClick={() => setLookEditorOpen(true)}
+              data-testid="character-look-add"
+            >
+              <span className="character-look-card__add-icon" aria-hidden>
+                <Plus size={22} />
+              </span>
+              <span className="character-look-card__label">
+                <Sparkles size={14} aria-hidden />
+                新增造型
+              </span>
+            </button>
           </div>
-        ) : null
+        </section>
       }
       basicInfo={
         <AssetBasicInfo
@@ -407,6 +471,21 @@ export function CharacterDetail({
       }
       voice={voicePanel}
       footer={note ? <p className="amw-note">{note}</p> : null}
-    />
+      />
+
+      {lookEditorOpen ? (
+        <LibraryCharacterLookEditor
+          key={`${character.id}:${activeMediaId ?? "new"}`}
+          projectId={projectId}
+          context={context}
+          characterId={character.id}
+          characterName={character.name || "未命名角色"}
+          initialMediaId={activeMediaId}
+          existingMediaIds={mediaIds}
+          onClose={() => setLookEditorOpen(false)}
+          onSaved={saveLook}
+        />
+      ) : null}
+    </>
   );
 }

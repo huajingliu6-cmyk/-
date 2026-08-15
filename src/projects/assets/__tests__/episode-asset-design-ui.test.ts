@@ -21,17 +21,18 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(nav).toContain('segment: "library"');
   });
 
-  it("keeps three core actions with unified save label", () => {
+  it("keeps extract/save actions without management confirm button", () => {
     expect(workspace).toContain("提取本集资产");
     expect(workspace).toContain("保存本集资产");
     expect(workspace).not.toContain("保存全剧本资产");
-    expect(workspace).toContain("确认本集资产");
+    expect(workspace).not.toContain("确认本集资产");
+    expect(workspace).not.toContain("确认全剧本资产");
+    expect(workspace).not.toContain('data-testid="ead-confirm"');
     expect(workspace).toContain("提交审批素材");
     expect(workspace).toContain("ead-submit-approval");
     expect(workspace).not.toContain("保存本集设计");
     expect(workspace).toContain("handleExtract");
     expect(workspace).toContain("saveItems");
-    expect(workspace).toContain("handleConfirm");
     expect(workspace).toContain("取消生成");
   });
 
@@ -271,13 +272,10 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(css).toContain(".ead-card__approval-overlay");
   });
 
-  it("blocks image-less confirmation and warns about unbound voices", () => {
-    expect(workspace).toContain("missingImageItems");
-    expect(workspace).toContain("ead-missing-image-warning");
-    expect(workspace).toContain("生成图片后才能确认入库");
-    expect(workspace).toContain("unboundVoiceItems");
-    expect(workspace).toContain("ead-unbound-voice-warning");
-    expect(workspace).toContain("尚未绑定音色");
+  it("does not show batch confirm warnings after removing management confirm button", () => {
+    expect(workspace).not.toContain("ead-missing-image-warning");
+    expect(workspace).not.toContain("ead-unbound-voice-warning");
+    expect(workspace).not.toContain("生成图片后才能确认入库");
   });
 
   it("shows per-asset confirmation only in personal project management", () => {

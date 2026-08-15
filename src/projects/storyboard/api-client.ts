@@ -360,6 +360,7 @@ export async function patchStoryboardShot(
     propAssetIds?: string[];
     sceneAssetId?: string | null;
     assetMediaIds?: Record<string, string>;
+    sceneCharacterPlacements?: import("@/projects/storyboard/types").SceneCharacterPlacement[];
     requirements?: unknown[];
     promptLocked?: boolean;
     locked?: boolean;

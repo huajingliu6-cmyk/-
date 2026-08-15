@@ -12,6 +12,7 @@ import {
   type PickerAsset,
 } from "@/projects/storyboard/components/ProjectAssetPickerDialog";
 import { ShotAssetGallery } from "@/projects/storyboard/components/ShotAssetGallery";
+import { StoryboardAssetImageEditor } from "@/projects/storyboard/components/StoryboardAssetImageEditor";
 import { ShotPromptEditor } from "@/projects/storyboard/components/ShotPromptEditor";
 import { ShotSceneRequiredDialog } from "@/projects/storyboard/components/ShotSceneRequiredDialog";
 import { ShotVideoGenerationButton } from "@/projects/storyboard/components/ShotVideoGenerationButton";
@@ -74,6 +75,8 @@ type Props = {
   onToggle: () => void;
   assets: PickerAsset[];
   onProductionChange: (production: EpisodeProduction) => void;
+  /** 保存图片后刷新资产摘要（历史图列表） */
+  onAssetsRefresh?: () => Promise<void> | void;
   cardRef?: (el: HTMLElement | null) => void;
   highlightUnresolved?: boolean;
   /** 外部请求打开场景选择器（批量预检「去处理」） */
@@ -87,6 +90,12 @@ type Props = {
   } | null;
   /** 项目级视频默认；初始化本镜头控件，不写回全局 */
   videoDefaults?: StoryboardVideoDefaults | null;
+  /** Render one shot as the fixed three-column editing workspace. */
+  workspaceMode?: boolean;
+  /** Local-only behavior for the development layout preview. */
+  previewMode?: boolean;
+  previewHistoryVideos?: ShotVideoHistoryItem[];
+  onPreviewShotChange?: (shot: StoryboardShot) => void;
 };
 
 type PickerTarget = {
@@ -146,11 +155,16 @@ export function StoryboardShotAccordion({
   onToggle,
   assets,
   onProductionChange,
+  onAssetsRefresh,
   cardRef,
   highlightUnresolved = false,
   openScenePickerToken = 0,
   videoConfig,
   videoDefaults = null,
+  workspaceMode = false,
+  previewMode = false,
+  previewHistoryVideos = [],
+  onPreviewShotChange,
 }: Props) {
   void _episodeConfirmed;
   const serverPrompt = getShotVideoPrompt(shot);
@@ -171,6 +185,7 @@ export function StoryboardShotAccordion({
     setNoteIsError(isError);
   }, []);
   const [picker, setPicker] = useState<PickerTarget | null>(null);
+  const [editingAsset, setEditingAsset] = useState<PickerAsset | null>(null);
   const [matchingAssets, setMatchingAssets] = useState(false);
   const [videoBusy, setVideoBusy] = useState(false);
   const [videoOutputParams, setVideoOutputParams] =
@@ -201,13 +216,28 @@ export function StoryboardShotAccordion({
     }>
   >([]);
   const [sceneDialogOpen, setSceneDialogOpen] = useState(false);
-  const [generationSnap, setGenerationSnap] =
-    useState<ShotGenerationSnapshot | null>(null);
+  const [generationSnap, setGenerationSnap] = useState<ShotGenerationSnapshot | null>(() =>
+    previewMode && previewHistoryVideos.length > 0
+      ? {
+          id: previewHistoryVideos[0]!.id,
+          status: "completed",
+          progress: 100,
+          errorMessage: null,
+          completedAt: previewHistoryVideos[0]!.completedAt,
+          localVideoAssetId: null,
+          actualDurationSeconds: previewHistoryVideos[0]!.actualDurationSeconds,
+          actualResolution: previewHistoryVideos[0]!.actualResolution,
+          providerModelId: previewHistoryVideos[0]!.providerModelId,
+          isMock: true,
+          updatedAt: previewHistoryVideos[0]!.completedAt,
+        }
+      : null,
+  );
   const [successSnaps, setSuccessSnaps] = useState<ShotGenerationSnapshot[]>(
     [],
   );
   const [historyVideos, setHistoryVideos] = useState<ShotVideoHistoryItem[]>(
-    [],
+    previewHistoryVideos,
   );
   const videoKeyRef = useRef<string>(safeRandomUUID());
   const sceneSectionRef = useRef<HTMLDivElement | null>(null);
@@ -313,6 +343,24 @@ export function StoryboardShotAccordion({
       setSaving(true);
       setNote("");
       try {
+        if (previewMode) {
+          const { revision: _revision, unlock: _unlock, ...changes } = patch;
+          void _revision;
+          void _unlock;
+          const next = {
+            ...shot,
+            ...changes,
+            revision: shot.revision + 1,
+            manuallyEdited: true,
+          } as StoryboardShot;
+          onPreviewShotChange?.(next);
+          setNote("已保存。");
+          setDraftPrompt(null);
+          if (typeof patch.videoPrompt === "string") {
+            setPromptSaveFailed(false);
+          }
+          return undefined;
+        }
         const updated = await patchStoryboardShot(
           projectId,
           episodeId,
@@ -337,7 +385,15 @@ export function StoryboardShotAccordion({
         setSaving(false);
       }
     },
-    [episodeId, onProductionChange, projectId, setNote, shot.id, shot.revision],
+    [
+      episodeId,
+      onProductionChange,
+      onPreviewShotChange,
+      previewMode,
+      projectId,
+      setNote,
+      shot,
+    ],
   );
 
   const persistShotShape = useCallback(
@@ -348,6 +404,7 @@ export function StoryboardShotAccordion({
         propAssetIds: next.propAssetIds,
         sceneAssetId: next.sceneAssetId,
         assetMediaIds: next.assetMediaIds ?? {},
+        sceneCharacterPlacements: next.sceneCharacterPlacements ?? [],
       });
     },
     [savePatch],
@@ -527,7 +584,7 @@ export function StoryboardShotAccordion({
 
   // 仅展开时拉历史；同 key 不重复请求
   useEffect(() => {
-    if (!expanded) return;
+    if (!expanded || previewMode) return;
     let cancelled = false;
     void (async () => {
       if (cancelled) return;
@@ -536,7 +593,7 @@ export function StoryboardShotAccordion({
     return () => {
       cancelled = true;
     };
-  }, [expanded, refreshVideoHistory]);
+  }, [expanded, previewMode, refreshVideoHistory]);
 
   // Poll parallel pending preview slots (including re-generations while in flight).
   const pendingPollKey = pendingSlots
@@ -902,6 +959,41 @@ export function StoryboardShotAccordion({
     setNote("");
     setVideoDialogOpen(false);
     try {
+      if (previewMode) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 900);
+        });
+        const completedAt = new Date().toISOString();
+        const generationId = `preview-${shot.id}-${Date.now()}`;
+        const previewVideo = previewHistoryVideos[0] ?? historyVideos[0];
+        if (previewVideo) {
+          setHistoryVideos((prev) => [
+            {
+              ...previewVideo,
+              id: generationId,
+              completedAt,
+              versionLabel: `版本 ${prev.length + 1}`,
+            },
+            ...prev,
+          ]);
+        }
+        setGenerationSnap({
+          id: generationId,
+          status: "completed",
+          progress: 100,
+          errorMessage: null,
+          completedAt,
+          localVideoAssetId: null,
+          actualDurationSeconds: videoOutputParams.durationSeconds,
+          actualResolution: videoOutputParams.resolution,
+          providerModelId: "preview",
+          isMock: true,
+          updatedAt: completedAt,
+        });
+        setPendingSlots((prev) => prev.filter((slot) => slot.id !== clientKey));
+        setNote("本镜头视频已生成，可在历史中查看版本。");
+        return;
+      }
       const result = await generateShotVideo(projectId, episodeId, shot.id, {
         storyboardRevision,
         shotRevision: shot.revision,
@@ -974,6 +1066,8 @@ export function StoryboardShotAccordion({
   }, [
     episodeId,
     onProductionChange,
+    previewHistoryVideos,
+    previewMode,
     projectId,
     setNote,
     shot,
@@ -985,6 +1079,7 @@ export function StoryboardShotAccordion({
     videoOutputParams.resolution,
     videoOutputParams.modelChoice,
     videoOutputParams.stylePreset,
+    historyVideos,
   ]);
 
   const handleSavePrompt = useCallback(async () => {
@@ -1007,6 +1102,12 @@ export function StoryboardShotAccordion({
         kind: "character" as const,
         name: a.name,
         imageUrl: promptImageUrlById.get(a.id) ?? a.thumbUrl,
+        voiceLabel:
+          a.mediaOptions?.find(
+            (media) => media.mediaId === shot.assetMediaIds?.[a.id],
+          )?.voiceLabel ??
+          a.voiceLabel ??
+          null,
       })),
       ...sceneAssets.map((a) => ({
         id: a.id,
@@ -1054,6 +1155,7 @@ export function StoryboardShotAccordion({
     promptImageUrlById,
     propAssets,
     sceneAssets,
+    shot.assetMediaIds,
   ]);
 
   const handleLockPrompt = useCallback(async () => {
@@ -1344,47 +1446,69 @@ export function StoryboardShotAccordion({
     <article
       className={`sbw-shot-card${expanded ? " is-expanded" : ""}${
         highlightUnresolved ? " is-focus-incomplete" : ""
-      }`}
+      }${workspaceMode ? " is-workspace" : ""}`}
       ref={cardRef}
       data-shot-id={shot.id}
     >
-      <button type="button" className="sbw-shot-card__summary" onClick={onToggle}>
-        <div className="sbw-shot-card__title-row">
-          <strong>{shotLabel}</strong>
-          <span>
-            {shot.durationSeconds.toFixed(1)} 秒 · {shot.shotSize} ·{" "}
-            {shot.cameraMovement}
-          </span>
-          <span className="sbw-badge">{SHOT_STATUS_LABEL[status]}</span>
-          <span className="sbw-shot-card__chevron">
-            {expanded ? "收起" : "展开"}
-          </span>
-        </div>
-      </button>
+      {!workspaceMode ? (
+        <button type="button" className="sbw-shot-card__summary" onClick={onToggle}>
+          <div className="sbw-shot-card__title-row">
+            <strong>{shotLabel}</strong>
+            <span>
+              {shot.durationSeconds.toFixed(1)} 秒 · {shot.shotSize} ·{" "}
+              {shot.cameraMovement}
+            </span>
+            <span className="sbw-badge">{SHOT_STATUS_LABEL[status]}</span>
+            <span className="sbw-shot-card__chevron">
+              {expanded ? "收起" : "展开"}
+            </span>
+          </div>
+        </button>
+      ) : null}
 
       {expanded ? (
-        <div className="sbw-shot-card__body">
-          <ShotVideoPreview
-            status={uiVideoStatus}
-            progress={resolvedVideo.generation?.progress ?? null}
-            errorMessage={resolvedVideo.generation?.errorMessage ?? null}
-            generation={
-              resolvedVideo.playbackGeneration ?? resolvedVideo.generation
-            }
-            contentStale={resolvedVideo.contentStale}
-            projectId={projectId}
-            historyVideos={historyVideos}
-            successGenerations={successSnaps}
-            pendingSlots={pendingSlots.map((slot) => ({
-              id: slot.id,
-              status: slot.status,
-              progress: slot.progress,
-              errorMessage: slot.errorMessage,
-            }))}
-          />
+        <div
+          className={`sbw-shot-card__body${
+            workspaceMode ? " sbw-shot-workspace" : ""
+          }`}
+        >
+          {workspaceMode ? (
+            <div className="sbw-shot-workspace__bar">
+              <div>
+                <strong>{shotLabel}</strong>
+                <span>
+                  {shot.durationSeconds.toFixed(1)} 秒 · {shot.shotSize} ·{" "}
+                  {shot.cameraMovement}
+                </span>
+              </div>
+              <span className="sbw-badge">{SHOT_STATUS_LABEL[status]}</span>
+            </div>
+          ) : null}
 
-          <section className="sbw-shot-section">
-            <h4>视频提示词</h4>
+          <div className={workspaceMode ? "sbw-shot-workspace__video" : undefined}>
+            <ShotVideoPreview
+              workspaceMode={workspaceMode}
+              status={uiVideoStatus}
+              progress={resolvedVideo.generation?.progress ?? null}
+              errorMessage={resolvedVideo.generation?.errorMessage ?? null}
+              generation={
+                resolvedVideo.playbackGeneration ?? resolvedVideo.generation
+              }
+              contentStale={resolvedVideo.contentStale}
+              projectId={projectId}
+              historyVideos={historyVideos}
+              successGenerations={successSnaps}
+              pendingSlots={pendingSlots.map((slot) => ({
+                id: slot.id,
+                status: slot.status,
+                progress: slot.progress,
+                errorMessage: slot.errorMessage,
+              }))}
+            />
+          </div>
+
+          <section className="sbw-shot-section sbw-shot-workspace__prompt">
+            <h4>分镜提示词</h4>
             <ShotPromptEditor
               value={prompt}
               disabled={locked || saving}
@@ -1396,13 +1520,17 @@ export function StoryboardShotAccordion({
               <div className="sbw-actions__left">
                 <button
                   type="button"
-                  className="sbw-btn sbw-btn-primary"
+                  className={`sbw-btn${
+                    !saving && !locked && prompt !== savedPrompt
+                      ? " sbw-btn-primary"
+                      : " sbw-btn-muted"
+                  }`}
                   disabled={
                     saving || locked || prompt === savedPrompt
                   }
                   onClick={() => void handleSavePrompt()}
                 >
-                  保存
+                  {saving ? "保存中…" : "保存更改"}
                 </button>
                 <button
                   type="button"
@@ -1495,9 +1623,9 @@ export function StoryboardShotAccordion({
             ) : null}
           </section>
 
-          <section className="sbw-shot-section">
+          <section className="sbw-shot-section sbw-shot-workspace__assets">
             <div className="sbw-shot-section__head">
-              <h4>镜头素材</h4>
+              <h4>当前分镜素材</h4>
               <button
                 type="button"
                 className="sbw-btn"
@@ -1525,6 +1653,7 @@ export function StoryboardShotAccordion({
               disabled={saving || locked || matchingAssets}
               onAdd={() => setPicker({ kind: "character" })}
               onSelectMedia={handleSelectAssetMedia}
+              onEditAsset={(asset) => setEditingAsset(asset)}
               onRemove={(id) => {
                 const nextIds = shot.characterAssetIds.filter((x) => x !== id);
                 const assetMediaIds = { ...(shot.assetMediaIds ?? {}) };
@@ -1536,7 +1665,13 @@ export function StoryboardShotAccordion({
                     Object.keys(assetMediaIds).length > 0
                       ? assetMediaIds
                       : undefined,
+                  sceneCharacterPlacements: (
+                    shot.sceneCharacterPlacements ?? []
+                  ).filter((p) => p.characterAssetId !== id),
                 };
+                if ((next.sceneCharacterPlacements?.length ?? 0) === 0) {
+                  next = { ...next, sceneCharacterPlacements: undefined };
+                }
                 for (const req of characterReqs) {
                   if (req.selectedAssetId === id) {
                     next = unlinkRequirementAsset(next, req.requirementId);
@@ -1560,6 +1695,7 @@ export function StoryboardShotAccordion({
               disabled={saving || locked || matchingAssets}
               onAdd={() => setPicker({ kind: "prop" })}
               onSelectMedia={handleSelectAssetMedia}
+              onEditAsset={(asset) => setEditingAsset(asset)}
               onRemove={(id) => {
                 const nextIds = shot.propAssetIds.filter((x) => x !== id);
                 const assetMediaIds = { ...(shot.assetMediaIds ?? {}) };
@@ -1601,6 +1737,7 @@ export function StoryboardShotAccordion({
                 disabled={saving || locked || matchingAssets}
                 onAdd={() => setPicker({ kind: "scene" })}
                 onSelectMedia={handleSelectAssetMedia}
+                onEditAsset={(asset) => setEditingAsset(asset)}
                 onRemove={() => {
                   const assetMediaIds = { ...(shot.assetMediaIds ?? {}) };
                   if (shot.sceneAssetId) delete assetMediaIds[shot.sceneAssetId];
@@ -1608,6 +1745,7 @@ export function StoryboardShotAccordion({
                     ...shot,
                     sceneAssetId: null,
                     sceneAssetIds: [],
+                    sceneCharacterPlacements: undefined,
                     assetMediaIds:
                       Object.keys(assetMediaIds).length > 0
                         ? assetMediaIds
@@ -1631,7 +1769,7 @@ export function StoryboardShotAccordion({
 
           {note ? (
             <p
-              className={`sbw-note${noteIsError ? " is-error" : ""}`}
+              className={`sbw-note sbw-shot-workspace__note${noteIsError ? " is-error" : ""}`}
               data-testid={noteIsError ? "shot-video-error-note" : undefined}
             >
               {note}
@@ -1691,6 +1829,53 @@ export function StoryboardShotAccordion({
         }}
         onConfirm={() => void handleShotGenerate()}
       />
+
+      {editingAsset ? (
+        <StoryboardAssetImageEditor
+          key={`${editingAsset.id}:${
+            shot.assetMediaIds?.[editingAsset.id] ??
+            editingAsset.mediaOptions?.find((media) => media.isPrimary)
+              ?.mediaId ??
+            editingAsset.mediaOptions?.[0]?.mediaId ??
+            "none"
+          }`}
+          open
+          projectId={projectId}
+          asset={editingAsset}
+          initialMediaId={
+            shot.assetMediaIds?.[editingAsset.id] ??
+            editingAsset.mediaOptions?.find((media) => media.isPrimary)
+              ?.mediaId ??
+            editingAsset.mediaOptions?.[0]?.mediaId ??
+            null
+          }
+          shotCharacterAssets={characterAssets}
+          sceneCharacterPlacements={shot.sceneCharacterPlacements ?? []}
+          shotAssetMediaIds={shot.assetMediaIds ?? {}}
+          onClose={() => setEditingAsset(null)}
+          onAssetsChanged={async () => {
+            await onAssetsRefresh?.();
+          }}
+          onMediaSaved={async (mediaId) => {
+            const next: StoryboardShot = {
+              ...shot,
+              assetMediaIds: {
+                ...(shot.assetMediaIds ?? {}),
+                [editingAsset.id]: mediaId,
+              },
+            };
+            await persistShotShape(next);
+          }}
+          onSavePlacements={async (placements) => {
+            const next: StoryboardShot = {
+              ...shot,
+              sceneCharacterPlacements:
+                placements.length > 0 ? placements : undefined,
+            };
+            await persistShotShape(next);
+          }}
+        />
+      ) : null}
     </article>
   );
 }

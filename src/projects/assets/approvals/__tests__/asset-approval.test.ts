@@ -253,6 +253,7 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
       creationSource: "story",
       projectMode: "full-stack",
       visualStyle: "live_action_cinematic",
+      approvalEnabled: true,
       passwordEnabled: false,
     });
     await addCardEngineer({
@@ -793,6 +794,7 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
       creationSource: "story",
       projectMode: "full-stack",
       visualStyle: "live_action_cinematic",
+      approvalEnabled: true,
       passwordEnabled: false,
     });
     vi.mocked(requireSessionUser).mockResolvedValue({

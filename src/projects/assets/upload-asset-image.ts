@@ -43,11 +43,16 @@ export async function uploadProjectAssetImage(
   projectId: string,
   assetId: string,
   file: File,
+  options?: { targetMediaId?: string | null },
 ): Promise<UploadProjectAssetImageResult> {
   const form = new FormData();
   form.append("file", file);
+  const targetMediaId = options?.targetMediaId?.trim();
+  const query = targetMediaId
+    ? `?targetMediaId=${encodeURIComponent(targetMediaId)}`
+    : "";
   const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/assets-draft/images/${encodeURIComponent(assetId)}`,
+    `/api/projects/${encodeURIComponent(projectId)}/assets-draft/images/${encodeURIComponent(assetId)}${query}`,
     { method: "PUT", body: form },
   );
   const payload = (await res.json().catch(() => ({}))) as {

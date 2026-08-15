@@ -19,8 +19,8 @@ type Props = {
   showDesign?: boolean;
 };
 
+/** 资产设计已并入资产库，保留旧 module 类型只为兼容历史调用。 */
 const MODULES: Array<{ id: AssetModuleId; label: string; segment: string }> = [
-  { id: "design", label: "资产设计", segment: "design" },
   { id: "library", label: "资产库", segment: "library" },
 ];
 
@@ -28,15 +28,12 @@ export function AssetModuleNav({
   projectId,
   active,
   context = "management",
-  showDesign = true,
 }: Props) {
   const base =
     context === "workspace"
       ? workspaceProjectAssetsPath(projectId)
       : `${projectManagementPath(projectId)}/assets`;
-  const modules = showDesign
-    ? MODULES
-    : MODULES.filter((mod) => mod.id === "library");
+  const modules = MODULES;
 
   return (
     <nav className="amn" aria-label="项目资产模块">

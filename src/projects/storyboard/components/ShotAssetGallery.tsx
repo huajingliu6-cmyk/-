@@ -12,6 +12,7 @@ type Props = {
   onAdd: () => void;
   onRemove: (assetId: string) => void;
   onSelectMedia?: (assetId: string, mediaId: string) => void;
+  onEditAsset?: (asset: PickerAsset) => void;
   children?: React.ReactNode;
 };
 
@@ -31,6 +32,7 @@ export function ShotAssetGallery({
   onAdd,
   onRemove,
   onSelectMedia,
+  onEditAsset,
   children,
 }: Props) {
   return (
@@ -63,6 +65,7 @@ export function ShotAssetGallery({
                   ? (mediaId) => onSelectMedia(asset.id, mediaId)
                   : undefined
               }
+              onEditAsset={onEditAsset}
             />
           ))}
         </div>

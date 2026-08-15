@@ -9,6 +9,8 @@ export type MountableAsset = {
   name: string;
   /** 有参考图时才写成图片标记；否则退回「图N（名）」纯文本 */
   imageUrl?: string | null;
+  /** 仅人物：紧跟人物挂载项显示的对应音色。 */
+  voiceLabel?: string | null;
 };
 
 const KIND_LABEL: Record<MountableAsset["kind"], string> = {
@@ -20,7 +22,7 @@ const KIND_LABEL: Record<MountableAsset["kind"], string> = {
 const MOUNT_LINE_RE = /^挂载[：:].*$/m;
 /** `@人物-名` / `@人物【图】-名` 挂载标签 */
 const AT_MOUNT_TAG_RE =
-  /@(?:人物|场景|道具|音频)(?:【图:[^】\n]+】)?-[^\s｜|，,。；;：:\n]+/g;
+  /@(?:人物|场景|道具|音频|音色)(?:【图:[^】\n]+】)?-[^\s｜|，,。；;：:\n]+/g;
 /** 图片替换标记 */
 export const IMAGE_MOUNT_TOKEN_RE = /【图:([^:】\n]+):([^】\n]+)】/g;
 
@@ -56,10 +58,14 @@ export function mountEntryFor(asset: MountableAsset): string | null {
   if (!name) return null;
   const kind = KIND_LABEL[asset.kind];
   const imageToken = imageTokenFor(asset);
+  const voiceEntry =
+    asset.kind === "character" && asset.voiceLabel?.trim()
+      ? `｜@音色-${asset.voiceLabel.trim()}`
+      : "";
   if (imageToken) {
-    return `@${kind}${imageToken}-${name}`;
+    return `@${kind}${imageToken}-${name}${voiceEntry}`;
   }
-  return `@${kind}-${name}`;
+  return `@${kind}-${name}${voiceEntry}`;
 }
 
 /** 挂载行顺序：人物 → 场景 → 道具（任务规则） */

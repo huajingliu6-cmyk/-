@@ -86,6 +86,7 @@ export async function confirmEpisodeAssetDesign(input: {
   userId: string;
   fingerprint: string;
   itemId?: string;
+  requireGeneratedMedia?: boolean;
 }): Promise<ConfirmEpisodeAssetDesignResult> {
   if (isRemoteDataOnly()) {
     return confirmEpisodeAssetDesignRemote(input);

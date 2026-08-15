@@ -64,11 +64,15 @@ export async function resolveProjectAccess(
   const project = await getProjectRecord(projectId);
   if (!project) return null;
   const role = await resolveEffectiveProjectRole(user.id, projectId, user);
+  const features =
+    role !== "NONE" && !project.approvalEnabled
+      ? workspaceFeaturesForRole("PROJECT_OWNER")
+      : workspaceFeaturesForRole(role);
   return {
     role,
     projectId,
     ownerId: project.ownerId,
-    features: workspaceFeaturesForRole(role),
+    features,
   };
 }
 

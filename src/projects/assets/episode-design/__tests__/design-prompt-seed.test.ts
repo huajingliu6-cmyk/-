@@ -196,11 +196,12 @@ describe("DesignAssetModal formal prompt UI", () => {
     expect(modal).not.toContain("【服装】");
     expect(modal).toContain("resolveFormalDesignPromptText");
     expect(modal).toContain("尚未生成");
-    expect(modal).toContain("生成提示词");
-    expect(modal).toContain("重新生成提示词");
     expect(modal).toContain("designPromptAutoGenKey");
-    expect(modal).toContain('void regeneratePromptRef.current("")');
-    expect(modal).toContain("handlePromptGenerateClick");
+    expect(modal).toContain("DEFAULT_DESIGN_PROMPT_MODEL_ID");
+    expect(modal).toContain("autoGenerateFormalPrompt");
+    expect(modal).not.toContain("重新生成提示词");
+    expect(modal).not.toContain("handlePromptGenerateClick");
+    expect(modal).not.toContain("design-regenerate-prompt");
     expect(modal).not.toContain("initialPromptForItem");
     expect(modal).not.toContain("didSeedExtract");
     expect(modal).not.toContain("buildInitialPromptHistory");
@@ -209,17 +210,22 @@ describe("DesignAssetModal formal prompt UI", () => {
   it("auto-generates once without requiring userRequirement dialog first", () => {
     expect(modal).toContain("formalPromptMissing");
     expect(modal).toContain("autoPromptKeyRef");
-    expect(modal).toMatch(/if \(formalPromptMissing\) \{\s*void regeneratePrompt\(""\)/);
+    expect(modal).toContain("void autoGenerateFormalPromptRef.current()");
     expect(workspace).toContain("kickOffFormalDesignPrompts");
     expect(workspace).toContain("autoGenerateMissingFormalDesignPrompts");
     expect(workspace).toContain("DEFAULT_DESIGN_PROMPT_MODEL_ID");
   });
 
-  it("keeps regenerate requirement dialog only for re-generate path", () => {
-    expect(modal).toContain("输入素材要求");
-    expect(modal).toContain("userRequirement");
-    expect(modal).toContain("design-regenerate-requirement-input");
-    expect(modal).toContain("生成提示词");
+  it("removes unreachable manual regenerate dialog and prompt model select", () => {
+    expect(modal).not.toContain("输入素材要求");
+    expect(modal).not.toContain("design-regenerate-requirement-input");
+    expect(modal).not.toContain('data-testid="design-prompt-model"');
+    expect(modal).not.toContain("DESIGN_PROMPT_MODEL_OPTIONS");
+    expect(modal).not.toContain("ead-requirement-dialog");
+    expect(modal).toContain('data-testid="design-prompt-copy-row"');
+    expect(modal).toContain('data-testid="design-copy"');
+    expect(modal).toContain('userRequirement: ""');
+    expect(modal).toContain("promptModelId: DEFAULT_DESIGN_PROMPT_MODEL_ID");
   });
 });
 

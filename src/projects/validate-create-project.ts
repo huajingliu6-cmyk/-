@@ -127,6 +127,7 @@ export function parseCreateProjectBody(
   }
 
   const passwordEnabled = Boolean(raw.passwordEnabled);
+  const approvalEnabled = raw.approvalEnabled === true;
   const projectPassword =
     typeof raw.projectPassword === "string" ? raw.projectPassword : "";
   const highlights =
@@ -185,6 +186,7 @@ export function parseCreateProjectBody(
       projectMode,
       highlights: highlights.trim(),
       visualStyle,
+      approvalEnabled,
       passwordEnabled,
       projectPassword: passwordEnabled ? projectPassword : null,
     },

@@ -67,6 +67,6 @@ export function projectEntryPath(
   stage: ProjectEntryStage,
 ): string {
   return `/app/projects/${encodeURIComponent(projectId)}/${
-    stage === "assets" ? "assets/design" : stage
+    stage === "assets" ? "assets/library" : stage
   }`;
 }

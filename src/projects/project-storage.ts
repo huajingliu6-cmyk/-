@@ -55,6 +55,7 @@ function toPublic(record: ProjectRecord): ProjectPublic {
     status: record.status,
     highlights: record.highlights,
     visualStyle: record.visualStyle,
+    approvalEnabled: record.approvalEnabled,
     passwordEnabled: record.passwordEnabled,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -83,6 +84,7 @@ function normalizeRecord(raw: unknown): ProjectRecord | null {
     status: "draft",
     highlights: typeof r.highlights === "string" ? r.highlights : "",
     visualStyle: parseProjectVisualStyleId(r.visualStyle),
+    approvalEnabled: r.approvalEnabled === true,
     passwordEnabled: Boolean(r.passwordEnabled),
     passwordHash:
       typeof r.passwordHash === "string" ? r.passwordHash : null,
@@ -211,6 +213,7 @@ export async function createProjectRecord(
     status: "draft",
     highlights: (input.highlights ?? "").trim(),
     visualStyle: input.visualStyle,
+    approvalEnabled: input.approvalEnabled === true,
     passwordEnabled: input.passwordEnabled,
     passwordHash,
     passwordSalt,

@@ -38,6 +38,7 @@ export async function confirmEpisodeAssetDesignRemote(input: {
   userId: string;
   fingerprint: string;
   itemId?: string;
+  requireGeneratedMedia?: boolean;
 }): Promise<ConfirmEpisodeAssetDesignResult> {
   for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
     const [designDocument, assetDocument] = await Promise.all([
