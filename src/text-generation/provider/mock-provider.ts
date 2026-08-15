@@ -85,8 +85,55 @@ export class MockTextProvider implements TextGenerationProvider {
     let body: string;
     if (redesignMatch) {
       const name = redesignMatch[1]!.trim() || "角色";
-      body = `${name}，真人电影级角色剧照，真实皮肤与光影，16:9，精细服装，电影灯光，高细节`;
-    } else     if (isScriptSplit) {
+      body =
+        `${name}，横构图电影剧照，虚构角色立于写实场景中，真实皮肤质感与自然光影，` +
+        "精细服装材质，电影灯光与浅景深，高细节，16:9画幅，可直接用于素材生成的完整连贯中文提示词正文。";
+    } else if (
+      /"output_contract"\s*:\s*"ndjson"|output_contract.:.ndjson/.test(
+        systemJoined + userJoined,
+      )
+    ) {
+      let assetIds: string[] = [];
+      try {
+        const jsonMatch = /\{[\s\S]*"assets"\s*:\s*\[[\s\S]*\][\s\S]*\}/.exec(
+          lastUser,
+        );
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]) as {
+            assets?: Array<{ asset_id?: string }>;
+          };
+          assetIds = (parsed.assets ?? [])
+            .map((a) => a.asset_id?.trim() ?? "")
+            .filter(Boolean);
+        }
+      } catch {
+        assetIds = [];
+      }
+      if (assetIds.length === 0) {
+        assetIds = [...lastUser.matchAll(/"asset_id"\s*:\s*"([^"]+)"/g)].map(
+          (m) => m[1]!,
+        );
+      }
+      const lines = assetIds.map((assetId) =>
+        JSON.stringify({
+          type: "asset",
+          asset_id: assetId,
+          prompt:
+            `横构图电影剧照，虚构资产${assetId}立于写实场景中，真实材质与自然光影，` +
+            "精细细节，电影灯光与浅景深，16:9画幅，可直接用于素材生成的完整连贯中文提示词正文。",
+          status: "completed",
+        }),
+      );
+      lines.push(
+        JSON.stringify({
+          type: "batch_end",
+          completed_asset_ids: assetIds,
+          failed_asset_ids: [],
+          next_asset_id: "",
+        }),
+      );
+      body = lines.join("\n");
+    } else if (isScriptSplit) {
       const blockIds = [
         ...lastUser.matchAll(/\[?(B\d{6})\]?/g),
       ].map((m) => m[1]!);
@@ -206,13 +253,21 @@ export class MockTextProvider implements TextGenerationProvider {
       await new Promise((r) => setTimeout(r, 16));
       yield { type: "delta", text: body.slice(i, i + chunkSize) };
     }
+    const inputTokens = this.estimateInputTokens(
+      input.systemPrompt + input.userPrompt,
+    );
+    const outputTokens = Math.ceil(body.length / 2);
     yield {
       type: "usage",
-      inputTokens: this.estimateInputTokens(
-        input.systemPrompt + input.userPrompt,
-      ),
-      outputTokens: Math.ceil(body.length / 2),
+      inputTokens,
+      outputTokens,
+      finishReason: "stop",
     };
-    yield { type: "done" };
+    yield {
+      type: "done",
+      inputTokens,
+      outputTokens,
+      finishReason: "stop",
+    };
   }
 }

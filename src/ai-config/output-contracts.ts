@@ -49,8 +49,12 @@ export function buildImmutableOutputContract(
       return [
         "[IMMUTABLE_OUTPUT_CONTRACT]",
         `version: ${OUTPUT_CONTRACT_VERSION}`,
-        "Return only one continuous Chinese design-prompt paragraph.",
-        "Do not output JSON, Markdown, field titles like 【角色描述】【外貌】【服装】, lists, or analysis.",
+        "Single-asset mode (default): return only one continuous Chinese design-prompt paragraph.",
+        "Batch mode: when user JSON includes \"output_contract\":\"ndjson\", return NDJSON only — one JSON object per line.",
+        "Batch NDJSON asset line: {\"type\":\"asset\",\"asset_id\":\"...\",\"prompt\":\"完整中文生图提示词\",\"status\":\"completed\"}",
+        "Batch NDJSON end line: {\"type\":\"batch_end\",\"completed_asset_ids\":[...],\"failed_asset_ids\":[],\"next_asset_id\":\"\"}",
+        "No Markdown fences, headings, explanations, or blank lines between NDJSON rows.",
+        "Do not output field titles like 【角色描述】【外貌】【服装】, lists, or analysis.",
         "Do not echo extract seed or English concept art fallbacks.",
       ].join("\n");
 

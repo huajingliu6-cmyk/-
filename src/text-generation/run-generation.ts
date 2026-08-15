@@ -28,6 +28,8 @@ import {
   runScriptAssetMapReduce,
   serializeMapReduceState,
 } from "@/projects/assets/episode-design/script-asset-map-reduce";
+import { logAssetExtractRequest } from "@/projects/assets/episode-design/design-prompt-diagnostics";
+import { outputKindToCapabilityId } from "@/ai-config/capabilities";
 import {
   BRIEF_MAX_CHARS,
   SCRIPT_ASSET_DESIGN_BRIEF_MAX_CHARS,
@@ -52,7 +54,6 @@ import {
   estimateOutputTokenBudget,
   getTextModelByKey,
 } from "@/text-generation/model-registry";
-import { outputKindToCapabilityId } from "@/ai-config/capabilities";
 import { resolveAiExecutionPlan } from "@/ai-config/execution-plan";
 import { AiConfigError } from "@/ai-config/errors";
 import { assembleUntrustedUserData } from "@/ai-config/prompt-assembly";
@@ -759,6 +760,39 @@ export async function* runTextGenerationStream(
 
   const generationId = `tg_${randomUUID().replace(/-/g, "").slice(0, 14)}`;
   const now = new Date().toISOString();
+  const isAssetExtractDiag =
+    input.outputKind === "episode_asset_design" ||
+    input.outputKind === "script_asset_design";
+  const extractDiagEpisodeId =
+    input.episodeId?.trim() ||
+    (input.outputKind === "script_asset_design" ? "script_full" : "");
+  const extractDiagChars = countVisibleChars(brief);
+  let extractDiagLogged = false;
+  const emitAssetExtractDiag = (
+    status: "completed" | "failed",
+    errorCode: string | null = null,
+  ) => {
+    if (!isAssetExtractDiag || extractDiagLogged) return;
+    extractDiagLogged = true;
+    logAssetExtractRequest({
+      projectId: input.projectId,
+      episodeId: extractDiagEpisodeId,
+      generationId,
+      capabilityId:
+        executionMetadata?.capabilityId ??
+        outputKindToCapabilityId(input.outputKind) ??
+        "asset.episode-design.generate",
+      outputKind: input.outputKind,
+      messageRoles: "system,user",
+      taskRuleSource: executionMetadata?.taskRuleSource ?? null,
+      taskRuleHash: executionMetadata?.taskRuleHash ?? null,
+      episodeChars: extractDiagChars,
+      startedAt: now,
+      finishedAt: new Date().toISOString(),
+      status,
+      errorCode,
+    });
+  };
   let job: TextGenerationJob = {
     generationId,
     projectId: input.projectId,
@@ -912,6 +946,7 @@ export async function* runTextGenerationStream(
           projectId: input.projectId,
           reason: "text-generation-timeout",
         });
+        emitAssetExtractDiag("failed", "MODEL_TIMEOUT");
         yield sseEncode({
           event: "error",
           data: {
@@ -940,6 +975,7 @@ export async function* runTextGenerationStream(
           projectId: input.projectId,
           reason: "text-generation-fail",
         });
+        emitAssetExtractDiag("failed", reduceResult.errorCode ?? "INTERNAL");
         yield sseEncode({
           event: "error",
           data: {
@@ -1165,6 +1201,8 @@ export async function* runTextGenerationStream(
       reason: "text-generation-settle",
     });
 
+    emitAssetExtractDiag("completed");
+
     yield sseEncode({
       event: "usage",
       data: {
@@ -1188,6 +1226,7 @@ export async function* runTextGenerationStream(
           projectId: input.projectId,
           reason: "text-generation-timeout",
         });
+        emitAssetExtractDiag("failed", "MODEL_TIMEOUT");
         yield sseEncode({
           event: "error",
           data: {
@@ -1219,6 +1258,7 @@ export async function* runTextGenerationStream(
         projectId: input.projectId,
         reason: "text-generation-cancel",
       });
+      emitAssetExtractDiag("failed", "CANCELLED");
       yield sseEncode({
         event: "error",
         data: { code: "CANCELLED", message: "已停止生成" },
@@ -1241,6 +1281,7 @@ export async function* runTextGenerationStream(
       projectId: input.projectId,
       reason: "text-generation-error",
     });
+    emitAssetExtractDiag("failed", "INTERNAL");
     yield sseEncode({
       event: "error",
       data: { code: "INTERNAL", message: "生成失败" },

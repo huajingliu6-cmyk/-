@@ -84,4 +84,69 @@ describe("openai-compatible image endpoint", () => {
     expect(result.images[3]?.buffer.toString()).toBe("img4");
     vi.unstubAllGlobals();
   });
+
+  it.each([
+    ["4K", "high", "4k"],
+    ["2K", "medium", "2k"],
+  ] as const)(
+    "uses codesonline's lowercase upscale field for %s output",
+    async (resolution, quality, expectedUpscale) => {
+      const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        expect(body).toMatchObject({
+          model: "gpt-image-2",
+          n: 1,
+          size: "16:9",
+          quality,
+          upscale: expectedUpscale,
+        });
+        expect(body).not.toHaveProperty("resolution");
+        expect(body).not.toHaveProperty("output_size");
+        expect(body).not.toHaveProperty("width");
+        expect(body).not.toHaveProperty("height");
+        expect(body).not.toHaveProperty("characterName");
+        return Response.json({
+          data: [{ b64_json: Buffer.from("img").toString("base64") }],
+        });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await generateOpenAiCompatibleImages({
+        endpoint: "https://image.codesonline.dev/v1",
+        apiKey: "k",
+        model: "gpt-image-2",
+        prompt: "test",
+        aspectRatio: "16:9",
+        resolution,
+        quality,
+        extra: { characterName: "metadata is not an API parameter" },
+      });
+
+      vi.unstubAllGlobals();
+    },
+  );
+
+  it("omits upscale for codesonline 1K output", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body.quality).toBe("low");
+      expect(body).not.toHaveProperty("upscale");
+      return Response.json({
+        data: [{ b64_json: Buffer.from("img").toString("base64") }],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await generateOpenAiCompatibleImages({
+      endpoint: "https://image.codesonline.dev/v1",
+      apiKey: "k",
+      model: "gpt-image-2",
+      prompt: "test",
+      aspectRatio: "16:9",
+      resolution: "1K",
+      quality: "low",
+    });
+
+    vi.unstubAllGlobals();
+  });
 });

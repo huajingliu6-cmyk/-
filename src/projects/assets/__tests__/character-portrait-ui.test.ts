@@ -10,6 +10,7 @@ function readSrc(relativePath: string): string {
 
 describe("character asset portrait UI contracts", () => {
   const detail = readSrc("src/projects/assets/CharacterDetail.tsx");
+  const manager = readSrc("src/projects/assets/CharacterManager.tsx");
   const list = readSrc("src/projects/assets/CharacterList.tsx");
   const upload = readSrc("src/projects/assets/AssetImageUpload.tsx");
   const css = readSrc("src/projects/assets/asset-workspace.css");
@@ -51,6 +52,17 @@ describe("character asset portrait UI contracts", () => {
     expect(css).toContain("asset-library-preview--with-content");
     expect(css).toContain("aspect-ratio: 16 / 9");
     expect(css).toContain("padding-top: 0");
+  });
+
+  it("uses the asset id for manually uploaded image bytes", () => {
+    expect(detail).toContain("uploadedMediaId");
+    expect(detail).toContain("resolveAssetImageStorageKey({");
+    expect(detail).not.toContain(
+      "character.imageFileName ? [character.imageFileName] : []",
+    );
+    expect(manager).toContain("const uploaded = await persistThenUploadAssetImage");
+    expect(manager).toContain("imageFileName: uploaded.imageFileName");
+    expect(manager).toContain("await onPersist(uploadedNext)");
   });
 
   it("design character cards restore side-by-side layout without portrait class", () => {

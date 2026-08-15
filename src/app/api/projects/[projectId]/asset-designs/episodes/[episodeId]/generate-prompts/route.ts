@@ -4,16 +4,16 @@ import {
   getEpisodeAssetDesignDetail,
   patchEpisodeItemDesignPrompt,
 } from "@/projects/assets/episode-design/episode-design-api";
-import { runGenerateDesignPromptPost } from "@/projects/assets/episode-design/run-generate-design-prompt-route";
+import { runGenerateDesignPromptBatchPost } from "@/projects/assets/episode-design/run-generate-design-prompt-batch-route";
 import { syncManagementToWorkspace } from "@/projects/workspace-sync/sync-management-to-workspace";
 import { guardEpisodeAssetDesignRemoteData } from "@/projects/assets/episode-design/route-remote-guard";
 
 type RouteContext = {
-  params: Promise<{ projectId: string; episodeId: string; itemId: string }>;
+  params: Promise<{ projectId: string; episodeId: string }>;
 };
 
 async function post(request: Request, context: RouteContext) {
-  const { projectId, episodeId, itemId } = await context.params;
+  const { projectId, episodeId } = await context.params;
   const gated = await requireProjectManagementProjectAccess(projectId);
   if (!gated.ok) return gated.response;
 
@@ -22,14 +22,13 @@ async function post(request: Request, context: RouteContext) {
     return Response.json({ error: "项目不存在" }, { status: 404 });
   }
 
-  return runGenerateDesignPromptPost({
+  return runGenerateDesignPromptBatchPost({
     request,
     projectId,
     episodeId,
-    itemId,
     userId: gated.user.id,
     loadDetail: () => getEpisodeAssetDesignDetail(projectId, episodeId),
-    patchItem: async ({ designPrompt, designConversation }) => {
+    patchItem: async ({ itemId, designPrompt }) => {
       const detail = await getEpisodeAssetDesignDetail(projectId, episodeId);
       if (!detail.ok) return detail;
       return patchEpisodeItemDesignPrompt({
@@ -38,7 +37,6 @@ async function post(request: Request, context: RouteContext) {
         itemId,
         fingerprint: detail.currentFingerprint,
         designPrompt,
-        designConversation,
       });
     },
     afterSuccess: async () => {

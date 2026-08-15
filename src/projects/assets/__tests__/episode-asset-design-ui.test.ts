@@ -35,20 +35,24 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain("取消生成");
   });
 
-  it("does not register extract jobs on the global generation busy lock", () => {
-    const busyCall = workspace.match(
-      /useGenerationBusy\(\s*([\s\S]*?)\s*,\s*extractionBusy/,
-    );
+  it("only keeps image generation on the global navigation lock", () => {
     expect(workspace).toContain("useGenerationBusy(");
-    expect(workspace).toContain("extractionBusy || generatingAssetIds.size > 0");
-    expect(workspace).toContain("asset-extract-${projectId}");
+    expect(workspace).toContain("generatingAssetIds.size > 0");
+    expect(workspace).not.toContain("asset-extract-${projectId}");
+    expect(workspace).not.toContain("asset-design-prompt-${projectId}");
     expect(workspace).toContain("asset-image-generation-${projectId}");
     expect(workspace).toContain("extractingEpisodeIds");
     expect(workspace).toContain("currentEpisodeExtracting");
     expect(workspace).toContain('designStatus === "generating"');
     expect(workspace).toContain("selectedIdRef");
     expect(workspace).toContain("extractJobsRef");
-    expect(busyCall || workspace.includes("extractionBusy")).toBeTruthy();
+    expect(workspace).toContain("assetPageLocked");
+    expect(workspace).toMatch(
+      /const assetPageLocked\s*=\s*\n?\s*extractionBusy \|\| promptGenerationBusy/,
+    );
+    expect(workspace).not.toMatch(
+      /const assetPageLocked\s*=\s*[\s\S]{0,100}generatingAssetIds\.size > 0/,
+    );
   });
 
   it("shows extract progress and locks navigation while busy", () => {
@@ -187,10 +191,34 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain('data-testid="ead-pending-assets"');
     expect(workspace).toContain('data-testid="ead-open-extracted-episode"');
     expect(workspace).toContain("extractedEpisodes");
-    expect(workspace).toContain('data-testid="ead-full-script-pending"');
-    expect(workspace).toContain("setFullScriptPending");
-    expect(workspace).toContain("ead-full-script-pending__button");
+    expect(workspace).not.toContain('data-testid="ead-full-script-pending"');
+    expect(workspace).not.toContain("setFullScriptPending");
+    expect(workspace).not.toContain("ead-full-script-pending__button");
     expect(workspace).not.toContain("for (let index = 0; index < targets.length");
+  });
+
+  it("shows batch percentage, locks asset controls, and keeps storyboard available", () => {
+    expect(workspace).toContain("promptBatchProgress");
+    expect(workspace).toContain("progress.completed + progress.failed");
+    expect(workspace).toContain("progress.batchSize ?? 5");
+    expect(workspace).toContain('data-testid="ead-prompt-progress"');
+    expect(workspace).toContain('data-testid="ead-page-lock"');
+    expect(workspace).toContain('data-testid="ead-workflow-progress-percent"');
+    expect(workspace).toContain("extractionStreamPercent");
+    expect(workspace).toContain("onDelta: (text) =>");
+    expect(workspace).toContain("共提取");
+    expect(workspace).toContain("正在提取资产");
+    expect(css).toContain("ead-progress-flow");
+    expect(workspace).toContain("* 75");
+    expect(workspace).toContain("inert={assetPageLocked ? true : undefined}");
+    expect(workspace).toContain('data-testid="ead-open-storyboard-while-generating"');
+    expect(workspace).toContain('target="_blank"');
+    expect(workspace).toContain("workspaceProjectStoryboardPath(projectId)");
+    expect(workspace).not.toContain('data-testid="ead-back-full-script-detail"');
+    expect(css).toContain(".ead-prompt-progress");
+    expect(css).toContain(".ead-page-lock");
+    expect(css).toContain(".ead-page-lock__percentage");
+    expect(css).toContain(".ead-page-lock__track");
   });
 
   it("confirm success copy no longer links to library", () => {

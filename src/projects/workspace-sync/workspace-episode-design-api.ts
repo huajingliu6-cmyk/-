@@ -17,6 +17,7 @@ import {
   upsertEpisodeRecord,
 } from "@/projects/assets/episode-design/store";
 import type {
+  AssetDesignPromptState,
   EpisodeAssetDesignItem,
   EpisodeAssetDesignRecord,
   EpisodeAssetDesignStatus,
@@ -24,6 +25,7 @@ import type {
   ProjectEpisodeAssetDesignStore,
 } from "@/projects/assets/episode-design/types";
 import { SCRIPT_ASSET_DESIGN_ID } from "@/projects/assets/episode-design/types";
+import { reconcileStuckDesignPromptItems } from "@/projects/assets/episode-design/design-prompt-diagnostics";
 import {
   getScriptSourceFingerprint,
   loadScriptDraft,
@@ -150,6 +152,33 @@ export async function listWorkspaceEpisodeAssetDesigns(
   return visible.sort((a, b) => a.episodeNumber - b.episodeNumber);
 }
 
+async function persistWorkspaceStuckDesignPrompts(
+  projectId: string,
+  episodeId: string,
+  episodeNumber: number,
+  record: EpisodeAssetDesignRecord,
+): Promise<EpisodeAssetDesignRecord> {
+  const stuck = reconcileStuckDesignPromptItems(record);
+  if (!stuck.changed) return record;
+  const local = await loadWorkspaceLocalEpisodeDesigns(projectId);
+  const { store: withRecord } = getOrCreateEpisodeRecord(
+    local,
+    episodeId,
+    episodeNumber,
+  );
+  const bumped = {
+    ...stuck.record,
+    revision:
+      (getEpisodeDesignRecord(withRecord, episodeId)?.revision ??
+        stuck.record.revision) + 1,
+    updatedAt: new Date().toISOString(),
+  };
+  await saveWorkspaceLocalEpisodeDesigns(
+    upsertEpisodeRecord(withRecord, bumped),
+  );
+  return bumped;
+}
+
 export async function getWorkspaceEpisodeAssetDesignDetail(
   projectId: string,
   episodeId: string,
@@ -216,6 +245,12 @@ export async function getWorkspaceEpisodeAssetDesignDetail(
         },
       });
     }
+    finalRecord = await persistWorkspaceStuckDesignPrompts(
+      projectId,
+      SCRIPT_ASSET_DESIGN_ID,
+      0,
+      finalRecord,
+    );
     return {
       ok: true,
       episode: {
@@ -294,6 +329,13 @@ export async function getWorkspaceEpisodeAssetDesignDetail(
       },
     });
   }
+
+  finalRecord = await persistWorkspaceStuckDesignPrompts(
+    projectId,
+    episode.id,
+    episode.episodeNumber,
+    finalRecord,
+  );
 
   return {
     ok: true,
@@ -495,6 +537,120 @@ export async function saveWorkspaceEpisodeAssetDesignItems(input: {
   };
 }
 
+export async function patchWorkspaceItemDesignPrompt(input: {
+  projectId: string;
+  episodeId: string;
+  itemId: string;
+  fingerprint: string;
+  designPrompt: AssetDesignPromptState;
+  designConversation?: EpisodeDesignConversationMessage[];
+}): Promise<
+  | { ok: true; record: EpisodeAssetDesignRecord }
+  | {
+      ok: false;
+      code:
+        | "EPISODE_NOT_FOUND"
+        | "ITEM_NOT_FOUND"
+        | "REVISION_CONFLICT"
+        | "FINGERPRINT_STALE"
+        | "EPISODE_CONTENT_EMPTY";
+      message: string;
+    }
+> {
+  const maxAttempts = 8;
+  let lastConflict = false;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const detail = await getWorkspaceEpisodeAssetDesignDetail(
+      input.projectId,
+      input.episodeId,
+    );
+    if (!detail.ok) return detail;
+    if (!detail.episode.content.trim()) {
+      return {
+        ok: false,
+        code: "EPISODE_CONTENT_EMPTY",
+        message: "剧集正文为空，无法保存资产设计",
+      };
+    }
+    if (detail.currentFingerprint !== input.fingerprint) {
+      return {
+        ok: false,
+        code: "FINGERPRINT_STALE",
+        message: "剧集正文已变更，请刷新后重试",
+      };
+    }
+    if (!detail.record.items.some((i) => i.id === input.itemId)) {
+      return {
+        ok: false,
+        code: "ITEM_NOT_FOUND",
+        message: "资产项不存在",
+      };
+    }
+    const storeDocument = await loadWorkspaceLocalEpisodeDesignsDocument(
+      input.projectId,
+    );
+    const currentRecord =
+      getEpisodeDesignRecord(storeDocument.value, input.episodeId) ??
+      detail.record;
+    const withRecord = getEpisodeDesignRecord(
+      storeDocument.value,
+      input.episodeId,
+    )
+      ? storeDocument.value
+      : upsertEpisodeRecord(storeDocument.value, currentRecord);
+    const now = new Date().toISOString();
+    const nextItems = currentRecord.items.map((item) => {
+      if (item.id !== input.itemId) return item;
+      const history = mergePromptHistories(
+        item.designPrompt?.history,
+        input.designPrompt.history,
+      );
+      return {
+        ...item,
+        designPrompt: {
+          ...input.designPrompt,
+          ...(history.length > 0 ? { history } : {}),
+        },
+      };
+    });
+    const nextRecord: EpisodeAssetDesignRecord = {
+      ...currentRecord,
+      items: nextItems,
+      contentFingerprint: input.fingerprint,
+      revision: currentRecord.revision + 1,
+      staleUpstream: false,
+      updatedAt: now,
+      ...(input.designConversation
+        ? { designConversation: input.designConversation }
+        : {}),
+    };
+    try {
+      await saveWorkspaceLocalEpisodeDesigns(
+        upsertEpisodeRecord(withRecord, nextRecord),
+        {
+          ...(storeDocument.remoteRevision !== null
+            ? { expectedRemoteRevision: storeDocument.remoteRevision }
+            : {}),
+        },
+      );
+      return { ok: true, record: nextRecord };
+    } catch (error) {
+      if (isRemoteWorkspaceDataConflict(error)) {
+        lastConflict = true;
+        continue;
+      }
+      throw error;
+    }
+  }
+  return {
+    ok: false,
+    code: "REVISION_CONFLICT",
+    message: lastConflict
+      ? "资产设计版本已变更，请刷新后重试"
+      : "资产设计保存冲突，请刷新后重试",
+  };
+}
+
 export async function applyWorkspaceEpisodeAssetDesignGeneration(input: {
   projectId: string;
   episodeId: string;
@@ -544,6 +700,20 @@ export async function applyWorkspaceEpisodeAssetDesignGeneration(input: {
       ok: false,
       code: "FINGERPRINT_STALE",
       message: "剧集正文已变更，请刷新后重试",
+    };
+  }
+  // Reconciliation can apply the completed job before the original browser
+  // request arrives. Replaying that generation must not fail on revision.
+  if (
+    detail.record.generationId === input.generationId &&
+    detail.record.items.length > 0
+  ) {
+    return {
+      ok: true,
+      record: detail.record,
+      warnings: [],
+      rejectedItems: [],
+      repaired: false,
     };
   }
   if (

@@ -105,7 +105,7 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(dialogIdx).toBeLessThan(cardFnIdx);
   });
 
-  it("wires character generation frosted overlay on media wrap", () => {
+  it("wires generation progress overlay for character, scene, and prop cards", () => {
     expect(overlay).toContain("export type AssetGenerationStage");
     expect(overlay).toContain("export type AssetGenerationProgress");
     expect(overlay).toContain("export function DesignGenerationOverlay");
@@ -123,18 +123,33 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(workspace).toContain("DesignGenerationOverlay");
     expect(workspace).toContain("generationProgress");
     expect(workspace).toContain("assetGenerationProgress");
-    expect(workspace).toContain('item.assetType === "character"');
     expect(workspace).toContain("assetGenerationProgress[item.id]");
-    expect(workspace).toContain("ead-card__media-wrap");
-    expect(workspace).toContain(
-      "<DesignGenerationOverlay progress={generationProgress} />",
+    expect(workspace).not.toMatch(
+      /item\.assetType === "character"\s*\?\s*assetGenerationProgress\[item\.id\]/,
     );
+    expect(workspace).toContain("ead-card__media-wrap");
+    expect(
+      workspace.match(
+        /<DesignGenerationOverlay progress=\{generationProgress\} \/>/g,
+      ),
+    ).toHaveLength(2);
+
+    const visualCardIdx = workspace.indexOf(
+      '<article className="ead-card ead-card--visual-asset">',
+    );
+    const visualOverlayIdx = workspace.indexOf(
+      "<DesignGenerationOverlay progress={generationProgress} />",
+      visualCardIdx,
+    );
+    expect(visualCardIdx).toBeGreaterThan(-1);
+    expect(visualOverlayIdx).toBeGreaterThan(visualCardIdx);
 
     const mediaWrapIdx = workspace.indexOf(
       '<div className="ead-card__media-wrap">',
     );
     const overlayIdx = workspace.indexOf(
       "<DesignGenerationOverlay progress={generationProgress} />",
+      mediaWrapIdx,
     );
     const mediaWrapCloseIdx = workspace.indexOf("</div>", overlayIdx);
     expect(mediaWrapIdx).toBeGreaterThan(-1);

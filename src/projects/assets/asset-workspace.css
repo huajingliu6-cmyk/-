@@ -2301,6 +2301,10 @@
   margin-top: 4px;
 }
 
+.ead-content-shell {
+  position: relative;
+}
+
 .ead-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -2711,40 +2715,6 @@
   }
 }
 
-.ead-full-script-pending {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px 16px;
-  margin-top: 12px;
-  padding: 10px 12px;
-  border: 1px solid rgba(245, 158, 11, 0.22);
-  border-radius: 12px;
-  background: linear-gradient(
-    90deg,
-    rgba(245, 158, 11, 0.1),
-    rgba(245, 158, 11, 0.03)
-  );
-}
-
-.ead-full-script-pending strong {
-  color: #fde68a;
-  font-size: 13px;
-}
-
-.ead-full-script-pending p {
-  margin: 3px 0 0;
-  color: rgba(226, 232, 240, 0.68);
-  font-size: 12px;
-}
-
-.ead-full-script-pending__button {
-  flex-shrink: 0;
-  min-height: 34px;
-  padding: 6px 12px;
-  font-size: 12px;
-}
-
 .ead-batch-progress {
   display: grid;
   gap: 8px;
@@ -2889,10 +2859,6 @@
     width: auto;
   }
 
-  .ead-full-script-pending {
-    align-items: flex-start;
-    flex-direction: column;
-  }
 }
 
 .ead-detail-placeholder {
@@ -3114,8 +3080,169 @@
 .ead-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.ead-prompt-progress {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  min-width: 156px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border: 1px solid rgba(56, 189, 248, 0.34);
+  border-radius: 8px;
+  background: rgba(56, 189, 248, 0.08);
+  color: #bae6fd;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ead-prompt-progress.is-complete {
+  border-color: rgba(52, 211, 153, 0.34);
+  background: rgba(52, 211, 153, 0.08);
+  color: #a7f3d0;
+}
+
+.ead-page-lock {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 120px 20px 20px;
+  box-sizing: border-box;
+  border-radius: 22px;
+  background: rgba(7, 9, 16, 0.56);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+
+.ead-page-lock__panel {
+  position: sticky;
+  top: 18px;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: min(500px, 100%);
+  padding: 24px;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(17, 20, 31, 0.94);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.38);
+  color: #fff;
+  text-align: center;
+}
+
+.ead-page-lock__panel > strong {
+  font-size: 22px;
+  line-height: 1.3;
+}
+
+.ead-page-lock__panel > span,
+.ead-page-lock__progress-label {
+  color: rgba(226, 232, 240, 0.76);
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ead-page-lock__progress {
+  display: grid;
+  gap: 9px;
+  width: min(380px, 100%);
+}
+
+.ead-page-lock__percentage {
+  color: #fff;
+  font-size: 42px;
+  font-weight: 750;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ead-page-lock__track {
+  display: block;
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.ead-page-lock__track > span {
+  position: relative;
+  display: block;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--ui-accent);
+  transition: width 0.25s ease;
+}
+
+.ead-page-lock__track > span::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.08) 35%,
+    rgba(255, 255, 255, 0.72) 50%,
+    rgba(255, 255, 255, 0.08) 65%,
+    transparent 100%
+  );
+  content: "";
+  transform: translateX(-100%);
+  animation: ead-progress-flow 1.6s linear infinite;
+}
+
+.ead-page-lock__progress-label {
+  min-height: 18px;
+  line-height: 1.5;
+}
+
+@keyframes ead-progress-flow {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ead-page-lock__track > span::after {
+    animation: none;
+  }
+}
+
+.ead-page-lock__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.ead-storyboard-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  text-decoration: none;
+}
+
+@media (max-width: 640px) {
+  .ead-page-lock {
+    padding: 72px 12px 16px;
+  }
+
+  .ead-prompt-progress {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 .ead-warn {

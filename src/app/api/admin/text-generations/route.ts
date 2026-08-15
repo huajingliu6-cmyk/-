@@ -91,6 +91,14 @@ export async function GET(request: Request) {
       errorMessage: job.errorMessage,
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
+      requestedAssetCount: job.requestedAssetCount ?? null,
+      completedAssetCount: job.completedAssetCount ?? null,
+      batchSize: job.batchSize ?? null,
+      finishReason: job.finishReason ?? null,
+      truncated: job.truncated ?? null,
+      partialOutputChars: job.partialOutputChars ?? null,
+      nextAssetId: job.nextAssetId ?? null,
+      batchAttempts: job.batchAttempts ?? null,
     };
   });
 

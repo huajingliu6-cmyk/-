@@ -115,6 +115,7 @@ export class DashScopeTextProvider implements TextGenerationProvider {
     let buffer = "";
     let inputTokens: number | null = null;
     let outputTokens: number | null = null;
+    let finishReason: string | null = null;
 
     try {
       while (true) {
@@ -136,20 +137,33 @@ export class DashScopeTextProvider implements TextGenerationProvider {
               type: "usage",
               inputTokens,
               outputTokens,
+              finishReason,
             };
-            yield { type: "done" };
+            yield {
+              type: "done",
+              inputTokens,
+              outputTokens,
+              finishReason,
+            };
             return;
           }
           try {
             const json = JSON.parse(data) as {
-              choices?: Array<{ delta?: { content?: string } }>;
+              choices?: Array<{
+                delta?: { content?: string };
+                finish_reason?: string | null;
+              }>;
               usage?: {
                 prompt_tokens?: number;
                 completion_tokens?: number;
               };
             };
-            const delta = json.choices?.[0]?.delta?.content;
+            const choice = json.choices?.[0];
+            const delta = choice?.delta?.content;
             if (delta) yield { type: "delta", text: delta };
+            if (typeof choice?.finish_reason === "string") {
+              finishReason = choice.finish_reason;
+            }
             if (json.usage) {
               inputTokens = json.usage.prompt_tokens ?? inputTokens;
               outputTokens = json.usage.completion_tokens ?? outputTokens;
@@ -159,8 +173,18 @@ export class DashScopeTextProvider implements TextGenerationProvider {
           }
         }
       }
-      yield { type: "usage", inputTokens, outputTokens };
-      yield { type: "done" };
+      yield {
+        type: "usage",
+        inputTokens,
+        outputTokens,
+        finishReason,
+      };
+      yield {
+        type: "done",
+        inputTokens,
+        outputTokens,
+        finishReason,
+      };
     } finally {
       reader.releaseLock();
     }

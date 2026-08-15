@@ -28,7 +28,10 @@ import {
   PUT as putEpisodeDesign,
 } from "@/app/api/projects/[projectId]/asset-designs/episodes/[episodeId]/route";
 import { POST as postConfirm } from "@/app/api/projects/[projectId]/asset-designs/episodes/[episodeId]/confirm/route";
-import { listEpisodeAssetDesigns } from "@/projects/assets/episode-design/episode-design-api";
+import {
+  applyEpisodeAssetDesignGeneration,
+  listEpisodeAssetDesigns,
+} from "@/projects/assets/episode-design/episode-design-api";
 import { SCRIPT_ASSET_DESIGN_ID } from "@/projects/assets/episode-design/types";
 import type { EpisodeAssetDesignRecord } from "@/projects/assets/episode-design/types";
 
@@ -407,6 +410,72 @@ describe("episode asset design routes", () => {
 
     const draft = await loadScriptDraft(project.projectId);
     expect(draft?.episodes[0]?.content).toBe("第一集正文");
+  });
+
+  it("treats an already reconciled generation as an idempotent apply", async () => {
+    const owner = auth("user", "owner_ads_apply_replay");
+    vi.mocked(requireSessionUser).mockResolvedValue({ ok: true, user: owner });
+    const project = await createProjectRecord(owner.id, {
+      name: `ads-apply-replay-${Date.now()}`,
+      creationSource: "script-upload",
+      projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
+      passwordEnabled: false,
+    });
+    const now = new Date().toISOString();
+    const draft = baseDraft(project.projectId, now);
+    await saveScriptDraft(draft);
+    const episode = draft.episodes[0]!;
+    const fingerprint = getScriptEpisodeContentFingerprint({
+      episodeNumber: episode.episodeNumber,
+      title: episode.title,
+      content: episode.content,
+    });
+    const store = await loadEpisodeAssetDesignStore(project.projectId);
+    await saveEpisodeAssetDesignStore(
+      upsertEpisodeRecord(store, {
+        episodeId: episode.id,
+        episodeNumber: episode.episodeNumber,
+        status: "review",
+        revision: 3,
+        contentFingerprint: fingerprint,
+        generationId: "gen-reconciled",
+        items: [
+          {
+            id: "i1",
+            assetType: "scene",
+            name: "Street",
+            resolution: "create_new",
+            source: "ai",
+            draft: {
+              description: "A street",
+              timeOfDay: "night",
+              location: "city",
+              style: "realistic",
+              usageInEpisode: "opening",
+              evidence: "street",
+            },
+          },
+        ],
+        confirmedAt: null,
+        confirmedBy: null,
+        confirmedRevision: null,
+        updatedAt: now,
+      }),
+    );
+
+    const replay = await applyEpisodeAssetDesignGeneration({
+      projectId: project.projectId,
+      episodeId: episode.id,
+      generationId: "gen-reconciled",
+      expectedRevision: 2,
+      fingerprint,
+    });
+
+    expect(replay.ok).toBe(true);
+    if (!replay.ok) return;
+    expect(replay.record.revision).toBe(3);
+    expect(replay.record.items).toHaveLength(1);
   });
 
   it("returns sourceText as content for full-script design viewer", async () => {

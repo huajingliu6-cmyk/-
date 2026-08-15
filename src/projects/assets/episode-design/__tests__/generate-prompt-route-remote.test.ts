@@ -46,24 +46,52 @@ describe("design prompt generation remote routes", () => {
 
   it("persists both the generation job and the updated design document", () => {
     for (const route of [managementRoute, workspaceRoute]) {
-      expect(route).toContain("await saveTextJob(historyJob)");
-      expect(route).toContain("designConversation: nextConversation");
+      expect(route).toContain("runGenerateDesignPromptPost");
     }
-    expect(managementRoute).toContain("saveEpisodeAssetDesignItems");
-    expect(workspaceRoute).toContain("saveWorkspaceEpisodeAssetDesignItems");
+    expect(managementRoute).toContain("patchEpisodeItemDesignPrompt");
+    expect(workspaceRoute).toContain("patchWorkspaceItemDesignPrompt");
+    const helper = readFileSync(
+      path.join(
+        process.cwd(),
+        "src/projects/assets/episode-design/run-generate-design-prompt-route.ts",
+      ),
+      "utf-8",
+    );
+    expect(helper).toContain("await saveTextJob(historyJob)");
+    expect(helper).toContain("designConversation: nextConversation");
   });
 
   it("validates promptModelId on management and workspace routes", () => {
-    for (const route of [managementRoute, workspaceRoute]) {
-      expect(route).toContain("isDesignPromptModelId");
-      expect(route).toContain("INVALID_PROMPT_MODEL");
-      expect(route).toContain("promptModelId,");
-      expect(route).toContain("modelKey: resultPromptModelId");
-      expect(route).toContain("displayModelName: resultDisplayModelName");
-      expect(route).toContain("providerModelId: resultProviderModelId");
-      expect(route).not.toContain('modelKey: "episode-asset-design-text"');
-      expect(route).not.toContain('displayModelName: "本集资产设计对话"');
-    }
+    const helper = readFileSync(
+      path.join(
+        process.cwd(),
+        "src/projects/assets/episode-design/run-generate-design-prompt-route.ts",
+      ),
+      "utf-8",
+    );
+    expect(helper).toContain("isDesignPromptModelId");
+    expect(helper).toContain("INVALID_PROMPT_MODEL");
+    expect(helper).toContain('outputKind: "asset_design_prompt"');
+    expect(helper).toContain('capabilityId: "asset.design-prompt.generate"');
+    expect(helper).not.toContain('modelKey: "episode-asset-design-text"');
+    expect(helper).not.toContain('displayModelName: "本集资产设计对话"');
+  });
+
+  it("allows formal prompt generation when designConversation is missing", () => {
+    const helper = readFileSync(
+      path.join(
+        process.cwd(),
+        "src/projects/assets/episode-design/run-generate-design-prompt-route.ts",
+      ),
+      "utf-8",
+    );
+    expect(helper).toContain("designConversation ?? []");
+    expect(helper).not.toContain("EXTRACT_CONVERSATION_MISSING");
+    expect(helper).not.toContain("本集尚无提取对话");
+    expect(helper).toContain("isEpisodeAssetExtractReady");
+    expect(generatePrompt).toContain("input.conversation ?? []");
+    expect(generatePrompt).not.toContain("本集尚无提取对话，请先点击");
+    expect(generatePrompt).not.toContain("EXTRACT_CONVERSATION_MISSING");
   });
 });
 

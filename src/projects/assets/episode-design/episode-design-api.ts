@@ -20,6 +20,7 @@ import {
   upsertEpisodeRecord,
 } from "@/projects/assets/episode-design/store";
 import type {
+  AssetDesignPromptState,
   EpisodeAssetActiveGeneration,
   EpisodeAssetDesignItem,
   EpisodeAssetDesignRecord,
@@ -38,6 +39,7 @@ import {
   isRemoteProjectAssetDataConflict,
 } from "@/projects/assets/remote-project-asset-data";
 import { reconcileGeneratingExtractRecord } from "@/projects/assets/episode-design/reconcile-extract-status";
+import { reconcileStuckDesignPromptItems } from "@/projects/assets/episode-design/design-prompt-diagnostics";
 
 export type EpisodeAssetDesignListItem = {
   episodeId: string;
@@ -111,6 +113,13 @@ async function withReconciledGeneratingDetail(input: {
       persist: async ({ record: next }) =>
         persistReconciledRecord(input.projectId, next),
     });
+  }
+  const stuckPrompts = reconcileStuckDesignPromptItems(record);
+  if (stuckPrompts.changed) {
+    record = await persistReconciledRecord(
+      input.projectId,
+      stuckPrompts.record,
+    );
   }
   return {
     record,
@@ -411,6 +420,107 @@ export async function saveEpisodeAssetDesignItems(input: {
   };
 }
 
+/**
+ * Persist one item's designPrompt without clobbering concurrent sibling updates.
+ */
+export async function patchEpisodeItemDesignPrompt(input: {
+  projectId: string;
+  episodeId: string;
+  itemId: string;
+  fingerprint: string;
+  designPrompt: AssetDesignPromptState;
+  designConversation?: EpisodeDesignConversationMessage[];
+}): Promise<
+  | { ok: true; record: EpisodeAssetDesignRecord }
+  | {
+      ok: false;
+      code:
+        | "EPISODE_NOT_FOUND"
+        | "ITEM_NOT_FOUND"
+        | "REVISION_CONFLICT"
+        | "FINGERPRINT_STALE"
+        | "EPISODE_CONTENT_EMPTY";
+      message: string;
+    }
+> {
+  const maxAttempts = 8;
+  let lastConflict = false;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const detail = await getEpisodeAssetDesignDetail(
+      input.projectId,
+      input.episodeId,
+    );
+    if (!detail.ok) return detail;
+    if (!detail.episode.content.trim()) {
+      return {
+        ok: false,
+        code: "EPISODE_CONTENT_EMPTY",
+        message: "剧集正文为空，无法保存资产设计",
+      };
+    }
+    if (detail.currentFingerprint !== input.fingerprint) {
+      return {
+        ok: false,
+        code: "FINGERPRINT_STALE",
+        message: "剧集正文已变更，请刷新后重试",
+      };
+    }
+    if (!detail.record.items.some((i) => i.id === input.itemId)) {
+      return {
+        ok: false,
+        code: "ITEM_NOT_FOUND",
+        message: "资产项不存在",
+      };
+    }
+
+    const store = await loadEpisodeAssetDesignStore(input.projectId);
+    const now = new Date().toISOString();
+    const nextItems = detail.record.items.map((item) => {
+      if (item.id !== input.itemId) return item;
+      const history = mergePromptHistories(
+        item.designPrompt?.history,
+        input.designPrompt.history,
+      );
+      return {
+        ...item,
+        designPrompt: {
+          ...input.designPrompt,
+          ...(history.length > 0 ? { history } : {}),
+        },
+      };
+    });
+    const nextRecord: EpisodeAssetDesignRecord = {
+      ...detail.record,
+      items: nextItems,
+      contentFingerprint: input.fingerprint,
+      revision: detail.record.revision + 1,
+      updatedAt: now,
+      ...(input.designConversation
+        ? { designConversation: input.designConversation }
+        : {}),
+    };
+    try {
+      await saveEpisodeAssetDesignStore(
+        upsertEpisodeRecord(store, nextRecord),
+      );
+      return { ok: true, record: nextRecord };
+    } catch (error) {
+      if (isRemoteProjectAssetDataConflict(error)) {
+        lastConflict = true;
+        continue;
+      }
+      throw error;
+    }
+  }
+  return {
+    ok: false,
+    code: "REVISION_CONFLICT",
+    message: lastConflict
+      ? "资产设计版本已变更，请刷新后重试"
+      : "资产设计保存冲突，请刷新后重试",
+  };
+}
+
 export async function applyEpisodeAssetDesignGeneration(input: {
   projectId: string;
   episodeId: string;
@@ -462,6 +572,21 @@ export async function applyEpisodeAssetDesignGeneration(input: {
       ok: false,
       code: "FINGERPRINT_STALE",
       message: "剧集正文已变更，请刷新后重试",
+    };
+  }
+  // A detail GET may reconcile and apply the completed job before the
+  // originating tab sends apply-generation. Treat that same generation as
+  // an idempotent success instead of reporting a revision conflict.
+  if (
+    detail.record.generationId === input.generationId &&
+    detail.record.items.length > 0
+  ) {
+    return {
+      ok: true,
+      record: detail.record,
+      warnings: [],
+      rejectedItems: [],
+      repaired: false,
     };
   }
   if (

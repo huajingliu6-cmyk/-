@@ -414,6 +414,53 @@ describe("streamRedesignPromptInConversation admin task rules", () => {
     ).rejects.toMatchObject({ code: "AI_DESIGN_PROMPT_FORMAT_INVALID" });
   });
 
+  it("generates with empty designConversation for legacy extracted assets", async () => {
+    streamDeltaQueue = [
+      "横构图电影剧照，虚构角色林晚立于雨巷，青衫褶皱，冷硬侧光，写实影视摄影质感。",
+    ];
+    const { streamRedesignPromptInConversation } = await import(
+      "@/projects/assets/episode-design/generate-design-prompt"
+    );
+    const projectId = (globalThis as { __designPromptProjectId?: string })
+      .__designPromptProjectId!;
+
+    const result = await streamRedesignPromptInConversation({
+      projectId,
+      userId: "u_owner",
+      item: {
+        id: "item_legacy",
+        assetType: "character",
+        name: "林晚",
+        draft: {
+          description: "女主",
+          appearance: "短发",
+          clothing: "青衫",
+          role: "主角",
+          age: "28",
+          voiceId: null,
+          voiceName: null,
+          voiceBound: false,
+          usageInEpisode: "开场",
+          evidence: "第一场",
+        },
+      } as never,
+      conversation: [],
+      episodeText: "林晚推开茶馆木门。",
+      userRequirement: "",
+      promptModelId: "deepseek-v4-pro",
+    });
+
+    expect(result.capabilityId).toBe("asset.design-prompt.generate");
+    expect(result.diagnostics.outputKind).toBe("asset_design_prompt");
+    expect(result.messageRoles).toBe("system,user");
+    expect(result.text).toContain("横构图电影剧照");
+    expect(result.text).not.toContain("【角色描述】");
+    expect(result.nextConversation.length).toBeGreaterThanOrEqual(2);
+    expect(result.nextConversation.some((m) => m.role === "system")).toBe(
+      false,
+    );
+  });
+
   it("does not call the provider when execution plan fails", async () => {
     await updateCapabilityBinding(
       "asset.design-prompt.generate",
@@ -483,22 +530,32 @@ describe("generate-prompt route capability metadata contracts", () => {
   );
 
   it("personal and workspace routes share metadata and pass episodeText", () => {
+    const helper = readFileSync(
+      path.join(
+        process.cwd(),
+        "src/projects/assets/episode-design/run-generate-design-prompt-route.ts",
+      ),
+      "utf-8",
+    );
+    expect(helper).toContain('capabilityId: "asset.design-prompt.generate"');
+    expect(helper).toContain('outputKind: "asset_design_prompt"');
+    expect(helper).not.toContain(
+      'capabilityId: "asset.episode-design.generate"',
+    );
+    expect(helper).not.toContain("episode-asset-design-text");
+    expect(helper).not.toContain("EXTRACT_CONVERSATION_MISSING");
+    expect(helper).toContain("designConversation ?? []");
+    expect(helper).toContain("taskRuleSource: result.taskRuleSource");
+    expect(helper).toContain("taskRuleVersion: result.taskRuleVersion");
+    expect(helper).toContain("taskRuleHash: result.taskRuleHash");
+    expect(helper).toContain("modelConnectionId: result.modelConnectionId");
+    expect(helper).toContain("systemPromptHash: result.systemPromptHash");
+    expect(helper).toContain("userPromptHash: result.userPromptHash");
+    expect(helper).toContain("enableThinking: result.enableThinking");
+    expect(helper).toContain("episodeText: detail.episode.content");
+    expect(helper).toContain("streamRedesignPromptInConversation");
     for (const route of [management, workspace]) {
-      expect(route).toContain('capabilityId: "asset.design-prompt.generate"');
-      expect(route).toContain('outputKind: "asset_design_prompt"');
-      expect(route).not.toContain(
-        'capabilityId: "asset.episode-design.generate"',
-      );
-      expect(route).not.toContain("episode-asset-design-text");
-      expect(route).toContain("taskRuleSource: result.taskRuleSource");
-      expect(route).toContain("taskRuleVersion: result.taskRuleVersion");
-      expect(route).toContain("taskRuleHash: result.taskRuleHash");
-      expect(route).toContain("modelConnectionId: result.modelConnectionId");
-      expect(route).toContain("systemPromptHash: result.systemPromptHash");
-      expect(route).toContain("userPromptHash: result.userPromptHash");
-      expect(route).toContain("enableThinking: result.enableThinking");
-      expect(route).toContain("episodeText: detail.episode.content");
-      expect(route).toContain("streamRedesignPromptInConversation");
+      expect(route).toContain("runGenerateDesignPromptPost");
     }
   });
 

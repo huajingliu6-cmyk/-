@@ -199,12 +199,21 @@ export class HttpCompatibleTextProvider implements TextGenerationProvider {
         ? input.messages.map((m) => m.content).join("\n")
         : input.systemPrompt + input.userPrompt;
 
+    const resolvedInputTokens =
+      inputTokens || this.estimateInputTokens(estimateSource);
+    const resolvedOutputTokens = outputTokens || 0;
     yield {
       type: "usage",
-      inputTokens: inputTokens || this.estimateInputTokens(estimateSource),
-      outputTokens: outputTokens || 0,
+      inputTokens: resolvedInputTokens,
+      outputTokens: resolvedOutputTokens,
+      finishReason,
     };
-    yield { type: "done" };
+    yield {
+      type: "done",
+      inputTokens: resolvedInputTokens,
+      outputTokens: resolvedOutputTokens,
+      finishReason,
+    };
   }
 
   /**

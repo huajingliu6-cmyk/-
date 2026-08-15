@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireWorkspaceAssetAccess } from "@/auth/require-access";
 import { getProjectRecord } from "@/projects/project-access";
-import { runGenerateDesignPromptPost } from "@/projects/assets/episode-design/run-generate-design-prompt-route";
+import { runGenerateDesignPromptBatchPost } from "@/projects/assets/episode-design/run-generate-design-prompt-batch-route";
 import { ensureWorkspaceInitialized } from "@/projects/workspace-sync/ensure-workspace-initialized";
 import {
   getWorkspaceEpisodeAssetDesignDetail,
@@ -10,11 +10,11 @@ import {
 import { guardWorkspaceRemoteData } from "@/projects/workspace-sync/route-remote-guard";
 
 type RouteContext = {
-  params: Promise<{ projectId: string; episodeId: string; itemId: string }>;
+  params: Promise<{ projectId: string; episodeId: string }>;
 };
 
 async function post(request: Request, context: RouteContext) {
-  const { projectId, episodeId, itemId } = await context.params;
+  const { projectId, episodeId } = await context.params;
   const gated = await requireWorkspaceAssetAccess(projectId);
   if (!gated.ok) return gated.response;
 
@@ -25,14 +25,13 @@ async function post(request: Request, context: RouteContext) {
 
   await ensureWorkspaceInitialized(projectId);
 
-  return runGenerateDesignPromptPost({
+  return runGenerateDesignPromptBatchPost({
     request,
     projectId,
     episodeId,
-    itemId,
     userId: gated.user.id,
     loadDetail: () => getWorkspaceEpisodeAssetDesignDetail(projectId, episodeId),
-    patchItem: async ({ designPrompt, designConversation }) => {
+    patchItem: async ({ itemId, designPrompt }) => {
       const detail = await getWorkspaceEpisodeAssetDesignDetail(
         projectId,
         episodeId,
@@ -44,7 +43,6 @@ async function post(request: Request, context: RouteContext) {
         itemId,
         fingerprint: detail.currentFingerprint,
         designPrompt,
-        designConversation,
       });
     },
   });

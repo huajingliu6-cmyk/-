@@ -146,12 +146,25 @@ describe("assertValidDesignPromptText", () => {
 
   it("sanitizes to one continuous paragraph and accepts formal Chinese", () => {
     const cleaned = assertValidDesignPromptText(
-      "横构图电影剧照。\n\n虚构青年律师短发深色瞳孔。\n- 深灰西装\n写实侧光。",
+      [
+        "横构图电影剧照。",
+        "",
+        "虚构青年律师短发深色瞳孔深灰西装。",
+        "- 冷硬侧光写实影视摄影质感",
+        "精细服装材质与真实皮肤细节，浅景深构图，电影级灯光，16:9画幅，可直接用于素材生成的完整连贯中文提示词正文，禁止输出字段标题。",
+      ].join("\n"),
       characterItem(),
     );
     expect(cleaned).not.toContain("\n");
     expect(cleaned).toContain("横构图电影剧照");
     expect(cleaned).not.toContain("【角色描述】");
+    expect(cleaned.length).toBeGreaterThanOrEqual(100);
+  });
+
+  it("rejects prompts shorter than 100 visible characters", () => {
+    expect(() => assertValidDesignPromptText("ab", characterItem())).toThrow(
+      /过短/,
+    );
   });
 
   it("sanitizeFormalDesignPromptCandidate collapses lists and fences", () => {

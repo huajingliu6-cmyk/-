@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CharacterList, CharacterListHeader } from "@/projects/assets/CharacterList";
 import { CharacterDetail } from "@/projects/assets/CharacterDetail";
 import { CharacterCreateDialog } from "@/projects/assets/CharacterCreateDialog";
@@ -43,7 +43,9 @@ export function CharacterManager({
     {},
   );
   const charactersRef = useRef(characters);
-  charactersRef.current = characters;
+  useEffect(() => {
+    charactersRef.current = characters;
+  }, [characters]);
 
   const projectVoices = voiceOptionsFromAudios(audios);
   const selected =
@@ -60,6 +62,10 @@ export function CharacterManager({
   const handleCreate = async (draft: CharacterDraftInput) => {
     const voice = findVoiceOption(draft.voiceId, projectVoices);
     const id = `char_${Date.now().toString(36)}`;
+    const pendingFile = draft.pendingImageFile ?? null;
+    if (draft.imageObjectUrl?.startsWith("blob:")) {
+      URL.revokeObjectURL(draft.imageObjectUrl);
+    }
     const created: CharacterAsset = {
       id,
       projectId,
@@ -73,9 +79,9 @@ export function CharacterManager({
       voiceId: voice?.id ?? null,
       voiceName: voice?.name ?? null,
       voiceStyle: voice?.style ?? null,
-      imageFileName: draft.imageFileName,
-      imageObjectUrl: draft.imageObjectUrl,
-      imageMimeType: draft.imageMimeType,
+      imageFileName: null,
+      imageObjectUrl: null,
+      imageMimeType: null,
       status: "draft",
     };
     created.status = deriveCharacterStatus(created);
@@ -87,15 +93,35 @@ export function CharacterManager({
     setNote("正在保存角色…");
     try {
       await onPersist(next);
-      if (draft.pendingImageFile) {
-        await persistThenUploadAssetImage({
+      if (pendingFile) {
+        const uploaded = await persistThenUploadAssetImage({
           projectId,
           assetId: id,
-          pendingFile: draft.pendingImageFile,
+          pendingFile,
           persist: async () => {
             await onPersist(charactersRef.current);
           },
         });
+        if (uploaded) {
+          const uploadedNext = charactersRef.current.map((character) =>
+            character.id === id
+              ? {
+                  ...character,
+                  imageFileName: uploaded.imageFileName,
+                  imageObjectUrl: null,
+                  imageMimeType: uploaded.imageMimeType,
+                  status: deriveCharacterStatus({
+                    ...character,
+                    imageFileName: uploaded.imageFileName,
+                    imageObjectUrl: null,
+                  }),
+                }
+              : character,
+          );
+          charactersRef.current = uploadedNext;
+          onChange(uploadedNext);
+          await onPersist(uploadedNext);
+        }
         setImageRevisions((prev) => ({
           ...prev,
           [id]: (prev[id] ?? 0) + 1,

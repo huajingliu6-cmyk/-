@@ -59,6 +59,34 @@ export type TextGenerationJob = {
   messageRoles?: string;
   enableThinking?: boolean;
   maxOutputTokens?: number;
+  /** Batch design-prompt diagnostics (optional, backward compatible). */
+  requestedAssetIds?: string[];
+  requestedAssetCount?: number;
+  completedAssetIds?: string[];
+  completedAssetCount?: number;
+  failedAssetIds?: string[];
+  nextAssetId?: string | null;
+  batchSize?: number;
+  batchAttempt?: number;
+  finishReason?: string | null;
+  partialOutputChars?: number;
+  responseCompleted?: boolean;
+  truncated?: boolean;
+  modelCallStartedAt?: string;
+  modelCallFinishedAt?: string;
+  batchAttempts?: Array<{
+    requestedAssetIds: string[];
+    completedAssetIds: string[];
+    batchSize: number;
+    batchAttempt: number;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    finishReason: string | null;
+    partialOutputChars: number;
+    responseCompleted: boolean;
+    truncated: boolean;
+    errorCode?: string;
+  }>;
 };
 
 export type ProjectTextDocument = {
@@ -101,6 +129,12 @@ export type ProviderTextStreamEvent =
       type: "usage";
       inputTokens: number | null;
       outputTokens: number | null;
+      finishReason?: string | null;
     }
-  | { type: "done" }
+  | {
+      type: "done";
+      inputTokens?: number | null;
+      outputTokens?: number | null;
+      finishReason?: string | null;
+    }
   | { type: "error"; code: string; message: string };

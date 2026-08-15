@@ -37,11 +37,34 @@ type Props = {
   ensurePersisted?: () => Promise<void>;
 };
 
+function resolveCharacterUploadedMediaId(
+  character: CharacterAsset,
+): string | null {
+  // Manually uploaded bytes are stored under asset.id. imageFileName is only
+  // the display name (for example "hero.png") and must not be used as a GET key.
+  return character.imageFileName
+    ? resolveAssetImageStorageKey({
+        id: character.id,
+        imageFileName: character.imageFileName,
+      })
+    : null;
+}
+
+function resolveCharacterPrimaryMediaId(
+  character: CharacterAsset,
+): string | null {
+  return (
+    character.primaryMediaId?.trim() ||
+    resolveCharacterUploadedMediaId(character)
+  );
+}
+
 function listCharacterMediaIds(character: CharacterAsset): string[] {
+  const uploadedMediaId = resolveCharacterUploadedMediaId(character);
   return mergeMediaIdLists(
     character.approvedMediaIds,
     character.primaryMediaId ? [character.primaryMediaId] : [],
-    character.imageFileName ? [character.imageFileName] : [],
+    uploadedMediaId ? [uploadedMediaId] : [],
   );
 }
 
@@ -56,10 +79,7 @@ function resolveVoiceForMedia(
       voiceName: fromMap.voiceName ?? null,
     };
   }
-  const primaryKey =
-    character.primaryMediaId?.trim() ||
-    character.imageFileName?.trim() ||
-    "";
+  const primaryKey = resolveCharacterPrimaryMediaId(character) ?? "";
   if (primaryKey && primaryKey === mediaId) {
     return {
       voiceId: character.voiceId,
@@ -92,10 +112,7 @@ export function CharacterDetail({
   );
 
   const preferredMediaId = character
-    ? character.primaryMediaId?.trim() ||
-      character.imageFileName?.trim() ||
-      mediaIds[0] ||
-      null
+    ? resolveCharacterPrimaryMediaId(character) || mediaIds[0] || null
     : null;
   const mediaSyncKey = character
     ? `${character.id}:${mediaIds.join("|")}:${preferredMediaId ?? ""}`
@@ -126,7 +143,7 @@ export function CharacterDetail({
   const activeMediaId =
     selectedMediaId && mediaIds.includes(selectedMediaId)
       ? selectedMediaId
-      : mediaIds[0] ?? resolveAssetImageStorageKey(character) ?? null;
+      : preferredMediaId ?? resolveAssetImageStorageKey(character) ?? null;
   const activeVoice = activeMediaId
     ? resolveVoiceForMedia(character, activeMediaId)
     : { voiceId: character.voiceId, voiceName: character.voiceName };
@@ -149,9 +166,7 @@ export function CharacterDetail({
     };
     const isPrimary =
       activeMediaId ===
-      (character.primaryMediaId?.trim() ||
-        character.imageFileName?.trim() ||
-        activeMediaId);
+      (resolveCharacterPrimaryMediaId(character) || activeMediaId);
     patch({
       mediaVoices,
       ...(isPrimary ? { voiceId, voiceName, voiceStyle } : {}),
@@ -202,8 +217,7 @@ export function CharacterDetail({
       />
       {character.voiceStyle &&
       activeMediaId ===
-        (character.primaryMediaId?.trim() ||
-          character.imageFileName?.trim()) ? (
+        resolveCharacterPrimaryMediaId(character) ? (
         <p className="amw-hint">当前风格：{character.voiceStyle}</p>
       ) : null}
       <div className="asset-controls__voice-actions">
@@ -334,8 +348,7 @@ export function CharacterDetail({
 
             {activeMediaId &&
             activeMediaId !==
-              (character.primaryMediaId?.trim() ||
-                character.imageFileName?.trim()) ? (
+              resolveCharacterPrimaryMediaId(character) ? (
               <button
                 type="button"
                 className="amw-btn"

@@ -1,4 +1,4 @@
-# LAN overlay: build from infinite-canvas (parent of deploy/).
+﻿# LAN overlay: build from infinite-canvas (parent of deploy/).
 # Pair with compose.remote.yml:
 #   docker compose --env-file .env.lan -f compose.remote.yml -f compose.lan.override.yml up -d --build
 # Prefer deploy/start-lan.ps1 which stamps BUILD_REVISION.
@@ -18,6 +18,12 @@ services:
       BUILD_REVISION: ${BUILD_REVISION:-unknown}
       # Full-script asset extract timeout (ms). Default 600000 = 10 minutes.
       SCRIPT_ASSET_DESIGN_TIMEOUT_MS: "${SCRIPT_ASSET_DESIGN_TIMEOUT_MS:-600000}"
+      # Formal design-prompt batch concurrency after extract. Default 4, max 6.
+      DESIGN_PROMPT_BATCH_CONCURRENCY: "${DESIGN_PROMPT_BATCH_CONCURRENCY:-4}"
+      # Formal design-prompt assets per model request. Default 5, range 1-10.
+      DESIGN_PROMPT_BATCH_SIZE: "${DESIGN_PROMPT_BATCH_SIZE:-5}"
+      # Concurrent first-pass batch requests. Default 3, range 2-5.
+      DESIGN_PROMPT_BATCH_REQUEST_CONCURRENCY: "${DESIGN_PROMPT_BATCH_REQUEST_CONCURRENCY:-3}"
       # LAN: expose host desktop voice library (read-only mount) for voice picker
       LOCAL_VOICE_LIBRARY_DIR: /var/lib/infinite-canvas/local-voice-library
       LOCAL_VOICE_LIBRARY_ALLOW_IN_REMOTE: "true"

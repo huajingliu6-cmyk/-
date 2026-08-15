@@ -35,6 +35,22 @@ type HistoryItem = {
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
+  requestedAssetCount?: number | null;
+  completedAssetCount?: number | null;
+  batchSize?: number | null;
+  finishReason?: string | null;
+  truncated?: boolean | null;
+  partialOutputChars?: number | null;
+  nextAssetId?: string | null;
+  batchAttempts?: Array<{
+    requestedAssetIds: string[];
+    completedAssetIds: string[];
+    batchSize: number;
+    batchAttempt: number;
+    finishReason: string | null;
+    partialOutputChars: number;
+    truncated: boolean;
+  }> | null;
 };
 
 type ListResponse = {
@@ -236,6 +252,13 @@ export function TextGenerationsHistoryTab({ active }: Props) {
                   {" · "}
                   {item.projectName}
                   {item.actualChars ? ` · ${item.actualChars} 字` : ""}
+                  {item.requestedAssetCount != null
+                    ? ` · 请求资产 ${item.requestedAssetCount}`
+                    : ""}
+                  {item.completedAssetCount != null
+                    ? ` · 完成 ${item.completedAssetCount}`
+                    : ""}
+                  {item.batchSize != null ? ` · 批量 ${item.batchSize}` : ""}
                 </div>
                 {!open && item.content ? (
                   <p className="line-clamp-2 text-[11px] leading-relaxed text-zinc-400">
@@ -259,7 +282,27 @@ export function TextGenerationsHistoryTab({ active }: Props) {
                     {item.outputTokens != null
                       ? ` · out ${item.outputTokens}`
                       : ""}
+                    {item.finishReason
+                      ? ` · finish_reason=${item.finishReason}`
+                      : ""}
+                    {item.truncated ? " · 截断" : ""}
+                    {item.partialOutputChars != null && item.partialOutputChars > 0
+                      ? ` · 部分正文 ${item.partialOutputChars} 字符`
+                      : ""}
+                    {item.nextAssetId
+                      ? ` · next=${item.nextAssetId}`
+                      : ""}
                   </div>
+                  {item.batchAttempts?.length ? (
+                    <div className="text-[10px] text-zinc-500">
+                      Attempts: {item.batchAttempts
+                        .map(
+                          (attempt) =>
+                            `#${attempt.batchAttempt} ${attempt.completedAssetIds.length}/${attempt.requestedAssetIds.length}${attempt.truncated ? " truncated" : ""}${attempt.finishReason ? ` ${attempt.finishReason}` : ""}`,
+                        )
+                        .join(" | ")}
+                    </div>
+                  ) : null}
                   {item.errorMessage ? (
                     <div className="rounded-lg border border-rose-500/30 bg-rose-950/30 px-2.5 py-2 text-[11px] text-rose-200">
                       {item.errorMessage}

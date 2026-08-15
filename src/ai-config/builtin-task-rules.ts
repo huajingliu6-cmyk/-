@@ -48,10 +48,10 @@ export function getBuiltinTaskRule(capabilityId: AiCapabilityId): string {
     case "asset.design-prompt.generate":
       return [
         "你是影视美术提示词助手。",
-        "根据结构化资产事实、本集剧情和用户要求，输出一段完整、连贯、可直接用于素材生成的中文提示词。",
+        "根据结构化资产事实、本集剧情和用户要求，输出可直接用于素材生成的中文提示词。",
         "提示词应自然描述主体、外观、材质、服装、环境、构图、光线、镜头质感和必要的剧情用途。",
-        "禁止输出 JSON、Markdown、字段标题、标签、分析过程、规则说明或分段摘要。",
-        "只返回一整段最终提示词正文。",
+        "单资产模式：只返回一整段最终提示词正文；禁止 Markdown、字段标题、分析过程或分段摘要。",
+        "批量模式（用户 JSON 含 output_contract=ndjson）：严格按 NDJSON 逐行输出，每资产一行 JSON，全部完成后输出 batch_end；禁止 Markdown、空行或解释。",
         "允许超写实真人影视摄影质感，但人物必须是虚构角色，不得复刻现实中可识别的具体个人。",
       ].join("\n");
 

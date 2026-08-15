@@ -127,8 +127,11 @@ function throwFormatInvalid(message: string): never {
   throw new AiConfigError("AI_DESIGN_PROMPT_FORMAT_INVALID", message);
 }
 
+/** Minimum visible characters for a newly generated formal design prompt. */
+export const MIN_FORMAL_DESIGN_PROMPT_VISIBLE_CHARS = 100;
+
 /**
- * Reject empty / JSON / extract-field dumps / concept-art fallbacks.
+ * Reject empty / JSON / extract-field dumps / concept-art fallbacks / too-short text.
  * Never fall back to extract seed.
  */
 export function assertValidDesignPromptText(
@@ -163,6 +166,11 @@ export function assertValidDesignPromptText(
   if (looksLikeExtractDraftPrompt(cleaned, item) || looksLikeExtractDraftPrompt(text, item)) {
     throwFormatInvalid("模型返回了资产提取摘录而非正式素材提示词。");
   }
+  if (cleaned.length < MIN_FORMAL_DESIGN_PROMPT_VISIBLE_CHARS) {
+    throwFormatInvalid(
+      `正式素材提示词过短（少于 ${MIN_FORMAL_DESIGN_PROMPT_VISIBLE_CHARS} 个可见字符）`,
+    );
+  }
   return cleaned;
 }
 
@@ -174,7 +182,8 @@ export async function streamRedesignPromptInConversation(input: {
   projectId: string;
   userId: string;
   item: EpisodeAssetDesignItem;
-  conversation: EpisodeDesignConversationMessage[];
+  /** Optional; old assets may have no extract conversation. */
+  conversation?: EpisodeDesignConversationMessage[];
   episodeText: string;
   userRequirement?: string | null;
   promptModelId?: DesignPromptModelId;
@@ -191,6 +200,7 @@ export async function streamRedesignPromptInConversation(input: {
     diagnostics: DesignPromptCallDiagnostics;
   } & DesignPromptExecutionMetadata
 > {
+  const conversation = input.conversation ?? [];
   const selectedModel = getDesignPromptModel(
     input.promptModelId ?? DEFAULT_DESIGN_PROMPT_MODEL_ID,
   );
@@ -317,7 +327,7 @@ export async function streamRedesignPromptInConversation(input: {
     }
   }
 
-  const historyWithoutSystem = input.conversation.filter(
+  const historyWithoutSystem = conversation.filter(
     (m) => m.role !== "system",
   );
   const withUser = appendConversationMessage(historyWithoutSystem, {
@@ -394,15 +404,12 @@ export async function streamDesignPromptText(input: {
   displayModelName?: string;
   providerModelId?: string;
 }> {
-  if (input.conversation && input.conversation.length > 0) {
-    return streamRedesignPromptInConversation({
-      projectId: input.projectId,
-      userId: input.userId,
-      item: input.item,
-      conversation: input.conversation,
-      episodeText: input.episodeText,
-      promptModelId: input.promptModelId,
-    });
-  }
-  throw new Error("本集尚无提取对话，请先点击「提取本集资产」。");
+  return streamRedesignPromptInConversation({
+    projectId: input.projectId,
+    userId: input.userId,
+    item: input.item,
+    conversation: input.conversation ?? [],
+    episodeText: input.episodeText,
+    promptModelId: input.promptModelId,
+  });
 }

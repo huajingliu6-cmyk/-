@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  Clapperboard,
   MapPinned,
   Package,
   UserRound,
@@ -15,6 +17,10 @@ import {
   type GlassSelectOption,
 } from "@/shell/glass-select";
 import { useGenerationBusy } from "@/shell/GenerationBusyGuard";
+import {
+  projectManagementPath,
+  workspaceProjectStoryboardPath,
+} from "@/shell/nav";
 import { safeRandomUUID } from "@/lib/safe-random-id";
 import {
   DesignGenerationOverlay,
@@ -39,7 +45,10 @@ import {
 } from "@/projects/assets/episode-design/approved-item";
 import { createEpisodeAssetDesignIdempotencyKey } from "@/projects/assets/episode-design/prompts";
 import { mergeGeneratedMediaState } from "@/projects/assets/episode-design/generated-media-history";
-import { autoGenerateMissingFormalDesignPrompts } from "@/projects/assets/episode-design/auto-generate-design-prompts";
+import {
+  autoGenerateMissingFormalDesignPrompts,
+  itemNeedsFormalDesignPrompt,
+} from "@/projects/assets/episode-design/auto-generate-design-prompts";
 import { DEFAULT_DESIGN_PROMPT_MODEL_ID } from "@/projects/assets/episode-design/design-prompt-models";
 import {
   characterNeedsUnboundVoiceConfirm,
@@ -345,6 +354,12 @@ function statusBadgeClass(status: EpisodeAssetDesignStatus): string {
   return "ead-badge";
 }
 
+function extractionStreamPercent(textLength: number, targetChars: number): number {
+  const expectedChars = Math.max(800, Math.min(targetChars, 4_000));
+  const streamedRatio = Math.min(1, Math.max(0, textLength) / expectedChars);
+  return Math.min(22, 10 + Math.floor(streamedRatio * 12));
+}
+
 export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   const pathname = usePathname();
   const router = useRouter();
@@ -390,7 +405,6 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   >({ characters: [], scenes: [], props: [], audios: [] });
   const [listLoading, setListLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [fullScriptPending, setFullScriptPending] = useState(false);
   const [fullScriptAssetCount, setFullScriptAssetCount] = useState(0);
   const [batchExtracting, setBatchExtracting] = useState(false);
   /** In-flight asset extract jobs keyed by episodeId (incl. full-script id). */
@@ -446,7 +460,37 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
   const [generatingPromptIds, setGeneratingPromptIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [promptBatchProgress, setPromptBatchProgress] = useState<{
+    episodeId: string;
+    active: boolean;
+    total: number;
+    processed: number;
+    completed: number;
+    failed: number;
+    batchSize: number;
+    assetTotal: number;
+  } | null>(null);
+  const [extractionProgress, setExtractionProgress] = useState<{
+    episodeId: string;
+    percent: number;
+  } | null>(null);
+  const updateExtractionProgress = useCallback(
+    (episodeId: string, percent: number) => {
+      const nextPercent = Math.min(25, Math.max(0, Math.round(percent)));
+      setExtractionProgress((previous) => {
+        if (
+          previous?.episodeId === episodeId &&
+          previous.percent >= nextPercent
+        ) {
+          return previous;
+        }
+        return { episodeId, percent: nextPercent };
+      });
+    },
+    [],
+  );
   const autoPromptBatchKeysRef = useRef(new Set<string>());
+  const activePromptEpisodesRef = useRef(new Set<string>());
   const [assetGenerationProgress, setAssetGenerationProgress] = useState<
     Record<string, AssetGenerationProgress>
   >({});
@@ -543,19 +587,9 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       : null;
   const ownerApprovalOpen = Boolean(ownerApprovalSubmissionId);
   useGenerationBusy(
-    extractionBusy ||
-      generatingAssetIds.size > 0 ||
-      generatingPromptIds.size > 0,
-    extractionBusy
-      ? `asset-extract-${projectId}`
-      : generatingPromptIds.size > 0
-        ? `asset-design-prompt-${projectId}`
-        : `asset-image-generation-${projectId}`,
-    extractionBusy
-      ? "资产提取"
-      : generatingPromptIds.size > 0
-        ? "素材提示词生成"
-        : "资产图片生成",
+    generatingAssetIds.size > 0,
+    `asset-image-generation-${projectId}`,
+    "资产图片生成",
   );
 
   useEffect(() => {
@@ -600,10 +634,6 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         const payload = (await res.json()) as EpisodeDetailPayload;
         if (cancelled) return;
         setFullScriptAssetCount(payload.record.items.length);
-        setFullScriptPending(
-          payload.designStatus === "not_started" &&
-            payload.record.items.length === 0,
-        );
       } catch {
         /* ignore — detail load will refresh when opening full script */
       }
@@ -884,10 +914,6 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
           }
           if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
             setFullScriptAssetCount(payload.record.items.length);
-            setFullScriptPending(
-              payload.designStatus === "not_started" &&
-                payload.record.items.length === 0,
-            );
             setBatchExtracting(false);
           }
         } catch {
@@ -916,10 +942,6 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         const payload = (await detailRes.json()) as EpisodeDetailPayload;
         if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
           setFullScriptAssetCount(payload.record.items.length);
-          setFullScriptPending(
-            payload.designStatus === "not_started" &&
-              payload.record.items.length === 0,
-          );
         }
         setDetail(payload);
         setItems((prevItems) =>
@@ -1103,6 +1125,31 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     setRevision(record.revision);
     revisionRef.current = record.revision;
     setDesignStatus(record.status);
+    setGeneratingPromptIds(
+      new Set(
+        record.items
+          .filter((item) => item.designPrompt?.status === "generating")
+          .map((item) => item.id),
+      ),
+    );
+    const progress = record.items.reduce(
+      (acc, item) => {
+        const status = item.designPrompt?.status;
+        const text = item.designPrompt?.text?.trim() ?? "";
+        if (status === "ready" && text) acc.ready += 1;
+        else if (status === "failed") acc.failed += 1;
+        else if (status === "generating") acc.generating += 1;
+        else if (!text) acc.missing += 1;
+        return acc;
+      },
+      { ready: 0, failed: 0, generating: 0, missing: 0 },
+    );
+    if (progress.generating > 0 || (progress.failed > 0 && progress.ready > 0)) {
+      setPageNote(
+        `素材提示词：已完成 ${progress.ready} / 总数 ${record.items.length}，失败 ${progress.failed}` +
+          (progress.generating > 0 ? `（进行中 ${progress.generating}）` : ""),
+      );
+    }
   }, []);
 
   const kickOffFormalDesignPrompts = useCallback(
@@ -1110,15 +1157,55 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       const batchKey = `${episodeId}|r${record.revision}|${record.items
         .map((item) => item.id)
         .join(",")}`;
-      if (autoPromptBatchKeysRef.current.has(batchKey)) return;
-      autoPromptBatchKeysRef.current.add(batchKey);
+      if (
+        autoPromptBatchKeysRef.current.has(batchKey) ||
+        activePromptEpisodesRef.current.has(episodeId)
+      ) {
+        return;
+      }
 
-      const { ok, failed } = await autoGenerateMissingFormalDesignPrompts({
+      const targetCount = record.items.filter(
+        itemNeedsFormalDesignPrompt,
+      ).length;
+      if (targetCount === 0) return;
+      autoPromptBatchKeysRef.current.add(batchKey);
+      activePromptEpisodesRef.current.add(episodeId);
+
+      try {
+        setPromptBatchProgress({
+          episodeId,
+          active: true,
+          total: targetCount,
+          processed: 0,
+          completed: 0,
+          failed: 0,
+          batchSize: 5,
+          assetTotal: record.items.length,
+        });
+        updateExtractionProgress(episodeId, 25);
+
+        const { ok, failed, started } =
+          await autoGenerateMissingFormalDesignPrompts({
         surface,
         projectId,
         episodeId,
         items: record.items,
         promptModelId: DEFAULT_DESIGN_PROMPT_MODEL_ID,
+        onProgress: (progress) => {
+          setPromptBatchProgress({
+            episodeId,
+            active: progress.completed + progress.failed < progress.total,
+            total: progress.total,
+            processed: progress.processed,
+            completed: progress.completed,
+            failed: progress.failed,
+            batchSize: progress.batchSize ?? 5,
+            assetTotal: record.items.length,
+          });
+          setPageNote(
+            `素材提示词生成中：已完成 ${progress.completed} / 总数 ${progress.total}，失败 ${progress.failed}`,
+          );
+        },
         onItemStart: (item) => {
           setGeneratingPromptIds((prev) => {
             const next = new Set(prev);
@@ -1227,19 +1314,46 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         },
       });
 
-      if (ok > 0 || failed > 0) {
+      if (started > 0) {
+        setPromptBatchProgress({
+          episodeId,
+          active: false,
+          total: started,
+          processed: started,
+          completed: ok,
+          failed,
+          batchSize: 5,
+          assetTotal: record.items.length,
+        });
         setPageNote(
-          ok > 0
-            ? `资产提取完成，已自动生成 ${ok} 条素材提示词` +
-                (failed > 0 ? `，${failed} 条生成失败可在弹窗重试` : "。")
-            : failed > 0
-              ? `资产提取完成，但素材提示词自动生成失败（${failed}），可打开设计弹窗重试。`
-              : "",
+          `素材提示词：已完成 ${ok} / 总数 ${started}，失败 ${failed}` +
+            (failed > 0 ? "（可在设计弹窗重试）" : "。"),
         );
       }
+      } finally {
+        activePromptEpisodesRef.current.delete(episodeId);
+      }
     },
-    [projectId, surface],
+    [projectId, surface, updateExtractionProgress],
   );
+
+  // A refresh may observe an extract that server reconciliation already
+  // applied, or a previous prompt batch that only partially completed.
+  // Resume from persisted missing items without repeating phase-one extract.
+  useEffect(() => {
+    const record = detail?.record;
+    if (!record || record.episodeId !== selectedId) return;
+    if (record.status !== "review" || currentEpisodeExtracting) return;
+    if (!record.items.some(itemNeedsFormalDesignPrompt)) return;
+    queueMicrotask(() => {
+      void kickOffFormalDesignPrompts(record, record.episodeId);
+    });
+  }, [
+    currentEpisodeExtracting,
+    detail,
+    kickOffFormalDesignPrompts,
+    selectedId,
+  ]);
 
   const saveItems = useCallback(
     async (
@@ -1448,6 +1562,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     setReextractOpen(false);
     setPageNote("");
     setConfirmSummary(null);
+    setExtractionProgress({ episodeId: extractingEpisodeId, percent: 3 });
     markEpisodeExtracting(extractingEpisodeId, true);
     if (selectedIdRef.current === extractingEpisodeId) {
       setDesignStatus("generating");
@@ -1484,6 +1599,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       if (!generatingRecord) {
         throw new Error("无法开始提取，请刷新后重试");
       }
+      updateExtractionProgress(extractingEpisodeId, 6);
       statusRevision = generatingRecord.revision;
       const job = extractJobsRef.current.get(extractingEpisodeId);
       if (job) job.revision = statusRevision;
@@ -1501,6 +1617,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         episodeId: extractingEpisodeId,
         signal: controller.signal,
         onMeta: (meta) => {
+          updateExtractionProgress(extractingEpisodeId, 10);
           const live = extractJobsRef.current.get(extractingEpisodeId);
           if (live) live.generationId = meta.generationId;
           void markExtractStatusForEpisode({
@@ -1524,7 +1641,14 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
             }
           });
         },
+        onDelta: (text) => {
+          updateExtractionProgress(
+            extractingEpisodeId,
+            extractionStreamPercent(text.length, 1_000),
+          );
+        },
       });
+      updateExtractionProgress(extractingEpisodeId, 23);
 
       const applyRes = await fetch(
         `${apiRoot}/asset-designs/episodes/${encodeURIComponent(extractingEpisodeId)}/apply-generation`,
@@ -1547,6 +1671,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       if (!applyRes.ok) {
         throw new Error(applyPayload.error ?? "应用生成结果失败");
       }
+      updateExtractionProgress(extractingEpisodeId, 25);
       notifyCreditsRefresh();
       await loadList();
       if (applyPayload.record) {
@@ -1565,6 +1690,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         error instanceof StoryGenerationClientError &&
         error.code === "ASSET_EXTRACT_IN_PROGRESS";
       if (busyConflict) {
+        updateExtractionProgress(extractingEpisodeId, 8);
         if (selectedIdRef.current === extractingEpisodeId) {
           setPageNote("资产正在提取中…");
           setDesignStatus("generating");
@@ -1626,6 +1752,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     selectedId,
     startExtractPoll,
     stopExtractPoll,
+    updateExtractionProgress,
   ]);
 
   const handleExtract = useCallback(() => {
@@ -1673,6 +1800,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     setPageNote("");
     setExtractionError(null);
     setConfirmSummary(null);
+    setExtractionProgress({ episodeId: extractingEpisodeId, percent: 3 });
 
     try {
       const detailRes = await fetch(
@@ -1689,6 +1817,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         applyRecord(scriptDetail.record);
         setDesignStatus("generating");
         setBatchExtracting(true);
+        updateExtractionProgress(extractingEpisodeId, 8);
         markEpisodeExtracting(extractingEpisodeId, true);
         extractJobsRef.current.delete(extractingEpisodeId);
         startExtractPoll(extractingEpisodeId);
@@ -1718,6 +1847,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       if (!generatingRecord) {
         throw new Error("无法开始提取，请刷新后重试");
       }
+      updateExtractionProgress(extractingEpisodeId, 6);
       if (job) job.revision = generatingRecord.revision;
       if (selectedIdRef.current === extractingEpisodeId) {
         applyRecord(generatingRecord);
@@ -1732,6 +1862,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
         outputKind: "script_asset_design",
         signal: controller.signal,
         onMeta: (meta) => {
+          updateExtractionProgress(extractingEpisodeId, 10);
           const live = extractJobsRef.current.get(extractingEpisodeId);
           if (live) live.generationId = meta.generationId;
           void markExtractStatusForEpisode({
@@ -1749,7 +1880,14 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
             },
           });
         },
+        onDelta: (text) => {
+          updateExtractionProgress(
+            extractingEpisodeId,
+            extractionStreamPercent(text.length, 20_000),
+          );
+        },
       });
+      updateExtractionProgress(extractingEpisodeId, 23);
 
       if (!result.text.trim()) {
         throw Object.assign(new Error("模型未返回任何内容，请重试提取。"), {
@@ -1801,10 +1939,10 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
           },
         );
       }
+      updateExtractionProgress(extractingEpisodeId, 25);
 
       notifyCreditsRefresh();
       setFullScriptAssetCount(applyPayload.record.items.length);
-      setFullScriptPending(false);
       setExtractionError(null);
       const rejectedCount = applyPayload.rejectedItems?.length ?? 0;
       const repairedCount = applyPayload.repaired
@@ -1851,6 +1989,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
           (error as { code?: string }).code === "ASSET_EXTRACT_IN_PROGRESS");
 
       if (busyConflict) {
+        updateExtractionProgress(extractingEpisodeId, 8);
         setPageNote("资产正在提取中…");
         setExtractionError(null);
         setDesignStatus("generating");
@@ -1954,6 +2093,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
     saving,
     startExtractPoll,
     stopExtractPoll,
+    updateExtractionProgress,
   ]);
 
   const handleReapplyGeneration = useCallback(async () => {
@@ -1993,7 +2133,6 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       }
       setExtractionError(null);
       setFullScriptAssetCount(applyPayload.record.items.length);
-      setFullScriptPending(false);
       setExtractDiagnostics({
         extracted: applyPayload.record.items.length,
         repaired: applyPayload.repaired ? 1 : 0,
@@ -2090,7 +2229,6 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
             }
           : null,
       );
-      setFullScriptPending(false);
       setFullScriptAssetCount(applyPayload.record.items.length);
       applyRecord(applyPayload.record);
       void kickOffFormalDesignPrompts(
@@ -2775,6 +2913,42 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
       designStatus === "confirmed" ||
       designStatus === "stale");
 
+  const visiblePromptBatchProgress = promptBatchProgress;
+  const promptGenerationBusy =
+    Boolean(visiblePromptBatchProgress?.active) || generatingPromptIds.size > 0;
+  const assetPageLocked =
+    extractionBusy || promptGenerationBusy;
+  const promptProcessed = visiblePromptBatchProgress
+    ? visiblePromptBatchProgress.processed ??
+      visiblePromptBatchProgress.completed + visiblePromptBatchProgress.failed
+    : 0;
+  const promptProgressPercent = visiblePromptBatchProgress?.total
+    ? Math.min(
+        100,
+        25 +
+          Math.round(
+            (promptProcessed / visiblePromptBatchProgress.total) * 75,
+          ),
+      )
+    : 0;
+  const workflowProgressPercent = promptGenerationBusy
+    ? promptProgressPercent
+    : extractionBusy
+      ? extractionProgress?.percent ?? 5
+      : null;
+  const workflowProgressLabel = promptGenerationBusy
+    ? `共提取 ${visiblePromptBatchProgress?.assetTotal ?? 0} 个资产`
+    : "正在提取资产…";
+  const storyboardHref =
+    surface === "workspace"
+      ? workspaceProjectStoryboardPath(projectId)
+      : `${projectManagementPath(projectId)}/storyboard`;
+  const assetLockTitle = promptGenerationBusy
+    ? "资产生成中"
+    : extractionBusy
+      ? "正在提取资产"
+      : "正在生成资产图片";
+
   useEffect(() => {
     if (!scriptViewerOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -2807,7 +2981,12 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
 
   return (
     <div className="ead" data-testid="episode-asset-design-workspace">
-      <div className={`ead-layout${isAwaitingFullScriptExtraction ? " is-pending" : ""}`}>
+      <div className="ead-content-shell">
+        <div
+          className={`ead-layout${isAwaitingFullScriptExtraction ? " is-pending" : ""}`}
+          inert={assetPageLocked ? true : undefined}
+          aria-busy={assetPageLocked}
+        >
         <section className="ead-overview amw-panel" aria-labelledby="ead-overview-title">
           <div className="ead-overview__main">
             <div className="ead-overview__copy">
@@ -2954,22 +3133,6 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
               ) : null}
             </div>
           </div>
-
-          {fullScriptPending && !isFullScriptDesign ? (
-            <div className="ead-full-script-pending" data-testid="ead-full-script-pending">
-              <div>
-                <strong>尚未提取资产</strong>
-              </div>
-              <button
-                type="button"
-                className="amw-btn ead-full-script-pending__button"
-                disabled={extractionBusy}
-                onClick={() => setSelectedId(SCRIPT_ASSET_DESIGN_ID)}
-              >
-                返回全剧本
-              </button>
-            </div>
-          ) : null}
 
           <div className="ead-episode-tool">
             <div className="ead-episode-tool__copy">
@@ -3132,16 +3295,6 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
                   ) : null}
                 </div>
                 <div className="ead-detail__head-actions">
-                  {!isFullScriptDesign ? (
-                    <button
-                      type="button"
-                      className="amw-btn ead-back-full-script"
-                      data-testid="ead-back-full-script-detail"
-                      onClick={() => setSelectedId(SCRIPT_ASSET_DESIGN_ID)}
-                    >
-                      返回全剧本资产
-                    </button>
-                  ) : null}
                   <button
                     type="button"
                     className="amw-btn ead-script-btn"
@@ -3166,6 +3319,17 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
                   >
                     {extractionBusy ? "提取中…" : extractLabel}
                   </button>
+                ) : null}
+                {visiblePromptBatchProgress ? (
+                  <span
+                    className={`ead-prompt-progress${visiblePromptBatchProgress.active ? " is-active" : " is-complete"}`}
+                    role="status"
+                    aria-live="polite"
+                    data-testid="ead-prompt-progress"
+                  >
+                    总进度 {promptProgressPercent}% · 共{" "}
+                    {visiblePromptBatchProgress.assetTotal} 个资产
+                  </span>
                 ) : null}
                 {extractionBusy ? (
                   <button
@@ -3308,9 +3472,7 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
                               audios={bundle.audios}
                               libraryAssets={bundle}
                               generationProgress={
-                                item.assetType === "character"
-                                  ? assetGenerationProgress[item.id]
-                                  : undefined
+                                assetGenerationProgress[item.id]
                               }
                               disabled={
                                 confirming ||
@@ -3381,6 +3543,74 @@ export function EpisodeAssetDesignWorkspace({ projectId }: Props) {
             </div>
           )}
         </section>
+      </div>
+
+        {assetPageLocked ? (
+          <div
+            className="ead-page-lock"
+            role="region"
+            aria-label={assetLockTitle}
+            data-testid="ead-page-lock"
+          >
+            <div className="ead-page-lock__panel">
+              <strong>{assetLockTitle}</strong>
+              {workflowProgressPercent != null ? (
+                <div
+                  className="ead-page-lock__progress"
+                  role="progressbar"
+                  aria-label="资产生成总进度"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={workflowProgressPercent}
+                >
+                  <span
+                    className="ead-page-lock__percentage"
+                    data-testid="ead-workflow-progress-percent"
+                  >
+                    {workflowProgressPercent}%
+                  </span>
+                  <span className="ead-page-lock__track" aria-hidden>
+                    <span style={{ width: `${workflowProgressPercent}%` }} />
+                  </span>
+                  <span className="ead-page-lock__progress-label">
+                    {workflowProgressLabel}
+                  </span>
+                </div>
+              ) : (
+                <span role="status" aria-live="polite">
+                  资产图片正在生成，任务会在后台继续。
+                </span>
+              )}
+              <div className="ead-page-lock__actions">
+                <Link
+                  href={storyboardHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="amw-btn amw-btn-primary ead-storyboard-link"
+                  data-testid="ead-open-storyboard-while-generating"
+                >
+                  <Clapperboard size={16} aria-hidden />
+                  进入分镜创作
+                </Link>
+                {extractionBusy ? (
+                  <button
+                    type="button"
+                    className="amw-btn"
+                    onClick={() =>
+                      void handleCancelGenerate(
+                        isFullScriptDesign
+                          ? SCRIPT_ASSET_DESIGN_ID
+                          : selectedId,
+                      )
+                    }
+                  >
+                    取消生成
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {scriptViewerOpen && detail ? (
@@ -4126,7 +4356,10 @@ function DesignItemCard({
       <article className="ead-card ead-card--visual-asset">
         <div className="ead-card__media">
           {mediaBlock}
-          {editButton}
+          {generationProgress ? (
+            <DesignGenerationOverlay progress={generationProgress} />
+          ) : null}
+          {!generationProgress ? editButton : null}
           <div className="ead-card__media-delete">{deleteButton}</div>
         </div>
         <div className="ead-card__content">

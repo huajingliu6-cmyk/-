@@ -291,9 +291,22 @@ function buildImageRequestBody(input: {
   count: number;
   pixelSize: string;
   sizeMode: "aspect" | "pixel";
+  provider: "codesonline" | "generic";
   extra?: Record<string, unknown>;
 }): Record<string, unknown> {
   const size = input.sizeMode === "pixel" ? input.pixelSize : input.aspect;
+
+  if (input.provider === "codesonline") {
+    return {
+      prompt: input.prompt,
+      n: input.count,
+      ...(input.model ? { model: input.model } : {}),
+      quality: input.quality,
+      size,
+      ...(input.tier === "1k" ? {} : { upscale: input.tier }),
+    };
+  }
+
   return {
     prompt: input.prompt,
     n: input.count,
@@ -310,6 +323,19 @@ function buildImageRequestBody(input: {
   };
 }
 
+function resolveImageProvider(
+  resolvedUrl: string,
+): "codesonline" | "generic" {
+  try {
+    return new URL(resolvedUrl).hostname.toLowerCase() ===
+      "image.codesonline.dev"
+      ? "codesonline"
+      : "generic";
+  } catch {
+    return "generic";
+  }
+}
+
 /**
  * Batch OpenAI-compatible `/images/generations`.
  * Sends n/size/quality and materializes every returned image (max 4).
@@ -322,6 +348,7 @@ export async function generateOpenAiCompatibleImages(
   const tier = normalizeImageResolutionTier(params.resolution);
   const quality = normalizeQuality(params.quality);
   const count = clampImageCount(params.count);
+  const provider = resolveImageProvider(resolvedUrl);
   const pixelSize = mapImageSize({
     aspectRatio: aspect,
     resolution: tier.toUpperCase(),
@@ -336,6 +363,7 @@ export async function generateOpenAiCompatibleImages(
     count,
     pixelSize,
     sizeMode: "aspect",
+    provider,
     extra: params.extra,
   });
 
@@ -376,6 +404,7 @@ export async function generateOpenAiCompatibleImages(
           count,
           pixelSize,
           sizeMode: "pixel",
+          provider,
           extra: params.extra,
         });
         const retry = await fetch(resolvedUrl, {
