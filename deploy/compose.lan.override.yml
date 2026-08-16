@@ -27,6 +27,8 @@ services:
       # LAN: expose host desktop voice library (read-only mount) for voice picker
       LOCAL_VOICE_LIBRARY_DIR: /var/lib/infinite-canvas/local-voice-library
       LOCAL_VOICE_LIBRARY_ALLOW_IN_REMOTE: "true"
+      # LAN: allow unauthenticated layout preview pages (mock data only)
+      ALLOW_LAYOUT_PREVIEWS: "true"
     volumes:
       - ${LOCAL_VOICE_LIBRARY_HOST_DIR:-E:/DevWorkspace/runtime/InfiniteCanvas/local-voice-library}:/var/lib/infinite-canvas/local-voice-library:ro
     ports:
