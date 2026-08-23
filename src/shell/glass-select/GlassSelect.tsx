@@ -25,7 +25,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, X } from "lucide-react";
 import { prefersReducedMotion } from "@/shell/login-portal";
 import { useChipBounce } from "@/shell/useChipBounce";
 import type {
@@ -54,8 +54,19 @@ type Props = {
   options?: GlassSelectOption[];
   /** Grouped options (e.g. project voices + system voices) */
   groups?: GlassSelectGroup[];
+  /**
+   * Optional action rows rendered first (before flat/grouped options).
+   * Selecting these fires `onAction` instead of `onChange`.
+   */
+  actionOptions?: GlassSelectOption[];
   value: string;
   onChange: (id: string) => void;
+  /** Fired when an `action` option (or `actionOptions` row) is chosen. */
+  onAction?: (id: string) => void;
+  /** Fired when an option's trailing remove control is clicked. */
+  onRemove?: (id: string) => void;
+  /** Option ids whose remove control should be disabled (e.g. in-flight delete). */
+  removingIds?: ReadonlySet<string> | readonly string[];
   disabled?: boolean;
   id?: string;
   label: string;
@@ -104,11 +115,28 @@ const MENU_MAX_HEIGHT = 320;
 function flattenOptions(
   options: GlassSelectOption[] | undefined,
   groups: GlassSelectGroup[] | undefined,
+  actionOptions: GlassSelectOption[] | undefined,
 ): GlassSelectOption[] {
-  if (groups && groups.length > 0) {
-    return groups.flatMap((g) => g.options);
+  const leading = (actionOptions ?? []).map((option) => ({
+    ...option,
+    action: true as const,
+  }));
+  const rest =
+    groups && groups.length > 0
+      ? groups.flatMap((g) => g.options)
+      : (options ?? []);
+  return [...leading, ...rest];
+}
+
+function isRemovingId(
+  id: string,
+  removingIds: ReadonlySet<string> | readonly string[] | undefined,
+): boolean {
+  if (!removingIds) return false;
+  if (Array.isArray(removingIds)) {
+    return (removingIds as readonly string[]).includes(id);
   }
-  return options ?? [];
+  return (removingIds as ReadonlySet<string>).has(id);
 }
 
 function computeMenuPosition(
@@ -160,8 +188,12 @@ function computeMenuPosition(
 export function GlassSelect({
   options,
   groups,
+  actionOptions,
   value,
   onChange,
+  onAction,
+  onRemove,
+  removingIds,
   disabled = false,
   id,
   label,
@@ -203,12 +235,15 @@ export function GlassSelect({
   const checkSize = isDense ? 14 : 16;
 
   const flatOptions = useMemo(
-    () => flattenOptions(options, groups),
-    [groups, options],
+    () => flattenOptions(options, groups, actionOptions),
+    [actionOptions, groups, options],
   );
 
-  const selected = flatOptions.find((o) => o.id === value) ?? null;
-  const selectedIndex = flatOptions.findIndex((o) => o.id === value);
+  const selected =
+    flatOptions.find((o) => !o.action && o.id === value) ?? null;
+  const selectedIndex = flatOptions.findIndex(
+    (o) => !o.action && o.id === value,
+  );
 
   const clearCloseTimer = useCallback(() => {
     if (closeTimerRef.current != null) {
@@ -260,11 +295,18 @@ export function GlassSelect({
 
   const selectOption = useCallback(
     (optionId: string) => {
+      const option = flatOptions.find((item) => item.id === optionId);
+      if (option?.action) {
+        onAction?.(optionId);
+        requestClose();
+        triggerRef.current?.focus();
+        return;
+      }
       onChange(optionId);
       requestClose();
       triggerRef.current?.focus();
     },
-    [onChange, requestClose],
+    [flatOptions, onAction, onChange, requestClose],
   );
 
   const updateMenuPosition = useCallback(() => {
@@ -398,10 +440,13 @@ export function GlassSelect({
   const useGroups = Boolean(groups && groups.length > 0);
 
   const renderOption = (option: GlassSelectOption, flatIndex: number) => {
-    const isSelected = option.id === value;
+    const isAction = Boolean(option.action);
+    const isSelected = !isAction && option.id === value;
     const isActive = flatIndex === highlightIndex;
     const compactOption = !option.description;
     const optionKey = option.id === "" ? `${listboxId}-empty` : option.id;
+    const removing = isRemovingId(option.id, removingIds);
+    const showRemove = Boolean(option.removable && onRemove);
     return (
       <div
         key={optionKey}
@@ -413,11 +458,12 @@ export function GlassSelect({
         id={`${listboxId}-opt-${optionKey}`}
         className={`gs__option${compactOption ? " is-compact" : ""}${
           isSelected ? " is-selected" : ""
-        }${isActive ? " is-active" : ""}${
+        }${isActive ? " is-active" : ""}${isAction ? " is-action" : ""}${
           optionClassName ? ` ${optionClassName}` : ""
         }`}
         data-highlighted={isActive ? "" : undefined}
         data-state={isSelected ? "checked" : "unchecked"}
+        data-action={isAction ? "true" : undefined}
         onMouseEnter={() => setHighlightIndex(flatIndex)}
         onClick={() => selectOption(option.id)}
       >
@@ -427,7 +473,26 @@ export function GlassSelect({
             <div className="gs__option-desc">{option.description}</div>
           ) : null}
         </div>
-        {isSelected ? (
+        {showRemove ? (
+          <button
+            type="button"
+            className="gs__option-remove"
+            aria-label={`删除 ${option.label}`}
+            title="删除"
+            disabled={removing || disabled}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              if (removing || disabled) return;
+              onRemove?.(option.id);
+            }}
+          >
+            <X size={isDense ? 12 : 14} strokeWidth={2.5} aria-hidden />
+          </button>
+        ) : null}
+        {isAction ? (
+          <span className="gs__mark" aria-hidden />
+        ) : isSelected ? (
           <span className="gs__check" aria-hidden>
             <Check size={checkSize} strokeWidth={2.5} />
           </span>
@@ -456,7 +521,7 @@ export function GlassSelect({
           width: menuPosition.width,
           minWidth: menuPosition.width,
           maxHeight: menuPosition.maxHeight,
-          zIndex: 2600,
+          zIndex: 12000,
           ["--radix-select-trigger-width" as string]: `${menuPosition.width}px`,
           ["--radix-select-content-available-height" as string]: `${menuPosition.maxHeight}px`,
         }
@@ -481,25 +546,44 @@ export function GlassSelect({
       }}
     >
       {useGroups
-        ? groups!.map((group) => {
-            const start = flatCursor;
-            const nodes = group.options.map((option, i) =>
-              renderOption(option, start + i),
-            );
-            flatCursor += group.options.length;
+        ? (() => {
+            const actionCount = actionOptions?.length ?? 0;
+            const actionNodes =
+              actionCount > 0
+                ? (actionOptions ?? []).map((option, i) =>
+                    renderOption({ ...option, action: true }, i),
+                  )
+                : null;
+            flatCursor = actionCount;
             return (
-              <div key={group.id} className="gs__group">
-                <p className="gs__group-title">{group.label}</p>
-                {group.options.length === 0 ? (
-                  <p className="gs__empty">
-                    {group.emptyHint ?? "暂无选项"}
-                  </p>
-                ) : (
-                  nodes
-                )}
-              </div>
+              <>
+                {actionNodes ? (
+                  <div className="gs__group gs__group--actions" key="__actions">
+                    {actionNodes}
+                  </div>
+                ) : null}
+                {groups!.map((group) => {
+                  const start = flatCursor;
+                  const nodes = group.options.map((option, i) =>
+                    renderOption(option, start + i),
+                  );
+                  flatCursor += group.options.length;
+                  return (
+                    <div key={group.id} className="gs__group">
+                      <p className="gs__group-title">{group.label}</p>
+                      {group.options.length === 0 ? (
+                        <p className="gs__empty">
+                          {group.emptyHint ?? "暂无选项"}
+                        </p>
+                      ) : (
+                        nodes
+                      )}
+                    </div>
+                  );
+                })}
+              </>
             );
-          })
+          })()
         : flatOptions.map((option, index) => renderOption(option, index))}
       {allowClear && value ? (
         <button

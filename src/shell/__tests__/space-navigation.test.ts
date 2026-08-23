@@ -6,7 +6,7 @@ describe("space navigation", () => {
   it("shows only personal creation controls in personal space", () => {
     expect(navigationForSpace({ kind: "personal" }, null).map((item) => item.id)).toEqual([
       "projects",
-      "showcase",
+      "materials",
       "guide",
     ]);
   });
@@ -14,7 +14,7 @@ describe("space navigation", () => {
   it("keeps system admin nav in personal space when allowed", () => {
     expect(
       navigationForSpace({ kind: "personal" }, AUTH_NAV_ITEMS).map((item) => item.id),
-    ).toEqual(["projects", "showcase", "guide", "admin"]);
+    ).toEqual(["projects", "materials", "guide", "admin-materials", "admin"]);
   });
 
   it("uses the permission-filtered navigation in enterprise space", () => {

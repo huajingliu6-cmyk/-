@@ -4,13 +4,8 @@ const mocks = vi.hoisted(() => ({
   requireAccess: vi.fn(),
   getProjectRecord: vi.fn(),
   getDetail: vi.fn(),
-  generate: vi.fn(),
-  saveItems: vi.fn(),
-  deleteImage: vi.fn(),
-  readImage: vi.fn(),
-  sync: vi.fn(),
+  enqueue: vi.fn(),
   reserve: vi.fn(),
-  settle: vi.fn(),
   release: vi.fn(),
 }));
 
@@ -22,22 +17,6 @@ vi.mock("@/projects/project-access", () => ({
 }));
 vi.mock("@/projects/assets/episode-design/episode-design-api", () => ({
   getEpisodeAssetDesignDetail: mocks.getDetail,
-  saveEpisodeAssetDesignItems: mocks.saveItems,
-}));
-vi.mock("@/projects/assets/episode-design/generate-design-asset-image", () => ({
-  generateDesignAssetImage: mocks.generate,
-}));
-vi.mock("@/projects/assets/asset-image-storage", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/projects/assets/asset-image-storage")>();
-  return {
-    ...actual,
-    deleteProjectAssetImageFile: mocks.deleteImage,
-    readProjectAssetImageFile: mocks.readImage,
-  };
-});
-vi.mock("@/projects/workspace-sync/sync-management-to-workspace", () => ({
-  syncManagementToWorkspace: mocks.sync,
 }));
 vi.mock("@/projects/assets/episode-design/route-remote-guard", () => ({
   guardEpisodeAssetDesignRemoteData: (fn: () => unknown) => fn(),
@@ -49,10 +28,12 @@ vi.mock("@/credits/generation-billing", async () => {
   return {
     ...actual,
     reserveImageGenerationCredits: mocks.reserve,
-    settleGenerationCredits: mocks.settle,
     releaseGenerationCredits: mocks.release,
   };
 });
+vi.mock("@/projects/assets/image-generation/process-job", () => ({
+  createAndEnqueueImageJob: (...args: unknown[]) => mocks.enqueue(...args),
+}));
 
 import { POST } from "@/app/api/projects/[projectId]/asset-designs/episodes/[episodeId]/items/[itemId]/generate-asset/route";
 
@@ -66,7 +47,7 @@ function baseItem(generatedMedia: unknown = null) {
   };
 }
 
-describe("generate-asset route credit billing", () => {
+describe("generate-asset route credit billing (async enqueue)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireAccess.mockResolvedValue({
@@ -74,14 +55,15 @@ describe("generate-asset route credit billing", () => {
       user: { id: "owner_1" },
     });
     mocks.getProjectRecord.mockResolvedValue({ projectId: "p1" });
-    mocks.sync.mockResolvedValue(undefined);
-    mocks.deleteImage.mockResolvedValue(undefined);
-    mocks.readImage.mockResolvedValue(null);
-    mocks.settle.mockResolvedValue({ chargedPoints: 2, balance: 98 });
     mocks.release.mockResolvedValue(undefined);
   });
 
   it("requires idempotencyKey", async () => {
+    mocks.getDetail.mockResolvedValue({
+      ok: true,
+      record: { revision: 1, items: [baseItem()] },
+      currentFingerprint: "fp",
+    });
     const res = await POST(
       new Request("http://localhost", {
         method: "POST",
@@ -93,7 +75,7 @@ describe("generate-asset route credit billing", () => {
     expect(await res.json()).toMatchObject({ code: "IDEMPOTENCY_KEY_REQUIRED" });
   });
 
-  it("returns 402 without calling provider when reserve fails", async () => {
+  it("returns 402 without enqueue when reserve fails", async () => {
     mocks.getDetail.mockResolvedValue({
       ok: true,
       record: { revision: 1, items: [baseItem()] },
@@ -115,10 +97,10 @@ describe("generate-asset route credit billing", () => {
       { params: Promise.resolve({ projectId: "p1", episodeId: "ep1", itemId: "item_1" }) },
     );
     expect(res.status).toBe(402);
-    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.enqueue).not.toHaveBeenCalled();
   });
 
-  it("releases reservation when provider fails", async () => {
+  it("releases reservation when active job blocks enqueue", async () => {
     mocks.getDetail.mockResolvedValue({
       ok: true,
       record: { revision: 1, items: [baseItem()] },
@@ -131,9 +113,13 @@ describe("generate-asset route credit billing", () => {
       firstGeneration: true,
       balance: 98,
     });
-    mocks.generate.mockRejectedValue(
-      Object.assign(new Error("provider down"), { status: 502, code: "PROVIDER_FAILED" }),
-    );
+    mocks.enqueue.mockResolvedValue({
+      ok: false,
+      status: 409,
+      code: "GENERATION_IN_PROGRESS",
+      message: "该素材正在生成中，请等待完成后再试。",
+      job: { id: "img_active", status: "running" },
+    });
 
     const res = await POST(
       new Request("http://localhost", {
@@ -142,20 +128,19 @@ describe("generate-asset route credit billing", () => {
       }),
       { params: Promise.resolve({ projectId: "p1", episodeId: "ep1", itemId: "item_1" }) },
     );
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(409);
     expect(mocks.release).toHaveBeenCalledWith(
       expect.objectContaining({
         reservationId: "img_res_1",
-        reason: "asset-image-provider-failed",
+        reason: "design-asset-image-duplicate-blocked",
       }),
     );
-    expect(mocks.settle).not.toHaveBeenCalled();
   });
 
-  it("releases on revision conflict and settles on success", async () => {
+  it("returns async job and releases when idempotency reuses prior job", async () => {
     mocks.getDetail.mockResolvedValue({
       ok: true,
-      record: { revision: 1, items: [baseItem({ currentId: "old", historyIds: ["old"], history: [] })] },
+      record: { revision: 1, items: [baseItem()] },
       currentFingerprint: "fp",
     });
     mocks.reserve.mockResolvedValue({
@@ -165,318 +150,75 @@ describe("generate-asset route credit billing", () => {
       firstGeneration: false,
       balance: 99,
     });
-    mocks.generate.mockResolvedValue({
-      mediaId: "media_new",
-      promptFingerprint: "pf",
-      mimeType: "image/png",
-      images: [{ mediaId: "media_new", mimeType: "image/png" }],
-      count: 1,
-      quality: "high",
-      aspectRatio: "16:9",
-      resolution: "4K",
-      notice: "ok",
-      mode: "mock",
-    });
-    mocks.saveItems.mockResolvedValue({
-      ok: false,
-      code: "REVISION_CONFLICT",
-      message: "conflict",
+    mocks.enqueue.mockResolvedValue({
+      ok: true,
+      reusedIdempotency: true,
+      job: { id: "img_prior", status: "succeeded", subjectKind: "design_item" },
     });
 
-    const conflict = await POST(
+    const res = await POST(
       new Request("http://localhost", {
         method: "POST",
         body: JSON.stringify({ prompt: "hello", idempotencyKey: "k3" }),
       }),
       { params: Promise.resolve({ projectId: "p1", episodeId: "ep1", itemId: "item_1" }) },
     );
-    expect(conflict.status).toBe(409);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({
+      async: true,
+      jobId: "img_prior",
+    });
     expect(mocks.release).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: "asset-image-revision-conflict" }),
+      expect.objectContaining({
+        reservationId: "img_res_2",
+        reason: "design-asset-image-idempotent-reuse",
+      }),
     );
+  });
 
-    mocks.release.mockClear();
-    mocks.saveItems.mockResolvedValue({
+  it("enqueues new async job without waiting on provider", async () => {
+    mocks.getDetail.mockResolvedValue({
       ok: true,
-      record: {
-        revision: 2,
-        items: [
-          {
-            ...baseItem({ currentId: "media_new", historyIds: ["old", "media_new"], history: [] }),
-            generatedMedia: { currentId: "media_new", historyIds: ["old", "media_new"], history: [] },
-          },
-        ],
+      record: { revision: 1, items: [baseItem()] },
+      currentFingerprint: "fp",
+    });
+    mocks.reserve.mockResolvedValue({
+      ok: true,
+      reservationId: "img_res_3",
+      points: 1,
+      firstGeneration: true,
+      balance: 10,
+    });
+    mocks.enqueue.mockResolvedValue({
+      ok: true,
+      job: {
+        id: "img_new",
+        status: "queued",
+        subjectKind: "design_item",
+        subjectId: "item_1",
       },
     });
-    mocks.settle.mockResolvedValue({ chargedPoints: 1, balance: 99 });
 
-    const ok = await POST(
+    const res = await POST(
       new Request("http://localhost", {
         method: "POST",
         body: JSON.stringify({ prompt: "hello", idempotencyKey: "k4" }),
       }),
       { params: Promise.resolve({ projectId: "p1", episodeId: "ep1", itemId: "item_1" }) },
     );
-    expect(ok.status).toBe(200);
-    const body = await ok.json();
-    expect(body.credit).toMatchObject({
-      chargedPoints: 1,
-      balance: 99,
-      firstGeneration: false,
-    });
-    expect(mocks.settle).toHaveBeenCalled();
-    expect(mocks.release).not.toHaveBeenCalled();
-  });
-
-  it("rejects invalid count and settles actual multi-image credits", async () => {
-    mocks.getDetail.mockResolvedValue({
-      ok: true,
-      record: { revision: 1, items: [baseItem()] },
-      currentFingerprint: "fp",
-    });
-
-    const invalid = await POST(
-      new Request("http://localhost", {
-        method: "POST",
-        body: JSON.stringify({
-          prompt: "hello",
-          idempotencyKey: "k5",
-          quality: "high",
-          aspectRatio: "16:9",
-          count: 5,
-        }),
-      }),
-      { params: Promise.resolve({ projectId: "p1", episodeId: "ep1", itemId: "item_1" }) },
-    );
-    expect(invalid.status).toBe(400);
-    expect(mocks.generate).not.toHaveBeenCalled();
-
-    mocks.reserve.mockResolvedValue({
-      ok: true,
-      reservationId: "img_res_3",
-      points: 5,
-      firstGeneration: true,
-      balance: 95,
-    });
-    mocks.generate.mockResolvedValue({
-      mediaId: "m1",
-      promptFingerprint: "pf",
-      mimeType: "image/png",
-      images: [
-        { mediaId: "m1", mimeType: "image/png" },
-        { mediaId: "m2", mimeType: "image/png" },
-        { mediaId: "m3", mimeType: "image/png" },
-        { mediaId: "m4", mimeType: "image/png" },
-      ],
-      count: 4,
-      quality: "high",
-      aspectRatio: "16:9",
-      resolution: "4K",
-      notice: "已生成 4 张",
-      mode: "mock",
-    });
-    mocks.saveItems.mockResolvedValue({
-      ok: true,
-      record: { revision: 2, items: [baseItem()] },
-    });
-    mocks.settle.mockResolvedValue({ chargedPoints: 5, balance: 95 });
-
-    const ok = await POST(
-      new Request("http://localhost", {
-        method: "POST",
-        body: JSON.stringify({
-          prompt: "hello",
-          idempotencyKey: "k6",
-          quality: "high",
-          aspectRatio: "16:9",
-          count: 4,
-        }),
-      }),
-      { params: Promise.resolve({ projectId: "p1", episodeId: "ep1", itemId: "item_1" }) },
-    );
-    expect(ok.status).toBe(200);
-    expect(mocks.reserve).toHaveBeenCalledWith(
-      expect.objectContaining({ count: 4 }),
-    );
-    expect(mocks.settle).toHaveBeenCalledWith(
-      expect.objectContaining({ actualPoints: 5 }),
-    );
-    const body = await ok.json();
-    expect(body.mediaIds).toEqual(["m1", "m2", "m3", "m4"]);
-    expect(body.count).toBe(4);
-  });
-
-  it("supports FormData image_to_image with owned referenceMediaId", async () => {
-    const png = Buffer.from(
-      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
-      "base64",
-    );
-    mocks.getDetail.mockResolvedValue({
-      ok: true,
-      record: {
-        revision: 1,
-        items: [
-          baseItem({
-            currentId: "gen_owned",
-            historyIds: ["gen_owned"],
-            history: [{ mediaId: "gen_owned" }],
-          }),
-        ],
-      },
-      currentFingerprint: "fp",
-    });
-    mocks.readImage.mockResolvedValue({
-      buffer: png,
-      mimeType: "image/png",
-      fileName: "gen_owned.png",
-    });
-    mocks.reserve.mockResolvedValue({
-      ok: true,
-      reservationId: "img_res_i2i",
-      points: 2,
-      firstGeneration: false,
-      balance: 90,
-    });
-    mocks.generate.mockResolvedValue({
-      mediaId: "gen_new",
-      promptFingerprint: "pf",
-      mimeType: "image/png",
-      images: [{ mediaId: "gen_new", mimeType: "image/png" }],
-      count: 1,
-      quality: "high",
-      aspectRatio: "16:9",
-      resolution: "4K",
-      notice: "ok",
-      mode: "mock",
-    });
-    mocks.saveItems.mockResolvedValue({
-      ok: true,
-      record: { revision: 2, items: [baseItem()] },
-    });
-    mocks.settle.mockResolvedValue({ chargedPoints: 1, balance: 90 });
-
-    const form = new FormData();
-    form.set("mode", "image_to_image");
-    form.set("prompt", "改成黑色风衣");
-    form.set("idempotencyKey", "k-i2i");
-    form.set("quality", "high");
-    form.set("aspectRatio", "16:9");
-    form.set("count", "1");
-    form.set("referenceMediaId[0]", "gen_owned");
-
-    const res = await POST(
-      new Request("http://localhost", { method: "POST", body: form }),
-      {
-        params: Promise.resolve({
-          projectId: "p1",
-          episodeId: "ep1",
-          itemId: "item_1",
-        }),
-      },
-    );
     expect(res.status).toBe(200);
-    expect(mocks.readImage).toHaveBeenCalledWith("p1", "gen_owned");
-    expect(mocks.generate).toHaveBeenCalledWith(
+    const body = await res.json();
+    expect(body.async).toBe(true);
+    expect(body.jobId).toBe("img_new");
+    expect(mocks.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompt: "改成黑色风衣",
-        referenceImages: [
-          expect.objectContaining({
-            mimeType: "image/png",
-            fileName: "gen_owned.png",
-          }),
-        ],
+        subjectKind: "design_item",
+        subjectId: "item_1",
+        episodeId: "ep1",
+        scope: "management",
       }),
     );
-  });
-
-  it("rejects foreign referenceMediaId and releases on provider fail for uploaded reference", async () => {
-    mocks.getDetail.mockResolvedValue({
-      ok: true,
-      record: {
-        revision: 1,
-        items: [
-          baseItem({
-            currentId: "gen_owned",
-            historyIds: ["gen_owned"],
-            history: [{ mediaId: "gen_owned" }],
-          }),
-        ],
-      },
-      currentFingerprint: "fp",
-    });
-
-    const forbiddenForm = new FormData();
-    forbiddenForm.set("mode", "image_to_image");
-    forbiddenForm.set("prompt", "x");
-    forbiddenForm.set("idempotencyKey", "k-forbid");
-    forbiddenForm.set("referenceMediaId[0]", "gen_other_project");
-
-    const forbidden = await POST(
-      new Request("http://localhost", {
-        method: "POST",
-        body: forbiddenForm,
-      }),
-      {
-        params: Promise.resolve({
-          projectId: "p1",
-          episodeId: "ep1",
-          itemId: "item_1",
-        }),
-      },
-    );
-    expect(forbidden.status).toBe(403);
-    expect(await forbidden.json()).toMatchObject({
-      code: "REFERENCE_MEDIA_FORBIDDEN",
-    });
-    expect(mocks.generate).not.toHaveBeenCalled();
-
-    const png = Buffer.from(
-      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
-      "base64",
-    );
-    const form = new FormData();
-    form.set("mode", "image_to_image");
-    form.set("prompt", "改色");
-    form.set("idempotencyKey", "k-upload-fail");
-    form.set("quality", "high");
-    form.set("aspectRatio", "16:9");
-    form.set("count", "1");
-    form.set(
-      "referenceImage[0]",
-      new File([png], "ref.png", { type: "image/png" }),
-    );
-
-    mocks.reserve.mockResolvedValue({
-      ok: true,
-      reservationId: "img_res_upload",
-      points: 2,
-      firstGeneration: false,
-      balance: 88,
-    });
-    mocks.generate.mockRejectedValue(
-      Object.assign(new Error("edit failed"), {
-        status: 502,
-        code: "IMAGE_GENERATION_FAILED",
-      }),
-    );
-
-    const failed = await POST(
-      new Request("http://localhost", { method: "POST", body: form }),
-      {
-        params: Promise.resolve({
-          projectId: "p1",
-          episodeId: "ep1",
-          itemId: "item_1",
-        }),
-      },
-    );
-    expect(failed.status).toBe(502);
-    expect(mocks.release).toHaveBeenCalledWith(
-      expect.objectContaining({
-        reservationId: "img_res_upload",
-        reason: "asset-image-provider-failed",
-      }),
-    );
-    expect(mocks.settle).not.toHaveBeenCalled();
+    expect(mocks.release).not.toHaveBeenCalled();
   });
 });

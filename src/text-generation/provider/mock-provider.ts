@@ -72,8 +72,18 @@ export class MockTextProvider implements TextGenerationProvider {
         systemJoined + userJoined,
       );
     const redesignMatch = /^(.+?)重新设计/.exec(lastUser.trim());
+    const isRosterPhase =
+      /ASSET_ROSTER_PHASE|asset\.roster\.extract|Roster phase ONLY|script-roster-chunk/.test(
+        systemJoined + userJoined,
+      );
+    const isDetailPhase =
+      /ASSET_DETAIL_PHASE|asset\.detail\.extract|Detail phase ONLY|asset-detail-batch/.test(
+        systemJoined + userJoined,
+      );
     const isEpisodeAssetDesign =
       !redesignMatch &&
+      !isRosterPhase &&
+      !isDetailPhase &&
       /影视资产策划师|episode_asset_design|"assets":\[\{"type"/.test(
         systemJoined + userJoined,
       );
@@ -170,6 +180,75 @@ export class MockTextProvider implements TextGenerationProvider {
               },
             ];
       body = JSON.stringify({ episodes });
+    } else if (isRosterPhase) {
+      body = JSON.stringify({
+        version: 1,
+        assets: [
+          {
+            type: "character",
+            name: "林清",
+            aliases: ["清清"],
+            evidenceRefs: ["林清走进茶馆"],
+          },
+          {
+            type: "scene",
+            name: "雨夜茶馆",
+            aliases: [],
+            evidenceRefs: ["茶馆"],
+          },
+          {
+            type: "prop",
+            name: "旧伞",
+            aliases: [],
+            evidenceRefs: ["伞"],
+          },
+        ],
+      });
+    } else if (isDetailPhase) {
+      const batchKeys = [
+        ...userJoined.matchAll(
+          /"assetKey"\s*:\s*"([^"]+)"/g,
+        ),
+      ].map((match) => match[1]!);
+      const uniqueKeys = [...new Set(batchKeys)].filter(
+        (key) => key.includes(":"),
+      );
+      const assets =
+        uniqueKeys.length > 0
+          ? uniqueKeys.map((assetKey) => {
+              const [type, ...rest] = assetKey.split(":");
+              const name = rest.join(":") || "资产";
+              const assetType =
+                type === "scene" || type === "prop" || type === "audio"
+                  ? type
+                  : "character";
+              return {
+                assetKey,
+                type: assetType,
+                name,
+                description: "本批资产详情",
+                design: {
+                  usageInEpisode: "推动情节",
+                  evidence: name,
+                  ...(assetType === "character"
+                    ? { role: "角色", appearance: "写实" }
+                    : assetType === "scene"
+                      ? { location: name, timeOfDay: "日", style: "写实" }
+                      : assetType === "prop"
+                        ? { propType: "道具", usage: "剧情" }
+                        : { audioKind: "sfx" }),
+                },
+              };
+            })
+          : [
+              {
+                assetKey: "character:linqing",
+                type: "character",
+                name: "林清",
+                design: { role: "主角", appearance: "清瘦", usageInEpisode: "开场" },
+              },
+            ];
+      body = JSON.stringify({ version: 1, assets });
     } else if (isEpisodeAssetDesign) {
       const nameHint =
         /林清|掌柜|阿棠|雨|茶馆|铜匣|玉佩/.exec(lastUser)?.[0] ?? "旅人";

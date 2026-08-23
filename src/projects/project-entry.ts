@@ -1,5 +1,4 @@
 import type { ProjectCreationSource } from "@/projects/types";
-import { SCRIPT_ASSET_DESIGN_ID } from "@/projects/assets/episode-design/types";
 
 type EntryScriptDraft = {
   sourceImport?: unknown;
@@ -33,15 +32,11 @@ function isConfirmed(record: EntryAssetStore["records"][number] | undefined) {
 function hasCompletedAssets(
   draft: EntryScriptDraft,
   assetStore: EntryAssetStore,
+  hasActiveVersion = false,
 ): boolean {
+  if (hasActiveVersion) return true;
   const episodeIds = draft?.episodes?.map((episode) => episode.id) ?? [];
   if (episodeIds.length === 0) return false;
-
-  const fullScript = assetStore.records.find(
-    (record) => record.episodeId === SCRIPT_ASSET_DESIGN_ID,
-  );
-  if (isConfirmed(fullScript)) return true;
-
   return episodeIds.every((episodeId) =>
     isConfirmed(
       assetStore.records.find((record) => record.episodeId === episodeId),
@@ -53,11 +48,16 @@ export function resolveProjectEntryStage(input: {
   creationSource: ProjectCreationSource;
   scriptDraft: EntryScriptDraft;
   assetStore: EntryAssetStore;
+  hasActiveVersion?: boolean;
 }): ProjectEntryStage {
   if (!hasScriptContent(input.scriptDraft)) {
     return input.creationSource === "story" ? "story" : "script";
   }
-  return hasCompletedAssets(input.scriptDraft, input.assetStore)
+  return hasCompletedAssets(
+    input.scriptDraft,
+    input.assetStore,
+    input.hasActiveVersion === true,
+  )
     ? "storyboard"
     : "assets";
 }

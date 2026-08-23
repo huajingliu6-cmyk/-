@@ -23,7 +23,9 @@ export function shouldOpenPersonalBlankContextMenu(params: {
   spaceKind: ActiveSpace["kind"];
   target: ClosestTarget | null;
 }): boolean {
-  if (params.spaceKind !== "personal") return false;
+  if (params.spaceKind !== "personal" && params.spaceKind !== "enterprise") {
+    return false;
+  }
   if (!params.target) return false;
   return !params.target.closest(PERSONAL_BLANK_INTERACTIVE_SELECTOR);
 }

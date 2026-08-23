@@ -1,7 +1,11 @@
 import "server-only";
 import { requestRemoteData } from "@/persistence/remote-data-client";
 
-export type ProjectAssetDataKind = "bundle" | "episode-designs" | "approvals";
+export type ProjectAssetDataKind =
+  | "bundle"
+  | "episode-designs"
+  | "approvals"
+  | "asset-extraction";
 
 export const REMOTE_PROJECT_ASSET_DATA_CONFLICT =
   "REMOTE_PROJECT_ASSET_DATA_CONFLICT";
@@ -20,6 +24,9 @@ export async function loadProjectAssetData(
   const response = await requestRemoteData(
     `/v1/project-asset-data?kind=${encodeURIComponent(kind)}&projectId=${encodeURIComponent(projectId)}`,
   );
+  if (response.status === 400 && kind === "asset-extraction") {
+    return { value: null, revision: 0 };
+  }
   if (!response.ok) {
     throw new Error(`REMOTE_PROJECT_ASSET_DATA_REQUEST_FAILED:${response.status}`);
   }

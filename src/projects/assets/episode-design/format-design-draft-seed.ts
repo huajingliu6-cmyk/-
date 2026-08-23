@@ -131,6 +131,39 @@ export function containsForbiddenExtractFieldTags(text: string): boolean {
   return FORBIDDEN_EXTRACT_FIELD_TAGS.some((tag) => text.includes(tag));
 }
 
+/** True when draft.description is a complete detail-phase image prompt from STY extraction. */
+export function isExtractionDetailImagePrompt(
+  text: string,
+  item: EpisodeAssetDesignItem,
+): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length < 100) return false;
+  if (looksLikeExtractDraftPrompt(trimmed, item)) return false;
+  if (containsForbiddenExtractFieldTags(trimmed)) return false;
+  if (item.assetType === "character") {
+    return /16:9|横屏|设定卡|三视图|Front|Profile|Back|超写实|角色设定|正面面部特写/.test(
+      trimmed,
+    );
+  }
+  if (item.assetType === "scene") {
+    return /16:9|环境建立|无人物|空间结构/.test(trimmed);
+  }
+  if (item.assetType === "prop") {
+    return /16:9|静物|道具|无人物|无人手/.test(trimmed);
+  }
+  return false;
+}
+
+function draftDescriptionImagePrompt(item: EpisodeAssetDesignItem): string {
+  const draft = item.draft as Record<string, unknown>;
+  const description =
+    typeof draft.description === "string" ? draft.description.trim() : "";
+  if (!description || !isExtractionDetailImagePrompt(description, item)) {
+    return "";
+  }
+  return description;
+}
+
 /** True when text is clearly an extract-draft dump, not a final design prompt. */
 export function looksLikeExtractDraftPrompt(
   text: string,
@@ -164,23 +197,27 @@ export function resolveFormalDesignPromptText(
 ): string {
   const state = item.designPrompt;
   const text = state?.text?.trim() ?? "";
-  if (!text) return "";
-
-  if (looksLikeExtractDraftPrompt(text, item)) {
-    return "";
-  }
-
-  const generationId = state?.generationId?.trim() ?? "";
-  if (!generationId) {
-    const history = state?.history ?? [];
-    const last = history[history.length - 1];
-    if (last?.source === "extract") return "";
-    if (history.length === 0 && looksLikeExtractDraftPrompt(text, item)) {
-      return "";
+  if (text) {
+    if (looksLikeExtractDraftPrompt(text, item)) {
+      return draftDescriptionImagePrompt(item);
     }
+
+    const generationId = state?.generationId?.trim() ?? "";
+    if (!generationId) {
+      const history = state?.history ?? [];
+      const last = history[history.length - 1];
+      if (last?.source === "extract") {
+        return draftDescriptionImagePrompt(item);
+      }
+      if (history.length === 0 && looksLikeExtractDraftPrompt(text, item)) {
+        return draftDescriptionImagePrompt(item);
+      }
+    }
+
+    return text;
   }
 
-  return text;
+  return draftDescriptionImagePrompt(item);
 }
 
 /**

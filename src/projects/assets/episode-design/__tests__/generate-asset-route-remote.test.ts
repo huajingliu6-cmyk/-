@@ -16,8 +16,26 @@ const workspaceRoute = readFileSync(
   ),
   "utf-8",
 );
+const enqueue = readFileSync(
+  path.join(
+    process.cwd(),
+    "src/projects/assets/image-generation/enqueue-design-asset.ts",
+  ),
+  "utf-8",
+);
+const link = readFileSync(
+  path.join(
+    process.cwd(),
+    "src/projects/assets/image-generation/link-design-item-result.ts",
+  ),
+  "utf-8",
+);
+const modal = readFileSync(
+  path.join(process.cwd(), "src/projects/assets/DesignAssetModal.tsx"),
+  "utf-8",
+);
 
-describe("design asset generation remote routes", () => {
+describe("design asset generation remote routes (P1.2 async)", () => {
   it("uses remote service guards instead of local dependency blockers", () => {
     expect(managementRoute).toContain("guardEpisodeAssetDesignRemoteData");
     expect(managementRoute).not.toContain(
@@ -27,22 +45,29 @@ describe("design asset generation remote routes", () => {
     expect(workspaceRoute).not.toContain("rejectRemoteWorkspaceLocalDependency");
   });
 
-  it("persists generated media into the corresponding design document", () => {
+  it("enqueues existing image jobs instead of sync generateDesignAssetImage", () => {
     for (const route of [managementRoute, workspaceRoute]) {
-      expect(route).toContain("generateDesignAssetImage");
-      expect(route).toContain("appendGeneratedMediaGenerations");
-      expect(route).toContain("parseGenerateAssetRequest");
-      expect(route).toContain("readProjectAssetImageFile");
-      expect(route).toContain('mode === "image_to_image"');
+      expect(route).toContain("enqueueDesignAssetGenerate");
+      expect(route).not.toContain("generateDesignAssetImage");
+      expect(route).not.toContain("appendGeneratedMediaGenerations");
     }
-    expect(managementRoute).toContain("saveEpisodeAssetDesignItems");
-    expect(workspaceRoute).toContain("saveWorkspaceEpisodeAssetDesignItems");
+    expect(enqueue).toContain("createAndEnqueueImageJob");
+    expect(enqueue).toContain('subjectKind: "design_item"');
+    expect(enqueue).toContain("parseGenerateAssetRequest");
   });
 
-  it("removes the generated Blob when the design document cannot be saved", () => {
-    for (const route of [managementRoute, workspaceRoute]) {
-      expect(route).toContain("deleteProjectAssetImageFile");
-      expect(route).toContain("generated.mediaId");
-    }
+  it("persists design media via scope-isolated link helper", () => {
+    expect(link).toContain("saveEpisodeAssetDesignItems");
+    expect(link).toContain("saveWorkspaceEpisodeAssetDesignItems");
+    expect(link).toContain("appendGeneratedMediaGenerations");
+  });
+
+  it("DesignAssetModal no longer waits on sync generate-asset media payload", () => {
+    expect(modal).toContain("useLibraryImageGenerationJob");
+    expect(modal).toContain("ImageGenerationTaskPanel");
+    expect(modal).toContain("beginFromGenerateResponse");
+    expect(modal).toContain("payload.async");
+    expect(modal).toContain('assetKind: "design_item"');
+    expect(modal).not.toMatch(/reportProgress\(\{\s*stage:\s*"saving"/);
   });
 });

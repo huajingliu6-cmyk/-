@@ -464,7 +464,7 @@ function buildShot(
     audioAssetIds: matchedAssetIds(assetMatches, "audio"),
     requirements,
     manuallyEdited: false,
-    promptLocked: false,
+    promptLocked: true,
     locked: false,
     confirmed: false,
     revision: 1,

@@ -32,12 +32,10 @@ import {
   type ActiveSpace,
 } from "@/enterprise/client-space";
 import {
-  cancelStoryGeneration,
   notifyCreditsRefresh,
-  streamStoryGeneration,
-  StoryGenerationClientError,
 } from "@/projects/story/story-generation-client";
-import { STORY_TEXT_MODELS } from "@/projects/story/constants";
+import { LIVE_EXTRACTION_STATUSES } from "@/projects/assets/extraction/types";
+import type { AssetExtractionTask } from "@/projects/assets/extraction/types";
 import {
   designCardApprovalUi,
   isApprovedEpisodeDesignItem,
@@ -71,7 +69,6 @@ import {
   type EpisodeAssetDesignStatus,
   type PropDesignItem,
   type SceneDesignItem,
-  SCRIPT_ASSET_DESIGN_ID,
 } from "@/projects/assets/episode-design/types";
 const CharacterCreateDialog = dynamic(
   () => import("@/projects/assets/CharacterCreateDialog").then((m) => m.CharacterCreateDialog),
@@ -109,6 +106,14 @@ import type {
 } from "@/projects/assets/types";
 import "./asset-workspace.css";
 
+function designFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const method = (init.method ?? "GET").toUpperCase();
+  if (method === "GET" || method === "HEAD") {
+    return fetch(url, { credentials: "include", ...init });
+  }
+  return fetch(url, { credentials: "include", ...init });
+}
+
 export type AssetExtractionEpisode = {
   episodeId: string;
   episodeNumber: number;
@@ -120,8 +125,13 @@ export type AssetExtractionEpisode = {
 type EpisodeListItem = AssetExtractionEpisode;
 
 export type AssetExtractionRequest =
-  | { id: number; mode: "full-script" }
-  | { id: number; mode: "selected-episode"; episodeId: string };
+  | { id: number; mode: "full-script"; idempotencyKey: string }
+  | {
+      id: number;
+      mode: "selected-episode";
+      episodeId: string;
+      idempotencyKey: string;
+    };
 
 export type AssetExtractionProgress = {
   percent: number;
@@ -169,7 +179,9 @@ type Props = {
   onExtractionProgressChange?: (
     progress: AssetExtractionProgress | null,
   ) => void;
-  onExtractionComplete?: () => void;
+  onExtractionComplete?: () => void | Promise<void>;
+  /** Parent clears the request after headless consumption so remounts cannot replay it. */
+  onExtractionRequestConsumed?: (requestId: number) => void;
 };
 
 const GROUPS: Array<{
@@ -387,12 +399,6 @@ function statusBadgeClass(status: EpisodeAssetDesignStatus): string {
   return "ead-badge";
 }
 
-function extractionStreamPercent(textLength: number, targetChars: number): number {
-  const expectedChars = Math.max(800, Math.min(targetChars, 4_000));
-  const streamedRatio = Math.min(1, Math.max(0, textLength) / expectedChars);
-  return Math.min(22, 10 + Math.floor(streamedRatio * 12));
-}
-
 export function EpisodeAssetDesignWorkspace({
   projectId,
   showApprovalUi = true,
@@ -408,6 +414,7 @@ export function EpisodeAssetDesignWorkspace({
   onExtractionBusyChange,
   onExtractionProgressChange,
   onExtractionComplete,
+  onExtractionRequestConsumed,
 }: Props) {
   const pathname = usePathname();
   const router = useRouter();
@@ -427,7 +434,7 @@ export function EpisodeAssetDesignWorkspace({
   );
   const [episodes, setEpisodes] = useState<EpisodeListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>(
-    () => queryEpisodeId || SCRIPT_ASSET_DESIGN_ID,
+    () => queryEpisodeId || "",
   );
   const [detail, setDetail] = useState<EpisodeDetailPayload | null>(null);
   const [items, setItems] = useState<EpisodeAssetDesignItem[]>([]);
@@ -453,9 +460,7 @@ export function EpisodeAssetDesignWorkspace({
   >({ characters: [], scenes: [], props: [], audios: [] });
   const [listLoading, setListLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [fullScriptAssetCount, setFullScriptAssetCount] = useState(0);
   const [batchExtracting, setBatchExtracting] = useState(false);
-  /** In-flight asset extract jobs keyed by episodeId (incl. full-script id). */
   const [extractingEpisodeIds, setExtractingEpisodeIds] = useState<
     Set<string>
   >(() => new Set());
@@ -484,10 +489,6 @@ export function EpisodeAssetDesignWorkspace({
     rejectedItems: Array<{ index: number; name?: string; reason: string }>;
   } | null>(null);
   const [confirmSummary, setConfirmSummary] = useState<string | null>(null);
-  const [reextractOpen, setReextractOpen] = useState(false);
-  const [modelKey, setModelKey] = useState(
-    STORY_TEXT_MODELS[0]?.id ?? "balanced-default",
-  );
   const [assetExtractionModel, setAssetExtractionModel] = useState(
     extractionModel ?? "deepseek-v4-pro",
   );
@@ -557,21 +558,6 @@ export function EpisodeAssetDesignWorkspace({
   const [submitApprovalOpen, setSubmitApprovalOpen] = useState(false);
   const [projectName, setProjectName] = useState(projectId);
   const selectedIdRef = useRef(selectedId);
-  const extractJobsRef = useRef(
-    new Map<
-      string,
-      {
-        controller: AbortController;
-        generationId: string | null;
-        fingerprint: string;
-        revision: number;
-        items: EpisodeAssetDesignItem[];
-      }
-    >(),
-  );
-  /** Lightweight recovery polls when server says generating but this tab has no live stream. */
-  const extractPollTimersRef = useRef(new Map<string, number>());
-  const extractPollStartedAtRef = useRef(new Map<string, number>());
   const confirmingRef = useRef(false);
   const isPersonalSpace = activeSpace.kind === "personal";
 
@@ -599,26 +585,37 @@ export function EpisodeAssetDesignWorkspace({
     });
   }, []);
 
-  const stopExtractPoll = useCallback((episodeId: string) => {
-    const timerId = extractPollTimersRef.current.get(episodeId);
-    if (timerId != null) {
-      window.clearInterval(timerId);
-      extractPollTimersRef.current.delete(episodeId);
-    }
-    extractPollStartedAtRef.current.delete(episodeId);
-  }, []);
-
-  useEffect(() => {
-    const timers = extractPollTimersRef.current;
-    const startedAt = extractPollStartedAtRef.current;
-    return () => {
-      for (const timerId of timers.values()) {
-        window.clearInterval(timerId);
+  const applyExtractionTask = useCallback(
+    (task: AssetExtractionTask | null) => {
+      const live =
+        Boolean(task) &&
+        LIVE_EXTRACTION_STATUSES.includes(
+          task!.status as (typeof LIVE_EXTRACTION_STATUSES)[number],
+        );
+      if (!live || !task) {
+        setBatchExtracting(false);
+        setExtractingEpisodeIds(new Set());
+        setExtractionProgress(null);
+        return;
       }
-      timers.clear();
-      startedAt.clear();
-    };
-  }, []);
+      setBatchExtracting(task.scope === "all");
+      setExtractingEpisodeIds(
+        task.scope === "episode" && task.episodeId
+          ? new Set([task.episodeId])
+          : new Set(),
+      );
+      if (task.scope === "episode" && task.episodeId) {
+        if (selectedIdRef.current === task.episodeId) {
+          setDesignStatus("generating");
+        }
+      }
+      setExtractionProgress({
+        episodeId: task.episodeId ?? "",
+        percent: Math.min(99, task.estimatedProgress),
+      });
+    },
+    [markEpisodeExtracting],
+  );
 
   const currentEpisodeExtracting =
     selectedId != null &&
@@ -628,8 +625,7 @@ export function EpisodeAssetDesignWorkspace({
   const extractionBusy =
     batchExtracting ||
     designStatus === "generating" ||
-    currentEpisodeExtracting ||
-    extractingEpisodeIds.has(SCRIPT_ASSET_DESIGN_ID);
+    currentEpisodeExtracting;
 
   useEffect(() => {
     onExtractionBusyChange?.(extractionBusy);
@@ -663,7 +659,7 @@ export function EpisodeAssetDesignWorkspace({
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(
+        const res = await designFetch(
           surface === "workspace"
             ? `/api/workspace/projects`
             : `/api/projects`,
@@ -687,27 +683,6 @@ export function EpisodeAssetDesignWorkspace({
     if (!queryEpisodeId) return;
     queueMicrotask(() => setSelectedId(queryEpisodeId));
   }, [queryEpisodeId]);
-
-  /** Keep the overview counter accurate even when viewing a single episode. */
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch(
-          `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}`,
-        );
-        if (!res.ok || cancelled) return;
-        const payload = (await res.json()) as EpisodeDetailPayload;
-        if (cancelled) return;
-        setFullScriptAssetCount(payload.record.items.length);
-      } catch {
-        /* ignore — detail load will refresh when opening full script */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [apiRoot]);
 
   const projectVoices = useMemo(
     () => voiceOptionsFromAudios(bundle.audios),
@@ -768,8 +743,6 @@ export function EpisodeAssetDesignWorkspace({
       : isPersonalSpace
         ? "选择剧集确认"
         : "选择剧集复核";
-  const isFullScriptDesign = selectedId === SCRIPT_ASSET_DESIGN_ID;
-
   const extractedAssets = items;
   const ungeneratedAssets = useMemo(
     () =>
@@ -827,7 +800,7 @@ export function EpisodeAssetDesignWorkspace({
   const loadList = useCallback(async () => {
     setListLoading(true);
     try {
-      const res = await fetch(
+      const res = await designFetch(
         `${apiRoot}/asset-designs`,
       );
       if (!res.ok) throw new Error("无法加载剧集列表");
@@ -838,16 +811,16 @@ export function EpisodeAssetDesignWorkspace({
         for (const ep of data.items ?? []) {
           if (ep.designStatus === "generating") {
             next.add(ep.episodeId);
-          } else if (!extractJobsRef.current.has(ep.episodeId)) {
+          } else {
             next.delete(ep.episodeId);
           }
         }
         return next;
       });
       setSelectedId((prev) => {
-        if (prev === SCRIPT_ASSET_DESIGN_ID) return prev;
+        if (prev === "") return prev;
         if (prev && data.items.some((ep) => ep.episodeId === prev)) return prev;
-        return SCRIPT_ASSET_DESIGN_ID;
+        return "";
       });
     } catch (error) {
       setPageNote(
@@ -860,7 +833,7 @@ export function EpisodeAssetDesignWorkspace({
 
   const loadBundle = useCallback(async () => {
     try {
-      const res = await fetch(
+      const res = await designFetch(
         `${apiRoot}/assets-draft`,
       );
       if (!res.ok) return;
@@ -890,7 +863,7 @@ export function EpisodeAssetDesignWorkspace({
           surface === "workspace"
             ? `${apiRoot}/asset-approvals?episodeId=${encodeURIComponent(episodeId)}`
             : `/api/projects/${encodeURIComponent(projectId)}/asset-approvals?episodeId=${encodeURIComponent(episodeId)}`;
-        const res = await fetch(url);
+        const res = await designFetch(url);
         if (!res.ok) {
           setPendingApprovalMediaIds(new Set());
           setApprovedApprovalMediaIds(new Set());
@@ -933,82 +906,22 @@ export function EpisodeAssetDesignWorkspace({
     [apiRoot, isPersonalSpace, projectId, surface],
   );
 
-  const startExtractPoll = useCallback(
-    (episodeId: string) => {
-      if (extractJobsRef.current.has(episodeId)) return;
-      if (extractPollTimersRef.current.has(episodeId)) return;
-
-      extractPollStartedAtRef.current.set(episodeId, Date.now());
-      markEpisodeExtracting(episodeId, true);
-
-      const tick = async () => {
-        if (extractJobsRef.current.has(episodeId)) {
-          stopExtractPoll(episodeId);
-          return;
-        }
-        const startedAt = extractPollStartedAtRef.current.get(episodeId) ?? Date.now();
-        try {
-          const res = await fetch(
-            `${apiRoot}/asset-designs/episodes/${encodeURIComponent(episodeId)}`,
-          );
-          if (!res.ok) return;
-          const payload = (await res.json()) as EpisodeDetailPayload;
-
-          if (payload.designStatus === "generating") {
-            // Keep polling — server reconcile decides failed/stale, not remount.
-            void startedAt;
-            return;
-          }
-
-          stopExtractPoll(episodeId);
-          markEpisodeExtracting(episodeId, false);
-          void loadList();
-          if (selectedIdRef.current !== episodeId) return;
-          if (payload.record.revision < revisionRef.current) return;
-
-          setDetail(payload);
-          setItems(payload.record.items);
-          itemsRef.current = payload.record.items;
-          setRevision(payload.record.revision);
-          revisionRef.current = payload.record.revision;
-          setFingerprint(payload.currentFingerprint);
-          setDesignStatus(payload.designStatus);
-          if (payload.designStatus === "failed") {
-            setPageNote("资产提取失败，请重试。");
-          } else {
-            setPageNote("");
-          }
-          if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
-            setFullScriptAssetCount(payload.record.items.length);
-            setBatchExtracting(false);
-          }
-        } catch {
-          /* keep polling until server leaves generating */
-        }
-      };
-
-      void tick();
-      const timerId = window.setInterval(() => {
-        void tick();
-      }, 2000);
-      extractPollTimersRef.current.set(episodeId, timerId);
-    },
-    [apiRoot, loadList, markEpisodeExtracting, stopExtractPoll],
-  );
-
   const loadDetail = useCallback(
     async (episodeId: string) => {
+      if (!episodeId) {
+        setDetail(null);
+        setItems([]);
+        setDetailLoading(false);
+        return;
+      }
       setDetailLoading(true);
       setConfirmSummary(null);
       try {
-        const detailRes = await fetch(
+        const detailRes = await designFetch(
           `${apiRoot}/asset-designs/episodes/${encodeURIComponent(episodeId)}`,
         );
         if (!detailRes.ok) throw new Error("无法加载剧集资产设计");
         const payload = (await detailRes.json()) as EpisodeDetailPayload;
-        if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
-          setFullScriptAssetCount(payload.record.items.length);
-        }
         setDetail(payload);
         setItems((prevItems) =>
           payload.record.items.map((incoming) => {
@@ -1035,26 +948,12 @@ export function EpisodeAssetDesignWorkspace({
         setRevision(payload.record.revision);
         revisionRef.current = payload.record.revision;
         setFingerprint(payload.currentFingerprint);
-        // Restore extract UI from server status. Live streams keep their own
-        // job entry; otherwise start a lightweight poll (refresh / remount).
         if (payload.designStatus === "generating") {
           setDesignStatus("generating");
           markEpisodeExtracting(episodeId, true);
-          if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
-            setBatchExtracting(true);
-          }
-          if (!extractJobsRef.current.has(episodeId)) {
-            startExtractPoll(episodeId);
-          } else {
-            stopExtractPoll(episodeId);
-          }
         } else {
           setDesignStatus(payload.designStatus);
           markEpisodeExtracting(episodeId, false);
-          stopExtractPoll(episodeId);
-          if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
-            setBatchExtracting(false);
-          }
         }
 
         let content = payload.episode.content?.replace(/\r\n/g, "\n") ?? "";
@@ -1063,7 +962,7 @@ export function EpisodeAssetDesignWorkspace({
             surface === "workspace"
               ? `${apiRoot}/script-draft`
               : `/api/projects/${encodeURIComponent(projectId)}/script-draft`;
-          const scriptRes = await fetch(scriptUrl);
+          const scriptRes = await designFetch(scriptUrl);
           if (scriptRes.ok) {
             const script = (await scriptRes.json()) as {
               draft?: {
@@ -1071,12 +970,8 @@ export function EpisodeAssetDesignWorkspace({
                 episodes?: Array<{ id: string; content?: string }>;
               };
             };
-            if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
-              content = script.draft?.sourceText?.replace(/\r\n/g, "\n") ?? "";
-            } else {
-              const ep = script.draft?.episodes?.find((e) => e.id === episodeId);
-              content = ep?.content?.replace(/\r\n/g, "\n") ?? "";
-            }
+            const ep = script.draft?.episodes?.find((e) => e.id === episodeId);
+            content = ep?.content?.replace(/\r\n/g, "\n") ?? "";
           }
         }
         setEpisodeContent(content);
@@ -1095,11 +990,53 @@ export function EpisodeAssetDesignWorkspace({
       loadApprovalMediaFlags,
       markEpisodeExtracting,
       projectId,
-      startExtractPoll,
-      stopExtractPoll,
       surface,
     ],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    let sawLive = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(`${apiRoot}/asset-extraction`, {
+          credentials: "include",
+        });
+        if (!res.ok || cancelled) return;
+        const payload = (await res.json()) as {
+          task?: AssetExtractionTask | null;
+        };
+        const task = payload.task ?? null;
+        const live =
+          Boolean(task) &&
+          LIVE_EXTRACTION_STATUSES.includes(
+            task!.status as (typeof LIVE_EXTRACTION_STATUSES)[number],
+          );
+        applyExtractionTask(task);
+        if (live) {
+          sawLive = true;
+          return;
+        }
+        if (sawLive) {
+          sawLive = false;
+          const selected = selectedIdRef.current;
+          if (selected) void loadDetail(selected);
+          void loadList();
+          void loadBundle();
+        }
+      } catch {
+        /* keep polling */
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => {
+      void tick();
+    }, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [apiRoot, applyExtractionTask, loadBundle, loadDetail, loadList]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1117,9 +1054,9 @@ export function EpisodeAssetDesignWorkspace({
           const listItems = data.items ?? [];
           setEpisodes(listItems);
           setSelectedId((prev) => {
-            if (prev === SCRIPT_ASSET_DESIGN_ID) return prev;
+            if (prev === "") return prev;
             if (prev && listItems.some((ep) => ep.episodeId === prev)) return prev;
-            return SCRIPT_ASSET_DESIGN_ID;
+            return "";
           });
         } else {
           setPageNote("无法加载剧集列表");
@@ -1139,9 +1076,8 @@ export function EpisodeAssetDesignWorkspace({
   useEffect(() => {
     let cancelled = false;
     const loadDeferred = async () => {
-      const [bundleRes, modelsRes] = await Promise.all([
+      const [bundleRes] = await Promise.all([
         fetch(`${apiRoot}/assets-draft`),
-        fetch("/api/text-models"),
       ]);
       if (cancelled) return;
       if (bundleRes.ok) {
@@ -1156,10 +1092,6 @@ export function EpisodeAssetDesignWorkspace({
             audios: data.draft.audios ?? [],
           });
         }
-      }
-      if (modelsRes.ok) {
-        const data = (await modelsRes.json()) as { recommendedKey?: string };
-        if (!cancelled && data.recommendedKey) setModelKey(data.recommendedKey);
       }
     };
     const schedule =
@@ -1403,24 +1335,6 @@ export function EpisodeAssetDesignWorkspace({
     [projectId, surface, updateExtractionProgress],
   );
 
-  // A refresh may observe an extract that server reconciliation already
-  // applied, or a previous prompt batch that only partially completed.
-  // Resume from persisted missing items without repeating phase-one extract.
-  useEffect(() => {
-    const record = detail?.record;
-    if (!record || record.episodeId !== selectedId) return;
-    if (record.status !== "review" || currentEpisodeExtracting) return;
-    if (!record.items.some(itemNeedsFormalDesignPrompt)) return;
-    queueMicrotask(() => {
-      void kickOffFormalDesignPrompts(record, record.episodeId);
-    });
-  }, [
-    currentEpisodeExtracting,
-    detail,
-    kickOffFormalDesignPrompts,
-    selectedId,
-  ]);
-
   const saveItems = useCallback(
     async (
       nextItems: EpisodeAssetDesignItem[],
@@ -1440,7 +1354,7 @@ export function EpisodeAssetDesignWorkspace({
         setPageNote("");
       }
       try {
-        const res = await fetch(
+        const res = await designFetch(
           `${apiRoot}/asset-designs/episodes/${encodeURIComponent(selectedId)}`,
           {
             method: "PUT",
@@ -1506,7 +1420,7 @@ export function EpisodeAssetDesignWorkspace({
       setSavingVoiceItemIds((prev) => new Set(prev).add(input.itemId));
 
       try {
-        const res = await fetch(
+        const res = await designFetch(
           `${apiRoot}/asset-designs/episodes/${encodeURIComponent(
             selectedId,
           )}/items/${encodeURIComponent(input.itemId)}/media-voice`,
@@ -1567,7 +1481,7 @@ export function EpisodeAssetDesignWorkspace({
       activeGeneration?: EpisodeAssetActiveGeneration | null;
     }): Promise<EpisodeAssetDesignRecord | null> => {
       try {
-        const res = await fetch(
+        const res = await designFetch(
           `${apiRoot}/asset-designs/episodes/${encodeURIComponent(input.episodeId)}`,
           {
             method: "PUT",
@@ -1612,6 +1526,45 @@ export function EpisodeAssetDesignWorkspace({
 
   const putEpisodeExtractStatus = markExtractStatusForEpisode;
 
+  const markExtractFailedWithRetry = useCallback(
+    async (input: {
+      episodeId: string;
+      fingerprint: string;
+      expectedRevision: number;
+      items: EpisodeAssetDesignItem[];
+    }): Promise<boolean> => {
+      const first = await markExtractStatusForEpisode({
+        episodeId: input.episodeId,
+        status: "failed",
+        fingerprint: input.fingerprint,
+        expectedRevision: input.expectedRevision,
+        items: input.items,
+        activeGeneration: null,
+      });
+      if (first) return true;
+
+      try {
+        const detailRes = await designFetch(
+          `${apiRoot}/asset-designs/episodes/${encodeURIComponent(input.episodeId)}`,
+        );
+        if (!detailRes.ok) return false;
+        const detailPayload = (await detailRes.json()) as EpisodeDetailPayload;
+        const retry = await markExtractStatusForEpisode({
+          episodeId: input.episodeId,
+          status: "failed",
+          fingerprint: detailPayload.currentFingerprint,
+          expectedRevision: detailPayload.record.revision,
+          items: detailPayload.record.items,
+          activeGeneration: null,
+        });
+        return retry !== null;
+      } catch {
+        return false;
+      }
+    },
+    [apiRoot, markExtractStatusForEpisode],
+  );
+
   const finalizeExtraction = useCallback(
     async (input: {
       episodeId: string;
@@ -1619,13 +1572,23 @@ export function EpisodeAssetDesignWorkspace({
       fingerprint: string;
     }): Promise<boolean> => {
       if (!approvalEnabled) {
-        const response = await fetch(
+        const detailResponse = await designFetch(
+          `${apiRoot}/asset-designs/episodes/${encodeURIComponent(input.episodeId)}`,
+        );
+        const detailPayload = (await detailResponse.json()) as EpisodeDetailPayload & {
+          error?: string;
+        };
+        if (!detailResponse.ok) {
+          setPageNote(detailPayload.error ?? "无法读取最新资产提取结果");
+          return false;
+        }
+        const response = await designFetch(
           `${apiRoot}/asset-designs/episodes/${encodeURIComponent(input.episodeId)}/confirm`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              expectedRevision: input.record.revision,
+              expectedRevision: detailPayload.record.revision,
               fingerprint: input.fingerprint,
             }),
           },
@@ -1637,850 +1600,81 @@ export function EpisodeAssetDesignWorkspace({
         }
         await loadBundle();
       }
-      onExtractionComplete?.();
+      await onExtractionComplete?.();
       return true;
     },
     [apiRoot, approvalEnabled, loadBundle, onExtractionComplete],
   );
 
-  const runExtract = useCallback(async () => {
-    if (!selectedId || !fingerprint || saving) return;
-    if (extractionBusy) return;
-    if (extractJobsRef.current.has(selectedId)) return;
-    if (extractingEpisodeIds.has(selectedId)) return;
-
-    const extractingEpisodeId = selectedId;
-    const snapshotItems = itemsRef.current.map((item) => ({ ...item }));
-    const snapshotFingerprint = fingerprint;
-    let statusRevision = revisionRef.current;
-    const idempotencyKey = createEpisodeAssetDesignIdempotencyKey();
-    const startedAt = new Date().toISOString();
-
-    setReextractOpen(false);
-    setPageNote("");
-    setConfirmSummary(null);
-    setExtractionProgress({ episodeId: extractingEpisodeId, percent: 3 });
-    markEpisodeExtracting(extractingEpisodeId, true);
-    if (selectedIdRef.current === extractingEpisodeId) {
-      setDesignStatus("generating");
-    }
-
-    const controller = new AbortController();
-    extractJobsRef.current.set(extractingEpisodeId, {
-      controller,
-      generationId: null,
-      fingerprint: snapshotFingerprint,
-      revision: statusRevision,
-      items: snapshotItems,
-    });
-
-    const timeoutId = window.setTimeout(() => {
-      controller.abort();
-    }, 180_000);
-
-    try {
-      const generatingRecord = await markExtractStatusForEpisode({
-        episodeId: extractingEpisodeId,
-        status: "generating",
-        fingerprint: snapshotFingerprint,
-        expectedRevision: statusRevision,
-        items: snapshotItems,
-        activeGeneration: {
-          generationId: null,
-          idempotencyKey,
-          outputKind: "episode_asset_design",
-          startedAt,
-          updatedAt: startedAt,
-        },
-      });
-      if (!generatingRecord) {
-        throw new Error("无法开始提取，请刷新后重试");
-      }
-      updateExtractionProgress(extractingEpisodeId, 6);
-      statusRevision = generatingRecord.revision;
-      const job = extractJobsRef.current.get(extractingEpisodeId);
-      if (job) job.revision = statusRevision;
-      if (selectedIdRef.current === extractingEpisodeId) {
-        applyRecord(generatingRecord);
-      }
-
-      const result = await streamStoryGeneration({
-        projectId,
-        brief: "",
-        modelKey,
-        targetChars: 1000,
-        idempotencyKey,
-        outputKind: "episode_asset_design",
-        episodeId: extractingEpisodeId,
-        signal: controller.signal,
-        onMeta: (meta) => {
-          updateExtractionProgress(extractingEpisodeId, 10);
-          const live = extractJobsRef.current.get(extractingEpisodeId);
-          if (live) live.generationId = meta.generationId;
-          void markExtractStatusForEpisode({
-            episodeId: extractingEpisodeId,
-            status: "generating",
-            fingerprint: snapshotFingerprint,
-            expectedRevision: statusRevision,
-            items: snapshotItems,
-            activeGeneration: {
-              generationId: meta.generationId,
-              idempotencyKey,
-              outputKind: "episode_asset_design",
-              startedAt,
-              updatedAt: new Date().toISOString(),
-            },
-          }).then((rec) => {
-            if (rec) {
-              statusRevision = rec.revision;
-              const liveJob = extractJobsRef.current.get(extractingEpisodeId);
-              if (liveJob) liveJob.revision = rec.revision;
-            }
+  // A refresh may observe an extract that server reconciliation already
+  // applied, or a previous prompt batch that only partially completed.
+  // Resume the existing 3 x 5 prompt route before personal-space sync.
+  useEffect(() => {
+    const record = detail?.record;
+    if (!record || record.episodeId !== selectedId) return;
+    if (record.status !== "review" || currentEpisodeExtracting) return;
+    const needsFormalPrompts = record.items.some(itemNeedsFormalDesignPrompt);
+    if (!needsFormalPrompts && approvalEnabled) return;
+    queueMicrotask(() => {
+      void (async () => {
+        if (needsFormalPrompts) {
+          await kickOffFormalDesignPrompts(record, record.episodeId);
+        }
+        if (!approvalEnabled) {
+          const synced = await finalizeExtraction({
+            episodeId: record.episodeId,
+            record,
+            fingerprint: detail.currentFingerprint,
           });
-        },
-        onDelta: (text) => {
-          updateExtractionProgress(
-            extractingEpisodeId,
-            extractionStreamPercent(text.length, 1_000),
-          );
-        },
-      });
-      updateExtractionProgress(extractingEpisodeId, 23);
-
-      const applyRes = await fetch(
-        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(extractingEpisodeId)}/apply-generation`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            generationId: result.generationId,
-            rawText: result.text,
-            expectedRevision: statusRevision,
-            fingerprint: snapshotFingerprint,
-          }),
-          signal: controller.signal,
-        },
-      );
-      const applyPayload = (await applyRes.json()) as {
-        record?: EpisodeAssetDesignRecord;
-        error?: string;
-      };
-      if (!applyRes.ok) {
-        throw new Error(applyPayload.error ?? "应用生成结果失败");
-      }
-      updateExtractionProgress(extractingEpisodeId, 25);
-      notifyCreditsRefresh();
-      await loadList();
-      if (applyPayload.record) {
-        const synced = await finalizeExtraction({
-          episodeId: extractingEpisodeId,
-          record: applyPayload.record,
-          fingerprint: snapshotFingerprint,
-        });
-        if (selectedIdRef.current === extractingEpisodeId) {
-          applyRecord(applyPayload.record);
-          setPageNote(
-            approvalEnabled
-              ? "本集资产提取完成，已进入审批流程。"
-              : synced
-                ? "本集资产已提取并同步到资产管理。"
-                : "本集资产已提取，但同步到资产管理失败。",
-          );
-          await loadDetail(extractingEpisodeId);
+          if (synced) await loadDetail(record.episodeId);
         }
-        if (approvalEnabled) {
-          void kickOffFormalDesignPrompts(
-            applyPayload.record,
-            extractingEpisodeId,
-          );
-        }
-      }
-    } catch (error) {
-      const busyConflict =
-        error instanceof StoryGenerationClientError &&
-        error.code === "ASSET_EXTRACT_IN_PROGRESS";
-      if (busyConflict) {
-        updateExtractionProgress(extractingEpisodeId, 8);
-        if (selectedIdRef.current === extractingEpisodeId) {
-          setPageNote("资产正在提取中…");
-          setDesignStatus("generating");
-        }
-        extractJobsRef.current.delete(extractingEpisodeId);
-        markEpisodeExtracting(extractingEpisodeId, true);
-        startExtractPoll(extractingEpisodeId);
-        await loadList();
-        return;
-      }
-      const aborted =
-        error instanceof DOMException && error.name === "AbortError";
-      if (selectedIdRef.current === extractingEpisodeId) {
-        if (aborted) {
-          setPageNote("已取消生成。");
-        } else if (error instanceof StoryGenerationClientError) {
-          setPageNote(error.message);
-        } else {
-          setPageNote(
-            error instanceof Error ? error.message : "提取失败，请稍后重试",
-          );
-        }
-      }
-      const job = extractJobsRef.current.get(extractingEpisodeId);
-      await markExtractStatusForEpisode({
-        episodeId: extractingEpisodeId,
-        status: "failed",
-        fingerprint: job?.fingerprint ?? snapshotFingerprint,
-        expectedRevision: job?.revision ?? statusRevision,
-        items: job?.items ?? snapshotItems,
-        activeGeneration: null,
-      });
-      await loadList();
-      if (selectedIdRef.current === extractingEpisodeId) {
-        setDesignStatus("failed");
-      }
-    } finally {
-      window.clearTimeout(timeoutId);
-      if (!extractPollTimersRef.current.has(extractingEpisodeId)) {
-        extractJobsRef.current.delete(extractingEpisodeId);
-        stopExtractPoll(extractingEpisodeId);
-        markEpisodeExtracting(extractingEpisodeId, false);
-      }
-    }
+      })();
+    });
   }, [
-    apiRoot,
-    applyRecord,
-    extractionBusy,
-    extractingEpisodeIds,
+    approvalEnabled,
+    currentEpisodeExtracting,
+    detail,
     finalizeExtraction,
-    fingerprint,
     kickOffFormalDesignPrompts,
     loadDetail,
-    loadList,
-    markEpisodeExtracting,
-    markExtractStatusForEpisode,
-    modelKey,
-    approvalEnabled,
-    projectId,
-    saving,
     selectedId,
-    startExtractPoll,
-    stopExtractPoll,
-    updateExtractionProgress,
   ]);
 
-  const handleExtract = useCallback(() => {
-    if (!selectedId || saving) return;
-    if (extractionBusy) return;
-    if (extractingEpisodeIds.has(selectedId)) return;
-    const hasReviewItems =
-      items.length > 0 &&
-      (designStatus === "review" ||
-        designStatus === "confirmed" ||
-        designStatus === "stale");
-    if (hasReviewItems) {
-      setReextractOpen(true);
+  const runExtract = useCallback(async () => {
+    if (!selectedId || extractionBusy) return;
+    const res = await fetch(`${apiRoot}/asset-extraction/tasks`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: "episode",
+        episodeId: selectedId,
+        modelKey: activeAssetExtractionModel,
+      }),
+    });
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      setExtractionError({
+        code: "EXTRACT_FAILED",
+        message: payload.error ?? "无法开始提取本集资产",
+      });
       return;
     }
-    void runExtract();
-  }, [
-    designStatus,
-    extractionBusy,
-    extractingEpisodeIds,
-    items.length,
-    runExtract,
-    saving,
-    selectedId,
-  ]);
-
-  const handleExtractAll = useCallback(async () => {
-    if (extractionBusy || saving || confirming) return;
-    if (extractJobsRef.current.has(SCRIPT_ASSET_DESIGN_ID)) return;
-
-    const extractingEpisodeId = SCRIPT_ASSET_DESIGN_ID;
-    const controller = new AbortController();
-    const idempotencyKey = createEpisodeAssetDesignIdempotencyKey();
-    const startedAt = new Date().toISOString();
-    extractJobsRef.current.set(extractingEpisodeId, {
-      controller,
-      generationId: null,
-      fingerprint: "",
-      revision: 0,
-      items: [],
-    });
-    setBatchExtracting(true);
-    markEpisodeExtracting(extractingEpisodeId, true);
+    markEpisodeExtracting(selectedId, true);
     setDesignStatus("generating");
-    setPageNote("");
     setExtractionError(null);
-    setConfirmSummary(null);
-    setExtractionProgress({ episodeId: extractingEpisodeId, percent: 3 });
-
-    try {
-      const detailRes = await fetch(
-        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}`,
-        { signal: controller.signal },
-      );
-      if (!detailRes.ok) {
-        const payload = (await detailRes.json()) as { error?: string };
-        throw new Error(payload.error ?? "无法加载完整原始剧本");
-      }
-      const scriptDetail = (await detailRes.json()) as EpisodeDetailPayload;
-      if (scriptDetail.designStatus === "generating") {
-        // Another tab / prior session already owns the extract — sync UI, do not fail it.
-        applyRecord(scriptDetail.record);
-        setDesignStatus("generating");
-        setBatchExtracting(true);
-        updateExtractionProgress(extractingEpisodeId, 8);
-        markEpisodeExtracting(extractingEpisodeId, true);
-        extractJobsRef.current.delete(extractingEpisodeId);
-        startExtractPoll(extractingEpisodeId);
-        return;
-      }
-      const job = extractJobsRef.current.get(extractingEpisodeId);
-      if (job) {
-        job.fingerprint = scriptDetail.currentFingerprint;
-        job.revision = scriptDetail.record.revision;
-        job.items = scriptDetail.record.items;
-      }
-
-      const generatingRecord = await markExtractStatusForEpisode({
-        episodeId: extractingEpisodeId,
-        status: "generating",
-        fingerprint: scriptDetail.currentFingerprint,
-        expectedRevision: scriptDetail.record.revision,
-        items: scriptDetail.record.items,
-        activeGeneration: {
-          generationId: null,
-          idempotencyKey,
-          outputKind: "script_asset_design",
-          startedAt,
-          updatedAt: startedAt,
-        },
-      });
-      if (!generatingRecord) {
-        throw new Error("无法开始提取，请刷新后重试");
-      }
-      updateExtractionProgress(extractingEpisodeId, 6);
-      if (job) job.revision = generatingRecord.revision;
-      if (selectedIdRef.current === extractingEpisodeId) {
-        applyRecord(generatingRecord);
-      }
-
-      const result = await streamStoryGeneration({
-        projectId,
-        brief: "",
-        modelKey: activeAssetExtractionModel,
-        targetChars: 20_000,
-        idempotencyKey,
-        outputKind: "script_asset_design",
-        signal: controller.signal,
-        onMeta: (meta) => {
-          updateExtractionProgress(extractingEpisodeId, 10);
-          const live = extractJobsRef.current.get(extractingEpisodeId);
-          if (live) live.generationId = meta.generationId;
-          void markExtractStatusForEpisode({
-            episodeId: extractingEpisodeId,
-            status: "generating",
-            fingerprint: scriptDetail.currentFingerprint,
-            expectedRevision: generatingRecord.revision,
-            items: scriptDetail.record.items,
-            activeGeneration: {
-              generationId: meta.generationId,
-              idempotencyKey,
-              outputKind: "script_asset_design",
-              startedAt,
-              updatedAt: new Date().toISOString(),
-            },
-          });
-        },
-        onDelta: (text) => {
-          updateExtractionProgress(
-            extractingEpisodeId,
-            extractionStreamPercent(text.length, 20_000),
-          );
-        },
-      });
-      updateExtractionProgress(extractingEpisodeId, 23);
-
-      if (!result.text.trim()) {
-        throw Object.assign(new Error("模型未返回任何内容，请重试提取。"), {
-          code: "EMPTY_MODEL_OUTPUT",
-        });
-      }
-
-      const applyRes = await fetch(
-        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}/apply-generation`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            generationId: result.generationId,
-            rawText: result.text,
-            expectedRevision: generatingRecord.revision,
-            fingerprint: scriptDetail.currentFingerprint,
-          }),
-          signal: controller.signal,
-        },
-      );
-      const applyPayload = (await applyRes.json()) as {
-        record?: EpisodeAssetDesignRecord;
-        error?: string;
-        code?: string;
-        warnings?: Array<{ code: string; message: string }>;
-        rejectedItems?: Array<{
-          index: number;
-          name?: string;
-          reason: string;
-        }>;
-        repaired?: boolean;
-      };
-      if (!applyRes.ok || !applyPayload.record) {
-        const code = applyPayload.code ?? "PARSE_FAILED";
-        const live = extractJobsRef.current.get(extractingEpisodeId);
-        throw Object.assign(
-          new Error(
-            formatFullScriptExtractionError(
-              code,
-              applyPayload.error ?? "应用全剧本资产结果失败",
-            ),
-          ),
-          {
-            code,
-            generationId: live?.generationId ?? result.generationId,
-            canReapply: Boolean(live?.generationId ?? result.generationId),
-            rejectedItems: applyPayload.rejectedItems ?? [],
-          },
-        );
-      }
-      updateExtractionProgress(extractingEpisodeId, 25);
-
-      notifyCreditsRefresh();
-      setFullScriptAssetCount(applyPayload.record.items.length);
-      setExtractionError(null);
-      const rejectedCount = applyPayload.rejectedItems?.length ?? 0;
-      const repairedCount = applyPayload.repaired
-        ? 1
-        : (applyPayload.warnings ?? []).filter((w) =>
-            /USAGE_PROMOTED|ASSET_MERGED|UNMAPPED_DESIGN_FIELD|repair/i.test(
-              w.code,
-            ),
-          ).length;
-      setExtractDiagnostics({
-        extracted: applyPayload.record.items.length,
-        repaired: repairedCount,
-        rejected: rejectedCount,
-        rejectedItems: applyPayload.rejectedItems ?? [],
-      });
-      await loadList();
-      const synced = await finalizeExtraction({
-        episodeId: SCRIPT_ASSET_DESIGN_ID,
-        record: applyPayload.record,
-        fingerprint: scriptDetail.currentFingerprint,
-      });
-      if (selectedIdRef.current === SCRIPT_ASSET_DESIGN_ID) {
-        applyRecord(applyPayload.record);
-        if (approvalEnabled) {
-          void kickOffFormalDesignPrompts(
-            applyPayload.record,
-            SCRIPT_ASSET_DESIGN_ID,
-          );
-        }
-        setPageNote(
-          `已提取 ${applyPayload.record.items.length} 项` +
-            (repairedCount > 0 ? `，${repairedCount} 项已自动修复` : "") +
-            (rejectedCount > 0 ? `，${rejectedCount} 项需人工检查` : "") +
-            (approvalEnabled
-              ? "，已进入审批流程。"
-              : synced
-                ? "，已同步到资产管理。"
-                : "，但同步到资产管理失败。"),
-        );
-        await loadDetail(SCRIPT_ASSET_DESIGN_ID);
-      } else {
-        setPageNote(
-          approvalEnabled
-            ? "完整剧本资产提取已完成，已进入审批流程。"
-            : synced
-              ? "完整剧本资产已提取并同步到资产管理。"
-              : "完整剧本资产已提取，但同步到资产管理失败。",
-        );
-        if (approvalEnabled) {
-          void kickOffFormalDesignPrompts(
-            applyPayload.record,
-            SCRIPT_ASSET_DESIGN_ID,
-          );
-        }
-      }
-    } catch (error) {
-      const busyConflict =
-        (error instanceof StoryGenerationClientError &&
-          error.code === "ASSET_EXTRACT_IN_PROGRESS") ||
-        (error &&
-          typeof error === "object" &&
-          "code" in error &&
-          (error as { code?: string }).code === "ASSET_EXTRACT_IN_PROGRESS");
-
-      if (busyConflict) {
-        updateExtractionProgress(extractingEpisodeId, 8);
-        setPageNote("资产正在提取中…");
-        setExtractionError(null);
-        setDesignStatus("generating");
-        setBatchExtracting(true);
-        markEpisodeExtracting(extractingEpisodeId, true);
-        extractJobsRef.current.delete(extractingEpisodeId);
-        startExtractPoll(extractingEpisodeId);
-        await loadList();
-        return;
-      }
-
-      if (error instanceof DOMException && error.name === "AbortError") {
-        setPageNote("已取消全剧本资产提取。");
-        setExtractionError(null);
-      } else if (error instanceof StoryGenerationClientError) {
-        const message = formatFullScriptExtractionError(
-          error.code,
-          error.message,
-        );
-        setExtractionError({
-          code: error.code,
-          message,
-          generationId: extractJobsRef.current.get(SCRIPT_ASSET_DESIGN_ID)
-            ?.generationId,
-          canReapply: false,
-        });
-        setPageNote("");
-      } else {
-        const code =
-          error && typeof error === "object" && "code" in error
-            ? String((error as { code?: string }).code ?? "EXTRACT_FAILED")
-            : "EXTRACT_FAILED";
-        const generationId =
-          error && typeof error === "object" && "generationId" in error
-            ? String((error as { generationId?: string }).generationId ?? "")
-            : extractJobsRef.current.get(SCRIPT_ASSET_DESIGN_ID)?.generationId ??
-              "";
-        const canReapply = Boolean(
-          error &&
-            typeof error === "object" &&
-            "canReapply" in error &&
-            (error as { canReapply?: boolean }).canReapply,
-        );
-        setExtractionError({
-          code,
-          message:
-            error instanceof Error
-              ? error.message
-              : "全剧本资产提取失败，请重试。",
-          generationId: generationId || null,
-          canReapply,
-          canRetryChunks: code === "PARTIAL_CHUNKS_FAILED",
-        });
-        const rejectedItems =
-          error && typeof error === "object" && "rejectedItems" in error
-            ? ((error as { rejectedItems?: Array<{ index: number; name?: string; reason: string }> })
-                .rejectedItems ?? [])
-            : [];
-        if (rejectedItems.length > 0) {
-          setExtractDiagnostics({
-            extracted: 0,
-            repaired: 0,
-            rejected: rejectedItems.length,
-            rejectedItems,
-          });
-        }
-        setPageNote("");
-      }
-      const live = extractJobsRef.current.get(extractingEpisodeId);
-      if (live?.fingerprint) {
-        await markExtractStatusForEpisode({
-          episodeId: extractingEpisodeId,
-          status: "failed",
-          fingerprint: live.fingerprint,
-          expectedRevision: live.revision,
-          items: live.items,
-          activeGeneration: null,
-        });
-      }
-      await loadList();
-    } finally {
-      if (!extractPollTimersRef.current.has(extractingEpisodeId)) {
-        extractJobsRef.current.delete(extractingEpisodeId);
-        stopExtractPoll(extractingEpisodeId);
-        markEpisodeExtracting(extractingEpisodeId, false);
-        setBatchExtracting(false);
-      }
-    }
   }, [
-    apiRoot,
-    applyRecord,
-    approvalEnabled,
     activeAssetExtractionModel,
-    confirming,
+    apiRoot,
     extractionBusy,
-    finalizeExtraction,
-    kickOffFormalDesignPrompts,
-    loadDetail,
-    loadList,
     markEpisodeExtracting,
-    markExtractStatusForEpisode,
-    projectId,
-    saving,
-    startExtractPoll,
-    stopExtractPoll,
-    updateExtractionProgress,
-  ]);
-
-  const handleReapplyGeneration = useCallback(async () => {
-    const generationId = extractionError?.generationId;
-    if (!generationId || batchExtracting || saving) return;
-    setBatchExtracting(true);
-    try {
-      const detailRes = await fetch(
-        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}`,
-      );
-      if (!detailRes.ok) {
-        throw new Error("无法加载完整原始剧本");
-      }
-      const scriptDetail = (await detailRes.json()) as EpisodeDetailPayload;
-      const applyRes = await fetch(
-        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}/apply-generation`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            generationId,
-            expectedRevision: scriptDetail.record.revision,
-            fingerprint: scriptDetail.currentFingerprint,
-          }),
-        },
-      );
-      const applyPayload = (await applyRes.json()) as {
-        record?: EpisodeAssetDesignRecord;
-        error?: string;
-        code?: string;
-        warnings?: Array<{ code: string; message: string }>;
-        rejectedItems?: Array<{ index: number; name?: string; reason: string }>;
-        repaired?: boolean;
-      };
-      if (!applyRes.ok || !applyPayload.record) {
-        throw new Error(applyPayload.error ?? "重新应用失败");
-      }
-      setExtractionError(null);
-      setFullScriptAssetCount(applyPayload.record.items.length);
-      setExtractDiagnostics({
-        extracted: applyPayload.record.items.length,
-        repaired: applyPayload.repaired ? 1 : 0,
-        rejected: applyPayload.rejectedItems?.length ?? 0,
-        rejectedItems: applyPayload.rejectedItems ?? [],
-      });
-      applyRecord(applyPayload.record);
-      void kickOffFormalDesignPrompts(
-        applyPayload.record,
-        SCRIPT_ASSET_DESIGN_ID,
-      );
-      setPageNote(
-        `已重新应用生成结果：${applyPayload.record.items.length} 项资产。`,
-      );
-      await loadList();
-      await loadDetail(SCRIPT_ASSET_DESIGN_ID);
-    } catch (error) {
-      setExtractionError({
-        code: "REAPPLY_FAILED",
-        message: error instanceof Error ? error.message : "重新应用失败",
-        generationId,
-        canReapply: true,
-      });
-    } finally {
-      setBatchExtracting(false);
-    }
-  }, [
-    apiRoot,
-    applyRecord,
-    batchExtracting,
-    extractionError?.generationId,
-    kickOffFormalDesignPrompts,
-    loadDetail,
-    loadList,
-    saving,
-  ]);
-
-  const handleRetryFailedChunks = useCallback(async () => {
-    const generationId = extractionError?.generationId;
-    if (!generationId || batchExtracting || saving) return;
-    setBatchExtracting(true);
-    try {
-      const retryRes = await fetch(
-        `${apiRoot}/asset-designs/retry-failed-chunks`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ generationId }),
-        },
-      );
-      const retryPayload = (await retryRes.json()) as {
-        content?: string;
-        failedRemaining?: number;
-        error?: string;
-        code?: string;
-      };
-      if (!retryRes.ok || !retryPayload.content) {
-        throw new Error(retryPayload.error ?? "重试失败分块未成功");
-      }
-      const detailRes = await fetch(
-        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}`,
-      );
-      const scriptDetail = (await detailRes.json()) as EpisodeDetailPayload;
-      const applyRes = await fetch(
-        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(SCRIPT_ASSET_DESIGN_ID)}/apply-generation`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            generationId,
-            rawText: retryPayload.content,
-            expectedRevision: scriptDetail.record.revision,
-            fingerprint: scriptDetail.currentFingerprint,
-          }),
-        },
-      );
-      const applyPayload = (await applyRes.json()) as {
-        record?: EpisodeAssetDesignRecord;
-        error?: string;
-        rejectedItems?: Array<{ index: number; name?: string; reason: string }>;
-        repaired?: boolean;
-      };
-      if (!applyRes.ok || !applyPayload.record) {
-        throw new Error(applyPayload.error ?? "应用重试结果失败");
-      }
-      setExtractionError(
-        (retryPayload.failedRemaining ?? 0) > 0
-          ? {
-              code: "PARTIAL_CHUNKS_FAILED",
-              message: `仍有 ${retryPayload.failedRemaining} 个分块失败，可继续重试`,
-              generationId,
-              canRetryChunks: true,
-              canReapply: true,
-            }
-          : null,
-      );
-      setFullScriptAssetCount(applyPayload.record.items.length);
-      applyRecord(applyPayload.record);
-      void kickOffFormalDesignPrompts(
-        applyPayload.record,
-        SCRIPT_ASSET_DESIGN_ID,
-      );
-      setPageNote(
-        `已合并重试结果：${applyPayload.record.items.length} 项资产` +
-          ((retryPayload.failedRemaining ?? 0) > 0
-            ? `（仍有 ${retryPayload.failedRemaining} 块失败）`
-            : ""),
-      );
-      await loadList();
-      await loadDetail(SCRIPT_ASSET_DESIGN_ID);
-    } catch (error) {
-      setExtractionError({
-        code: "RETRY_CHUNKS_FAILED",
-        message: error instanceof Error ? error.message : "重试失败分块失败",
-        generationId,
-        canRetryChunks: true,
-        canReapply: true,
-      });
-    } finally {
-      setBatchExtracting(false);
-    }
-  }, [
-    apiRoot,
-    applyRecord,
-    batchExtracting,
-    extractionError?.generationId,
-    kickOffFormalDesignPrompts,
-    loadDetail,
-    loadList,
-    saving,
-  ]);
-
-  const handleCancelGenerate = useCallback(async (episodeIdArg?: string) => {
-    const episodeId = episodeIdArg ?? selectedId;
-    if (!episodeId) return;
-    const job = extractJobsRef.current.get(episodeId);
-    stopExtractPoll(episodeId);
-
-    if (job) {
-      job.controller.abort();
-      const genId = job.generationId;
-      if (genId) {
-        try {
-          await cancelStoryGeneration(projectId, genId);
-        } catch {
-          /* best-effort cancel */
-        }
-      }
-
-      if (episodeId !== SCRIPT_ASSET_DESIGN_ID) {
-        await putEpisodeExtractStatus({
-          episodeId,
-          status: "failed",
-          fingerprint: job.fingerprint,
-          expectedRevision: job.revision,
-          items: job.items,
-        });
-      }
-      extractJobsRef.current.delete(episodeId);
-    } else if (episodeId !== SCRIPT_ASSET_DESIGN_ID) {
-      await putEpisodeExtractStatus({
-        episodeId,
-        status: "failed",
-        fingerprint: fingerprint || "",
-        expectedRevision: revisionRef.current,
-        items: itemsRef.current,
-      });
-    } else {
-      try {
-        const res = await fetch(
-          `${apiRoot}/asset-designs/episodes/${encodeURIComponent(episodeId)}`,
-        );
-        if (res.ok) {
-          const payload = (await res.json()) as EpisodeDetailPayload;
-          await fetch(
-            `${apiRoot}/asset-designs/episodes/${encodeURIComponent(episodeId)}`,
-            {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                expectedRevision: payload.record.revision,
-                fingerprint: payload.currentFingerprint,
-                items: payload.record.items,
-                status: "failed",
-              }),
-            },
-          );
-        }
-      } catch {
-        /* best-effort cancel unlock */
-      }
-    }
-
-    if (selectedIdRef.current === episodeId) {
-      setDesignStatus("failed");
-    }
-
-    markEpisodeExtracting(episodeId, false);
-    if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
-      setBatchExtracting(false);
-      setPageNote("已取消全剧本资产提取。");
-    } else {
-      setPageNote("已取消生成。");
-    }
-    await loadList();
-  }, [
-    apiRoot,
-    fingerprint,
-    loadList,
-    markEpisodeExtracting,
-    projectId,
-    putEpisodeExtractStatus,
     selectedId,
-    stopExtractPoll,
   ]);
+
+  const runExtractRef = useRef(runExtract);
+  useEffect(() => {
+    runExtractRef.current = runExtract;
+  }, [runExtract]);
 
   const handleConfirm = useCallback(async () => {
     if (!selectedId || !fingerprint) return;
@@ -2510,7 +1704,7 @@ export function EpisodeAssetDesignWorkspace({
       const savedRecord = await saveItems(latestItems);
       if (!savedRecord) return;
 
-      const res = await fetch(
+      const res = await designFetch(
         `${apiRoot}/asset-designs/episodes/${encodeURIComponent(selectedId)}/confirm`,
         {
           method: "POST",
@@ -2529,14 +1723,28 @@ export function EpisodeAssetDesignWorkspace({
           assetId: string;
           assetType: EpisodeAssetDesignAssetType;
         }>;
+        promoted?: Array<{
+          itemId: string;
+          assetId: string;
+          assetType: EpisodeAssetDesignAssetType;
+        }>;
+        skipped?: Array<{ itemId: string; code: string; message: string }>;
+        failed?: Array<{ itemId: string; code: string; message: string }>;
         error?: string;
       };
       if (!res.ok) throw new Error(payload.error ?? "确认失败");
       if (payload.record) applyRecord(payload.record);
       const counts = payload.counts ?? { created: 0, linked: 0, ignored: 0 };
+      const promoted = payload.promoted ?? payload.createdAssets ?? [];
+      const skipped = payload.skipped ?? [];
+      const failed = payload.failed ?? [];
+      const nameOf = (itemId: string) =>
+        latestItems.find((item) => item.id === itemId)?.name ?? itemId;
+
+      const hasPendingConfirm = skipped.length > 0 || failed.length > 0;
       setConfirmSummary(
-        isFullScriptDesign
-          ? "全剧本资产已确认并自动加入资产库。"
+        hasPendingConfirm
+          ? "部分入库，仍待处理。"
           : "本集资产已确认并自动加入资产库。",
       );
       let note =
@@ -2544,7 +1752,32 @@ export function EpisodeAssetDesignWorkspace({
           ? `新增 ${counts.created} 项，关联已有 ${counts.linked} 项，忽略 ${counts.ignored} 项。`
           : "";
 
-      const createdAssets = payload.createdAssets ?? [];
+      if (promoted.length || skipped.length || failed.length) {
+        const parts: string[] = [];
+        if (promoted.length > 0) {
+          parts.push(
+            `已入库 ${promoted.length} 项：${promoted.map((entry) => nameOf(entry.itemId)).join("、")}`,
+          );
+        }
+        if (skipped.length > 0) {
+          parts.push(
+            `已跳过 ${skipped.length} 项：${skipped
+              .map((entry) => `${nameOf(entry.itemId)}（${entry.message}）`)
+              .join("；")}`,
+          );
+        }
+        if (failed.length > 0) {
+          parts.push(
+            `失败 ${failed.length} 项：${failed
+              .map((entry) => `${nameOf(entry.itemId)}（${entry.message}）`)
+              .join("；")}`,
+          );
+        }
+        const partialNote = parts.join("。") + "。";
+        note = note ? `${note} ${partialNote}` : partialNote;
+      }
+
+      const createdAssets = payload.createdAssets ?? promoted;
       if (createdAssets.length > 0) {
         let mediaFailed = false;
         const clearedIds: string[] = [];
@@ -2557,6 +1790,10 @@ export function EpisodeAssetDesignWorkspace({
                 projectId,
                 entry.assetId,
                 pending.file,
+                {
+                  context:
+                    surface === "workspace" ? "workspace" : "management",
+                },
               );
             } else {
               await uploadProjectAssetAudio(
@@ -2604,13 +1841,13 @@ export function EpisodeAssetDesignWorkspace({
     apiRoot,
     applyRecord,
     fingerprint,
-    isFullScriptDesign,
     loadBundle,
     loadList,
     pendingMedia,
     projectId,
     saveItems,
     selectedId,
+    surface,
   ]);
 
   const confirmItemToLibrary = useCallback(
@@ -2639,7 +1876,7 @@ export function EpisodeAssetDesignWorkspace({
           skipReloadList: true,
         });
         if (!savedRecord) return;
-        const res = await fetch(
+        const res = await designFetch(
           `${apiRoot}/asset-designs/episodes/${encodeURIComponent(selectedId)}/confirm`,
           {
             method: "POST",
@@ -2658,12 +1895,30 @@ export function EpisodeAssetDesignWorkspace({
             assetId: string;
             assetType: EpisodeAssetDesignAssetType;
           }>;
+          promoted?: Array<{
+            itemId: string;
+            assetId: string;
+            assetType: EpisodeAssetDesignAssetType;
+          }>;
+          skipped?: Array<{ itemId: string; code: string; message: string }>;
+          failed?: Array<{ itemId: string; code: string; message: string }>;
           error?: string;
         };
         if (!res.ok) throw new Error(payload.error ?? "确认入库失败");
         if (payload.record) applyRecord(payload.record);
 
-        const created = payload.createdAssets?.find(
+        const skipped = payload.skipped ?? [];
+        const failed = payload.failed ?? [];
+        const skipForItem = skipped.find((entry) => entry.itemId === itemId);
+        const failForItem = failed.find((entry) => entry.itemId === itemId);
+        if (skipForItem || failForItem) {
+          const detail = skipForItem ?? failForItem!;
+          setPageNote(`「${item.name}」未入库：${detail.message}`);
+          await Promise.all([loadList(), loadBundle()]);
+          return;
+        }
+
+        const created = (payload.createdAssets ?? payload.promoted)?.find(
           (entry) => entry.itemId === itemId,
         );
         const pending = pendingMedia[itemId];
@@ -2675,6 +1930,10 @@ export function EpisodeAssetDesignWorkspace({
                 projectId,
                 created.assetId,
                 pending.file,
+                {
+                  context:
+                    surface === "workspace" ? "workspace" : "management",
+                },
               );
             } else {
               await uploadProjectAssetAudio(
@@ -2701,6 +1960,9 @@ export function EpisodeAssetDesignWorkspace({
             ? `「${item.name}」已入库，但媒体上传失败，可在资产库补传。`
             : `「${item.name}」已确认入库。`,
         );
+        if (payload.record?.status === "review") {
+          setConfirmSummary("部分入库，仍待处理。");
+        }
         await Promise.all([loadList(), loadBundle()]);
       } catch (error) {
         setPageNote(error instanceof Error ? error.message : "确认入库失败");
@@ -2723,30 +1985,22 @@ export function EpisodeAssetDesignWorkspace({
       projectId,
       saveItems,
       selectedId,
-  ],
+      surface,
+    ],
   );
 
   useEffect(() => {
     if (!embeddedInLibrary || extractRequestId <= 0) return;
     if (handledExtractRequestIdRef.current === extractRequestId) return;
     handledExtractRequestIdRef.current = extractRequestId;
-    void handleExtractAll();
-  }, [embeddedInLibrary, extractRequestId, handleExtractAll]);
+  }, [embeddedInLibrary, extractRequestId, projectId]);
 
   useEffect(() => {
     if (!headless || !extractionRequest) return;
     if (handledExternalRequestIdRef.current === extractionRequest.id) return;
     handledExternalRequestIdRef.current = extractionRequest.id;
-    queueMicrotask(() => {
-      if (extractionRequest.mode === "full-script") {
-        pendingEpisodeRequestRef.current = null;
-        void handleExtractAll();
-        return;
-      }
-      pendingEpisodeRequestRef.current = extractionRequest;
-      setSelectedId(extractionRequest.episodeId);
-    });
-  }, [extractionRequest, handleExtractAll, headless]);
+    onExtractionRequestConsumed?.(extractionRequest.id);
+  }, [extractionRequest, headless, onExtractionRequestConsumed, projectId]);
 
   useEffect(() => {
     if (
@@ -2769,13 +2023,12 @@ export function EpisodeAssetDesignWorkspace({
     if (detailLoading || detail?.record.episodeId !== request.episodeId) return;
     if (extractionBusy) return;
     pendingEpisodeRequestRef.current = null;
-    queueMicrotask(() => void runExtract());
+    queueMicrotask(() => void runExtractRef.current());
   }, [
     detail,
     detailLoading,
     extractionBusy,
     headless,
-    runExtract,
     selectedId,
   ]);
 
@@ -3058,8 +2311,8 @@ export function EpisodeAssetDesignWorkspace({
         detail.episode.title,
       )
     : null;
-  const isAwaitingFullScriptExtraction =
-    isFullScriptDesign &&
+  const isAwaitingEpisodeExtraction =
+    Boolean(selectedId) &&
     designStatus === "not_started" &&
     items.length === 0;
 
@@ -3076,8 +2329,7 @@ export function EpisodeAssetDesignWorkspace({
   const visiblePromptBatchProgress = promptBatchProgress;
   const promptGenerationBusy =
     Boolean(visiblePromptBatchProgress?.active) || generatingPromptIds.size > 0;
-  const assetPageLocked =
-    extractionBusy || promptGenerationBusy;
+  const assetPageLocked = promptGenerationBusy;
   const promptProcessed = visiblePromptBatchProgress
     ? visiblePromptBatchProgress.processed ??
       visiblePromptBatchProgress.completed + visiblePromptBatchProgress.failed
@@ -3093,9 +2345,7 @@ export function EpisodeAssetDesignWorkspace({
     : 0;
   const workflowProgressPercent = promptGenerationBusy
     ? promptProgressPercent
-    : extractionBusy
-      ? extractionProgress?.percent ?? 5
-      : null;
+    : null;
   const workflowProgressLabel = promptGenerationBusy
     ? `共提取 ${visiblePromptBatchProgress?.assetTotal ?? 0} 个资产`
     : "正在提取资产…";
@@ -3210,7 +2460,7 @@ export function EpisodeAssetDesignWorkspace({
     >
       <div className="ead-content-shell">
         <div
-          className={`ead-layout${isAwaitingFullScriptExtraction ? " is-pending" : ""}`}
+          className={`ead-layout${isAwaitingEpisodeExtraction ? " is-pending" : ""}`}
           inert={assetPageLocked ? true : undefined}
           aria-busy={assetPageLocked}
         >
@@ -3223,56 +2473,16 @@ export function EpisodeAssetDesignWorkspace({
                 <div className="ead-overview__extract-actions">
                   <button
                     type="button"
-                    className="amw-btn amw-btn-primary ead-extract-all-btn"
-                    disabled={extractionBusy || saving || confirming}
+                    className="amw-btn amw-btn-primary ead-extract-btn"
+                    disabled={extractionBusy || saving || confirming || !selectedId}
                     aria-busy={extractionBusy}
-                    onClick={() => void handleExtractAll()}
-                    data-testid="ead-extract-all"
+                    onClick={() => void runExtract()}
+                    data-testid="ead-extract-episode"
                   >
-                    {extractionBusy
-                      ? "提取中…"
-                      : "一键提取基本资产"}
+                    {extractionBusy ? "提取中…" : "提取本集资产"}
                   </button>
-                  {extractionBusy ? (
-                    <button
-                      type="button"
-                      className="amw-btn"
-                      onClick={() =>
-                        void handleCancelGenerate(SCRIPT_ASSET_DESIGN_ID)
-                      }
-                      data-testid="ead-cancel-extract-all"
-                    >
-                      取消生成
-                    </button>
-                  ) : null}
-
-                  <div
-                    className="ead-extract-model-select"
-                    data-testid="ead-extract-model"
-                  >
-                    <GlassSelect
-                      label="提取模型"
-                      hideLabel
-                      value={assetExtractionModel}
-                      options={ASSET_EXTRACTION_MODEL_OPTIONS}
-                      disabled={extractionBusy || saving || confirming}
-                      menuPortal
-                      menuSideOffset={6}
-                      menuCollisionPadding={12}
-                      onChange={setAssetExtractionModel}
-                    />
-                  </div>
                 </div>
               </div>
-              {extractionBusy ? (
-                <p
-                  className="ead-background-task-note"
-                  aria-live="polite"
-                  data-testid="ead-extract-all-background-note"
-                >
-                  正在提取全剧本资产，通常需要 2-10 分钟。请稍候，提取完成前请勿重复提交或离开后立即再开新任务。
-                </p>
-              ) : null}
             </div>
 
             <div className="ead-overview__summary" ref={summaryRef}>
@@ -3369,23 +2579,12 @@ export function EpisodeAssetDesignWorkspace({
               </strong>
             </div>
             <div className="ead-episode-tool__controls">
-              {!isFullScriptDesign ? (
-                <button
-                  type="button"
-                  className="amw-btn ead-back-full-script"
-                  data-testid="ead-back-full-script"
-                  disabled={extractionBusy}
-                  onClick={() => setSelectedId(SCRIPT_ASSET_DESIGN_ID)}
-                >
-                  返回全剧本资产
-                </button>
-              ) : null}
               <div className="ead-episode-select-wrap" data-testid="ead-episode-select">
                 <GlassSelect
                   className="ead-episode-glass-select"
                   label="选择剧集"
                   hideLabel
-                  value={isFullScriptDesign ? "" : selectedId}
+                  value={selectedId}
                   disabled={
                     listLoading ||
                     episodes.length === 0 ||
@@ -3397,7 +2596,7 @@ export function EpisodeAssetDesignWorkspace({
                   menuPortal
                   menuSideOffset={6}
                   menuCollisionPadding={12}
-                  onChange={(id) => setSelectedId(id || SCRIPT_ASSET_DESIGN_ID)}
+                  onChange={(id) => setSelectedId(id || "")}
                 />
               </div>
             </div>
@@ -3407,11 +2606,13 @@ export function EpisodeAssetDesignWorkspace({
           ) : null}
         </section>
 
-        <section className={`ead-detail amw-panel${isAwaitingFullScriptExtraction ? " ead-detail--pending" : ""}`}>
-          {detailLoading || !detail ? (
+        <section className={`ead-detail amw-panel${isAwaitingEpisodeExtraction ? " ead-detail--pending" : ""}`}>
+          {!selectedId ? (
+            <div className="amw-empty">请选择剧集后提取本集资产。</div>
+          ) : detailLoading || !detail ? (
             <div className="amw-empty">加载资产设计…</div>
-          ) : isAwaitingFullScriptExtraction ? (
-            <div className="ead-pending-assets" data-testid="ead-pending-assets" data-full-script-count={fullScriptAssetCount}>
+          ) : isAwaitingEpisodeExtraction ? (
+            <div className="ead-pending-assets" data-testid="ead-pending-assets">
               <h2>尚未提取资产</h2>
               {extractionError ? (
                 <div
@@ -3436,35 +2637,13 @@ export function EpisodeAssetDesignWorkspace({
                       type="button"
                       className="amw-btn amw-btn-primary"
                       disabled={extractionBusy || saving || confirming}
-                      onClick={() => void handleExtractAll()}
-                      data-testid="ead-extract-all-retry"
+                      onClick={() => void runExtract()}
+                      data-testid="ead-extract-episode-retry"
                     >
                       {extractionBusy
                         ? "提取中…"
-                        : "一键提取基本资产"}
+                        : "提取本集资产"}
                     </button>
-                    {extractionError.canReapply && extractionError.generationId ? (
-                      <button
-                        type="button"
-                        className="amw-btn"
-                        disabled={extractionBusy || saving || confirming}
-                        onClick={() => void handleReapplyGeneration()}
-                        data-testid="ead-reapply-generation"
-                      >
-                        重新应用已有结果
-                      </button>
-                    ) : null}
-                    {extractionError.canRetryChunks && extractionError.generationId ? (
-                      <button
-                        type="button"
-                        className="amw-btn"
-                        disabled={extractionBusy || saving || confirming}
-                        onClick={() => void handleRetryFailedChunks()}
-                        data-testid="ead-retry-failed-chunks"
-                      >
-                        重试失败分块
-                      </button>
-                    ) : null}
                   </div>
                 </div>
               ) : null}
@@ -3498,15 +2677,13 @@ export function EpisodeAssetDesignWorkspace({
               <div className="ead-detail__head">
                 <div className="ead-detail__titles">
                   <div className="ead-detail__title-row">
-                    <h2>{isFullScriptDesign ? "全剧本资产设计" : "本集资产设计"}</h2>
+                    <h2>本集资产设计</h2>
                     <span className={statusBadgeClass(designStatus)}>
                       {EPISODE_ASSET_DESIGN_STATUS_LABELS[designStatus]}
                     </span>
                   </div>
                   <p className="ead-detail__subtitle">
-                    {isFullScriptDesign
-                      ? "主理人上传的未分集完整剧本"
-                      : `第${detail.episode.episodeNumber}集${
+                    {`第${detail.episode.episodeNumber}集${
                           selectedEpisodeTitle ? ` · ${selectedEpisodeTitle}` : ""
                         }`}
                   </p>
@@ -3529,24 +2706,22 @@ export function EpisodeAssetDesignWorkspace({
                     onClick={() => setScriptViewerOpen(true)}
                     data-testid="ead-view-script"
                   >
-                    {isFullScriptDesign ? "查看完整原始剧本" : "查看本集剧本"}
+                    查看本集剧本
                   </button>
                 </div>
               </div>
 
               <div className="ead-actions amw-actions">
-                {!isFullScriptDesign ? (
-                  <button
+                <button
                     type="button"
                     className="amw-btn amw-btn-primary ead-extract-btn"
                     disabled={extractionBusy || saving || confirming}
                     aria-busy={extractionBusy}
-                    onClick={() => void handleExtract()}
+                    onClick={() => void runExtract()}
                     data-testid="ead-extract"
                   >
                     {extractionBusy ? "提取中…" : extractLabel}
                   </button>
-                ) : null}
                 {visiblePromptBatchProgress ? (
                   <span
                     className={`ead-prompt-progress${visiblePromptBatchProgress.active ? " is-active" : " is-complete"}`}
@@ -3558,18 +2733,7 @@ export function EpisodeAssetDesignWorkspace({
                     {visiblePromptBatchProgress.assetTotal} 个资产
                   </span>
                 ) : null}
-                {extractionBusy ? (
-                  <button
-                    type="button"
-                    className="amw-btn"
-                    onClick={() => void handleCancelGenerate()}
-                    data-testid="ead-cancel-generate"
-                  >
-                    取消生成
-                  </button>
-                ) : null}
-                {!isFullScriptDesign ? (
-                  <button
+                <button
                     type="button"
                     className="amw-btn"
                     disabled={
@@ -3583,7 +2747,6 @@ export function EpisodeAssetDesignWorkspace({
                   >
                     {saving ? "保存中…" : "保存本集资产"}
                   </button>
-                ) : null}
                 {showApprovalUi && surface === "workspace" ? (
                   <button
                     type="button"
@@ -3596,16 +2759,6 @@ export function EpisodeAssetDesignWorkspace({
                   </button>
                 ) : null}
               </div>
-
-              {extractionBusy ? (
-                <p
-                  className="ead-background-task-note"
-                  aria-live="polite"
-                  data-testid="ead-extract-background-note"
-                >
-                  正在提取资产，预计需要 1-3 分钟。提取完成前按钮保持锁定，离开页面后再返回会从服务端恢复进度。
-                </p>
-              ) : null}
 
               {pageNote ? <p className="amw-note">{pageNote}</p> : null}
               {confirmSummary ? (
@@ -3783,6 +2936,7 @@ export function EpisodeAssetDesignWorkspace({
                 </span>
               )}
               <div className="ead-page-lock__actions">
+                {!extractionBusy ? (
                 <Link
                   href={storyboardHref}
                   target="_blank"
@@ -3793,20 +2947,6 @@ export function EpisodeAssetDesignWorkspace({
                   <Clapperboard size={16} aria-hidden />
                   进入分镜创作
                 </Link>
-                {extractionBusy ? (
-                  <button
-                    type="button"
-                    className="amw-btn"
-                    onClick={() =>
-                      void handleCancelGenerate(
-                        isFullScriptDesign
-                          ? SCRIPT_ASSET_DESIGN_ID
-                          : selectedId,
-                      )
-                    }
-                  >
-                    取消生成
-                  </button>
                 ) : null}
               </div>
             </div>
@@ -3831,9 +2971,7 @@ export function EpisodeAssetDesignWorkspace({
             <div className="ead-script-dialog__head">
               <div className="ead-script-dialog__titles">
                 <h3 id="ead-script-dialog-title">
-                  {isFullScriptDesign
-                    ? "主理人上传的完整原始剧本"
-                    : `第${detail.episode.episodeNumber}集剧本`}
+                  {`第${detail.episode.episodeNumber}集剧本`}
                 </h3>
                 <p className="ead-muted ead-script-dialog__meta">
                   {selectedEpisodeTitle ?? "只读预览"}
@@ -3857,37 +2995,8 @@ export function EpisodeAssetDesignWorkspace({
             >
               {episodeContent.trim()
                 ? episodeContent
-                : isFullScriptDesign
-                  ? "暂无完整原始剧本正文"
-                  : "本集暂无正文"}
+                : "本集暂无正文"}
             </pre>
-          </div>
-        </div>
-      ) : null}
-
-      {reextractOpen ? (
-        <div className="amw-overlay" role="presentation">
-          <div className="amw-dialog" role="dialog" aria-modal="true">
-            <h3>重新提取本集资产？</h3>
-            <p className="amw-dialog-desc">
-              重新提取会替换当前尚未确认的本集资产设计，是否继续？
-            </p>
-            <div className="amw-dialog-actions">
-              <button
-                type="button"
-                className="amw-btn"
-                onClick={() => setReextractOpen(false)}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="amw-btn amw-btn-primary"
-                onClick={() => void runExtract()}
-              >
-                重新提取
-              </button>
-            </div>
           </div>
         </div>
       ) : null}
@@ -4120,7 +3229,8 @@ export function EpisodeAssetDesignWorkspace({
               return merged ? { ...prev, generatedMedia: merged } : prev;
             });
           }
-          if (selectedId) void loadDetail(selectedId);
+          // Avoid full loadDetail refresh here — it caused UI stutter and could
+          // thrash the open modal while generation progress is still visible.
         }}
       />
 

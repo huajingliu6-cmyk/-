@@ -173,6 +173,7 @@
 }
 
 .gs__option {
+  position: relative;
   display: flex;
   min-height: 64px;
   align-items: center;
@@ -231,6 +232,46 @@
   font-size: 12px;
   line-height: 1.4;
   color: rgba(255, 255, 255, 0.55);
+}
+
+.gs__option.is-action .gs__option-name {
+  color: rgb(var(--ui-accent-rgb) / 0.95);
+}
+
+.gs__option-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  height: 22px;
+  width: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+  opacity: 0.72;
+  transition:
+    opacity 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.gs__option:hover .gs__option-remove,
+.gs__option.is-active .gs__option-remove {
+  opacity: 1;
+}
+
+.gs__option-remove:hover:not(:disabled) {
+  background: rgba(220, 60, 60, 0.85);
+  color: #fff;
+}
+
+.gs__option-remove:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .gs__check {

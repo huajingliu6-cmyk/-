@@ -4,31 +4,40 @@ import { NextResponse } from "next/server";
 import {
   findImageableAssetInDraft,
   readProjectAssetImageFile,
-  deleteProjectAssetImageFile,
   isSafeProjectAssetImageId,
   type ProjectAssetImageMime,
 } from "@/projects/assets/asset-image-storage";
+import type { AssetBundleDraft } from "@/projects/assets/asset-bundle-store";
 import {
-  loadAssetBundleDraft,
-  saveAssetBundleDraft,
-  type AssetBundleDraft,
-} from "@/projects/assets/asset-bundle-store";
-import { synchronizeAssetDraftDownstream } from "@/projects/assets/asset-draft-downstream";
-import { generateDesignAssetImage } from "@/projects/assets/episode-design/generate-design-asset-image";
+  loadAssetBundleForScope,
+  saveAssetBundleForScope,
+  type AssetBundleStoreScope,
+} from "@/projects/assets/asset-bundle-scope";
 import {
   parseGenerateAssetRequest,
   type ParsedGenerateAssetReferenceImage,
 } from "@/projects/assets/episode-design/parse-generate-asset-request";
+import {
+  resolvePersonalMaterialReference,
+  resolveSystemMaterialReference,
+} from "@/materials/resolve-look-reference-sources";
 import { isDesignImageModelId } from "@/projects/assets/episode-design/image-generation-models";
 import { mergeMediaIdLists } from "@/projects/assets/episode-design/generated-media-history";
 import {
+  addCharacterLook,
+  setCharacterPrimary,
+  resolveCharacterPrimaryMediaId,
+} from "@/projects/assets/character-media-state";
+import { isAppearanceMedia } from "@/projects/assets/character-appearance-state";
+import {
   releaseGenerationCredits,
   reserveImageGenerationCredits,
-  settleGenerationCredits,
 } from "@/credits/generation-billing";
-import { estimateAssetImageCredits } from "@/credits/generation-pricing";
 import { buildSceneCharacterPlacementPrompt } from "@/projects/storyboard/scene-character-placements";
 import type { SceneCharacterPlacement } from "@/projects/storyboard/types";
+import type { CharacterAsset } from "@/projects/assets/types";
+import { createAndEnqueueImageJob } from "@/projects/assets/image-generation/process-job";
+import { publicImageJobView } from "@/projects/assets/image-generation/public-view";
 
 export type LibraryAssetKind = "character" | "prop" | "scene";
 
@@ -36,7 +45,7 @@ export type AssetImageGenerationResponse = {
   mediaId: string;
   mediaIds: string[];
   images: Array<{ mediaId: string; mimeType: string }>;
-  mode: "image_to_image";
+  mode: "text_to_image" | "image_to_image";
   generatedAt: string;
   notice?: string;
 };
@@ -72,14 +81,6 @@ function assetAllowedMediaIds(asset: {
   );
 }
 
-async function deleteBatchImages(projectId: string, mediaIds: string[]) {
-  await Promise.all(
-    mediaIds.map((mediaId) =>
-      deleteProjectAssetImageFile(projectId, mediaId).catch(() => undefined),
-    ),
-  );
-}
-
 function parsePlacementsField(raw: string): SceneCharacterPlacement[] {
   if (!raw.trim()) return [];
   try {
@@ -100,18 +101,21 @@ function parsePlacementsField(raw: string): SceneCharacterPlacement[] {
 }
 
 /**
- * Formal library asset image-to-image generation (storyboard right-click editor).
+ * Formal library asset media generation (text-to-image for library prompt panel;
+ * image-to-image for look / secondary editors).
  * Reuses parseGenerateAssetRequest + generateDesignAssetImage + billing.
  */
 export async function runLibraryAssetMediaGenerate(input: {
   request: Request;
   projectId: string;
   actorUserId: string;
+  store?: AssetBundleStoreScope;
 }): Promise<NextResponse> {
+  const scope = input.store ?? "management";
   const contentType = (input.request.headers.get("content-type") || "").toLowerCase();
   if (!contentType.includes("multipart/form-data")) {
     return NextResponse.json(
-      { error: "图生图须使用 multipart/form-data", code: "MULTIPART_REQUIRED" },
+      { error: "须使用 multipart/form-data", code: "MULTIPART_REQUIRED" },
       { status: 400 },
     );
   }
@@ -135,12 +139,12 @@ export async function runLibraryAssetMediaGenerate(input: {
     );
   }
 
-  const mode = readFormString(form, "mode") || "image_to_image";
-  if (mode !== "image_to_image") {
+  const modeRaw = readFormString(form, "mode") || "image_to_image";
+  if (modeRaw !== "image_to_image" && modeRaw !== "text_to_image") {
     return NextResponse.json(
       {
-        error: "正式资产媒体生成仅支持图生图",
-        code: "IMAGE_TO_IMAGE_REQUIRED",
+        error: "正式资产媒体生成仅支持文生图或图生图",
+        code: "INVALID_GENERATE_MODE",
       },
       { status: 400 },
     );
@@ -151,7 +155,7 @@ export async function runLibraryAssetMediaGenerate(input: {
   for (const [key, value] of form.entries()) {
     passthrough.append(key, value);
   }
-  if (!passthrough.has("mode")) passthrough.set("mode", "image_to_image");
+  if (!passthrough.has("mode")) passthrough.set("mode", modeRaw);
   // Allow placement-only prompts: parseGenerateAssetRequest requires a prompt string.
   const placementsPreview = parsePlacementsField(
     readFormString(form, "sceneCharacterPlacements"),
@@ -178,17 +182,21 @@ export async function runLibraryAssetMediaGenerate(input: {
       { status: parsed.error.status },
     );
   }
-  if (parsed.value.mode !== "image_to_image") {
+  if (
+    parsed.value.mode !== "image_to_image" &&
+    parsed.value.mode !== "text_to_image"
+  ) {
     return NextResponse.json(
       {
-        error: "正式资产媒体生成仅支持图生图",
-        code: "IMAGE_TO_IMAGE_REQUIRED",
+        error: "正式资产媒体生成仅支持文生图或图生图",
+        code: "INVALID_GENERATE_MODE",
       },
       { status: 400 },
     );
   }
+  const mode = parsed.value.mode;
 
-  const draft = await loadAssetBundleDraft(input.projectId);
+  const draft = await loadAssetBundleForScope(input.projectId, scope);
   if (!draft) {
     return NextResponse.json({ error: "资产库不存在" }, { status: 404 });
   }
@@ -205,6 +213,34 @@ export async function runLibraryAssetMediaGenerate(input: {
   for (const slot of parsed.value.referenceSlots) {
     if (slot.kind === "upload") {
       referenceImages.push(slot.image);
+      continue;
+    }
+    if (slot.kind === "personal-material") {
+      const resolved = await resolvePersonalMaterialReference({
+        userId: input.actorUserId,
+        personalMaterialId: slot.personalMaterialId,
+      });
+      if (!resolved.ok) {
+        return NextResponse.json(
+          { error: resolved.error, code: resolved.code },
+          { status: resolved.status },
+        );
+      }
+      referenceImages.push(resolved.image);
+      continue;
+    }
+    if (slot.kind === "system-material") {
+      const resolved = await resolveSystemMaterialReference({
+        userId: input.actorUserId,
+        materialId: slot.materialId,
+      });
+      if (!resolved.ok) {
+        return NextResponse.json(
+          { error: resolved.error, code: resolved.code },
+          { status: resolved.status },
+        );
+      }
+      referenceImages.push(resolved.image);
       continue;
     }
     const owned = allowedMedia.has(slot.mediaId);
@@ -228,7 +264,7 @@ export async function runLibraryAssetMediaGenerate(input: {
     referenceImages.push(file);
   }
 
-  if (referenceImages.length === 0) {
+  if (mode === "image_to_image" && referenceImages.length === 0) {
     return NextResponse.json(
       { error: "图生图至少需要 1 张参考图", code: "REFERENCE_IMAGE_REQUIRED" },
       { status: 400 },
@@ -293,84 +329,83 @@ export async function runLibraryAssetMediaGenerate(input: {
   });
   if (!reserved.ok) return reserved.response;
 
-  let generated: Awaited<ReturnType<typeof generateDesignAssetImage>>;
-  try {
-    generated = await generateDesignAssetImage({
-      projectId: input.projectId,
-      assetType: assetKindRaw,
-      assetName: found.asset.name,
-      prompt: effectivePrompt,
+  const subjectKind =
+    assetKindRaw === "character"
+      ? ("library_character" as const)
+      : assetKindRaw === "scene"
+        ? ("library_scene" as const)
+        : ("library_prop" as const);
+
+  const libraryReferenceMediaIds = parsed.value.referenceSlots.flatMap((slot) =>
+    slot.kind === "media" ? [slot.mediaId] : [],
+  );
+  const sourceEntryRaw = readFormString(form, "sourceEntry");
+  const sourceEntry =
+    sourceEntryRaw === "library_look" ||
+    sourceEntryRaw === "library_image" ||
+    sourceEntryRaw === "storyboard_image" ||
+    sourceEntryRaw === "design_item"
+      ? sourceEntryRaw
+      : ("library_image" as const);
+
+  const enqueued = await createAndEnqueueImageJob({
+    projectId: input.projectId,
+    scope,
+    subjectKind,
+    subjectId: assetId,
+    assetKind: assetKindRaw,
+    actorUserId: input.actorUserId,
+    params: {
+      prompt: userPrompt,
+      mode,
+      model,
       quality: parsed.value.options.quality,
       aspectRatio: parsed.value.options.aspectRatio,
       count: parsed.value.options.count,
-      model,
-      referenceImages,
-    });
-  } catch (error) {
+      referenceMediaIds: libraryReferenceMediaIds,
+      sceneCharacterPlacementsJson:
+        readFormString(form, "sceneCharacterPlacements") || null,
+    },
+    idempotencyKey: parsed.value.idempotencyKey,
+    creditReservationId: reserved.reservationId,
+    referenceImages,
+    effectivePrompt,
+    model,
+    sourceEntry,
+    libraryReferenceMediaIds,
+    negativePrompt: readFormString(form, "negativePrompt") || null,
+    seed: readFormString(form, "seed") || null,
+  });
+
+  if (!enqueued.ok) {
     await releaseGenerationCredits({
       reservationId: reserved.reservationId,
       projectId: input.projectId,
-      reason: "library-asset-image-provider-failed",
+      reason: "library-asset-image-duplicate-blocked",
     });
-    const status =
-      error &&
-      typeof error === "object" &&
-      "status" in error &&
-      typeof (error as { status: unknown }).status === "number"
-        ? (error as { status: number }).status
-        : 500;
-    const code =
-      error &&
-      typeof error === "object" &&
-      "code" in error &&
-      typeof (error as { code: unknown }).code === "string"
-        ? (error as { code: string }).code
-        : "IMAGE_GENERATION_FAILED";
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "资产生成失败",
-        code,
+        error: enqueued.message,
+        code: enqueued.code,
+        job: enqueued.job ?? null,
       },
-      { status },
+      { status: enqueued.status },
     );
   }
 
-  const mediaIds = generated.images.map((image) => image.mediaId);
-  try {
-    const actualPoints = estimateAssetImageCredits(null, generated.count).points;
-    const credit = await settleGenerationCredits({
-      reservationId: reserved.reservationId,
-      projectId: input.projectId,
-      actualPoints,
-      reason: "library-asset-image-generation-settle",
-      knownBalance: reserved.balance,
-    });
-
-    const body: AssetImageGenerationResponse & {
-      credit?: unknown;
-      notice?: string;
-    } = {
-      mediaId: generated.mediaId,
-      mediaIds,
-      images: generated.images.map((image) => ({
-        mediaId: image.mediaId,
-        mimeType: image.mimeType,
-      })),
-      mode: "image_to_image",
-      generatedAt: new Date().toISOString(),
-      notice: generated.notice,
-      credit,
-    };
-    return NextResponse.json(body);
-  } catch (error) {
-    await deleteBatchImages(input.projectId, mediaIds);
+  if (enqueued.reusedIdempotency) {
     await releaseGenerationCredits({
       reservationId: reserved.reservationId,
       projectId: input.projectId,
-      reason: "library-asset-image-settle-failed",
+      reason: "library-asset-image-idempotent-reuse",
     });
-    throw error;
   }
+
+  return NextResponse.json({
+    async: true,
+    jobId: enqueued.job.id,
+    job: publicImageJobView(enqueued.job),
+  });
 }
 
 export async function runLibraryAssetMediaSave(input: {
@@ -379,7 +414,9 @@ export async function runLibraryAssetMediaSave(input: {
   assetKind: LibraryAssetKind;
   mediaId: string;
   setPrimary?: boolean;
+  store?: AssetBundleStoreScope;
 }): Promise<NextResponse> {
+  const scope = input.store ?? "management";
   if (!isSafeProjectAssetImageId(input.assetId)) {
     return NextResponse.json({ error: "无效资产 ID" }, { status: 400 });
   }
@@ -395,7 +432,7 @@ export async function runLibraryAssetMediaSave(input: {
     );
   }
 
-  const draft = await loadAssetBundleDraft(input.projectId);
+  const draft = await loadAssetBundleForScope(input.projectId, scope);
   if (!draft) {
     return NextResponse.json({ error: "资产库不存在" }, { status: 404 });
   }
@@ -407,25 +444,78 @@ export async function runLibraryAssetMediaSave(input: {
     );
   }
 
-  const approvedMediaIds = mergeMediaIdLists(
-    found.asset.approvedMediaIds,
-    [input.mediaId],
-    found.asset.imageFileName ? [found.asset.imageFileName] : [],
-    found.asset.primaryMediaId ? [found.asset.primaryMediaId] : [],
-  );
   const setPrimary = input.setPrimary === true;
-  const primaryMediaId = setPrimary
-    ? input.mediaId
-    : found.asset.primaryMediaId ?? found.asset.imageFileName ?? null;
+  let patched: typeof found.asset;
+  let approvedMediaIds: string[];
+  let primaryMediaId: string | null;
 
-  const patched = {
-    ...found.asset,
-    approvedMediaIds,
-    primaryMediaId: primaryMediaId ?? undefined,
-    imageFileName: found.asset.imageFileName ?? input.mediaId,
-    imageMimeType:
-      found.asset.imageMimeType ?? (file.mimeType as ProjectAssetImageMime),
-  };
+  if (
+    found.kind === "character" &&
+    setPrimary &&
+    isAppearanceMedia(found.asset as CharacterAsset, input.mediaId)
+  ) {
+    const primary = resolveCharacterPrimaryMediaId(
+      found.asset as CharacterAsset,
+    );
+    if (input.mediaId !== primary) {
+      return NextResponse.json(
+        {
+          error: "造型图片不能设为主形象",
+          code: "APPEARANCE_MEDIA_CANNOT_REPLACE_MAIN",
+        },
+        { status: 400 },
+      );
+    }
+  }
+
+  if (found.kind === "character" && !setPrimary) {
+    const nextCharacter = addCharacterLook(
+      {
+        ...(found.asset as CharacterAsset),
+        imageMimeType:
+          found.asset.imageMimeType ??
+          (file.mimeType as ProjectAssetImageMime),
+        imageFileName: found.asset.imageFileName ?? input.mediaId,
+      },
+      input.mediaId,
+    );
+    patched = nextCharacter;
+    approvedMediaIds = nextCharacter.approvedMediaIds ?? [];
+    primaryMediaId =
+      nextCharacter.primaryMediaId ?? nextCharacter.imageFileName ?? null;
+  } else {
+    approvedMediaIds = mergeMediaIdLists(
+      found.asset.approvedMediaIds,
+      [input.mediaId],
+      found.asset.imageFileName ? [found.asset.imageFileName] : [],
+      found.asset.primaryMediaId ? [found.asset.primaryMediaId] : [],
+    );
+    primaryMediaId = setPrimary
+      ? input.mediaId
+      : found.asset.primaryMediaId ?? found.asset.imageFileName ?? null;
+
+    patched = {
+      ...found.asset,
+      approvedMediaIds,
+      primaryMediaId: primaryMediaId ?? undefined,
+      imageFileName: setPrimary
+        ? input.mediaId
+        : found.asset.imageFileName ?? input.mediaId,
+      imageMimeType:
+        found.asset.imageMimeType ?? (file.mimeType as ProjectAssetImageMime),
+    };
+
+    if (found.kind === "character" && setPrimary) {
+      patched = setCharacterPrimary(
+        patched as CharacterAsset,
+        input.mediaId,
+      );
+      approvedMediaIds =
+        (patched as CharacterAsset).approvedMediaIds ?? approvedMediaIds;
+      primaryMediaId =
+        (patched as CharacterAsset).primaryMediaId ?? primaryMediaId;
+    }
+  }
 
   let nextDraft: AssetBundleDraft = draft;
   if (found.kind === "character") {
@@ -451,9 +541,8 @@ export async function runLibraryAssetMediaSave(input: {
     };
   }
 
-  await saveAssetBundleDraft(nextDraft);
-  await synchronizeAssetDraftDownstream({
-    projectId: input.projectId,
+  await saveAssetBundleForScope({
+    scope,
     previous: draft,
     next: nextDraft,
   });

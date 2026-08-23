@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildHttpCompatibleChatBody } from "@/text-generation/provider/http-compatible-provider";
+import {
+  buildHttpCompatibleChatBody,
+  normalizeHttpCompatibleBaseUrl,
+} from "@/text-generation/provider/http-compatible-provider";
 
 describe("buildHttpCompatibleChatBody thinking", () => {
   it("disables DeepSeek thinking by default", () => {
@@ -36,5 +39,22 @@ describe("buildHttpCompatibleChatBody thinking", () => {
       enableThinking: true,
     });
     expect(body.thinking).toBeUndefined();
+  });
+});
+
+describe("normalizeHttpCompatibleBaseUrl", () => {
+  it("appends /v1 for bare DeepSeek host", () => {
+    expect(normalizeHttpCompatibleBaseUrl("https://api.deepseek.com")).toBe(
+      "https://api.deepseek.com/v1",
+    );
+    expect(normalizeHttpCompatibleBaseUrl("https://api.deepseek.com/")).toBe(
+      "https://api.deepseek.com/v1",
+    );
+  });
+
+  it("leaves existing /v1 paths unchanged", () => {
+    expect(normalizeHttpCompatibleBaseUrl("https://api.deepseek.com/v1")).toBe(
+      "https://api.deepseek.com/v1",
+    );
   });
 });

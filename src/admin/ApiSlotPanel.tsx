@@ -12,6 +12,7 @@ import type {
 import { testStatusLabel } from "@/auth/ai-admin/types";
 import {
   ADMIN_SLOT_CATALOG,
+  ASSET_EXTRACTION_SLOT_IDS,
   MODALITY_GROUP_ORDER,
   TEXT_SIBLING_SLOT_IDS,
   isLegacySlotConnectionId,
@@ -279,6 +280,60 @@ export function ApiSlotPanel() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "测试失败");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const onApplyToAssetExtractionSibling = async (slot: AdminSlotDef) => {
+    const source = connectionForSlot(slot.id, connections, bindings);
+    if (!source) {
+      setError("请先保存当前接口，再同步到另一阶段");
+      return;
+    }
+    const siblings = ASSET_EXTRACTION_SLOT_IDS.filter((id) => id !== slot.id);
+    setBusyId(`copy-extract-${slot.id}`);
+    setError("");
+    setNotice("");
+    try {
+      const draft = drafts[slot.id]!;
+      for (const siblingId of siblings) {
+        const sibling = ADMIN_SLOT_CATALOG.find((item) => item.id === siblingId)!;
+        if (!isLegacySlotConnectionId(source.id)) {
+          const res = await fetch("/api/admin/ai-model-bindings", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              profileSlot: siblingId,
+              modelConnectionId: source.id,
+            }),
+          });
+          const payload = await readJson<{ error?: string }>(res);
+          if (!res.ok) throw new Error(payload.error ?? "同步绑定失败");
+          continue;
+        }
+        const targetId = connectionIdForSlot(siblingId);
+        const res = await fetch(
+          `/api/admin/model-connections/${encodeURIComponent(targetId)}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              displayName: sibling.label,
+              providerMode: draft.providerMode,
+              baseUrl: draft.baseUrl.trim() || source.baseUrl,
+              modelId: draft.modelId.trim() || source.modelId,
+              apiKey: draft.apiKey.trim() || undefined,
+            }),
+          },
+        );
+        const payload = await readJson<{ error?: string }>(res);
+        if (!res.ok) throw new Error(payload.error ?? `同步到${sibling.label}失败`);
+      }
+      setNotice(`已将「${slot.label}」的模型配置同步到另一提取阶段（任务规则仍分开展开编辑）`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "同步失败");
     } finally {
       setBusyId(null);
     }
@@ -575,6 +630,17 @@ export function ApiSlotPanel() {
                       </label>
                     </div>
                     <div className="admin-slot-actions">
+                      {ASSET_EXTRACTION_SLOT_IDS.includes(slot.id) ? (
+                        <button
+                          type="button"
+                          disabled={busyId === `copy-extract-${slot.id}`}
+                          onClick={() => void onApplyToAssetExtractionSibling(slot)}
+                        >
+                          {busyId === `copy-extract-${slot.id}`
+                            ? "同步中…"
+                            : "同步到另一提取阶段"}
+                        </button>
+                      ) : null}
                       {slot.modality === "text" && !slot.deprecated ? (
                         <button
                           type="button"

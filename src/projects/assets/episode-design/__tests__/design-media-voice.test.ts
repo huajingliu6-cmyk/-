@@ -48,6 +48,11 @@ function characterItem(
           mediaId: "gen_a",
           prompt: "a",
           generatedAt: "2026-08-01T00:00:00.000Z",
+          videoRefSafety: {
+            status: "ok",
+            checkedAt: "2026-08-01T00:00:00.000Z",
+            modelId: "sd2-real-person-cert",
+          },
         },
         {
           mediaId: "gen_b",

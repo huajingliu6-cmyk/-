@@ -17,6 +17,10 @@ import type {
 import { EPISODE_CHARS_DEFAULT } from "@/projects/script/types";
 import { isScriptTxtEncoding } from "@/projects/script/script-txt-constants";
 import { isRemoteDataOnly } from "@/persistence/remote-data-client";
+import { readAssetDocumentRevisionField } from "@/projects/assets/asset-bundle-revision";
+import { atomicWriteJson } from "@/projects/atomic-write-json";
+import { wrapWriteFailure } from "@/projects/operation-failed";
+import { scriptDraftContentChanged } from "@/projects/script/script-content-fingerprint";
 import {
   loadScriptDraftRemoteValue,
   saveScriptDraftRemote,
@@ -45,6 +49,7 @@ export type ScriptDraft = {
   /** Intelligent block-boundary split state (formal episodes only after confirm). */
   episodeSplit?: ScriptEpisodeSplitState;
   updatedAt: string;
+  documentRevision?: number;
 };
 
 export function normalizeScriptSourceText(sourceText: string): string {
@@ -325,6 +330,9 @@ export function normalizeScriptDraft(
       typeof raw.updatedAt === "string"
         ? raw.updatedAt
         : new Date().toISOString(),
+    ...(readAssetDocumentRevisionField(raw) > 0
+      ? { documentRevision: readAssetDocumentRevisionField(raw) }
+      : {}),
   };
 }
 
@@ -335,17 +343,47 @@ export async function saveScriptDraft(
   if (!normalized) {
     throw new Error("剧本草稿格式无效");
   }
-  if (isRemoteDataOnly()) return saveScriptDraftRemote(normalized);
-  await ensureDrafts(draft.projectId);
+  const updatedAt =
+    typeof draft.updatedAt === "string" ? draft.updatedAt : new Date().toISOString();
   const next: ScriptDraft = {
     ...normalized,
-    updatedAt: new Date().toISOString(),
+    updatedAt,
   };
-  const target = scriptDraftPath(draft.projectId);
-  const temp = `${target}.${process.pid}.tmp`;
-  await fs.writeFile(temp, JSON.stringify(next, null, 2), "utf-8");
-  await fs.rename(temp, target);
-  return next;
+  const expectedRevision = readAssetDocumentRevisionField(next);
+  const previous = await loadScriptDraft(draft.projectId);
+  const contentChanged = scriptDraftContentChanged(previous, next);
+  let saved: ScriptDraft;
+  if (isRemoteDataOnly()) {
+    saved = await saveScriptDraftRemote(next);
+  } else {
+    await ensureDrafts(draft.projectId);
+    const target = scriptDraftPath(draft.projectId);
+    const disk = await fs.readFile(target, "utf-8").catch(() => null);
+    const diskRev = disk
+      ? readAssetDocumentRevisionField(JSON.parse(disk) as unknown)
+      : 0;
+    if (disk && expectedRevision !== diskRev) {
+      throw new Error("REVISION_CONFLICT");
+    }
+    const afterRevision = expectedRevision + 1;
+    saved = { ...next, documentRevision: afterRevision };
+    await atomicWriteJson(target, saved);
+  }
+  try {
+    const { syncManagementToWorkspace } = await import(
+      "@/projects/workspace-sync/sync-management-to-workspace"
+    );
+    await syncManagementToWorkspace(draft.projectId);
+    if (contentChanged) {
+      const { invalidateProductionsAfterScriptSave } = await import(
+        "@/projects/script/script-draft-invalidation"
+      );
+      await invalidateProductionsAfterScriptSave(draft.projectId);
+    }
+  } catch (error) {
+    wrapWriteFailure(error);
+  }
+  return saved;
 }
 
 export async function loadScriptDraft(

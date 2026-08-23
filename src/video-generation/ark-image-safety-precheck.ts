@@ -6,12 +6,13 @@
 import { promises as fs } from "fs";
 import { getGenerationApiConfig, looksLikeArkVideoEndpoint } from "@/auth/api-config";
 import { isRemoteDataOnly } from "@/persistence/remote-data-client";
+import type { AssetBundleStoreScope } from "@/projects/assets/asset-bundle-scope";
 import {
   findImageableAssetInDraft,
-  patchImageableAssetVideoRefSafety,
   readProjectAssetImageMeta,
   resolveAssetImageFilePath,
 } from "@/projects/assets/asset-image-storage";
+import { persistAssetVideoRefSafety } from "@/projects/assets/video-ref-precheck-persist";
 import { loadAssetBundleDraft } from "@/projects/assets/asset-bundle-store";
 import { resolveAssetImageStorageKey } from "@/projects/assets/asset-image-url";
 import { getRemoteAssetImage } from "@/projects/assets/remote-asset-blob-store";
@@ -312,7 +313,9 @@ export async function runAndPersistAssetVideoRefPrecheck(params: {
   projectId: string;
   assetId: string;
   fetchImpl?: typeof fetch;
+  store?: AssetBundleStoreScope;
 }): Promise<VideoRefSafety | null> {
+  const store = params.store ?? "management";
   const runtime = await resolveArkVisionPrecheckRuntime();
   const image = await readAssetImageAsDataUrl(params.projectId, params.assetId);
   if (!image) {
@@ -322,34 +325,25 @@ export async function runAndPersistAssetVideoRefPrecheck(params: {
       reason: "无法读取资产参考图",
       modelId: runtime.modelId,
     };
-    await patchImageableAssetVideoRefSafety({
+    await persistAssetVideoRefSafety({
       projectId: params.projectId,
       assetId: params.assetId,
       videoRefSafety: failed,
+      store,
     });
     return failed;
   }
-
-  // Mark pending first so UI can show in-progress if needed
-  await patchImageableAssetVideoRefSafety({
-    projectId: params.projectId,
-    assetId: params.assetId,
-    videoRefSafety: {
-      status: "pending",
-      checkedAt: new Date().toISOString(),
-      modelId: runtime.modelId,
-    },
-  });
 
   const result = await callArkVisionImagePrecheck({
     dataUrl: image.dataUrl,
     runtime,
     fetchImpl: params.fetchImpl,
   });
-  await patchImageableAssetVideoRefSafety({
+  await persistAssetVideoRefSafety({
     projectId: params.projectId,
     assetId: params.assetId,
     videoRefSafety: result,
+    store,
   });
   return result;
 }

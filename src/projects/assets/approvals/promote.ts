@@ -4,6 +4,7 @@ import {
   loadAssetBundleDraft,
   saveAssetBundleDraft,
 } from "@/projects/assets/asset-bundle-store";
+import { bindAssetBundleRevisionForSave, carryAssetBundleRevision } from "@/projects/assets/asset-bundle-revision";
 import { resolveAssetImageFilePath } from "@/projects/assets/asset-image-storage";
 import { mergeAssetBundlesPreferLocalKeepUpstream } from "@/projects/assets/approvals/merge-workspace-assets";
 import type { AssetApprovalItem } from "@/projects/assets/approvals/types";
@@ -36,8 +37,11 @@ import {
   getDesignMediaVoiceBinding,
   isMediaVoiceBound,
 } from "@/projects/assets/episode-design/design-media-voice";
+import { addCharacterLook } from "@/projects/assets/character-media-state";
+import {
+  setCharacterMediaVideoRefSafety,
+} from "@/projects/assets/character-media-video-ref";
 import { syncDesignVideoRefSafetyToLibrary } from "@/projects/assets/episode-design/sync-design-video-ref-to-library";
-import { syncManagementToWorkspace } from "@/projects/workspace-sync/sync-management-to-workspace";
 import {
   loadWorkspaceLocalAssets,
   loadWorkspaceLocalEpisodeDesigns,
@@ -45,6 +49,7 @@ import {
   saveWorkspaceLocalEpisodeDesigns,
 } from "@/projects/workspace-sync/store";
 import { getWorkspaceEpisodeAssetDesignDetail } from "@/projects/workspace-sync/workspace-episode-design-api";
+import { isSd2CertifiedForVideoRef } from "@/video-generation/sd2-cert-safety";
 
 export type PromoteApprovalItemResult =
   | {
@@ -139,7 +144,7 @@ export function createAssetFromDesignItem(
     const voiceName = isMediaVoiceBound(voice)
       ? voice.voiceName
       : (item.draft.voiceName ?? null);
-    return {
+    const created: CharacterAsset = {
       id: randomUUID(),
       name: item.name,
       role: item.draft.role,
@@ -156,6 +161,7 @@ export function createAssetFromDesignItem(
         : undefined,
       ...base,
     };
+    return setCharacterMediaVideoRefSafety(created, mediaId, videoRefSafety);
   }
   if (item.assetType === "scene") {
     return {
@@ -191,25 +197,48 @@ export function applyMediaToExistingAsset<
   videoRefSafety: VideoRefSafety | null = null,
   designItem?: EpisodeAssetDesignItem,
 ): T {
-  const approvedMediaIds = mergeMediaIdLists(
-    asset.approvedMediaIds,
-    [mediaId],
-    asset.imageFileName ? [asset.imageFileName] : [],
-    asset.primaryMediaId ? [asset.primaryMediaId] : [],
-  );
-  const next: T = {
-    ...asset,
-    approvedMediaIds,
-    primaryMediaId: asset.primaryMediaId ?? asset.imageFileName ?? mediaId,
+  const baseMeta = {
     imageFileName: asset.imageFileName ?? mediaId,
     imageMimeType: asset.imageMimeType ?? "image/png",
     status: asset.status === "draft" ? "completed" : asset.status,
-    videoRefSafety,
     approvalProvenance: {
       ...(asset.approvalProvenance ?? {}),
       ...provenance,
     },
-  };
+  } as const;
+
+  let next: T;
+  if ("voiceId" in asset) {
+    const withLook = addCharacterLook(
+      {
+        ...(asset as CharacterAsset),
+        ...baseMeta,
+        primaryMediaId:
+          asset.primaryMediaId ?? asset.imageFileName ?? mediaId,
+      },
+      mediaId,
+    );
+    next = setCharacterMediaVideoRefSafety(
+      withLook,
+      mediaId,
+      videoRefSafety,
+    ) as T;
+  } else {
+    const approvedMediaIds = mergeMediaIdLists(
+      asset.approvedMediaIds,
+      [mediaId],
+      asset.imageFileName ? [asset.imageFileName] : [],
+      asset.primaryMediaId ? [asset.primaryMediaId] : [],
+    );
+    next = {
+      ...asset,
+      ...baseMeta,
+      videoRefSafety,
+      approvedMediaIds,
+      primaryMediaId: asset.primaryMediaId ?? asset.imageFileName ?? mediaId,
+    };
+  }
+
   if (designItem?.assetType === "character" && "voiceId" in next) {
     const voice = getDesignMediaVoiceBinding(designItem, mediaId);
     const voiceId = isMediaVoiceBound(voice) ? voice.voiceId : null;
@@ -337,6 +366,11 @@ export async function promoteApprovalItem(input: {
     };
   }
 
+  const carriedSafety = resolveVideoRefSafetyFromDesignMedia(
+    workspaceItem,
+    mediaId,
+  );
+
   // Idempotent: already promoted this media to an asset
   if (input.item.promotedAssetId) {
     const existingBundle = (await loadAssetBundleDraft(input.projectId)) ?? {
@@ -368,10 +402,7 @@ export async function promoteApprovalItem(input: {
           libraryAssetId: existing.id,
         },
         mediaId,
-        videoRefSafety: resolveVideoRefSafetyFromDesignMedia(
-          workspaceItem,
-          mediaId,
-        ),
+        videoRefSafety: carriedSafety,
       });
       return {
         ok: true,
@@ -379,6 +410,17 @@ export async function promoteApprovalItem(input: {
         created: false,
       };
     }
+  }
+
+  if (
+    input.item.category === "character" &&
+    !isSd2CertifiedForVideoRef(carriedSafety)
+  ) {
+    return {
+      ok: false,
+      code: "VIDEO_REF_REQUIRED",
+      message: `角色「${input.item.assetNameSnapshot}」的入库图尚未通过 SD 真人素材认证，无法写入资产库。请先完成人物校验。`,
+    };
   }
 
   const provenance: AssetApprovalProvenance = {
@@ -414,10 +456,6 @@ export async function promoteApprovalItem(input: {
 
   let assetId: string;
   let created = false;
-  const carriedSafety = resolveVideoRefSafetyFromDesignMedia(
-    workspaceItem,
-    mediaId,
-  );
   if (linked) {
     if (
       linked.imageFileName === mediaId ||
@@ -427,11 +465,19 @@ export async function promoteApprovalItem(input: {
       assetId = linked.id;
       // 同图已入库：设计侧预检结果覆盖库角标（含 likely→ok 纠正）
       if (carriedSafety) {
-        const synced = {
-          ...linked,
-          videoRefSafety: carriedSafety,
-        };
+        const synced =
+          input.item.category === "character" && "voiceId" in linked
+            ? setCharacterMediaVideoRefSafety(
+                linked as CharacterAsset,
+                mediaId,
+                carriedSafety,
+              )
+            : {
+                ...linked,
+                videoRefSafety: carriedSafety,
+              };
         bundle = upsertAssetInBundle(bundle, input.item.category, synced);
+        await bindAssetBundleRevisionForSave(input.projectId, bundle);
         await saveAssetBundleDraft(bundle);
       }
     } else {
@@ -458,18 +504,14 @@ export async function promoteApprovalItem(input: {
     created = true;
   }
 
+  await bindAssetBundleRevisionForSave(input.projectId, bundle);
   await saveAssetBundleDraft(bundle);
 
-  // 设计侧已有终态预检则跳过；否则异步补检
   if (needsVideoRefPrecheck(carriedSafety)) {
-    void runAndPersistAssetVideoRefPrecheck({
+    await runAndPersistAssetVideoRefPrecheck({
       projectId: input.projectId,
       assetId,
-    }).catch((err) => {
-      console.error(
-        `[video-ref-precheck] promote failed for ${input.projectId}/${assetId}:`,
-        err,
-      );
+      store: "management",
     });
   }
 
@@ -538,9 +580,9 @@ export async function promoteApprovalItem(input: {
     upsertEpisodeRecord(designStore, nextRecord),
   );
 
-  // Sync snapshot, then merge into workspace local assets + design libraryAssetId
-  await syncManagementToWorkspace(input.projectId);
-
+  // Sync snapshot, then merge into workspace local assets + design libraryAssetId.
+  // These writes target the workspace store and must not inherit a management
+  // HTTP urlStore/store bound.
   const localAssets = await loadWorkspaceLocalAssets(input.projectId);
   const managementAfter = await loadAssetBundleDraft(input.projectId);
   if (managementAfter) {
@@ -549,8 +591,14 @@ export async function promoteApprovalItem(input: {
         localAssets,
         managementAfter,
       );
+      carryAssetBundleRevision(localAssets, merged);
       await saveWorkspaceLocalAssets(merged);
     } else {
+      await bindAssetBundleRevisionForSave(
+        input.projectId,
+        managementAfter,
+        "workspace",
+      );
       await saveWorkspaceLocalAssets(managementAfter);
     }
   }

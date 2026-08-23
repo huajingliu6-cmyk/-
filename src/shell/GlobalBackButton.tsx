@@ -22,7 +22,7 @@ export function GlobalBackButton() {
 
   const onClick = async () => {
     bounce.trigger();
-    const genOk = await confirmGenerationLeaveIfNeeded();
+    const genOk = await confirmGenerationLeaveIfNeeded(target.href);
     if (!genOk) return;
     const ok = await confirmUnsavedLeaveIfNeeded();
     if (ok) navigate();

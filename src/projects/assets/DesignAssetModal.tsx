@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Download, History, ImagePlus, ShieldCheck, X } from "lucide-react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { createPortal } from "react-dom";
+import { Download, History, ImagePlus, Settings2, ShieldCheck, X } from "lucide-react";
 import type {
   AssetDesignPromptHistoryEntry,
   EpisodeAssetDesignItem,
@@ -23,10 +24,16 @@ import {
   mergeMediaIdLists,
 } from "@/projects/assets/episode-design/generated-media-history";
 import { getProjectAssetImageUrl } from "@/projects/assets/asset-image-url";
+import {
+  CompactPromptReferenceSlots,
+  emptyCompactPromptReferenceSlots,
+  type CompactPromptReferenceSlot,
+} from "@/projects/assets/CompactPromptReferenceSlots";
 import { DesignImageLightbox } from "@/projects/assets/DesignImageLightbox";
 import { useGenerationBusy } from "@/shell/GenerationBusyGuard";
 import { safeRandomUUID } from "@/lib/safe-random-id";
 import type { AssetGenerationProgress } from "@/projects/assets/DesignGenerationOverlay";
+import { DesignGenerationOverlay } from "@/projects/assets/DesignGenerationOverlay";
 import {
   DEFAULT_DESIGN_IMAGE_OPTIONS,
   DESIGN_IMAGE_ASPECT_RATIOS,
@@ -54,6 +61,10 @@ import {
   GlassSelect,
   type GlassSelectOption,
 } from "@/shell/glass-select";
+import { useLibraryImageGenerationJob } from "@/projects/assets/image-generation/useLibraryImageGenerationJob";
+import { ImageGenerationTaskPanel } from "@/projects/assets/image-generation/ImageGenerationTaskPanel";
+import { appendGeneratedMediaGenerations } from "@/projects/assets/episode-design/generated-media-history";
+import { parseResponseJson } from "@/projects/assets/parse-response-json";
 
 const DESIGN_IMAGE_QUALITY_OPTIONS: GlassSelectOption[] =
   DESIGN_IMAGE_QUALITIES.map((value) => ({
@@ -127,6 +138,56 @@ function revokeUploadPreview(slot: ReferenceSlot) {
   }
 }
 
+function revokeCompactUploadPreview(slot: CompactPromptReferenceSlot): void {
+  if (slot?.source === "upload" && slot.previewUrl.startsWith("blob:")) {
+    URL.revokeObjectURL(slot.previewUrl);
+  }
+}
+
+function appendLibraryCompactReferencesToForm(
+  form: FormData,
+  slots: CompactPromptReferenceSlot[],
+): boolean {
+  let hasRefs = false;
+  const referenceSources: Array<Record<string, unknown>> = [];
+  slots.forEach((slot, index) => {
+    if (!slot) return;
+    hasRefs = true;
+    if (slot.source === "generated") {
+      referenceSources.push({
+        slot: index,
+        sourceType: "project-asset",
+        mediaId: slot.mediaId,
+      });
+      form.set(`referenceMediaId[${index}]`, slot.mediaId);
+      return;
+    }
+    if (slot.source === "upload") {
+      referenceSources.push({ slot: index, sourceType: "upload" });
+      form.set(`referenceImage[${index}]`, slot.file);
+      return;
+    }
+    if (slot.source === "personal-material") {
+      referenceSources.push({
+        slot: index,
+        sourceType: "personal-material",
+        personalMaterialId: slot.personalMaterialId,
+      });
+      return;
+    }
+    referenceSources.push({
+      slot: index,
+      sourceType: "system-material",
+      materialId: slot.materialId,
+      personalMaterialId: slot.personalMaterialId,
+    });
+  });
+  if (referenceSources.length > 0) {
+    form.set("referenceSources", JSON.stringify(referenceSources));
+  }
+  return hasRefs;
+}
+
 export type DesignAssetModalProps = {
   open: boolean;
   item: EpisodeAssetDesignItem | null;
@@ -159,8 +220,31 @@ export type DesignAssetModalProps = {
   ) => void;
   /** Asset-library context keeps the prompt/generation surface but removes image-to-image editing. */
   hideImageEdit?: boolean;
-  /** Development preview uses the same progress/disabled animation without auth-backed generation. */
-  previewMode?: boolean;
+  /**
+   * Character detail embeds history/download/validation on the hero image.
+   * Hide the duplicate media toolbar in the「生成预览」row when true.
+   */
+  hideMediaToolbar?: boolean;
+  /**
+   * Character detail already shows a compact object badge.
+   * Hide the embedded「素材提示词」section label to avoid duplicate titles.
+   */
+  hidePromptSectionLabel?: boolean;
+  /**
+   * Compact object label shown where prompt-history used to sit
+   * (e.g. 主形象 / 少年态). When set, hides「素材提示词」title.
+   */
+  promptContextLabel?: string | null;
+  /** Prefer host toast / status channel over inline footer notes. */
+  onStatus?: (message: string) => void;
+  /** modal = dialog overlay; embedded = inline panel for character library page. */
+  variant?: "modal" | "embedded";
+  /** Notify host when preview/history/generate switches the active media id. */
+  onCurrentMediaChange?: (mediaId: string | null) => void;
+  /** Host tracks unsaved prompt edits in embedded library panels. */
+  onPromptDirtyChange?: (dirty: boolean) => void;
+  /** Host can flush the current prompt text before save/navigation. */
+  promptFlushRef?: MutableRefObject<(() => Promise<void>) | null>;
 };
 
 function apiBase(
@@ -168,22 +252,45 @@ function apiBase(
   projectId: string,
   episodeId: string,
   itemId: string,
-): { prompt: string; generate: string; videoRefPrecheck: string } {
+): { prompt: string; generate: string; videoRefPrecheck: string; projectRoot: string } {
   const enc = encodeURIComponent;
+  const projectRoot =
+    surface === "workspace"
+      ? `/api/workspace/projects/${enc(projectId)}`
+      : `/api/projects/${enc(projectId)}`;
   if (surface === "workspace") {
-    const root = `/api/workspace/projects/${enc(projectId)}/asset-designs/episodes/${enc(episodeId)}/items/${enc(itemId)}`;
+    const root = `${projectRoot}/asset-designs/episodes/${enc(episodeId)}/items/${enc(itemId)}`;
     return {
       prompt: `${root}/generate-prompt`,
       generate: `${root}/generate-asset`,
       videoRefPrecheck: `${root}/video-ref-precheck`,
+      projectRoot,
     };
   }
-  const root = `/api/projects/${enc(projectId)}/asset-designs/episodes/${enc(episodeId)}/items/${enc(itemId)}`;
+  const root = `${projectRoot}/asset-designs/episodes/${enc(episodeId)}/items/${enc(itemId)}`;
   return {
     prompt: `${root}/generate-prompt`,
     generate: `${root}/generate-asset`,
     videoRefPrecheck: `${root}/video-ref-precheck`,
+    projectRoot,
   };
+}
+
+function resolveLibraryGenerateTarget(
+  item: EpisodeAssetDesignItem,
+  hideImageEdit: boolean,
+): { assetId: string; assetKind: "character" | "scene" | "prop" } | null {
+  if (!hideImageEdit) return null;
+  if (
+    item.assetType !== "character" &&
+    item.assetType !== "scene" &&
+    item.assetType !== "prop"
+  ) {
+    return null;
+  }
+  const assetId = (item.libraryAssetId ?? item.existingAssetId ?? "").trim();
+  if (!assetId) return null;
+  return { assetId, assetKind: item.assetType };
 }
 
 function pushLocalPromptHistory(
@@ -210,21 +317,32 @@ function DesignAssetModalBody({
   onItemPatched,
   onGenerationProgress,
   hideImageEdit = false,
-  previewMode = false,
+  hideMediaToolbar = false,
+  hidePromptSectionLabel = false,
+  promptContextLabel = null,
+  onStatus,
+  variant = "modal",
+  onCurrentMediaChange,
+  onPromptDirtyChange,
+  promptFlushRef,
 }: DesignAssetModalBodyProps) {
   const titleId = useId();
+  const isEmbedded = variant === "embedded";
   const formalPrompt = resolveFormalDesignPromptText(item);
   const formalPromptMissing = !formalPrompt;
   const serverPromptGenerating = item.designPrompt?.status === "generating";
 
   const [promptText, setPromptText] = useState(formalPrompt);
+  const committedPromptRef = useRef(formalPrompt);
   const [syncedFormalPrompt, setSyncedFormalPrompt] = useState(formalPrompt);
   if (formalPrompt !== syncedFormalPrompt) {
     setSyncedFormalPrompt(formalPrompt);
     if (formalPrompt) {
       setPromptText(formalPrompt);
+      committedPromptRef.current = formalPrompt;
     } else if (!serverPromptGenerating) {
       setPromptText("");
+      committedPromptRef.current = "";
     }
   }
   const [promptHistory, setPromptHistory] = useState<
@@ -233,14 +351,36 @@ function DesignAssetModalBody({
   const [loadingPrompt, setLoadingPrompt] = useState(false);
   const promptBusy = loadingPrompt || serverPromptGenerating;
   const [generatingAsset, setGeneratingAsset] = useState(false);
-  const generateBusy = generatingAsset || isGeneratingAsset;
+  const [generationProgress, setGenerationProgress] =
+    useState<AssetGenerationProgress | null>(null);
+  const libraryGenerateTarget = useMemo(
+    () => resolveLibraryGenerateTarget(item, hideImageEdit),
+    [hideImageEdit, item],
+  );
+  const imageJob = useLibraryImageGenerationJob({
+    projectId,
+    context: surface === "workspace" ? "workspace" : "management",
+    assetId: libraryGenerateTarget?.assetId ?? item.id,
+    assetKind: libraryGenerateTarget?.assetKind ?? "design_item",
+    enabled: true,
+  });
+  const generateBusy =
+    generatingAsset || isGeneratingAsset || imageJob.generationBlocked;
   const autoPromptKeyRef = useRef<string | null>(null);
+  const appliedJobResultRef = useRef<string | null>(null);
+  const generateInFlightRef = useRef(false);
+  const lastStatusRef = useRef<string | null>(null);
   useGenerationBusy(
     generateBusy || promptBusy,
     `design-modal-${item.id}`,
     promptBusy ? "资产提示词生成" : "资产图生成",
   );
   const [copyNote, setCopyNote] = useState("");
+  const [paramsOpen, setParamsOpen] = useState(false);
+  const paramsTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const paramsPanelRef = useRef<HTMLDivElement | null>(null);
+  const [paramsPanelStyle, setParamsPanelStyle] = useState<Record<string, string | number>>({});
+  const [paramsPlaced, setParamsPlaced] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [imageOptions, setImageOptions] = useState<DesignImageGenerationOptions>(
@@ -255,6 +395,9 @@ function DesignAssetModalBody({
   const [referenceSlots, setReferenceSlots] = useState<ReferenceSlot[]>(
     emptyReferenceSlots,
   );
+  const [libraryReferenceSlots, setLibraryReferenceSlots] = useState(
+    emptyCompactPromptReferenceSlots,
+  );
   const referenceFileInputRefs = useRef<Array<HTMLInputElement | null>>(
     Array.from({ length: REFERENCE_SLOT_COUNT }, () => null),
   );
@@ -265,7 +408,6 @@ function DesignAssetModalBody({
   const [staleHint, setStaleHint] = useState(
     item.designPrompt?.status === "stale",
   );
-  const [showPromptHistory, setShowPromptHistory] = useState(false);
   const [showImageHistory, setShowImageHistory] = useState(false);
   const [pickedMediaId, setPickedMediaId] = useState<string | null>(null);
   const [localHistoryIds, setLocalHistoryIds] = useState<string[]>(
@@ -299,6 +441,7 @@ function DesignAssetModalBody({
 
   const reportProgress = useCallback(
     (progress: AssetGenerationProgress | null) => {
+      setGenerationProgress(progress);
       onGenerationProgress?.(item.id, progress);
     },
     [item.id, onGenerationProgress],
@@ -311,6 +454,7 @@ function DesignAssetModalBody({
       }
       progressClearTimerRef.current = window.setTimeout(() => {
         progressClearTimerRef.current = null;
+        setGenerationProgress(null);
         onGenerationProgress?.(item.id, null);
       }, delayMs);
     },
@@ -321,7 +465,9 @@ function DesignAssetModalBody({
   const incomingCurrentId = incomingMedia?.currentId ?? null;
   if (incomingCurrentId !== syncedMediaCurrentId) {
     setSyncedMediaCurrentId(incomingCurrentId);
-    if (incomingCurrentId) {
+    // Only clear an explicit pick when host media advances to a *different* id.
+    // Clearing when incoming equals the pick forces a needless preview reload.
+    if (incomingCurrentId && incomingCurrentId !== pickedMediaId) {
       setPickedMediaId(null);
     }
     setLocalHistoryIds((prev) =>
@@ -351,6 +497,19 @@ function DesignAssetModalBody({
     incomingCurrentId ? [incomingCurrentId] : [],
   );
 
+  const onCurrentMediaChangeRef = useRef(onCurrentMediaChange);
+  useEffect(() => {
+    onCurrentMediaChangeRef.current = onCurrentMediaChange;
+  }, [onCurrentMediaChange]);
+
+  const lastNotifiedMediaIdRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    // Notify only when the media id value changes — never when parent re-creates the callback.
+    if (lastNotifiedMediaIdRef.current === currentMediaId) return;
+    lastNotifiedMediaIdRef.current = currentMediaId;
+    onCurrentMediaChangeRef.current?.(currentMediaId);
+  }, [currentMediaId]);
+
   if (!currentMediaId && previewObjectUrl !== null) {
     setPreviewObjectUrl(null);
   }
@@ -369,7 +528,7 @@ function DesignAssetModalBody({
       setPreviewLoading(true);
       try {
         const url = getProjectAssetImageUrl(projectId, currentMediaId, {
-          revision: `${currentMediaId}-${Date.now()}`,
+          revision: currentMediaId,
         });
         const res = await fetch(url, { credentials: "same-origin" });
         if (!res.ok) {
@@ -513,20 +672,194 @@ function DesignAssetModalBody({
   }, []);
 
   const referenceSlotsRef = useRef(referenceSlots);
+  const libraryReferenceSlotsRef = useRef(libraryReferenceSlots);
   useEffect(() => {
     referenceSlotsRef.current = referenceSlots;
   }, [referenceSlots]);
   useEffect(() => {
+    libraryReferenceSlotsRef.current = libraryReferenceSlots;
+  }, [libraryReferenceSlots]);
+  useEffect(() => {
     return () => {
       revokeAllUploadPreviews(referenceSlotsRef.current);
+      libraryReferenceSlotsRef.current.forEach(revokeCompactUploadPreview);
     };
   }, [revokeAllUploadPreviews]);
+
+  const reportStatus = useCallback(
+    (message: string, kind: "info" | "error" = "info") => {
+      const text = String(message ?? "").trim();
+      if (!text) return;
+      if (lastStatusRef.current === text) return;
+      lastStatusRef.current = text;
+      if (onStatus) {
+        onStatus(text);
+        return;
+      }
+      if (kind === "error") setError(text);
+      else if (text.includes("已复制")) setCopyNote(text);
+      else setNotice(text);
+    },
+    [onStatus],
+  );
+
+  const compactGenerationChrome = isEmbedded && hideImageEdit;
+  const showLibraryCompactReferences =
+    compactGenerationChrome && Boolean(libraryGenerateTarget);
+  const libraryImageToImage =
+    showLibraryCompactReferences && libraryReferenceSlots.some(Boolean);
+
+  const flushPrompt = useCallback(async () => {
+    const text = promptText.trim();
+    const committed = committedPromptRef.current.trim();
+    if (!text || text === committed) {
+      onPromptDirtyChange?.(false);
+      return;
+    }
+    await Promise.resolve(
+      onPromptUpdated(item.id, text, {
+        history: promptHistory,
+        generationId: item.designPrompt?.generationId ?? null,
+      }),
+    );
+    committedPromptRef.current = text;
+    onPromptDirtyChange?.(false);
+  }, [
+    item.designPrompt?.generationId,
+    item.id,
+    onPromptDirtyChange,
+    onPromptUpdated,
+    promptHistory,
+    promptText,
+  ]);
+
+  useEffect(() => {
+    if (!promptFlushRef) return;
+    promptFlushRef.current = flushPrompt;
+    return () => {
+      if (promptFlushRef.current === flushPrompt) {
+        promptFlushRef.current = null;
+      }
+    };
+  }, [flushPrompt, promptFlushRef]);
+
+  useEffect(() => {
+    onPromptDirtyChange?.(
+      promptText.trim() !== committedPromptRef.current.trim(),
+    );
+  }, [onPromptDirtyChange, promptText]);
+
+  const onStatusRef = useRef(onStatus);
+  useEffect(() => {
+    onStatusRef.current = onStatus;
+  }, [onStatus]);
+
+  useEffect(() => {
+    if (!onStatusRef.current) return;
+    const text = error.trim();
+    if (!text) return;
+    if (lastStatusRef.current === text) return;
+    lastStatusRef.current = text;
+    onStatusRef.current(text);
+  }, [error]);
+  useEffect(() => {
+    if (!onStatusRef.current) return;
+    const text = notice.trim();
+    if (!text) return;
+    if (lastStatusRef.current === text) return;
+    lastStatusRef.current = text;
+    onStatusRef.current(text);
+  }, [notice]);
+  useEffect(() => {
+    if (!onStatusRef.current) return;
+    const text = copyNote.trim();
+    if (!text) return;
+    if (lastStatusRef.current === text) return;
+    lastStatusRef.current = text;
+    onStatusRef.current(text);
+  }, [copyNote]);
+
+  const placeParamsPanel = useCallback(() => {
+    const trigger = paramsTriggerRef.current;
+    const panel = paramsPanelRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const width = Math.min(420, window.innerWidth - 24);
+    let left = rect.right - width;
+    left = Math.max(12, Math.min(left, window.innerWidth - width - 12));
+    const panelH = Math.max(panel?.offsetHeight || 0, 300);
+    let top = rect.bottom + 8;
+    if (top + panelH > window.innerHeight - 12) {
+      top = rect.top - panelH - 8;
+    }
+    top = Math.max(12, Math.min(top, window.innerHeight - panelH - 12));
+    setParamsPanelStyle({
+      top: `${top}px`,
+      left: `${left}px`,
+      width: `${width}px`,
+    });
+    setParamsPlaced(true);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!paramsOpen) {
+      setParamsPlaced(false);
+      return;
+    }
+    placeParamsPanel();
+    const raf = window.requestAnimationFrame(() => placeParamsPanel());
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (document.querySelector(".gs__menu--portal, .gs__menu")) return;
+      setParamsOpen(false);
+    };
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (paramsPanelRef.current?.contains(target)) return;
+      if (paramsTriggerRef.current?.contains(target)) return;
+      const el = target instanceof Element ? target : null;
+      if (
+        el?.closest?.(
+          ".gs__menu, .gs__menu--portal, [role='listbox'], [data-glass-select-menu]",
+        )
+      ) {
+        return;
+      }
+      setParamsOpen(false);
+    };
+    window.addEventListener("resize", placeParamsPanel);
+    window.addEventListener("scroll", placeParamsPanel, true);
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointer);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener("resize", placeParamsPanel);
+      window.removeEventListener("scroll", placeParamsPanel, true);
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointer);
+    };
+  }, [paramsOpen, placeParamsPanel]);
+
+  const qualityLabel =
+    DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality] ?? imageOptions.quality;
+  const modelLabel =
+    DESIGN_IMAGE_MODELS.find((model) => model.id === imageModelId)?.label ??
+    imageModelId;
+  const generationModeLabel = libraryImageToImage
+    ? "图生图"
+    : showLibraryCompactReferences
+      ? "文生图"
+      : imageEditOpen
+        ? "图生图"
+        : "文生图";
+  const generationSummaryText = `${generationModeLabel} · ${qualityLabel} · ${imageOptions.aspectRatio} · ${imageOptions.count}张 · ${modelLabel}`;
 
   const handleCopy = useCallback(async () => {
     setCopyNote("");
     setError("");
     if (!promptText.trim()) {
-      setError("提示词为空，无法复制");
+      reportStatus("提示词为空，无法复制", "error");
       return;
     }
     const fallbackCopy = () => {
@@ -551,11 +884,11 @@ function DesignAssetModalBody({
       } catch {
         fallbackCopy();
       }
-      setCopyNote("提示词已复制");
+      reportStatus("提示词已复制");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "复制失败");
+      reportStatus(e instanceof Error ? e.message : "复制失败", "error");
     }
-  }, [promptText]);
+  }, [promptText, reportStatus]);
 
   const handleDownload = async () => {
     if (!currentMediaId) {
@@ -565,7 +898,7 @@ function DesignAssetModalBody({
     setError("");
     try {
       const url = getProjectAssetImageUrl(projectId, currentMediaId, {
-        revision: Date.now(),
+        revision: currentMediaId,
       });
       const res = await fetch(url);
       if (!res.ok) throw new Error("下载失败");
@@ -583,10 +916,174 @@ function DesignAssetModalBody({
     }
   };
 
+  const applyJobResultToUi = useCallback(
+    (job: NonNullable<typeof imageJob.job>, activePrompt: string) => {
+      if (!job.primaryMediaId || job.mediaIds.length === 0) return;
+      const now = new Date().toISOString();
+      const media = appendGeneratedMediaGenerations(
+        item.generatedMedia,
+        job.mediaIds.map((mediaId) => ({
+          mediaId,
+          prompt: activePrompt || job.params.prompt,
+          generatedAt: now,
+          promptFingerprint: "",
+          mimeType: job.mimeType ?? "image/png",
+        })),
+      );
+      setPickedMediaId(job.primaryMediaId);
+      setSyncedMediaCurrentId(job.primaryMediaId);
+      setLocalHistoryIds((prev) =>
+        mergeMediaIdLists(prev, media.historyIds, job.mediaIds),
+      );
+      setShowImageHistory(true);
+      setVideoRefSafety(media.videoRefSafety ?? null);
+      if (imageEditOpen || job.params.mode === "image_to_image") {
+        setReferenceSlots((prev) => {
+          const kept = prev.slice(1);
+          return compactReferenceSlots([
+            {
+              source: "generated",
+              mediaId: job.primaryMediaId!,
+              previewUrl: getProjectAssetImageUrl(
+                projectId,
+                job.primaryMediaId!,
+                { revision: job.primaryMediaId! },
+              ),
+            },
+            ...kept,
+          ]);
+        });
+      }
+      const history = pushLocalPromptHistory(promptHistory, {
+        text: activePrompt || promptText,
+        generatedAt: now,
+        generationId: item.designPrompt?.generationId ?? null,
+        source: "generate_asset",
+      });
+      setPromptHistory(history);
+      setSyncedPromptHistoryLen(history.length);
+      if (job.params.mode !== "image_to_image") {
+        onPromptUpdated(item.id, activePrompt || job.params.prompt, {
+          history,
+        });
+      } else {
+        onPromptUpdated(item.id, promptText, { history });
+      }
+      reportProgress({
+        stage: "saving",
+        percent: 88,
+        message: "正在保存图片",
+      });
+      onAssetGenerated(item.id, media);
+      if (libraryGenerateTarget) {
+        void imageJob.markSaved();
+      }
+      setError("");
+      lastStatusRef.current = null;
+      setNotice(
+        job.status === "save_failed"
+          ? "图片已生成，但写回设计稿失败，可重新保存。"
+          : `已生成 ${job.mediaIds.length} 张 · ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio}`,
+      );
+      reportProgress({
+        stage: "completed",
+        percent: 100,
+        message: "图片生成完成",
+      });
+      scheduleProgressClear(900);
+    },
+    [
+      imageEditOpen,
+      imageOptions.aspectRatio,
+      imageOptions.quality,
+      item.designPrompt?.generationId,
+      item.generatedMedia,
+      item.id,
+      libraryGenerateTarget,
+      imageJob,
+      onAssetGenerated,
+      onPromptUpdated,
+      projectId,
+      promptHistory,
+      promptText,
+      reportProgress,
+      scheduleProgressClear,
+    ],
+  );
+
+  useEffect(() => {
+    const job = imageJob.job;
+    if (!job) return;
+    if (job.status === "failed") {
+      setGeneratingAsset(false);
+      onGeneratingAssetChange?.(item.id, false);
+      if (job.errorMessage) setError(job.errorMessage);
+      reportProgress({
+        stage: "failed",
+        percent: 0,
+        message: job.errorMessage ?? "资产生成失败",
+      });
+      scheduleProgressClear(2200);
+      return;
+    }
+    if (job.status !== "succeeded" && job.status !== "save_failed") return;
+    if (!job.primaryMediaId) return;
+    if (appliedJobResultRef.current === job.id) return;
+    // Look-editor jobs share the same character assetId. Never promote them
+    // into the main-image panel / 主形象历史 — LibraryCharacterLookEditor owns linking.
+    if (job.sourceEntry === "library_look") {
+      appliedJobResultRef.current = job.id;
+      setGeneratingAsset(false);
+      onGeneratingAssetChange?.(item.id, false);
+      return;
+    }
+    // Remount / refreshLatest after we already linked this media — mark applied
+    // without re-running onAssetGenerated (avoids preview/scroll thrash).
+    if (
+      item.generatedMedia?.currentId === job.primaryMediaId ||
+      item.generatedMedia?.historyIds?.includes(job.primaryMediaId)
+    ) {
+      appliedJobResultRef.current = job.id;
+      setGeneratingAsset(false);
+      onGeneratingAssetChange?.(item.id, false);
+      return;
+    }
+    appliedJobResultRef.current = job.id;
+    setGeneratingAsset(false);
+    onGeneratingAssetChange?.(item.id, false);
+    applyJobResultToUi(job, job.params.prompt);
+  }, [
+    applyJobResultToUi,
+    imageJob.job,
+    item.id,
+    onGeneratingAssetChange,
+    reportProgress,
+    scheduleProgressClear,
+  ]);
+
   const handleGenerate = useCallback(async (opts?: {
     multiAngleMode?: DesignMultiAngleMode;
   }) => {
-    if (generateBusy) return;
+    if (generateBusy || generateInFlightRef.current) return;
+    if (imageJob.canRetry && !opts?.multiAngleMode) {
+      generateInFlightRef.current = true;
+      setGeneratingAsset(true);
+      onGeneratingAssetChange?.(item.id, true);
+      setError("");
+      lastStatusRef.current = null;
+      setNotice("");
+      const result = await imageJob.retryFromServer();
+      generateInFlightRef.current = false;
+      if (!result.ok) {
+        setError(result.error);
+        setGeneratingAsset(false);
+        onGeneratingAssetChange?.(item.id, false);
+      } else {
+        setNotice("已按原参数重新提交生成。");
+        reportProgress({ stage: "generating", percent: 20 });
+      }
+      return;
+    }
     const multiAngleMode = opts?.multiAngleMode;
     const isMultiAngle = Boolean(multiAngleMode);
     const activePrompt = imageEditOpen || isMultiAngle
@@ -604,43 +1101,66 @@ function DesignAssetModalBody({
       setError("请先生成或上传场景参考图");
       return;
     }
+    if (imageJob.generationBlocked) {
+      setError("该素材正在生成中，请等待完成后再试。");
+      return;
+    }
+    generateInFlightRef.current = true;
     setGeneratingAsset(true);
     onGeneratingAssetChange?.(item.id, true);
     setError("");
+    lastStatusRef.current = null;
     setNotice("");
     if (progressClearTimerRef.current != null) {
       window.clearTimeout(progressClearTimerRef.current);
       progressClearTimerRef.current = null;
     }
     try {
-      reportProgress({ stage: "validating", percent: 8 });
+      reportProgress({
+        stage: "validating",
+        percent: 8,
+        message: "正在校验参考图",
+      });
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => resolve());
+        });
+      });
       const urls = apiBase(surface, projectId, episodeId, item.id);
-      reportProgress({ stage: "submitted", percent: 22 });
-      reportProgress({ stage: "generating", percent: 38 });
-
-      if (previewMode) {
-        await new Promise<void>((resolve) => {
-          window.setTimeout(resolve, 1400);
-        });
-        const now = new Date().toISOString();
-        const history = pushLocalPromptHistory(promptHistory, {
-          text: activePrompt,
-          generatedAt: now,
-          generationId: null,
-          source: "generate_asset",
-        });
-        setPromptHistory(history);
-        setSyncedPromptHistoryLen(history.length);
-        onPromptUpdated(item.id, activePrompt, { history });
-        reportProgress({ stage: "completed", percent: 100 });
-        scheduleProgressClear(900);
-        setNotice(`已生成 ${imageOptions.count} 张 · ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio}`);
-        setShowImageHistory(true);
-        return;
-      }
+      reportProgress({
+        stage: "submitted",
+        percent: 22,
+        message: "已提交生成任务",
+      });
+      reportProgress({
+        stage: "generating",
+        percent: 38,
+        message: "正在生成图片",
+      });
 
       let res: Response;
-      if (imageEditOpen || isMultiAngle) {
+      if (libraryGenerateTarget) {
+        // Library formal assets are not episode design rows — generate via assets-draft.
+        const form = new FormData();
+        const hasCompactRefs =
+          showLibraryCompactReferences &&
+          appendLibraryCompactReferencesToForm(form, libraryReferenceSlots);
+        form.set("mode", hasCompactRefs ? "image_to_image" : "text_to_image");
+        form.set("assetId", libraryGenerateTarget.assetId);
+        form.set("assetKind", libraryGenerateTarget.assetKind);
+        form.set("model", imageModelId);
+        form.set("prompt", activePrompt);
+        form.set("idempotencyKey", safeRandomUUID());
+        form.set("quality", imageOptions.quality);
+        form.set("aspectRatio", imageOptions.aspectRatio);
+        form.set("count", String(imageOptions.count));
+        form.set("setPrimary", "false");
+        form.set("sourceEntry", "library_image");
+        res = await fetch(`${urls.projectRoot}/assets-draft/media/generate`, {
+          method: "POST",
+          body: form,
+        });
+      } else if (imageEditOpen || isMultiAngle) {
         const form = new FormData();
         form.set("mode", "image_to_image");
         form.set("model", imageModelId);
@@ -679,77 +1199,48 @@ function DesignAssetModalBody({
           }),
         });
       }
-      const payload = (await res.json()) as {
+      const payload = await parseResponseJson<{
         error?: string;
         code?: string;
         notice?: string;
-        mediaId?: string;
-        generatedMedia?: GeneratedMediaState;
-        videoRefSafety?: VideoRefSafety;
-        credit?: { chargedPoints: number; balance: number; firstGeneration?: boolean };
-      };
+        async?: boolean;
+        jobId?: string;
+        job?: Parameters<typeof imageJob.beginFromGenerateResponse>[0]["job"];
+      }>(res, { allowEmpty: res.status === 202 });
+      if (!payload) {
+        if (res.status === 202 || res.ok) {
+          setNotice("已提交生成任务，预计进度见预览区。");
+          void imageJob.refreshLatest();
+          return;
+        }
+        throw new Error("服务器没有返回有效数据，请稍后重试。");
+      }
       if (!res.ok) {
-        throw new Error(payload.error ?? "资产生成失败");
-      }
-      reportProgress({ stage: "saving", percent: 88 });
-      const media = payload.generatedMedia ?? null;
-      const nextMediaId = media?.currentId ?? payload.mediaId ?? null;
-      if (media?.currentId) {
-        setPickedMediaId(media.currentId);
-        setSyncedMediaCurrentId(media.currentId);
-        setLocalHistoryIds((prev) =>
-          mergeMediaIdLists(prev, media.historyIds, [media.currentId!]),
-        );
-      } else if (payload.mediaId) {
-        setPickedMediaId(payload.mediaId);
-        setSyncedMediaCurrentId(payload.mediaId);
-        setLocalHistoryIds((prev) =>
-          mergeMediaIdLists(prev, [payload.mediaId!]),
+        if (payload.code === "GENERATION_IN_PROGRESS" && (payload.jobId || payload.job)) {
+          imageJob.beginFromGenerateResponse(payload);
+        }
+        throw new Error(
+          payload.error ??
+            (res.status >= 500
+              ? "生成服务暂时不可用，请稍后再试"
+              : "资产生成失败"),
         );
       }
-      if ((imageEditOpen || isMultiAngle) && nextMediaId) {
-        setReferenceSlots((prev) => {
-          const kept = prev.slice(1);
-          return compactReferenceSlots([
-            {
-              source: "generated",
-              mediaId: nextMediaId,
-              previewUrl: getProjectAssetImageUrl(projectId, nextMediaId, {
-                revision: Date.now(),
-              }),
-            },
-            ...kept,
-          ]);
-        });
+      if (!payload.async || !(payload.jobId || payload.job)) {
+        throw new Error("生成接口未返回异步任务，请刷新后重试");
       }
+      appliedJobResultRef.current = null;
+      imageJob.beginFromGenerateResponse(payload);
+      reportProgress({
+        stage: "generating",
+        percent: 45,
+        message: "正在生成图片",
+      });
+      setNotice(payload.notice ?? "已提交生成任务，预计进度见预览区。");
       if (isMultiAngle) {
         setMultiAngleSelect(MULTI_ANGLE_NONE);
       }
-      const safety =
-        payload.videoRefSafety ?? media?.videoRefSafety ?? null;
-      setVideoRefSafety(safety);
-      const now = new Date().toISOString();
-      const history = pushLocalPromptHistory(promptHistory, {
-        text: activePrompt || promptText,
-        generatedAt: now,
-        generationId: item.designPrompt?.generationId ?? null,
-        source: "generate_asset",
-      });
-      setPromptHistory(history);
-      setSyncedPromptHistoryLen(history.length);
-      if (!imageEditOpen && !isMultiAngle) {
-        onPromptUpdated(item.id, activePrompt, { history });
-      } else {
-        onPromptUpdated(item.id, promptText, { history });
-      }
-      onAssetGenerated(item.id, media);
-      reportProgress({ stage: "completed", percent: 100 });
-      scheduleProgressClear(900);
-      setNotice(
-        payload.notice ??
-          `已生成 ${imageOptions.count} 张 · ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio}`,
-      );
-      setShowImageHistory(true);
+      // Keep generatingAsset true while job is active; effect clears it.
     } catch (e) {
       const message = e instanceof Error ? e.message : "资产生成失败";
       setError(message);
@@ -758,9 +1249,10 @@ function DesignAssetModalBody({
       if (isMultiAngle) {
         setMultiAngleSelect(MULTI_ANGLE_NONE);
       }
-    } finally {
       setGeneratingAsset(false);
       onGeneratingAssetChange?.(item.id, false);
+    } finally {
+      generateInFlightRef.current = false;
     }
   }, [
     item,
@@ -772,15 +1264,15 @@ function DesignAssetModalBody({
     imageEditPrompt,
     referenceSlots,
     imageModelId,
-    promptHistory,
     imageOptions,
     generateBusy,
+    imageJob,
+    libraryGenerateTarget,
+    libraryReferenceSlots,
+    showLibraryCompactReferences,
     onGeneratingAssetChange,
-    onPromptUpdated,
-    onAssetGenerated,
     reportProgress,
     scheduleProgressClear,
-    previewMode,
   ]);
 
   const handleMultiAngleChange = useCallback(
@@ -805,6 +1297,7 @@ function DesignAssetModalBody({
     if (isDesignMediaVideoRefLocked(videoRefSafety)) return;
     setPrecheckBusy(true);
     setError("");
+    lastStatusRef.current = null;
     try {
       const urls = apiBase(surface, projectId, episodeId, item.id);
       const res = await fetch(urls.videoRefPrecheck, {
@@ -812,14 +1305,14 @@ function DesignAssetModalBody({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mediaId: currentMediaId }),
       });
-      const payload = (await res.json()) as {
+      const payload = await parseResponseJson<{
         error?: string;
         notice?: string;
         videoRefSafety?: VideoRefSafety;
         generatedMedia?: GeneratedMediaState;
-      };
-      if (!res.ok) {
-        throw new Error(payload.error ?? "人物校验失败");
+      }>(res);
+      if (!res.ok || !payload) {
+        throw new Error(payload?.error ?? "人物校验失败");
       }
       const safety = payload.videoRefSafety ?? null;
       setVideoRefSafety(safety);
@@ -862,9 +1355,13 @@ function DesignAssetModalBody({
     : `点击「生成资产」将按 ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio} · ${imageOptions.count}张 生成${styleBrief}`;
   const generateTitle = audioDisabled
     ? "当前未配置该类型的音频生成能力"
-    : imageEditOpen
+    : libraryImageToImage
       ? `图生图 · ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio} · ${imageOptions.count}张`
-      : `文生图 · ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio} · ${imageOptions.count}张 · ${styleBrief}`;
+      : showLibraryCompactReferences
+        ? `文生图 · ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio} · ${imageOptions.count}张 · ${styleBrief}`
+        : imageEditOpen
+          ? `图生图 · ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio} · ${imageOptions.count}张`
+          : `文生图 · ${DESIGN_IMAGE_QUALITY_LABELS[imageOptions.quality]} · ${imageOptions.aspectRatio} · ${imageOptions.count}张 · ${styleBrief}`;
   const previewTitle = formatDesignImagePreviewTitle(imageOptions);
   const precheckLabel =
     item.assetType === "character" ? "人物校验" : "参考图校验";
@@ -961,8 +1458,8 @@ function DesignAssetModalBody({
     <div
       className={
         previewObjectUrl
-          ? "ead-preview-frame ead-preview-frame--zoomable"
-          : "ead-preview-frame"
+          ? "ead-preview-frame ead-preview-frame--zoomable aie-preview-stage"
+          : "ead-preview-frame aie-preview-stage"
       }
       data-testid="design-image-preview"
       role={previewObjectUrl ? "button" : undefined}
@@ -1004,12 +1501,15 @@ function DesignAssetModalBody({
             : emptyPreviewHint}
         </p>
       )}
+      {generateBusy && generationProgress ? (
+        <DesignGenerationOverlay progress={generationProgress} />
+      ) : null}
     </div>
   );
 
   const imageOptionsBlock = !audioDisabled ? (
     <div
-      className="ead-generation-options"
+      className="ead-generation-options prompt-params-grid"
       data-testid="design-image-generation-options"
     >
       <div
@@ -1161,28 +1661,35 @@ function DesignAssetModalBody({
   return (
     <>
       <div
-        className="ead-modal-backdrop"
-        role="presentation"
-        onClick={onClose}
-        data-testid="design-asset-modal"
+        className={isEmbedded ? "ead-prompt-embedded" : "ead-modal-backdrop"}
+        role={isEmbedded ? undefined : "presentation"}
+        onClick={isEmbedded ? undefined : onClose}
+        data-testid={isEmbedded ? "design-asset-prompt-panel" : "design-asset-modal"}
+        aria-label={isEmbedded ? `素材提示词 · ${item.name}` : undefined}
       >
         <div
-          className={`ead-modal-stage${imageEditOpen ? " is-image-editing" : ""}`}
-          data-testid="design-modal-stage"
-          onClick={(e) => e.stopPropagation()}
+          className={
+            isEmbedded
+              ? "ead-prompt-embedded__stage"
+              : `ead-modal-stage${imageEditOpen ? " is-image-editing" : ""}`
+          }
+          data-testid={isEmbedded ? "design-prompt-stage" : "design-modal-stage"}
+          onClick={isEmbedded ? undefined : (e) => e.stopPropagation()}
         >
         <div
-          className="ead-modal ead-modal--wide"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby={titleId}
+          className={isEmbedded ? "ead-prompt-embedded__panel" : "ead-modal ead-modal--wide"}
+          role={isEmbedded ? undefined : "dialog"}
+          aria-modal={isEmbedded ? undefined : "true"}
+          aria-labelledby={isEmbedded ? undefined : titleId}
         >
+          {isEmbedded ? null : (
           <header className="ead-modal__head">
             <h2 id={titleId}>设计素材 · {item.name}</h2>
             <button type="button" className="amw-btn" onClick={onClose}>
               关闭
             </button>
           </header>
+          )}
           {staleHint ? (
             <p className="ead-muted" role="status">
               该提示词基于旧剧本或旧资产描述，可继续编辑或重新生成。
@@ -1194,174 +1701,287 @@ function DesignAssetModalBody({
             </p>
           ) : null}
 
-          <div className="ead-modal__grid">
-            <div className="ead-modal__col">
-              <div className="ead-modal__section-head">
-                <span>素材提示词</span>
-                <button
-                  type="button"
-                  className="amw-btn ead-modal__icon-btn"
-                  data-testid="design-prompt-history-toggle"
-                  title="提示词历史"
-                  onClick={() => setShowPromptHistory((v) => !v)}
+          <div className={`ead-modal__grid${isEmbedded ? " ead-modal__grid--embedded" : ""}`}>
+                        <div className="ead-modal__col">
+              {compactGenerationChrome ? (
+                <section
+                  className={`prompt-panel${
+                    showLibraryCompactReferences ? " prompt-panel--with-refs" : ""
+                  }`}
+                  data-testid="prompt-panel"
                 >
-                  <History className="h-3.5 w-3.5" />
-                  {promptHistory.length > 0 ? (
-                    <span className="tabular-nums">{promptHistory.length}</span>
+                  {showLibraryCompactReferences ? (
+                    <CompactPromptReferenceSlots
+                      projectId={projectId}
+                      slots={libraryReferenceSlots}
+                      onSlotsChange={setLibraryReferenceSlots}
+                      disabled={generateBusy}
+                      onError={setError}
+                    />
                   ) : null}
-                </button>
-              </div>
-              {showPromptHistory ? (
-                <div
-                  className="ead-history-strip"
-                  data-testid="design-prompt-history"
-                >
-                  {promptHistory.length === 0 ? (
-                    <p className="ead-muted">暂无提示词历史</p>
-                  ) : (
-                    [...promptHistory].reverse().map((entry, idx) => (
+                  <header className="prompt-panel__header">
+                    <span
+                      className="ead-prompt-context"
+                      data-testid="design-prompt-context"
+                    >
+                      {promptContextLabel || "素材提示词"}
+                    </span>
+                    <button
+                      type="button"
+                      className="amw-btn prompt-panel__copy"
+                      data-testid="design-copy"
+                      title="复制提示词"
+                      aria-label="复制提示词"
+                      disabled={!promptText.trim() || promptBusy || generateBusy}
+                      onClick={() => void handleCopy()}
+                    >
+                      复制提示词
+                    </button>
+                  </header>
+                  <div className="prompt-panel__editor">
+                    <textarea
+                      className="amw-textarea"
+                      data-testid="design-prompt-textarea"
+                      aria-label={promptContextLabel || "素材提示词"}
+                      placeholder={
+                        promptBusy
+                          ? "正在生成提示词…"
+                          : formalPromptMissing
+                            ? "尚未生成"
+                            : "正式素材提示词"
+                      }
+                      value={promptText}
+                      disabled={promptBusy}
+                      onChange={(e) => {
+                        setPromptText(e.target.value);
+                        setStaleHint(false);
+                      }}
+                    />
+                    {formalPromptMissing && !promptText.trim() && !promptBusy ? (
+                      <p
+                        className="ead-muted"
+                        data-testid="design-prompt-not-generated"
+                      >
+                        尚未生成
+                      </p>
+                    ) : null}
+                  </div>
+                  <footer
+                    className="prompt-panel__footer"
+                    data-testid="prompt-generation-summary"
+                  >
+                    <span
+                      className="prompt-panel__summary"
+                      data-testid="prompt-generation-summary-text"
+                    >
+                      {generationSummaryText}
+                    </span>
+                    <div className="prompt-panel__actions">
                       <button
-                        key={`${entry.generatedAt}-${idx}`}
                         type="button"
-                        className="ead-history-chip"
+                        className="amw-btn"
+                        data-testid="design-adjust-params"
+                        ref={paramsTriggerRef}
+                        aria-expanded={paramsOpen}
+                        disabled={generateBusy || audioDisabled}
                         onClick={() => {
-                          setPromptText(entry.text);
-                          setStaleHint(false);
+                          setParamsOpen((open) => {
+                            const next = !open;
+                            if (next) {
+                              const trigger = paramsTriggerRef.current;
+                              if (trigger) {
+                                const rect = trigger.getBoundingClientRect();
+                                const width = Math.min(
+                                  420,
+                                  window.innerWidth - 24,
+                                );
+                                let left = rect.right - width;
+                                left = Math.max(
+                                  12,
+                                  Math.min(
+                                    left,
+                                    window.innerWidth - width - 12,
+                                  ),
+                                );
+                                const panelH = 280;
+                                let top = rect.bottom + 8;
+                                if (top + panelH > window.innerHeight - 12) {
+                                  top = rect.top - panelH - 8;
+                                }
+                                top = Math.max(
+                                  12,
+                                  Math.min(
+                                    top,
+                                    window.innerHeight - panelH - 12,
+                                  ),
+                                );
+                                setParamsPanelStyle({
+                                  top: top + "px",
+                                  left: left + "px",
+                                  width: width + "px",
+                                });
+                                setParamsPlaced(true);
+                              }
+                            } else {
+                              setParamsPlaced(false);
+                            }
+                            return next;
+                          });
                         }}
                       >
-                        <span className="ead-history-chip__meta">
-                          {new Date(entry.generatedAt).toLocaleString("zh-CN", {
-                            hour12: false,
-                          })}
-                        </span>
-                        <span className="ead-history-chip__text">
-                          {entry.text.slice(0, 80)}
-                          {entry.text.length > 80 ? "…" : ""}
-                        </span>
+                        <Settings2 className="h-3.5 w-3.5" aria-hidden />
+                        调整参数
                       </button>
-                    ))
-                  )}
-                </div>
-              ) : null}
-              <label className="amw-field">
-                <textarea
-                  className="amw-textarea"
-                  data-testid="design-prompt-textarea"
-                  aria-label="素材提示词"
-                  placeholder={
-                    promptBusy
-                      ? "正在生成提示词…"
-                      : formalPromptMissing
-                        ? "尚未生成"
-                        : "正式素材提示词"
-                  }
-                  value={promptText}
-                  disabled={promptBusy}
-                  rows={12}
-                  onChange={(e) => {
-                    setPromptText(e.target.value);
-                    setStaleHint(false);
-                  }}
-                />
-              </label>
-              {formalPromptMissing && !promptText.trim() && !promptBusy ? (
-                <p
-                  className="ead-muted"
-                  data-testid="design-prompt-not-generated"
-                >
-                  尚未生成
-                </p>
-              ) : null}
-              {!hideImageEdit ? (
-                <div
-                  className="ead-prompt-copy-row"
-                  data-testid="design-prompt-copy-row"
-                >
-                  <button
-                    type="button"
-                    className="amw-btn amw-btn-primary"
-                    data-testid="design-copy"
-                    disabled={
-                      !promptText.trim() || promptBusy || generateBusy
-                    }
-                    onClick={() => void handleCopy()}
-                  >
-                    一键复制
-                  </button>
-                </div>
-              ) : null}
+                      <button
+                        type="button"
+                        className="amw-btn amw-btn-primary"
+                        data-testid="design-generate-asset"
+                        disabled={
+                          promptBusy ||
+                          generateBusy ||
+                          !activePrompt ||
+                          audioDisabled
+                        }
+                        title={generateBusy ? "资产生成中…" : generateTitle}
+                        onClick={() => void handleGenerate()}
+                      >
+                        {generateBusy
+                          ? "生成中…"
+                          : audioDisabled
+                            ? "生成资产（未配置）"
+                            : "生成资产"}
+                      </button>
+                    </div>
+                  </footer>
+                </section>
+              ) : (
+                <>
+                  <div className="ead-modal__section-head">
+                    {hidePromptSectionLabel ? null : <span>素材提示词</span>}
+                  </div>
+                  <label className="amw-field">
+                    <textarea
+                      className="amw-textarea"
+                      data-testid="design-prompt-textarea"
+                      aria-label="素材提示词"
+                      placeholder={
+                        promptBusy
+                          ? "正在生成提示词…"
+                          : formalPromptMissing
+                            ? "尚未生成"
+                            : "正式素材提示词"
+                      }
+                      value={promptText}
+                      disabled={promptBusy}
+                      rows={12}
+                      onChange={(e) => {
+                        setPromptText(e.target.value);
+                        setStaleHint(false);
+                      }}
+                    />
+                  </label>
+                  {formalPromptMissing && !promptText.trim() && !promptBusy ? (
+                    <p
+                      className="ead-muted"
+                      data-testid="design-prompt-not-generated"
+                    >
+                      尚未生成
+                    </p>
+                  ) : null}
+                  {!hideImageEdit ? (
+                    <div
+                      className="ead-prompt-copy-row"
+                      data-testid="design-prompt-copy-row"
+                    >
+                      <button
+                        type="button"
+                        className="amw-btn amw-btn-primary"
+                        data-testid="design-copy-legacy"
+                        disabled={
+                          !promptText.trim() || promptBusy || generateBusy
+                        }
+                        onClick={() => void handleCopy()}
+                      >
+                        一键复制
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              )}
             </div>
 
             <div className="ead-modal__col">
               <div className="ead-modal__section-head">
                 <span>{previewTitle}</span>
-                <div className="ead-modal__section-actions">
-                  <button
-                    type="button"
-                    className="amw-btn ead-modal__icon-btn"
-                    data-testid="design-image-history-toggle"
-                    title="图片生成历史"
-                    onClick={() => setShowImageHistory((v) => !v)}
-                  >
-                    <History className="h-3.5 w-3.5" />
-                    {imageHistoryIds.length > 0 ? (
-                      <span className="tabular-nums">
-                        {imageHistoryIds.length}
-                      </span>
-                    ) : null}
-                  </button>
-                  <button
-                    type="button"
-                    className="amw-btn ead-modal__icon-btn"
-                    data-testid="design-download"
-                    title="下载图片"
-                    disabled={!currentMediaId}
-                    onClick={() => void handleDownload()}
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                  </button>
-                  {!audioDisabled ? (
+                {hideMediaToolbar ? null : (
+                  <div className="ead-modal__section-actions">
                     <button
                       type="button"
-                      className={`amw-btn ead-modal__icon-btn${
-                        precheckLocked ? " is-verified" : ""
-                      }`}
-                      data-testid="design-video-ref-precheck"
-                      data-verified={precheckLocked ? "true" : undefined}
-                      title={
-                        precheckLocked
-                          ? "已通过 SD 审核认证，不可重复校验"
-                          : `${precheckLabel}：上传至 SD 审核资产库并等待认证`
-                      }
-                      disabled={
-                        !currentMediaId ||
-                        generateBusy ||
-                        precheckBusy ||
-                        precheckLocked
-                      }
-                      onClick={() => void handleVideoRefPrecheck()}
+                      className="amw-btn ead-modal__icon-btn"
+                      data-testid="design-image-history-toggle"
+                      title="图片生成历史"
+                      onClick={() => setShowImageHistory((v) => !v)}
                     >
-                      <ShieldCheck
-                        className={`h-3.5 w-3.5${
-                          precheckLocked ? " ead-shield-verified" : ""
-                        }`}
-                        aria-hidden
-                      />
-                      <span>
-                        {precheckBusy
-                          ? "校验中…"
-                          : precheckLocked
-                            ? "已认证"
-                            : precheckLabel}
-                      </span>
+                      <History className="h-3.5 w-3.5" />
+                      {imageHistoryIds.length > 0 ? (
+                        <span className="tabular-nums">
+                          {imageHistoryIds.length}
+                        </span>
+                      ) : null}
                     </button>
-                  ) : null}
-                </div>
+                    <button
+                      type="button"
+                      className="amw-btn ead-modal__icon-btn"
+                      data-testid="design-download"
+                      title="下载图片"
+                      disabled={!currentMediaId}
+                      onClick={() => void handleDownload()}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                    </button>
+                    {!audioDisabled ? (
+                      <button
+                        type="button"
+                        className={`amw-btn ead-modal__icon-btn${
+                          precheckLocked ? " is-verified" : ""
+                        }`}
+                        data-testid="design-video-ref-precheck"
+                        data-verified={precheckLocked ? "true" : undefined}
+                        title={
+                          precheckLocked
+                            ? "已通过 SD 审核认证，不可重复校验"
+                            : `${precheckLabel}：上传至 SD 审核资产库并等待认证`
+                        }
+                        disabled={
+                          !currentMediaId ||
+                          generateBusy ||
+                          precheckBusy ||
+                          precheckLocked
+                        }
+                        onClick={() => void handleVideoRefPrecheck()}
+                      >
+                        <ShieldCheck
+                          className={`h-3.5 w-3.5${
+                            precheckLocked ? " ead-shield-verified" : ""
+                          }`}
+                          aria-hidden
+                        />
+                        <span>
+                          {precheckBusy
+                            ? "校验中…"
+                            : precheckLocked
+                              ? "已认证"
+                              : precheckLabel}
+                        </span>
+                      </button>
+                    ) : null}
+                  </div>
+                )}
               </div>
 
-              {previewBlock}
+              {isEmbedded ? null : previewBlock}
 
-              {imageOptionsBlock}
+              {compactGenerationChrome ? null : imageOptionsBlock}
 
               {safetyForPreview?.status === "likely_real_person" ? (
                 <p
@@ -1380,12 +2000,12 @@ function DesignAssetModalBody({
             </div>
           </div>
 
-          {copyNote ? (
+          {!onStatus && copyNote ? (
             <p className="ead-muted" role="status" data-testid="design-copy-ok">
               {copyNote}
             </p>
           ) : null}
-          {notice ? (
+          {!onStatus && notice ? (
             <p
               className="ead-muted"
               role="status"
@@ -1394,7 +2014,7 @@ function DesignAssetModalBody({
               {notice}
             </p>
           ) : null}
-          {error ? (
+          {!onStatus && error ? (
             <p
               className="ead-error"
               role="alert"
@@ -1403,6 +2023,22 @@ function DesignAssetModalBody({
               {error}
             </p>
           ) : null}
+          {paramsOpen && compactGenerationChrome
+            ? createPortal(
+                <div
+                  ref={paramsPanelRef}
+                  className={`prompt-params-popover parameter-popover${paramsPlaced ? " is-placed" : ""}`}
+                  data-testid="design-params-popover"
+                  style={paramsPanelStyle}
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  <div className="prompt-params-popover__title">调整生成参数</div>
+                  {imageOptionsBlock}
+                </div>,
+                document.body,
+              )
+            : null}
+          {compactGenerationChrome ? null : (
           <footer
             className={`ead-modal__foot${hideImageEdit ? " ead-modal__foot--split" : ""}`}
           >
@@ -1410,7 +2046,7 @@ function DesignAssetModalBody({
               <button
                 type="button"
                 className="amw-btn amw-btn-primary"
-                data-testid="design-copy"
+                data-testid="design-copy-footer"
                 disabled={!promptText.trim() || promptBusy || generateBusy}
                 onClick={() => void handleCopy()}
               >
@@ -1457,8 +2093,9 @@ function DesignAssetModalBody({
               </button>
             ) : null}
           </footer>
+          )}
         </div>
-        {!hideImageEdit && imageEditOpen ? (
+        {!isEmbedded && !hideImageEdit && imageEditOpen ? (
           <aside
             className="ead-image-edit-panel"
             data-testid="design-image-edit-panel"
@@ -1595,6 +2232,41 @@ function DesignAssetModalBody({
         src={lightboxOpen ? previewObjectUrl : null}
         alt={`${item.name} 放大预览`}
         onClose={() => setLightboxOpen(false)}
+      />
+      <ImageGenerationTaskPanel
+        projectId={projectId}
+        context={surface === "workspace" ? "workspace" : "management"}
+        job={imageJob.job}
+        hideSucceededPreview={isEmbedded}
+        canRetry={imageJob.canRetry}
+        busyAction={imageJob.busyAction}
+        serviceNotice={imageJob.serviceNotice}
+        timeoutDialogOpen={imageJob.timeoutDialogOpen}
+        deleteConfirmOpen={imageJob.deleteConfirmOpen}
+        retrySnapshotIncomplete={imageJob.retrySnapshotIncomplete}
+        needsReferenceReplace={imageJob.needsReferenceReplace}
+        onRetry={() => void handleGenerate()}
+        onRetrySave={() => {
+          void imageJob.retrySave().then((result) => {
+            if (!result.ok) setError(result.error);
+            else setNotice("已重新写回设计稿。");
+          });
+        }}
+        onRequestDeletePending={() => imageJob.setDeleteConfirmOpen(true)}
+        onContinueWait={() => void imageJob.continueWaiting()}
+        onDismissTimeout={() => imageJob.setTimeoutDialogOpen(false)}
+        onRedetectService={() => void imageJob.redetectService()}
+        onReplaceReferences={(files) => {
+          void imageJob.replaceReferences(files).then((result) => {
+            if (!result.ok) setError(result.error);
+            else setNotice("参考图已更新，可点击使用原参数重试。");
+          });
+        }}
+        onConfirmDeletePending={() => void imageJob.confirmDeletePending()}
+        onCancelDeletePending={() => imageJob.setDeleteConfirmOpen(false)}
+        onOpenEditor={() => {
+          setError("旧任务缺少完整参数，请在本弹窗重新配置后生成。");
+        }}
       />
     </>
   );

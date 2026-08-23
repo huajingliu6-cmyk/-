@@ -21,17 +21,22 @@ vi.mock("@/projects/assets/asset-bundle-store", () => ({
   loadAssetBundleDraft: vi.fn(),
 }));
 
-vi.mock("@/projects/assets/asset-image-storage", () => ({
-  PROJECT_ASSET_IMAGE_MAX_BYTES: 10 * 1024 * 1024,
-  assetImageMetaPath: vi.fn(),
-  deleteProjectAssetImageFile: vi.fn(),
-  findImageableAssetInDraft: vi.fn(),
-  normalizeDeclaredImageMime: vi.fn(),
-  patchImageableAssetImageMeta: vi.fn(),
-  resolveAssetImageFilePath: storage.resolveLocalPath,
-  sniffProjectAssetImageMime: vi.fn(),
-  writeProjectAssetImageFile: vi.fn(),
-}));
+vi.mock("@/projects/assets/asset-image-storage", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/projects/assets/asset-image-storage")>();
+  return {
+    ...actual,
+    PROJECT_ASSET_IMAGE_MAX_BYTES: 10 * 1024 * 1024,
+    assetImageMetaPath: vi.fn(),
+    deleteProjectAssetImageFile: vi.fn(),
+    findImageableAssetInDraft: vi.fn(),
+    normalizeDeclaredImageMime: vi.fn(),
+    patchImageableAssetImageMeta: vi.fn(),
+    resolveAssetImageFilePath: storage.resolveLocalPath,
+    sniffProjectAssetImageMime: vi.fn(),
+    writeProjectAssetImageFile: vi.fn(),
+  };
+});
 
 vi.mock("@/projects/assets/remote-asset-blob-store", () => ({
   deleteRemoteAssetImage: vi.fn(),

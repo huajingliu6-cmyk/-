@@ -1,8 +1,13 @@
-import { patchImageableAssetVideoRefSafety } from "@/projects/assets/asset-image-storage";
+import { persistAssetVideoRefSafety } from "@/projects/assets/video-ref-precheck-persist";
 import {
   loadAssetBundleDraft,
   type AssetBundleDraft,
 } from "@/projects/assets/asset-bundle-store";
+import { carryAssetBundleRevision } from "@/projects/assets/asset-bundle-revision";
+import {
+  getCharacterMediaVideoRefSafety,
+  setCharacterMediaVideoRefSafety,
+} from "@/projects/assets/character-media-video-ref";
 import type {
   CharacterAsset,
   PropAsset,
@@ -86,22 +91,35 @@ async function patchWorkspaceLocalVideoRefSafety(params: {
   if (!local) return false;
   const found = listImageable(local).find((a) => a.id === params.assetId);
   if (!found || !assetUsesMedia(found, params.mediaId)) return false;
-  if (!safetyChanged(found.videoRefSafety, params.videoRefSafety)) {
+  const currentSafety =
+    "voiceId" in found
+      ? getCharacterMediaVideoRefSafety(found as CharacterAsset, params.mediaId)
+      : found.videoRefSafety;
+  if (!safetyChanged(currentSafety, params.videoRefSafety)) {
     return false;
   }
 
-  const apply = <T extends ImageableAsset>(item: T): T =>
-    item.id === params.assetId
-      ? { ...item, videoRefSafety: params.videoRefSafety }
-      : item;
+  const apply = <T extends ImageableAsset>(item: T): T => {
+    if (item.id !== params.assetId) return item;
+    if ("voiceId" in item) {
+      return setCharacterMediaVideoRefSafety(
+        item as CharacterAsset,
+        params.mediaId,
+        params.videoRefSafety,
+      ) as T;
+    }
+    return { ...item, videoRefSafety: params.videoRefSafety };
+  };
 
-  await saveWorkspaceLocalAssets({
-    projectId: local.projectId,
-    characters: local.characters.map(apply),
-    scenes: local.scenes.map(apply),
-    props: local.props.map(apply),
-    audios: local.audios,
-  });
+  await saveWorkspaceLocalAssets(
+    carryAssetBundleRevision(local, {
+      projectId: local.projectId,
+      characters: local.characters.map(apply),
+      scenes: local.scenes.map(apply),
+      props: local.props.map(apply),
+      audios: local.audios,
+    }) as typeof local,
+  );
   return true;
 }
 
@@ -138,11 +156,20 @@ export async function syncDesignVideoRefSafetyToLibrary(params: {
     ? listImageable(management).find((a) => a.id === assetId)
     : undefined;
   if (mgmtAsset && assetUsesMedia(mgmtAsset, mediaId)) {
-    if (safetyChanged(mgmtAsset.videoRefSafety, safety)) {
-      const result = await patchImageableAssetVideoRefSafety({
+    const currentSafety =
+      "voiceId" in mgmtAsset
+        ? getCharacterMediaVideoRefSafety(
+            mgmtAsset as CharacterAsset,
+            mediaId,
+          )
+        : mgmtAsset.videoRefSafety;
+    if (safetyChanged(currentSafety, safety)) {
+      const result = await persistAssetVideoRefSafety({
         projectId: params.projectId,
         assetId,
         videoRefSafety: safety,
+        mediaId,
+        store: "management",
       });
       if (result === "ok") synced = true;
     }

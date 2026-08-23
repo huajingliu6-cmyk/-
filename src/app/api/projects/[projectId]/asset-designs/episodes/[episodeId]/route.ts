@@ -172,11 +172,12 @@ export async function PUT(request: Request, context: RouteContext) {
 
   // Generating is a transient lock — skip heavy workspace sync until extract finishes.
   if (result.record.status !== "generating") {
-    const syncResult = await syncManagementToWorkspace(projectId);
-    if (!syncResult.ok) {
+    try {
+      await syncManagementToWorkspace(projectId);
+    } catch (error) {
       console.error(
         `[workspace-sync] management→workspace sync failed for ${projectId}:`,
-        syncResult.error,
+        error,
       );
     }
   }

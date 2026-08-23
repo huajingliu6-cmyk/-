@@ -54,7 +54,7 @@ export function HomeChrome() {
     <div className="home-page relative h-full min-h-full overflow-x-hidden overflow-y-auto">
       <AnimatedHeroBackground />
       <div className="relative z-10 flex min-h-full flex-col">
-        {auth.status === "loading" || auth.status === "authenticated" ? (
+        {auth.status === "authenticated" ? (
           <NeutralHeader />
         ) : (
           <PublicHeader onLoggedIn={onLoggedIn} />

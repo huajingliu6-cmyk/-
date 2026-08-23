@@ -24,12 +24,7 @@ import type {
   EpisodeDesignConversationMessage,
   ProjectEpisodeAssetDesignStore,
 } from "@/projects/assets/episode-design/types";
-import { SCRIPT_ASSET_DESIGN_ID } from "@/projects/assets/episode-design/types";
 import { reconcileStuckDesignPromptItems } from "@/projects/assets/episode-design/design-prompt-diagnostics";
-import {
-  getScriptSourceFingerprint,
-  loadScriptDraft,
-} from "@/projects/script/script-draft-store";
 import type { ProjectAssetBundle } from "@/projects/assets/types";
 import { mergeAssetBundlesPreferLocalKeepUpstream } from "@/projects/assets/approvals/merge-workspace-assets";
 import { ensureWorkspaceInitialized } from "@/projects/workspace-sync/ensure-workspace-initialized";
@@ -92,11 +87,23 @@ function getEffectiveRecord(
   fallbackUpdatedAt: string,
 ): EpisodeAssetDesignRecord {
   const local = getEpisodeDesignRecord(localStore, episodeId);
-  if (local) return local;
   const upstream = snapshotDesigns
     ? getEpisodeDesignRecord(snapshotDesigns, episodeId)
     : null;
-  if (upstream) return upstream;
+  if (!local && upstream) return upstream;
+  if (local && !upstream) return local;
+  if (local && upstream) {
+    const localTime = Date.parse(local.updatedAt);
+    const upstreamTime = Date.parse(upstream.updatedAt);
+    if (
+      Number.isFinite(localTime) &&
+      Number.isFinite(upstreamTime) &&
+      upstreamTime > localTime
+    ) {
+      return upstream;
+    }
+    return local;
+  }
   return {
     episodeId,
     episodeNumber,
@@ -193,75 +200,11 @@ export async function getWorkspaceEpisodeAssetDesignDetail(
   | { ok: false; code: "EPISODE_NOT_FOUND"; message: string }
 > {
   await ensureWorkspaceInitialized(projectId);
-  if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
-    const draft = await loadScriptDraft(projectId);
-    const content = draft?.sourceText?.trim() ?? "";
-    if (!content) {
-      return {
-        ok: false,
-        code: "EPISODE_NOT_FOUND",
-        message: "未找到主理人上传的未分集完整剧本",
-      };
-    }
-    const snapshot = await loadWorkspaceSnapshot(projectId);
-    const localDesigns = await loadWorkspaceLocalEpisodeDesigns(projectId);
-    const record = getEffectiveRecord(
-      localDesigns,
-      snapshot?.episodeAssetDesigns ?? null,
-      SCRIPT_ASSET_DESIGN_ID,
-      0,
-      draft?.updatedAt ?? new Date().toISOString(),
-    );
-    const currentFingerprint = getScriptSourceFingerprint(content) ?? "";
-    let finalRecord = record;
-    if (finalRecord.status === "generating") {
-      const { reconcileGeneratingExtractRecord } = await import(
-        "@/projects/assets/episode-design/reconcile-extract-status"
-      );
-      finalRecord = await reconcileGeneratingExtractRecord({
-        projectId,
-        record: finalRecord,
-        fingerprint: currentFingerprint,
-        episodeContent: content,
-        episodeNumber: 0,
-        episodeTitle: "完整原始剧本",
-        persist: async ({ record: next }) => {
-          const local = await loadWorkspaceLocalEpisodeDesigns(projectId);
-          const { store: withRecord } = getOrCreateEpisodeRecord(
-            local,
-            SCRIPT_ASSET_DESIGN_ID,
-            0,
-          );
-          const bumped = {
-            ...next,
-            revision: (getEpisodeDesignRecord(withRecord, SCRIPT_ASSET_DESIGN_ID)?.revision ??
-              next.revision) + 1,
-            updatedAt: new Date().toISOString(),
-          };
-          await saveWorkspaceLocalEpisodeDesigns(
-            upsertEpisodeRecord(withRecord, bumped),
-          );
-          return bumped;
-        },
-      });
-    }
-    finalRecord = await persistWorkspaceStuckDesignPrompts(
-      projectId,
-      SCRIPT_ASSET_DESIGN_ID,
-      0,
-      finalRecord,
-    );
+  if (episodeId === "__full_script__") {
     return {
-      ok: true,
-      episode: {
-        id: SCRIPT_ASSET_DESIGN_ID,
-        episodeNumber: 0,
-        title: "完整原始剧本",
-        content,
-      },
-      record: finalRecord,
-      currentFingerprint,
-      designStatus: computeEffectiveStatus(finalRecord, currentFingerprint),
+      ok: false,
+      code: "EPISODE_NOT_FOUND",
+      message: "全剧本提取已迁移到资产提取任务，请使用当前生效版本",
     };
   }
   const snapshot = await loadWorkspaceSnapshot(projectId);
@@ -716,9 +659,13 @@ export async function applyWorkspaceEpisodeAssetDesignGeneration(input: {
       repaired: false,
     };
   }
+  const sameActiveGeneration =
+    detail.record.status === "generating" &&
+    detail.record.activeGeneration?.generationId === input.generationId;
   if (
     input.expectedRevision !== undefined &&
-    detail.record.revision !== input.expectedRevision
+    detail.record.revision !== input.expectedRevision &&
+    !sameActiveGeneration
   ) {
     return {
       ok: false,

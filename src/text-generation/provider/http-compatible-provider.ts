@@ -23,6 +23,28 @@ export function normalizeHttpCompatibleModelId(
   return trimmed;
 }
 
+/**
+ * Admin often saves DeepSeek as `https://api.deepseek.com` without `/v1`.
+ * OpenAI-compatible chat completions expect `…/v1/chat/completions`.
+ */
+export function normalizeHttpCompatibleBaseUrl(baseUrl: string): string {
+  const trimmed = baseUrl.trim().replace(/\/$/, "");
+  if (!trimmed) return trimmed;
+  try {
+    const url = new URL(trimmed);
+    if (!url.hostname.toLowerCase().includes("deepseek.com")) {
+      return trimmed;
+    }
+    const path = url.pathname.replace(/\/$/, "");
+    if (!path || path === "") {
+      return `${trimmed}/v1`;
+    }
+  } catch {
+    return trimmed;
+  }
+  return trimmed;
+}
+
 function isDeepSeekEndpoint(baseUrl: string): boolean {
   try {
     return new URL(baseUrl).hostname.toLowerCase().includes("deepseek.com");
@@ -116,7 +138,7 @@ export class HttpCompatibleTextProvider implements TextGenerationProvider {
       this.baseUrl,
       input.providerModelId || this.defaultModelId || "default",
     );
-    const endpoint = `${this.baseUrl.replace(/\/$/, "")}/chat/completions`;
+    const endpoint = `${normalizeHttpCompatibleBaseUrl(this.baseUrl)}/chat/completions`;
     const messages =
       input.messages && input.messages.length > 0
         ? input.messages.map((m) => ({

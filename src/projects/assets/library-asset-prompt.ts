@@ -19,6 +19,8 @@ export function findLibraryDesignItem(
 ): EpisodeAssetDesignItem | null {
   if (!asset || !items?.length) return null;
   const provenance = asset.approvalProvenance;
+  // Match by stable ids only — name fallback can bind the wrong episode item
+  // when switching characters in the library (prompt/image desync).
   return (
     items.find(
       (item) =>
@@ -26,13 +28,7 @@ export function findLibraryDesignItem(
         (item.id === provenance?.assetDesignItemId ||
           item.libraryAssetId === asset.id ||
           item.existingAssetId === asset.id),
-    ) ??
-    items.find(
-      (item) =>
-        item.assetType !== "audio" &&
-        item.name.trim().toLocaleLowerCase() === asset.name.trim().toLocaleLowerCase(),
-    ) ??
-    null
+    ) ?? null
   );
 }
 

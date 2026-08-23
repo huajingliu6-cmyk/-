@@ -11,20 +11,40 @@ import {
   listTaskRuleMigrationNotices,
   migrateMisboundEpisodeDesignTaskRules,
 } from "@/ai-config/migrate-misbound-episode-design-rules";
+import { migrateAssetExtractionSlotBindings } from "@/ai-config/migrate-asset-extraction-slot-bindings";
+import { migrateStyPlatformAssetExtractTaskRules } from "@/ai-config/migrate-sty-platform-asset-extract-task-rules";
 
 export async function GET() {
   const auth = await requireSystemAdmin();
   if (!auth.ok) return auth.response;
 
-  let migrationHint: string | null = null;
+  const migrationHints: string[] = [];
   try {
     const migrated = await migrateMisboundEpisodeDesignTaskRules();
     if (migrated.ran && migrated.adminHint) {
-      migrationHint = migrated.adminHint;
+      migrationHints.push(migrated.adminHint);
     }
   } catch {
     /* non-fatal */
   }
+  try {
+    const slotMigrated = await migrateAssetExtractionSlotBindings();
+    if (slotMigrated.ran && slotMigrated.adminHint) {
+      migrationHints.push(slotMigrated.adminHint);
+    }
+  } catch {
+    /* non-fatal */
+  }
+  try {
+    const styRules = await migrateStyPlatformAssetExtractTaskRules();
+    if (styRules.ran && styRules.adminHint) {
+      migrationHints.push(styRules.adminHint);
+    }
+  } catch {
+    /* non-fatal */
+  }
+
+  const migrationHint = migrationHints.length > 0 ? migrationHints.join("\n") : null;
 
   const notices = await listTaskRuleMigrationNotices();
   const latestNotice = notices[0] ?? null;

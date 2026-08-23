@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var projectAssetDataNamespaces = map[string]string{"bundle": "asset-bundles", "episode-designs": "episode-asset-designs", "approvals": "asset-approvals"}
+var projectAssetDataNamespaces = map[string]string{"bundle": "asset-bundles", "episode-designs": "episode-asset-designs", "approvals": "asset-approvals", "asset-extraction": "asset-extraction"}
 
 type projectAssetDataSaveInput struct {
 	Value            any    `json:"value"`

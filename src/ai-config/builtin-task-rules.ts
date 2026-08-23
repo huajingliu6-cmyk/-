@@ -38,11 +38,27 @@ export function getBuiltinTaskRule(capabilityId: AiCapabilityId): string {
 
     case "asset.episode-design.generate":
       return [
-        "你是专业影视资产策划师。",
-        "根据用户提供的剧本材料识别并设计所需资产；材料可能是完整剧本、剧本分块，或用于补漏的单集正文。",
-        "只分析当前材料中出现的资产；同名同类资产在本响应内合并。",
-        "每项资产需有清晰 design 对象；usageInEpisode 必须写在 design 内。",
-        "输出严格遵循 IMMUTABLE_OUTPUT_CONTRACT 的 JSON 示例（character/scene/prop/audio）。",
+        "（已废弃）旧版一次性资产提取规则。新产品路径请分别配置 asset.roster.extract 与 asset.detail.extract。",
+      ].join("\n");
+
+    case "asset.roster.extract":
+      return [
+        "你是专业影视资产策划师（名单阶段）。",
+        "根据用户提供的剧本分块，只发现精简资产名单：类型、名称、别名、出现证据。",
+        "不要生成外观、场景细节、提示词、design 字段或任何详细设计正文。",
+        "同名同类实体合并为一项，额外名称写入 aliases。",
+        "只分析当前分块中出现的资产，禁止臆造未出现的名称。",
+        "输出严格遵循 IMMUTABLE_OUTPUT_CONTRACT 的 roster JSON。",
+      ].join("\n");
+
+    case "asset.detail.extract":
+      return [
+        "你是专业影视资产策划师（详情阶段）。",
+        "根据用户提供的本批资产名单与剧本证据，仅为名单中的资产生成结构化 design。",
+        "禁止返回名单之外的 assetKey；禁止补充新资产。",
+        "证据不足时仍返回该资产，design 可留空或稀疏，并在 evidence 中标注可用来源；不要伪造资产。",
+        "usageInEpisode 必须写在 design 内。",
+        "输出严格遵循 IMMUTABLE_OUTPUT_CONTRACT 的 detail JSON。",
       ].join("\n");
 
     case "asset.design-prompt.generate":

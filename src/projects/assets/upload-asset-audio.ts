@@ -112,16 +112,23 @@ export async function uploadProjectAssetAudio(
 export async function deleteProjectAssetAudio(
   projectId: string,
   assetId: string,
+  options?: { hard?: boolean },
 ): Promise<void> {
+  const hardQuery = options?.hard ? "?hard=1" : "";
   const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/assets-draft/audio/${encodeURIComponent(assetId)}`,
-    { method: "DELETE" },
+    `/api/projects/${encodeURIComponent(projectId)}/assets-draft/audio/${encodeURIComponent(assetId)}${hardQuery}`,
+    {
+      method: "DELETE",
+      ...(options?.hard
+        ? { headers: { "X-Hard-Delete": "1" } }
+        : {}),
+    },
   );
   if (res.status === 404) return;
   if (!res.ok) {
     const payload = (await res.json().catch(() => ({}))) as { error?: string };
     throw new ProjectAssetAudioUploadError(
-      payload.error ?? "清除音频失败",
+      payload.error ?? (options?.hard ? "删除音色失败" : "清除音频失败"),
       res.status,
     );
   }

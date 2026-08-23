@@ -59,7 +59,7 @@ describe('remote management to workspace synchronization', () => {
 
   it('writes a real workspace snapshot instead of deferring remote mode', async () => {
     const result = await syncManagementToWorkspace('project_1');
-    expect(result).toEqual({ ok: true, revision: 1 });
+    expect(result).toMatchObject({ ok: true, revision: 1 });
     expect(workspace.snapshot).toMatchObject({
       projectId: 'project_1',
       upstreamRevision: 1,

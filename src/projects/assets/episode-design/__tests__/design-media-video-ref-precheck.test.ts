@@ -12,6 +12,7 @@ import {
 } from "@/projects/assets/episode-design/design-media-video-ref-precheck";
 import type { EpisodeAssetDesignItem } from "@/projects/assets/episode-design/types";
 import type { VideoRefSafety } from "@/projects/assets/types";
+import { SD2_CERT_MODEL_TAG } from "@/video-generation/sd2-cert-safety";
 import { readFileSync } from "fs";
 import path from "path";
 
@@ -52,6 +53,7 @@ describe("design media SD2 person verification", () => {
     const safety = {
       status: "ok" as const,
       checkedAt: new Date().toISOString(),
+      modelId: SD2_CERT_MODEL_TAG,
     };
     expect(designVideoRefSafetyBadge(safety)?.label).toBe("SD 已认证");
     expect(designVideoRefSafetyBadge(safety)?.tone).toBe("ok");
@@ -59,6 +61,15 @@ describe("design media SD2 person verification", () => {
     expect(formatDesignVideoRefSafetyNotice(safety, "character")).toContain(
       "审核资产库",
     );
+  });
+
+  it("labels legacy ok without SD2 model as 需重新人物校验", () => {
+    const safety = {
+      status: "ok" as const,
+      checkedAt: new Date().toISOString(),
+    };
+    expect(designVideoRefSafetyBadge(safety)?.label).toBe("需重新人物校验");
+    expect(isDesignMediaVideoRefLocked(safety)).toBe(false);
   });
 
   it("labels cert rejection as 疑似真人", () => {
@@ -196,7 +207,7 @@ describe("design media SD2 person verification", () => {
     expect(modal).toContain("isDesignMediaVideoRefLocked");
     expect(mgmt).not.toContain("precheckDesignGeneratedMedia");
     expect(workspace).not.toContain("precheckDesignGeneratedMedia");
-    expect(mgmt).toContain("人物校验");
+    expect(mgmt).toContain("enqueueDesignAssetGenerate");
   });
 });
 
@@ -204,10 +215,12 @@ describe("characterNeedsUncheckedVideoRefBlock (personal confirm gate)", () => {
   const ok: VideoRefSafety = {
     status: "ok",
     checkedAt: "2026-08-13T00:00:00.000Z",
+    modelId: SD2_CERT_MODEL_TAG,
   };
   const risk: VideoRefSafety = {
     status: "likely_real_person",
     checkedAt: "2026-08-13T00:00:00.000Z",
+    modelId: SD2_CERT_MODEL_TAG,
   };
 
   function characterItem(

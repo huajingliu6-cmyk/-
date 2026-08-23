@@ -33,6 +33,8 @@ type Props = {
   /** Extra in-flight frames shown beside completed previews */
   pendingSlots?: PendingPreviewSlot[];
   workspaceMode?: boolean;
+  /** Workspace right-rail preview frame; follows the shot aspect control. */
+  aspectRatio?: "16:9" | "9:16";
 };
 
 const STATUS_LABEL: Record<ShotVideoUiStatus, string> = {
@@ -126,6 +128,7 @@ export function ShotVideoPreview({
   successGenerations = [],
   pendingSlots = [],
   workspaceMode = false,
+  aspectRatio = "9:16",
 }: Props) {
   const videos = useMemo(
     () => mergeHistory(projectId, historyVideos, successGenerations),
@@ -163,23 +166,20 @@ export function ShotVideoPreview({
         className="sbw-shot-preview is-workspace"
         data-video-status={status}
       >
-        <div className="sbw-shot-preview__head">
-          <div>
-            <h4>最新视频</h4>
-            <span className="sbw-hint">当前分镜生成结果</span>
-          </div>
+        <div
+          className="sbw-shot-preview__workspace-frame"
+          data-aspect={aspectRatio === "16:9" ? "16:9" : "9:16"}
+        >
           <button
             type="button"
-            className="sbw-btn sbw-shot-preview__history-btn"
+            className="sbw-btn sbw-shot-preview__history-btn is-icon"
             onClick={() => setHistoryOpen(true)}
             data-testid="shot-video-history-btn"
+            title="历史分镜"
+            aria-label="历史分镜"
           >
             <History size={15} />
-            历史
           </button>
-        </div>
-
-        <div className="sbw-shot-preview__workspace-frame">
           {pending ? (
             <div className="sbw-shot-preview__empty is-loading">
               <span className="sbw-shot-preview__spinner" aria-hidden />
@@ -215,24 +215,26 @@ export function ShotVideoPreview({
               <p>本镜头尚未生成视频</p>
             </div>
           )}
-        </div>
 
-        <div className="sbw-shot-preview__workspace-meta">
-          <span className="sbw-badge">{STATUS_LABEL[status]}</span>
-          {latest ? (
-            <span className="sbw-hint">
-              {latest.versionLabel}
-              {latest.completedAt
-                ? ` · ${new Date(latest.completedAt).toLocaleString()}`
-                : ""}
-            </span>
-          ) : null}
-          {contentStale || status === "stale" ? (
-            <p className="sbw-hint">当前镜头已修改，视频内容需要再次生成。</p>
-          ) : null}
-          {status === "failed" && facingError && latest ? (
-            <p className="sbw-note is-error">最近一次生成失败：{facingError.message}</p>
-          ) : null}
+          <div className="sbw-shot-preview__workspace-meta">
+            <span className="sbw-badge">{STATUS_LABEL[status]}</span>
+            {latest ? (
+              <span className="sbw-hint">
+                {latest.versionLabel}
+                {latest.completedAt
+                  ? ` · ${new Date(latest.completedAt).toLocaleString()}`
+                  : ""}
+              </span>
+            ) : null}
+            {contentStale || status === "stale" ? (
+              <p className="sbw-hint">当前镜头已修改，视频内容需要再次生成。</p>
+            ) : null}
+            {status === "failed" && facingError && latest ? (
+              <p className="sbw-note is-error">
+                最近一次生成失败：{facingError.message}
+              </p>
+            ) : null}
+          </div>
         </div>
 
         {historyOpen

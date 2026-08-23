@@ -36,6 +36,40 @@ export type VideoRefSafety = {
   modelId?: string;
 };
 
+/** Ownership record for a character look generation result (optional / backward compatible). */
+export type CharacterMediaLookProvenance = {
+  kind: "library_look_generation";
+  jobId?: string;
+  projectId?: string;
+  assetId?: string;
+  scope?: "management" | "workspace";
+  /** Preferred timestamp field for new writes. */
+  createdAt?: string;
+  /** Legacy alias of createdAt (still accepted when reading old data). */
+  recordedAt?: string;
+};
+
+/** Voice binding is character-default or appearance-override — never mediaId-bound. */
+export type CharacterVoiceBindingScope =
+  | "character_default"
+  | "appearance_override";
+
+/**
+ * Independent appearance (人物造型) version under a character.
+ * Slot 0 / main 主形象 is NOT an appearance — only looks live here.
+ */
+export type CharacterAppearance = {
+  id: string;
+  characterId?: string;
+  name: string;
+  promptOverride: string;
+  currentMediaId: string | null;
+  mediaHistory: string[];
+  voiceOverrideId: string | null;
+  voiceOverrideName?: string | null;
+  revision: number;
+};
+
 export type CharacterAsset = {
   id: string;
   projectId: string;
@@ -47,29 +81,59 @@ export type CharacterAsset = {
   clothing: string;
   age: string;
   gender: string;
+  /** Character-level default voice (人物默认音色). */
   voiceId: string | null;
   voiceName: string | null;
   voiceStyle: string | null;
   /**
-   * 按媒体 id 的音色绑定（同一角色多张生成图各自独立）。
-   * `voiceId`/`voiceName` 仍表示当前主图（primary/imageFileName）音色。
+   * @deprecated Legacy per-media voice map. New voice UX uses character default
+   * + appearance.voiceOverrideId. Kept for migration / episode-design compat.
    */
   mediaVoices?: Record<
     string,
     { voiceId: string | null; voiceName: string | null }
   >;
+  /** First-class 人物造型 layers (independent of 主形象). */
+  appearances?: CharacterAppearance[];
   /** 本地上传角色图文件名 */
   imageFileName: string | null;
   /** 本地预览 object URL；本阶段仅内存 */
   imageObjectUrl: string | null;
   imageMimeType: string | null;
   status: AssetStatus;
-  /** Append-only approved generated media ids (optional). */
+  /** Union of all approved media ids (primary + history + look + promoted). */
   approvedMediaIds?: string[];
   primaryMediaId?: string | null;
+  /** Former primary (主形象) images kept for reference — never includes look images. */
+  historyMediaIds?: string[];
+  /**
+   * Current image ids of appearances — synced from appearances for storyboard
+   * compatibility. Prefer appearances[].currentMediaId as source of truth.
+   */
+  lookMediaIds?: string[];
   approvalProvenance?: AssetApprovalProvenance | null;
-  /** 视频参考图预检结果；换图后清空 */
+  /**
+   * Per-media SD2 person-certification results (authoritative for multi-look).
+   * Keyed by mediaId / storage key.
+   */
+  mediaVideoRefSafety?: Record<string, VideoRefSafety>;
+  /**
+   * Legacy top-level precheck result. Compatibility mirror of the *current*
+   * primary media only — do not treat as authority for other looks.
+   */
   videoRefSafety?: VideoRefSafety | null;
+  /** Optional display names for look/history media cards (backward compatible). */
+  mediaDisplayNames?: Record<string, string>;
+  /**
+   * ISO timestamps of last *manual* shot.assetMediaIds selection per media.
+   * Preview / img2img / open-detail must not update this map.
+   */
+  mediaLastUsedAt?: Record<string, string>;
+  /**
+   * Provenance for look media eligible for exclusive blob deletion.
+   * Written when a library_look generation result is added as a look.
+   */
+  mediaLookProvenance?: Record<string, CharacterMediaLookProvenance>;
 };
 
 export type SceneAsset = {
@@ -89,6 +153,7 @@ export type SceneAsset = {
   primaryMediaId?: string | null;
   approvalProvenance?: AssetApprovalProvenance | null;
   videoRefSafety?: VideoRefSafety | null;
+  mediaVariantLabels?: Record<string, string>;
 };
 
 export type PropAsset = {
@@ -106,6 +171,7 @@ export type PropAsset = {
   primaryMediaId?: string | null;
   approvalProvenance?: AssetApprovalProvenance | null;
   videoRefSafety?: VideoRefSafety | null;
+  mediaVariantLabels?: Record<string, string>;
 };
 
 export type AudioAssetKind = "music" | "sfx" | "narration" | "voice";

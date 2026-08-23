@@ -45,7 +45,11 @@ vi.mock("@/auth/require-user", () => ({
 
 import { requireSessionUser } from "@/auth/require-user";
 import { POST as regeneratePrompt } from "@/app/api/projects/[projectId]/storyboard-workspace/episodes/[episodeId]/storyboard/shots/[shotId]/regenerate-prompt/route";
-import { PATCH as patchShot } from "@/app/api/projects/[projectId]/storyboard-workspace/episodes/[episodeId]/storyboard/shots/[shotId]/route";
+import { POST as insertBlankShot } from "@/app/api/projects/[projectId]/storyboard-workspace/episodes/[episodeId]/storyboard/shots/route";
+import {
+  PATCH as patchShot,
+  DELETE as deleteShot,
+} from "@/app/api/projects/[projectId]/storyboard-workspace/episodes/[episodeId]/storyboard/shots/[shotId]/route";
 
 function walkFiles(dir: string, out: string[] = []): string[] {
   if (!existsSync(dir)) return out;
@@ -324,6 +328,15 @@ describe("shot prompt regenerate + NOT_REQUIRED", () => {
       sourceAssetSnapshotHash: "",
       userId: owner.id,
     });
+    // Seed fixtures unlock prompts so regenerate/edit tests can exercise unlock paths.
+    board.scenes = board.scenes.map((scene) => ({
+      ...scene,
+      shots: scene.shots.map((shot) => ({
+        ...shot,
+        promptLocked: false,
+        locked: false,
+      })),
+    }));
 
     // Ensure at least 2 shots for cross-shot isolation assertions
     const flat = listFlatShots(board.scenes);
@@ -367,6 +380,244 @@ describe("shot prompt regenerate + NOT_REQUIRED", () => {
 
     return { projectId: project.projectId, production, board };
   }
+
+  it("inserts a blank shot after the target and renumbers the episode", async () => {
+    const { projectId, board } = await seedProjectWithTwoShots();
+    const before = listFlatShots(board.scenes);
+    const target = before[0]!.shot;
+
+    const response = await insertBlankShot(
+      new Request("http://localhost/shots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ afterShotId: target.id }),
+      }),
+      {
+        params: Promise.resolve({
+          projectId,
+          episodeId: "ep_regen",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(201);
+    const payload = (await response.json()) as {
+      production: EpisodeProduction;
+      shot: StoryboardShot;
+    };
+    const after = listFlatShots(payload.production.activeStoryboard!.scenes);
+    expect(after).toHaveLength(before.length + 1);
+    expect(after.map((row) => row.shot.shotNumber)).toEqual(
+      Array.from({ length: after.length }, (_, index) => index + 1),
+    );
+    expect(after[1]!.shot.id).toBe(payload.shot.id);
+    expect(payload.shot).toMatchObject({
+      videoPrompt: "",
+      requirements: [],
+      characterAssetIds: [],
+      sceneAssetId: null,
+      propAssetIds: [],
+      confirmed: false,
+      promptLocked: true,
+      locked: false,
+    });
+    expect(payload.production.status).toBe("storyboard_incomplete");
+  });
+
+  it("deletes a target shot, renumbers continuously, and rejects last-shot delete", async () => {
+    const { projectId, board } = await seedProjectWithTwoShots();
+    const before = listFlatShots(board.scenes);
+    const target = before[0]!.shot;
+    const survivor = before[1]!.shot;
+    const storyboardRev = board.revision;
+
+    const deleted = await deleteShot(
+      new Request("http://localhost/shot", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: target.revision }),
+      }),
+      {
+        params: Promise.resolve({
+          projectId,
+          episodeId: "ep_regen",
+          shotId: target.id,
+        }),
+      },
+    );
+    expect(deleted.status).toBe(200);
+    const payload = (await deleted.json()) as {
+      production: EpisodeProduction;
+    };
+    const after = listFlatShots(payload.production.activeStoryboard!.scenes);
+    expect(after).toHaveLength(before.length - 1);
+    expect(after.some((row) => row.shot.id === target.id)).toBe(false);
+    expect(after.some((row) => row.shot.id === survivor.id)).toBe(true);
+    expect(after.map((row) => row.shot.shotNumber)).toEqual(
+      Array.from({ length: after.length }, (_, index) => index + 1),
+    );
+    expect(payload.production.activeStoryboard!.revision).toBe(
+      storyboardRev + 1,
+    );
+    expect(payload.production.activeStoryboard!.confirmedAt).toBeNull();
+    expect(payload.production.status).not.toBe("storyboard_done");
+
+    let remaining = after;
+    while (remaining.length > 1) {
+      const victim = remaining[0]!.shot;
+      const step = await deleteShot(
+        new Request("http://localhost/shot", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ revision: victim.revision }),
+        }),
+        {
+          params: Promise.resolve({
+            projectId,
+            episodeId: "ep_regen",
+            shotId: victim.id,
+          }),
+        },
+      );
+      expect(step.status).toBe(200);
+      const stepPayload = (await step.json()) as {
+        production: EpisodeProduction;
+      };
+      remaining = listFlatShots(
+        stepPayload.production.activeStoryboard!.scenes,
+      );
+    }
+
+    const last = remaining[0]!.shot;
+    const refuse = await deleteShot(
+      new Request("http://localhost/shot", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: last.revision }),
+      }),
+      {
+        params: Promise.resolve({
+          projectId,
+          episodeId: "ep_regen",
+          shotId: last.id,
+        }),
+      },
+    );
+    expect(refuse.status).toBe(400);
+    const refuseBody = (await refuse.json()) as { code?: string };
+    expect(refuseBody.code).toBe("LAST_SHOT");
+  });
+
+  it("delete shot returns revision conflict", async () => {
+    const { projectId, board } = await seedProjectWithTwoShots();
+    const target = listFlatShots(board.scenes)[0]!.shot;
+    const conflict = await deleteShot(
+      new Request("http://localhost/shot", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: target.revision - 1 }),
+      }),
+      {
+        params: Promise.resolve({
+          projectId,
+          episodeId: "ep_regen",
+          shotId: target.id,
+        }),
+      },
+    );
+    expect(conflict.status).toBe(409);
+    const body = (await conflict.json()) as { code?: string };
+    expect(body.code).toBe("REVISION_CONFLICT");
+  });
+
+  it("editPrompt updates locked prompt and keeps promptLocked without whole-shot lock", async () => {
+    const { projectId, board } = await seedProjectWithTwoShots();
+    const target = listFlatShots(board.scenes)[0]!.shot;
+
+    const lockRes = await patchShot(
+      new Request("http://localhost/patch", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          promptLocked: true,
+          revision: target.revision,
+        }),
+      }),
+      {
+        params: Promise.resolve({
+          projectId,
+          episodeId: "ep_regen",
+          shotId: target.id,
+        }),
+      },
+    );
+    expect(lockRes.status).toBe(200);
+    const locked = ((await lockRes.json()) as { shot: StoryboardShot }).shot;
+    expect(locked.promptLocked).toBe(true);
+    expect(locked.locked).toBe(false);
+
+    const blocked = await patchShot(
+      new Request("http://localhost/patch", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          videoPrompt: "should fail",
+          revision: locked.revision,
+        }),
+      }),
+      {
+        params: Promise.resolve({
+          projectId,
+          episodeId: "ep_regen",
+          shotId: target.id,
+        }),
+      },
+    );
+    expect(blocked.status).toBe(409);
+
+    const edited = await patchShot(
+      new Request("http://localhost/patch", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          videoPrompt: "edited via modal",
+          editPrompt: true,
+          revision: locked.revision,
+        }),
+      }),
+      {
+        params: Promise.resolve({
+          projectId,
+          episodeId: "ep_regen",
+          shotId: target.id,
+        }),
+      },
+    );
+    expect(edited.status).toBe(200);
+    const saved = ((await edited.json()) as { shot: StoryboardShot }).shot;
+    expect(saved.videoPrompt).toBe("edited via modal");
+    expect(saved.promptLocked).toBe(true);
+    expect(saved.locked).toBe(false);
+
+    const missingRev = await patchShot(
+      new Request("http://localhost/patch", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          videoPrompt: "no rev",
+          editPrompt: true,
+        }),
+      }),
+      {
+        params: Promise.resolve({
+          projectId,
+          episodeId: "ep_regen",
+          shotId: target.id,
+        }),
+      },
+    );
+    expect(missingRev.status).toBe(400);
+  });
 
   it("regenerate-prompt updates only the target shot and is idempotent", async () => {
     const { projectId, board } = await seedProjectWithTwoShots();

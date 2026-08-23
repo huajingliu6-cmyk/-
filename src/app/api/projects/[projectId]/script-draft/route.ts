@@ -12,7 +12,6 @@ import {
   parseScriptEpisodesGenerationOutput,
   ScriptEpisodesGenerationDtoSchema,
 } from "@/projects/script/script-episodes-generation-schema";
-import { synchronizeScriptDraftDownstream } from "@/projects/script/script-draft-downstream";
 import { guardScriptDraftRemoteData } from "@/projects/script/route-remote-guard";
 
 type RouteContext = {
@@ -51,7 +50,6 @@ async function putScriptDraft(request: Request, context: RouteContext) {
   if (!project) {
     return NextResponse.json({ error: "项目不存在" }, { status: 404 });
   }
-
   let body: unknown;
   try {
     body = await request.json();
@@ -65,6 +63,33 @@ async function putScriptDraft(request: Request, context: RouteContext) {
       : null;
 
   const previous = await loadScriptDraft(projectId);
+
+  if (bodyRecord?.clearScript === true) {
+    const { emptyEpisodeSplitState } = await import(
+      "@/projects/script/script-split-types"
+    );
+    const base =
+      previous ??
+      normalizeScriptDraft(projectId, { projectId, ...bodyRecord });
+    if (!base) {
+      return NextResponse.json({ error: "剧本草稿格式无效" }, { status: 400 });
+    }
+    const cleared = {
+      ...base,
+      sourceFile: null,
+      sourceText: null,
+      sourceImport: null,
+      preambleNotes: null,
+      episodes: [],
+      selectedId: null,
+      episodeSplit: emptyEpisodeSplitState(),
+    };
+    const draft = await saveScriptDraft(cleared);
+    return NextResponse.json({
+      draft,
+      invalidated: scriptDraftContentChanged(previous, draft),
+    });
+  }
 
   // Apply structured episode generation (single-episode merge).
   if (bodyRecord && Object.hasOwn(bodyRecord, "applyGeneratedEpisodes")) {
@@ -122,12 +147,76 @@ async function putScriptDraft(request: Request, context: RouteContext) {
       applied.draft,
     );
     const draft = await saveScriptDraft(applied.draft);
-    if (contentChanged) {
-      await synchronizeScriptDraftDownstream({ projectId, contentChanged });
-    }
     return NextResponse.json({
       draft,
       invalidated: contentChanged,
+    });
+  }
+
+  if (bodyRecord && bodyRecord.autoSplit === true) {
+    const { commitImportedScriptAutoSplit } = await import(
+      "@/projects/script/script-auto-split"
+    );
+    const { emptyEpisodeSplitState } = await import(
+      "@/projects/script/script-split-types"
+    );
+    const replaceExisting = bodyRecord.replaceExisting === true;
+    const incoming = normalizeScriptDraft(projectId, {
+      ...bodyRecord,
+      episodes: replaceExisting ? [] : (previous?.episodes ?? []),
+      selectedId: replaceExisting ? null : (previous?.selectedId ?? null),
+      episodeSplit: replaceExisting
+        ? emptyEpisodeSplitState()
+        : (previous?.episodeSplit ?? emptyEpisodeSplitState()),
+      outlineText:
+        previous && !Object.hasOwn(bodyRecord, "outlineText") && !replaceExisting
+          ? previous.outlineText
+          : bodyRecord.outlineText,
+      ...(replaceExisting && previous?.documentRevision != null
+        ? { documentRevision: previous.documentRevision }
+        : {}),
+    });
+    if (!incoming) {
+      return NextResponse.json({ error: "剧本草稿格式无效" }, { status: 400 });
+    }
+    const result = await commitImportedScriptAutoSplit({
+      previous: replaceExisting ? null : previous,
+      nextDraft: {
+        ...incoming,
+        episodes: replaceExisting ? [] : (previous?.episodes ?? []),
+        selectedId: replaceExisting
+          ? null
+          : (previous?.selectedId ?? incoming.selectedId),
+        episodeSplit: replaceExisting
+          ? emptyEpisodeSplitState()
+          : (previous?.episodeSplit ?? emptyEpisodeSplitState()),
+        outlineText: replaceExisting
+          ? incoming.outlineText
+          : (previous?.outlineText ?? incoming.outlineText),
+      },
+    });
+    if (!result.ok) {
+      return NextResponse.json(
+        {
+          error: result.message,
+          code: result.code,
+          draft: result.draft,
+          warnings: result.warnings,
+          downstreamSync: result.downstreamSync,
+        },
+        { status: result.status },
+      );
+    }
+    return NextResponse.json({
+      draft: result.draft,
+      autoSplit: true,
+      confirmed: true,
+      idempotent: result.idempotent,
+      mode: result.mode,
+      warnings: result.warnings,
+      downstreamSync: result.downstreamSync,
+      extractionAction: result.extractionAction,
+      invalidated: scriptDraftContentChanged(previous, result.draft),
     });
   }
 
@@ -179,12 +268,20 @@ async function putScriptDraft(request: Request, context: RouteContext) {
         : previous.sourceImport,
     };
   }
+  if (
+    previous &&
+    previous.episodes.length > 0 &&
+    toSave.episodes.length === 0
+  ) {
+    toSave = {
+      ...toSave,
+      episodes: previous.episodes,
+      selectedId: previous.selectedId,
+      episodeSplit: previous.episodeSplit ?? toSave.episodeSplit,
+    };
+  }
 
   const draft = await saveScriptDraft(toSave);
-
-  if (contentChanged) {
-    await synchronizeScriptDraftDownstream({ projectId, contentChanged });
-  }
 
   return NextResponse.json({
     draft,
@@ -196,6 +293,9 @@ export function GET(request: Request, context: RouteContext) {
   return guardScriptDraftRemoteData(() => getScriptDraft(request, context));
 }
 
-export function PUT(request: Request, context: RouteContext) {
+export function PUT(
+  request: Request,
+  context: RouteContext,
+) {
   return guardScriptDraftRemoteData(() => putScriptDraft(request, context));
-}
+};

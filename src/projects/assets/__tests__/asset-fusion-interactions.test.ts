@@ -11,6 +11,7 @@ function readSrc(relativePath: string): string {
 describe("unified asset management interactions", () => {
   const toolbar = readSrc("src/projects/assets/AssetExtractionToolbar.tsx");
   const workspace = readSrc("src/projects/assets/AssetManagementWorkspace.tsx");
+  const guard = readSrc("src/shell/GenerationBusyGuard.tsx");
   const imageUpload = readSrc("src/projects/assets/AssetImageUpload.tsx");
   const imageEditor = readSrc(
     "src/projects/assets/LibraryAssetImageEditor.tsx",
@@ -18,6 +19,7 @@ describe("unified asset management interactions", () => {
   const promptModal = readSrc(
     "src/projects/assets/LibraryAssetPromptModal.tsx",
   );
+  const designModal = readSrc("src/projects/assets/DesignAssetModal.tsx");
   const character = readSrc("src/projects/assets/CharacterDetail.tsx");
   const characterManager = readSrc(
     "src/projects/assets/CharacterManager.tsx",
@@ -43,42 +45,71 @@ describe("unified asset management interactions", () => {
     expect(workspace).not.toContain('setEpisodePickerMode("view")');
   });
 
-  it("locks the unified page and reuses extraction progress animation", () => {
+  it("locks the unified page while extraction is busy", () => {
     expect(workspace).toContain("inert={pageLocked ? true : undefined}");
-    expect(workspace).toContain("asset-extraction-page-lock");
-    expect(workspace).toContain("onExtractionProgressChange");
-    expect(workspace).toContain("asset-extraction-progress-percent");
+    expect(workspace).toContain("extractionBusy");
+    expect(guard).toContain("asset-extraction-overlay");
     expect(css).toContain("ead-progress-flow");
-    expect(css).toContain(".asset-library-page__lock");
   });
 
-  it("uses asset-specific replacement copy and targets the active look", () => {
-    expect(character).toContain('actionLabel="替换形象"');
-    expect(character).toContain("uploadTargetId={activeMediaId}");
-    expect(character).toContain("preserveValueOnUpload");
+  it("uses asset-specific replacement copy; character uses candidate upload without 替换形象", () => {
+    expect(character).not.toContain("替换形象");
+    expect(character).toContain("replace-primary");
+    expect(character).toContain("确认使用");
+    expect(character).toContain("postLibrarySd2Precheck");
+    expect(character).toContain("character-look-add");
     expect(scene).toContain('actionLabel="替换场景"');
     expect(prop).toContain('actionLabel="替换道具"');
     expect(imageUpload).toContain("targetMediaId: uploadTargetId");
+    expect(imageUpload).toContain("customUpload");
     expect(imageRoute).toContain('get("targetMediaId")');
     expect(imageRoute).toContain("ownedMediaIds.has(targetMediaId)");
   });
 
-  it("opens the prompt design card from a list-item context menu", () => {
-    expect(compactList).toContain("onContextMenu");
-    expect(compactList).toContain("onEdit?.(item.id)");
+  it("character page embeds prompt panel; scene/prop keep modal context menu", () => {
+    expect(compactList).toContain("onContextMenu={");
+    expect(compactList).toContain("onEdit");
+    expect(compactList).toMatch(
+      /onContextMenu=\{\s*onEdit\s*\?/,
+    );
     expect(imageEditor).toContain("AssetImageEditPanel");
-    expect(imageEditor).toContain("existingMediaIds");
-    expect(imageEditor).toContain("referenceMediaId");
     expect(promptModal).toContain("hideImageEdit");
-    expect(characterManager).toContain("LibraryAssetPromptModal");
+    expect(promptModal).toContain("LibraryAssetPromptPanel");
+    expect(promptModal).toContain('mode="embedded"');
+    expect(designModal).toContain('variant?: "modal" | "embedded"');
+    expect(designModal).toContain("onCurrentMediaChange");
+    expect(designModal).toContain("design-prompt-textarea");
+    expect(designModal).not.toContain("design-prompt-history-toggle");
+    expect(designModal).not.toContain("design-prompt-history");
+    expect(designModal).toContain("design-image-history-toggle");
+    expect(designModal).toContain("design-copy");
+    expect(designModal).toContain("design-generate-asset");
+    expect(designModal).toContain("design-adjust-params");
+    expect(designModal).toContain("prompt-generation-summary");
+    expect(designModal).toContain("design-params-popover");
+    expect(designModal).toContain("resolveLibraryGenerateTarget");
+    expect(designModal).toContain('form.set("mode", "text_to_image")');
+    expect(designModal).toContain("/assets-draft/media/generate");
+    expect(designModal).toContain("design-download");
+    expect(designModal).toContain("design-video-ref-precheck");
+    expect(characterManager).toContain("AppToastHost");
+    expect(characterManager).not.toContain("LibraryAssetPromptModal");
+    expect(characterManager).not.toContain("imageEditorId");
+    expect(characterManager).not.toContain("onEdit=");
     expect(scene).toContain("LibraryAssetPromptModal");
     expect(prop).toContain("LibraryAssetPromptModal");
-    expect(characterManager).not.toContain("LibraryAssetImageEditor");
-    expect(scene).not.toContain("LibraryAssetImageEditor");
-    expect(prop).not.toContain("LibraryAssetImageEditor");
-    expect(characterManager).not.toContain("initialDraft=");
-    expect(scene).not.toContain("initialDraft=");
-    expect(prop).not.toContain("initialDraft=");
-    expect(character).toContain("新增造型");
+    expect(character).toContain("LibraryAssetPromptPanel");
+    expect(character).toContain("onCurrentMediaChange");
+    expect(character).toContain("LibraryCharacterLookEditor");
+    expect(character).not.toContain("CreateCharacterLookDialog");
+    expect(character).toContain("确认使用");
+    expect(character).toContain("新增人物造型");
+    expect(character).not.toContain("设为主造型");
+    expect(character).toContain("character-history-trigger");
+    expect(character).toContain("character-history-popover");
+    expect(character).not.toContain("character-generation-history");
+    expect(character).not.toContain("AssetBasicInfo");
+    expect(character).not.toContain('label: "定位"');
+    expect(character).not.toContain('label: "年龄"');
   });
 });

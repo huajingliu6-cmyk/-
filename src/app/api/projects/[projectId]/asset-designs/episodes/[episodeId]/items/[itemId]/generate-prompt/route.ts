@@ -5,7 +5,6 @@ import {
   patchEpisodeItemDesignPrompt,
 } from "@/projects/assets/episode-design/episode-design-api";
 import { runGenerateDesignPromptPost } from "@/projects/assets/episode-design/run-generate-design-prompt-route";
-import { syncManagementToWorkspace } from "@/projects/workspace-sync/sync-management-to-workspace";
 import { guardEpisodeAssetDesignRemoteData } from "@/projects/assets/episode-design/route-remote-guard";
 
 type RouteContext = {
@@ -40,9 +39,6 @@ async function post(request: Request, context: RouteContext) {
         designPrompt,
         designConversation,
       });
-    },
-    afterSuccess: async () => {
-      await syncManagementToWorkspace(projectId);
     },
   });
 }

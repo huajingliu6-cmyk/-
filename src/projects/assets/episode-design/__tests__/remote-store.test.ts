@@ -7,6 +7,7 @@ const documents = vi.hoisted(
   () => new Map<string, { revision: number; value: unknown }>(),
 );
 const state = vi.hoisted(() => ({ conflictsRemaining: 0 }));
+const downstream = vi.hoisted(() => ({ sync: vi.fn(async () => ({ ok: true })) }));
 
 vi.mock('@/persistence/remote-data-client', () => ({
   isRemoteDataOnly: () => true,
@@ -40,6 +41,9 @@ vi.mock('@/persistence/remote-data-client', () => ({
       revision: document?.revision ?? 0,
     });
   }),
+}));
+vi.mock('@/projects/workspace-sync/sync-management-to-workspace', () => ({
+  syncManagementToWorkspace: downstream.sync,
 }));
 import {
   emptyEpisodeAssetDesignStore,
@@ -90,6 +94,7 @@ describe('remote episode asset design store', () => {
   beforeEach(() => {
     documents.clear();
     state.conflictsRemaining = 0;
+    downstream.sync.mockClear();
   });
 
   it('persists normalized design records without local files', async () => {

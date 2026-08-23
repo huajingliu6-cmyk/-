@@ -14,8 +14,11 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:-infinite-canvas-dev-secret-change-me}
       AI_CONFIG_ENCRYPTION_KEY: ${AI_CONFIG_ENCRYPTION_KEY:-}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      TEXT_LLM_PROVIDER: ${TEXT_LLM_PROVIDER:-http}
+      ALLOW_PAID_GENERATION: ${ALLOW_PAID_GENERATION:-true}
       BUILD_SOURCE: infinite-canvas
       BUILD_REVISION: ${BUILD_REVISION:-unknown}
+      WEB_PORT: ${WEB_PORT:-3080}
       # Full-script asset extract timeout (ms). Default 600000 = 10 minutes.
       SCRIPT_ASSET_DESIGN_TIMEOUT_MS: "${SCRIPT_ASSET_DESIGN_TIMEOUT_MS:-600000}"
       # Formal design-prompt batch concurrency after extract. Default 4, max 6.
@@ -31,13 +34,25 @@ services:
       ALLOW_LAYOUT_PREVIEWS: "true"
     volumes:
       - ${LOCAL_VOICE_LIBRARY_HOST_DIR:-E:/DevWorkspace/runtime/InfiniteCanvas/local-voice-library}:/var/lib/infinite-canvas/local-voice-library:ro
+    ports: !reset []
+  gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    read_only: true
     ports:
-      - "${WEB_PORT:-3080}:3000"
-  api:
-    build:
-      context: ../backend
-      dockerfile: Dockerfile
-  blobstore:
-    build:
-      context: ../backend
-      dockerfile: Blobstore.Dockerfile
+      - "0.0.0.0:${WEB_PORT:-3080}:8088"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=64m
+      - /var/run:rw,noexec,nosuid,size=16m
+      - /tmp:rw,noexec,nosuid,size=16m
+    depends_on:
+      web:
+        condition: service_healthy
+    networks: [edge]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8088/build-revision"]
+      interval: 10s
+      timeout: 5s
+      retries: 10

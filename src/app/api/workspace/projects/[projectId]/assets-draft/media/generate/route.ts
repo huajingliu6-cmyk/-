@@ -14,5 +14,6 @@ export async function POST(request: Request, context: RouteContext) {
     request,
     projectId,
     actorUserId: gated.user.id,
+    store: "workspace",
   });
 }

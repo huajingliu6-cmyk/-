@@ -52,7 +52,7 @@ describe("project management context menu", () => {
     expect(css).toContain(".wb-context-menu");
   });
 
-  it("shows only new project on blank personal project-list space", () => {
+  it("shows only new project on blank personal or enterprise project-list space", () => {
     expect(projectsPage).toContain("PersonalBlankContextMenu");
     expect(projectsPage).toContain("PersonalBlankContextMenuState");
     expect(projectsPage).toContain("ACTIVE_ENTERPRISE_EVENT");
@@ -66,6 +66,8 @@ describe("project management context menu", () => {
     expect(projectsPage).toContain("setContextMenu(null)");
     expect(projectsPage).toContain("onCreate={onNewClick}");
     expect(projectsPage).toContain("CreateProjectWizardDialog");
+    expect(projectsPage).toContain("activeSpace.enterpriseId");
+    expect(projectsPage).toContain('params.set("enterpriseId"');
     expect(projectsPage).not.toContain('POST `/api/projects`');
     expect(blankMenu).toContain('data-testid="personal-blank-ctx-create"');
     expect(blankMenu).toContain("新建项目");
@@ -108,7 +110,7 @@ describe("project management context menu", () => {
 });
 
 describe("personal blank context menu helpers", () => {
-  it("opens only in personal space on non-interactive blank targets", () => {
+  it("opens in personal and enterprise spaces on non-interactive blank targets", () => {
     expect(
       shouldOpenPersonalBlankContextMenu({
         spaceKind: "personal",
@@ -121,7 +123,7 @@ describe("personal blank context menu helpers", () => {
         spaceKind: "enterprise",
         target: fakeTarget(null),
       }),
-    ).toBe(false);
+    ).toBe(true);
 
     expect(
       shouldOpenPersonalBlankContextMenu({

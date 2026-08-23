@@ -5,6 +5,8 @@
 /** Same rules as server `isSafeProjectAssetImageId` — media keys on disk. */
 const SAFE_STORAGE_KEY_RE = /^[A-Za-z0-9_-]+$/;
 
+export type AssetImageApiContext = "management" | "workspace";
+
 export function isAssetImageStorageKey(id: string): boolean {
   return (
     typeof id === "string" &&
@@ -41,12 +43,31 @@ export function resolveAssetImageStorageKey(asset: {
   return asset.id;
 }
 
+function assetsDraftImagesBase(
+  projectId: string,
+  assetOrMediaId: string,
+  context: AssetImageApiContext = "management",
+): string {
+  const encodedProject = encodeURIComponent(projectId);
+  const encodedAsset = encodeURIComponent(assetOrMediaId);
+  return context === "workspace"
+    ? `/api/workspace/projects/${encodedProject}/assets-draft/images/${encodedAsset}`
+    : `/api/projects/${encodedProject}/assets-draft/images/${encodedAsset}`;
+}
+
 export function getProjectAssetImageUrl(
   projectId: string,
   assetOrMediaId: string,
-  options?: { revision?: string | number | null },
+  options?: {
+    revision?: string | number | null;
+    context?: AssetImageApiContext;
+  },
 ): string {
-  const base = `/api/projects/${encodeURIComponent(projectId)}/assets-draft/images/${encodeURIComponent(assetOrMediaId)}`;
+  const base = assetsDraftImagesBase(
+    projectId,
+    assetOrMediaId,
+    options?.context ?? "management",
+  );
   if (
     options?.revision !== undefined &&
     options.revision !== null &&
@@ -73,7 +94,10 @@ export type AssetImageSrcFields = {
 export function resolveAssetImageSrc(
   projectId: string,
   asset: AssetImageSrcFields,
-  options?: { revision?: string | number | null },
+  options?: {
+    revision?: string | number | null;
+    context?: AssetImageApiContext;
+  },
 ): string | null {
   const objectUrl = asset.imageObjectUrl;
   if (objectUrl && objectUrl.startsWith("blob:")) {

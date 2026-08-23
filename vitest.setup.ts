@@ -12,14 +12,17 @@ import {
   mkdtempSync,
   rmSync,
 } from "fs";
-import os from "os";
 import path from "path";
 import { beforeEach } from "vitest";
 
 const workerId =
   process.env.VITEST_POOL_ID ?? process.env.VITEST_WORKER_ID ?? "0";
+const isolatedRoot =
+  process.env.IC_TEST_TMP_ROOT ||
+  path.join("E:", "DevWorkspace", "runtime", "test-tmp");
+mkdirSync(isolatedRoot, { recursive: true });
 const tempDataRoot = mkdtempSync(
-  path.join(os.tmpdir(), `ic-vitest-data-w${workerId}-`),
+  path.join(isolatedRoot, `ic-vitest-data-w${workerId}-`),
 );
 
 process.env.APP_DATA_DIR = tempDataRoot;
@@ -36,7 +39,9 @@ const resetIsolatedTestEnvironment = () => {
   delete process.env.INTERNAL_API_TOKEN;
 };
 
-beforeEach(resetIsolatedTestEnvironment);
+beforeEach(() => {
+  resetIsolatedTestEnvironment();
+});
 
 // Deterministic 32-byte test master key (Base64). Never use in production.
 if (!(process.env.AI_CONFIG_ENCRYPTION_KEY ?? "").trim()) {

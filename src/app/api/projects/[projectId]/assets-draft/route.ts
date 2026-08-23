@@ -105,5 +105,13 @@ export async function PUT(request: Request, context: RouteContext) {
   if (guardedDraft instanceof NextResponse) return guardedDraft;
   const draft = guardedDraft;
   await synchronizeAssetDraftDownstream({ projectId, previous, next: draft });
+  try {
+    const { syncManualOverridesFromBundle } = await import(
+      "@/projects/assets/extraction/overrides"
+    );
+    await syncManualOverridesFromBundle(projectId, draft);
+  } catch {
+    /* extraction overrides are best-effort */
+  }
   return NextResponse.json({ draft });
 }

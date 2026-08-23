@@ -61,6 +61,7 @@ export function CapabilityRulesTab({
       const bindPayload = await readJson<{
         bindings?: AiModelBinding[];
         slots?: ProfileSlotOption[];
+        migrationHint?: string | null;
         error?: string;
       }>(bindRes);
       const diagPayload = await readJson<{
@@ -82,7 +83,11 @@ export function CapabilityRulesTab({
       }
 
       setCapabilities(rulesPayload.capabilities ?? []);
-      setMigrationHint(rulesPayload.migrationHint?.trim() || "");
+      const hints = [
+        bindPayload.migrationHint?.trim(),
+        rulesPayload.migrationHint?.trim(),
+      ].filter(Boolean);
+      setMigrationHint([...new Set(hints)].join("\n"));
       setConnections(connPayload.connections ?? []);
       setBindings(bindPayload.bindings ?? []);
       setDiagnostics(diagPayload.capabilities ?? []);
@@ -128,8 +133,9 @@ export function CapabilityRulesTab({
       diagnostics,
       bindings,
       connectionId,
+      connections,
     );
-  }, [embedded, capabilities, diagnostics, bindings, connectionId]);
+  }, [embedded, capabilities, diagnostics, bindings, connectionId, connections]);
 
   const showEmptyBoundState =
     embedded && Boolean(connectionId) && !loading && visibleCapabilities.length === 0;

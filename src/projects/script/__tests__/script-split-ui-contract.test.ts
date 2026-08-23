@@ -16,11 +16,12 @@ describe("local script split UI contract", () => {
   const editor = readSrc("src/projects/script/ScriptDocumentEditor.tsx");
   const processPanel = readSrc("src/projects/script/ScriptProcessPanel.tsx");
 
-  it("wires confirm-import auto local-split instead of LLM script_split", () => {
+  it("wires upload auto persist+split instead of LLM script_split", () => {
     expect(workspace).toContain("确认剧本");
     expect(workspace).toContain("local-split");
     expect(workspace).toContain("runLocalSplit");
-    expect(workspace).toContain("剧本已导入，正在自动分集…");
+    expect(workspace).toContain("persistImportedScriptAndAutoSplit");
+    expect(workspace).toContain("autoSplit: true");
     expect(workspace).not.toContain('outputKind: "script_split"');
     expect(workspace).not.toContain("apply-split");
     expect(workspace).not.toContain("streamStoryGeneration");
@@ -34,55 +35,56 @@ describe("local script split UI contract", () => {
     expect(upload).not.toContain("已分集");
     expect(upload).toContain("上传剧本文件");
     expect(upload).toContain("处理中…");
-    expect(upload).toContain("确认导入后将自动生成分集方案");
+    expect(upload).toContain("将自动保存并创建剧集");
+    expect(upload).toContain("script-upload-remove");
+    expect(upload).toContain("onRemove");
+    expect(workspace).toContain("clearScript: true");
+    expect(workspace).toContain("replaceExisting");
+    expect(workspace).toContain("handleRemoveUploadedScript");
     expect(workspace).not.toContain('data-testid="script-split-start"');
     expect(workspace).not.toContain("canSplit={canSplit}");
     expect(workspace).not.toContain("splitDone={splitDone}");
     expect(workspace).not.toContain("onOpenSplit");
   });
 
-  it("auto local-split after confirm import with empty body (saved draft, not stale sourceText)", () => {
+  it("auto-split after upload does not require an extra confirm-import click", () => {
     expect(workspace).toMatch(
-      /handleConfirmImport[\s\S]*runLocalSplit\(\{\s*body:\s*\{\}/,
+      /handleScriptFile[\s\S]*persistImportedScriptAndAutoSplit\(preview\)/,
     );
     expect(workspace).not.toContain("请点击「分集」进行本地分集");
     const confirmBlock = workspace.slice(
       workspace.indexOf("const handleConfirmImport"),
       workspace.indexOf("const handleStartSplit"),
     );
-    expect(confirmBlock).toContain("runLocalSplit");
-    expect(confirmBlock).toContain("body: {}");
-    expect(confirmBlock).not.toContain("sourceFingerprint");
-    expect(confirmBlock).not.toContain("handleStartSplit");
+    expect(confirmBlock).toContain("persistImportedScriptAndAutoSplit");
+    expect(confirmBlock).not.toContain("episodes: []");
   });
 
-  it("TXT / DOCX / Markdown share the same auto-split path after confirm", () => {
+  it("TXT / DOCX / Markdown share the same auto-split path after upload", () => {
     expect(workspace).toContain("postScriptImportByFile");
     expect(workspace).toContain("scriptSourceFileTypeFromFormat");
     expect(workspace).not.toContain("DOCX 源文本已保存。请点击");
     expect(workspace).not.toContain("Markdown 源文本已保存。请点击");
     expect(workspace).not.toContain("TXT 源文本已保存。请点击");
-    expect(workspace).toContain('stageMessage: "剧本已导入，正在自动分集…"');
+    expect(workspace).toContain('setSplitStage("剧本已导入，正在自动分集…")');
   });
 
-  it("successful local-split enters review via draft and does not auto confirm-split", () => {
-    expect(workspace).toContain("本地分集完成");
-    expect(workspace).toContain("请核对各集后确认剧本");
+  it("successful auto-split writes formal episodes without a confirm-split click", () => {
+    expect(workspace).toContain("formatScriptAutoSplitNote");
     expect(workspace).toContain("applyDraftToState(payload.draft");
-    const confirmScriptIdx = workspace.indexOf("const handleConfirmScript");
-    const confirmSplitCall = workspace.indexOf("confirm-split", confirmScriptIdx);
-    expect(confirmSplitCall).toBeGreaterThan(confirmScriptIdx);
+    expect(workspace).toContain("scriptShowsFormalEpisodeList");
     const runLocalSplitBlock = workspace.slice(
       workspace.indexOf("const runLocalSplit"),
       workspace.indexOf("const handleConfirmImport"),
     );
     expect(runLocalSplitBlock).not.toContain("confirm-split");
     const autoImportBlock = workspace.slice(
-      workspace.indexOf("const handleConfirmImport"),
-      workspace.indexOf("const handleStartSplit"),
+      workspace.indexOf("const persistImportedScriptAndAutoSplit"),
+      workspace.indexOf("const handleScriptFile"),
     );
-    expect(autoImportBlock).not.toContain("confirm-split");
+    expect(autoImportBlock).toContain("autoSplit: true");
     expect(autoImportBlock).not.toContain("/assets");
+    expect(processPanel).toContain('data-testid="script-episode-list"');
   });
 
   it("keeps 重新分集 recovery and shared runLocalSplit for retry", () => {
@@ -109,8 +111,8 @@ describe("local script split UI contract", () => {
     expect(workspace).not.toContain("请点击「分集」");
     expect(workspace).not.toContain("请先上传剧本并点击「分集」");
     expect(workspace).not.toContain("请使用「分集」生成方案");
-    expect(editor).toContain("确认导入后将自动生成分集方案");
-    expect(processPanel).toContain("确认导入后将自动生成分集方案");
+    expect(editor).toContain("上传成功后将自动分集");
+    expect(processPanel).toContain("上传剧本后将自动分集并创建剧集");
     expect(workspace).toContain("正在自动生成分集方案");
     expect(workspace).toContain("剧本导入后会自动分集");
   });

@@ -1,5 +1,6 @@
 import { assertProjectManagementProjectPage } from "@/auth/page-guards";
 import { ProjectStageNav } from "@/projects/workbench/ProjectStageNav";
+import { WorkspaceSyncStatusBanner } from "@/projects/workspace-sync/WorkspaceSyncStatusBanner";
 import "@/projects/workbench/workbench.css";
 
 /** 项目管理项目详情及子路由：仅系统管理员 / 项目主理人 */
@@ -21,6 +22,7 @@ export default async function ProjectManagementProjectLayout({
   return (
     <div className="project-route-shell">
       <ProjectStageNav projectId={projectId} mode="management" scriptHref={scriptHref} />
+      <WorkspaceSyncStatusBanner projectId={projectId} store="management" />
       {children}
     </div>
   );

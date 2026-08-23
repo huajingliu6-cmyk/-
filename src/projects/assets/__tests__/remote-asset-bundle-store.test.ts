@@ -11,6 +11,85 @@ const downstream = vi.hoisted(() => ({ voice: vi.fn(), workspace: vi.fn() }));
 
 vi.mock('@/persistence/remote-data-client', () => ({
   isRemoteDataOnly: () => true,
+  isRemoteRevisionConflict: (error: unknown) =>
+    error instanceof Error && error.message === 'REVISION_CONFLICT',
+  getRemoteDocument: vi.fn(async (namespace: string, key: string) => {
+    const identity = `${namespace}/${key}`;
+    const doc = documents.get(identity);
+    if (!doc) return null;
+    return {
+      namespace,
+      key,
+      revision: doc.revision,
+      value: structuredClone(doc.value),
+      updatedAt: new Date().toISOString(),
+    };
+  }),
+  putRemoteDocument: vi.fn(
+    async (input: {
+      namespace: string;
+      key: string;
+      expectedRevision?: number;
+      value: unknown;
+    }) => {
+      const identity = `${input.namespace}/${input.key}`;
+      const current = documents.get(identity);
+      const expected = input.expectedRevision ?? 0;
+      if ((current?.revision ?? 0) !== expected) {
+        throw new Error('REVISION_CONFLICT');
+      }
+      const revision = (current?.revision ?? 0) + 1;
+      documents.set(identity, {
+        revision,
+        value: structuredClone(input.value),
+      });
+      return {
+        namespace: input.namespace,
+        key: input.key,
+        revision,
+        value: structuredClone(input.value),
+        updatedAt: new Date().toISOString(),
+      };
+    },
+  ),
+  putRemoteDocumentsAtomic: vi.fn(async (input: {
+    writes: Array<{
+      namespace: string;
+      key: string;
+      expectedRevision: number;
+      value: unknown;
+    }>;
+  }) => {
+    if (state.conflictsRemaining > 0) {
+      state.conflictsRemaining -= 1;
+      throw new Error('REVISION_CONFLICT');
+    }
+    const results = [];
+    for (const write of input.writes) {
+      const identity = `${write.namespace}/${write.key}`;
+      const current = documents.get(identity);
+      if ((current?.revision ?? 0) !== write.expectedRevision) {
+        throw new Error('REVISION_CONFLICT');
+      }
+    }
+    for (const write of input.writes) {
+      const identity = `${write.namespace}/${write.key}`;
+      const current = documents.get(identity);
+      const revision = (current?.revision ?? 0) + 1;
+      documents.set(identity, {
+        revision,
+        value: structuredClone(write.value),
+      });
+      results.push({
+        namespace: write.namespace,
+        key: write.key,
+        revision,
+        value: structuredClone(write.value),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    return { documents: results };
+  }),
   requestRemoteData: vi.fn(async (requestPath: string, init: RequestInit = {}) => {
     const url = new URL(requestPath, 'http://go-backend.internal');
     const projectId = url.searchParams.get('projectId') ?? '';
@@ -129,7 +208,8 @@ describe('remote asset bundle store', () => {
     expect((await loadAssetBundleDraft('project_2'))?.characters[0]?.name).toBe(
       '二号角色',
     );
-    expect(documents.size).toBe(2);
+    expect(documents.get('asset-bundles/project_1')?.revision).toBe(1);
+    expect(documents.get('asset-bundles/project_2')?.revision).toBe(1);
   });
 
   it('retries revision conflicts', async () => {

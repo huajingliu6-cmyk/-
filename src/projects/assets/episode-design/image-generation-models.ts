@@ -1,15 +1,15 @@
 export const DESIGN_IMAGE_MODELS = [
   {
     id: "gpt-image-2",
-    label: "gpt-image-2",
+    label: "GPT Image 2",
   },
   {
     id: "gpt-image-2-adobe",
-    label: "gpt-image-2-adobe",
+    label: "GPT Image 2 Adobe",
   },
   {
     id: "gemini-banana-2.0-pro",
-    label: "gemini-banana-2.0-pro",
+    label: "Gemini Banana 2.0 Pro",
   },
 ] as const;
 

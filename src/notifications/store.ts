@@ -44,7 +44,9 @@ function parseNotification(raw: unknown): AppNotification | null {
     raw.type !== "asset_approval_approved" &&
     raw.type !== "asset_approval_rejected" &&
     raw.type !== "enterprise_join_approved" &&
-    raw.type !== "enterprise_join_rejected"
+    raw.type !== "enterprise_join_rejected" &&
+    raw.type !== "image_generation_succeeded" &&
+    raw.type !== "image_generation_failed"
   ) {
     return null;
   }

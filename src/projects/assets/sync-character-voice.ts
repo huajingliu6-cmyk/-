@@ -140,6 +140,7 @@ export async function syncLibraryCharacterVoiceToDesignItems(params: {
 
 /**
  * Diff previous/next asset bundles and sync voice for every changed character.
+ * Voice is character-default scoped (not mediaId-bound).
  */
 export async function syncChangedCharacterVoicesFromBundle(params: {
   projectId: string;
@@ -151,40 +152,43 @@ export async function syncChangedCharacterVoicesFromBundle(params: {
   );
   for (const character of params.next.characters) {
     const prev = prevById.get(character.id);
-    const mediaVoicesChanged =
-      JSON.stringify(prev?.mediaVoices ?? null) !==
-      JSON.stringify(character.mediaVoices ?? null);
     const primaryChanged =
       !prev ||
       prev.voiceId !== character.voiceId ||
       prev.voiceName !== character.voiceName;
-    if (!primaryChanged && !mediaVoicesChanged) {
+    const appearancesChanged =
+      JSON.stringify(
+        (prev?.appearances ?? []).map((a) => ({
+          id: a.id,
+          voiceOverrideId: a.voiceOverrideId,
+          voiceOverrideName: a.voiceOverrideName,
+        })),
+      ) !==
+      JSON.stringify(
+        (character.appearances ?? []).map((a) => ({
+          id: a.id,
+          voiceOverrideId: a.voiceOverrideId,
+          voiceOverrideName: a.voiceOverrideName,
+        })),
+      );
+    if (!primaryChanged && !appearancesChanged) {
       continue;
     }
     if (
       !prev &&
       !character.voiceId &&
       !character.voiceName &&
-      !character.mediaVoices
+      !(character.appearances ?? []).some((a) => a.voiceOverrideId)
     ) {
       continue;
     }
-    const mediaId =
-      character.primaryMediaId?.trim() ||
-      character.imageFileName?.trim() ||
-      null;
-    const voiceForSync = mediaId
-      ? character.mediaVoices?.[mediaId] ?? {
-          voiceId: character.voiceId,
-          voiceName: character.voiceName,
-        }
-      : { voiceId: character.voiceId, voiceName: character.voiceName };
+    // Sync character default voice to design items (not per-media).
     await syncLibraryCharacterVoiceToDesignItems({
       projectId: params.projectId,
       characterId: character.id,
-      voiceId: voiceForSync.voiceId,
-      voiceName: voiceForSync.voiceName,
-      mediaId,
+      voiceId: character.voiceId,
+      voiceName: character.voiceName,
+      mediaId: null,
     });
   }
 }

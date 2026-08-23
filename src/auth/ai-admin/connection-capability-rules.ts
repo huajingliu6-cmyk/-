@@ -2,7 +2,19 @@ import type {
   AiModelBinding,
   CapabilityDiag,
   CapabilityRuleSummary,
+  ModelConnectionPublic,
 } from "@/auth/ai-admin/types";
+import { profileSlotForConnectionDisplayName } from "@/auth/ai-admin/slot-label-match";
+
+const LEGACY_SLOT_CONNECTION_PREFIX = "legacy-slot-";
+
+function legacySlotIdFromConnectionId(
+  connectionId: string,
+): string | null {
+  if (!connectionId.startsWith(LEGACY_SLOT_CONNECTION_PREFIX)) return null;
+  const slotId = connectionId.slice(LEGACY_SLOT_CONNECTION_PREFIX.length).trim();
+  return slotId || null;
+}
 
 /** Resolve the profile slot a capability uses for model binding. */
 export function resolveCapabilityProfileSlot(
@@ -24,6 +36,7 @@ export function filterCapabilityRulesForConnection(
   diagnostics: readonly CapabilityDiag[],
   bindings: readonly AiModelBinding[],
   connectionId: string | null | undefined,
+  connections: readonly ModelConnectionPublic[] = [],
 ): CapabilityRuleSummary[] {
   const targetId = connectionId?.trim() ?? "";
   if (!targetId) return [];
@@ -35,7 +48,24 @@ export function filterCapabilityRulesForConnection(
     bindings.map((item) => [item.profileSlot, item.modelConnectionId] as const),
   );
 
-  return capabilities.filter((summary) => {
+  const matchBySlot = (slotId: string | null): CapabilityRuleSummary[] => {
+    if (!slotId) return [];
+    return capabilities.filter((summary) => {
+      const slot = resolveCapabilityProfileSlot(
+        summary,
+        diagByCapability.get(summary.capabilityId),
+      );
+      return slot === slotId;
+    });
+  };
+
+  const legacySlotId = legacySlotIdFromConnectionId(targetId);
+  if (legacySlotId) {
+    const matched = matchBySlot(legacySlotId);
+    if (matched.length > 0) return matched;
+  }
+
+  const boundMatches = capabilities.filter((summary) => {
     const slot = resolveCapabilityProfileSlot(
       summary,
       diagByCapability.get(summary.capabilityId),
@@ -43,4 +73,15 @@ export function filterCapabilityRulesForConnection(
     if (!slot) return false;
     return connectionBySlot.get(slot) === targetId;
   });
+  if (boundMatches.length > 0) return boundMatches;
+
+  const connection = connections.find((item) => item.id === targetId);
+  const slotFromName = connection
+    ? profileSlotForConnectionDisplayName(connection.displayName)
+    : null;
+  if (slotFromName) {
+    return matchBySlot(slotFromName);
+  }
+
+  return [];
 }

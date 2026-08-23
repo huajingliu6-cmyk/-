@@ -9,10 +9,12 @@ import {
 
 type Props = {
   projectId: string;
+  context?: "management" | "workspace";
   characters: CharacterAsset[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onEdit?: (id: string) => void;
+  onDelete?: (id: string) => Promise<"deleted" | "in_use" | void> | void;
   onCreate: () => void;
   canEdit: boolean;
   imageRevisions?: Record<string, number>;
@@ -28,10 +30,12 @@ function initials(name: string): string {
 
 export function CharacterList({
   projectId,
+  context = "management",
   characters,
   selectedId,
   onSelect,
   onEdit,
+  onDelete,
   onCreate,
   canEdit,
   imageRevisions = {},
@@ -40,9 +44,11 @@ export function CharacterList({
   const list = (
     <AssetCompactList
       projectId={projectId}
+      context={context}
       selectedId={selectedId}
       onSelect={onSelect}
       onEdit={onEdit}
+      onDelete={onDelete}
       emptyMessage="暂无角色。点击「新建角色」开始准备资产。"
       testId="character-card-grid"
       items={characters.map((c) => {

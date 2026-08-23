@@ -16,6 +16,12 @@ export type ConfirmScriptSplitInput = {
   idempotencyKey: string;
 };
 
+export function scriptSplitConfirmIdempotencyKey(
+  sourceFingerprint: string,
+): string {
+  return `split_confirm_${sourceFingerprint}`;
+}
+
 export type ConfirmScriptSplitResult =
   | { ok: true; draft: ScriptDraft; idempotent: boolean }
   | {
@@ -124,11 +130,7 @@ export function confirmScriptSplit(
     };
   }
 
-  if (
-    split.status === "confirmed" &&
-    split.lastConfirmIdempotencyKey === input.idempotencyKey &&
-    split.confirmedRevision === input.confirmedRevision
-  ) {
+  if (split.status === "confirmed" && draft.episodes.length > 0) {
     return { ok: true, draft, idempotent: true };
   }
 

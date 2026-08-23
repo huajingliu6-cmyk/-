@@ -4,13 +4,25 @@ import os from "os";
 import path from "path";
 import { createProjectRecord } from "@/projects/project-access";
 import { saveAssetBundleDraft } from "@/projects/assets/asset-bundle-store";
+import {
+  loadEpisodeAssetDesignStore,
+  saveEpisodeAssetDesignStore,
+  upsertEpisodeRecord,
+} from "@/projects/assets/episode-design/store";
 import { saveScriptDraft } from "@/projects/script/script-draft-store";
 import { syncManagementToWorkspace } from "@/projects/workspace-sync/sync-management-to-workspace";
 import {
   loadWorkspaceLocalAssets,
+  loadWorkspaceLocalEpisodeDesigns,
   loadWorkspaceSnapshot,
   saveWorkspaceLocalAssets,
+  saveWorkspaceLocalEpisodeDesigns,
 } from "@/projects/workspace-sync/store";
+import {
+  applyWorkspaceEpisodeAssetDesignGeneration,
+  getWorkspaceEpisodeAssetDesignDetail,
+} from "@/projects/workspace-sync/workspace-episode-design-api";
+import { getScriptEpisodeContentFingerprint } from "@/projects/assets/episode-design/fingerprint";
 
 describe("workspace one-way sync isolation", () => {
   const previousAppDataDir = process.env.APP_DATA_DIR;
@@ -99,6 +111,84 @@ describe("workspace one-way sync isolation", () => {
 
   function readManagementAssetsRaw() {
     return readFileSync(managementAssetsPath(), "utf-8");
+  }
+
+  function workspaceDesignsPath() {
+    return path.join(
+      tmp,
+      "projects",
+      projectId,
+      "workspace",
+      "episode-asset-designs.json",
+    );
+  }
+
+  async function saveManagementDesignRecord(updatedAt: string) {
+    const store = await loadEpisodeAssetDesignStore(projectId);
+    await saveEpisodeAssetDesignStore(
+      upsertEpisodeRecord(store, {
+        episodeId: "ep-1",
+        episodeNumber: 1,
+        status: "review",
+        revision: 1,
+        contentFingerprint: "fp-upstream",
+        generationId: null,
+        items: [
+          {
+            id: `design-upstream-${updatedAt}`,
+            assetType: "prop",
+            name: "上游道具",
+            resolution: "create_new",
+            source: "ai",
+            draft: {
+              description: "from upstream",
+              propType: "道具",
+              usage: "剧情",
+              usageInEpisode: "第一集",
+              evidence: "正文",
+            },
+          },
+        ],
+        confirmedAt: null,
+        confirmedBy: null,
+        confirmedRevision: null,
+        updatedAt,
+      }),
+    );
+  }
+
+  async function saveWorkspaceLocalDesignRecord(updatedAt: string) {
+    const store = await loadWorkspaceLocalEpisodeDesigns(projectId);
+    await saveWorkspaceLocalEpisodeDesigns(
+      upsertEpisodeRecord(store, {
+        episodeId: "ep-1",
+        episodeNumber: 1,
+        status: "review",
+        revision: 99,
+        contentFingerprint: "fp-local",
+        generationId: null,
+        items: [
+          {
+            id: `design-local-${updatedAt}`,
+            assetType: "prop",
+            name: "本地道具",
+            resolution: "create_new",
+            source: "ai",
+            draft: {
+              description: "from local",
+              propType: "道具",
+              usage: "本地改动",
+              usageInEpisode: "第一集",
+              evidence: "本地",
+            },
+          },
+        ],
+        confirmedAt: null,
+        confirmedBy: null,
+        confirmedRevision: null,
+        updatedAt,
+      }),
+    );
   }
 
   it("after sync, workspace snapshot has episodes", async () => {
@@ -238,5 +328,158 @@ describe("workspace one-way sync isolation", () => {
     const wsRaw = readFileSync(wsPath, "utf-8");
     expect(wsRaw).toContain("char-route");
     expect(wsRaw).not.toContain("char-mgmt");
+  });
+
+  it("reads upstream design when only upstream record exists", async () => {
+    await saveManagementDesignRecord("2026-01-02T00:00:00.000Z");
+    await syncManagementToWorkspace(projectId);
+
+    const detail = await getWorkspaceEpisodeAssetDesignDetail(projectId, "ep-1");
+    expect(detail.ok).toBe(true);
+    if (!detail.ok) return;
+    expect(detail.record.items[0]?.name).toBe("上游道具");
+    expect(detail.record.contentFingerprint).toBe("fp-upstream");
+  });
+
+  it("keeps local design when local updatedAt is newer than upstream", async () => {
+    await saveManagementDesignRecord("2026-01-02T00:00:00.000Z");
+    await syncManagementToWorkspace(projectId);
+    await saveWorkspaceLocalDesignRecord("2026-01-03T00:00:00.000Z");
+
+    const detail = await getWorkspaceEpisodeAssetDesignDetail(projectId, "ep-1");
+    expect(detail.ok).toBe(true);
+    if (!detail.ok) return;
+    expect(detail.record.items[0]?.name).toBe("本地道具");
+    expect(detail.record.contentFingerprint).toBe("fp-local");
+  });
+
+  it("switches to upstream design when management re-extract is newer", async () => {
+    await saveManagementDesignRecord("2026-01-02T00:00:00.000Z");
+    await syncManagementToWorkspace(projectId);
+    await saveWorkspaceLocalDesignRecord("2026-01-03T00:00:00.000Z");
+
+    await saveManagementDesignRecord("2026-01-04T00:00:00.000Z");
+    await syncManagementToWorkspace(projectId);
+
+    const detail = await getWorkspaceEpisodeAssetDesignDetail(projectId, "ep-1");
+    expect(detail.ok).toBe(true);
+    if (!detail.ok) return;
+    expect(detail.record.items[0]?.name).toBe("上游道具");
+    expect(detail.record.contentFingerprint).toBe("fp-upstream");
+  });
+
+  it("prefers local record when timestamps are invalid", async () => {
+    await saveManagementDesignRecord("2026-01-02T00:00:00.000Z");
+    await syncManagementToWorkspace(projectId);
+    await saveWorkspaceLocalDesignRecord("not-a-valid-time");
+
+    const detail = await getWorkspaceEpisodeAssetDesignDetail(projectId, "ep-1");
+    expect(detail.ok).toBe(true);
+    if (!detail.ok) return;
+    expect(detail.record.items[0]?.name).toBe("本地道具");
+    expect(detail.record.contentFingerprint).toBe("fp-local");
+  });
+
+  it("sync does not delete workspace local design file", async () => {
+    await saveManagementDesignRecord("2026-01-02T00:00:00.000Z");
+    await syncManagementToWorkspace(projectId);
+    await saveWorkspaceLocalDesignRecord("2026-01-03T00:00:00.000Z");
+
+    const before = readFileSync(workspaceDesignsPath(), "utf-8");
+    expect(before).toContain("design-local-2026-01-03T00:00:00.000Z");
+
+    await saveManagementDesignRecord("2026-01-04T00:00:00.000Z");
+    await syncManagementToWorkspace(projectId);
+
+    const after = readFileSync(workspaceDesignsPath(), "utf-8");
+    expect(after).toContain("design-local-2026-01-03T00:00:00.000Z");
+  });
+
+  it("allows workspace apply during generating when activeGeneration matches", async () => {
+    const now = new Date().toISOString();
+    await saveManagementDesignRecord(now);
+    const store = await loadEpisodeAssetDesignStore(projectId);
+    const fingerprint = getScriptEpisodeContentFingerprint({
+      episodeNumber: 1,
+      title: "第一集",
+      content: "正式剧集正文 A",
+    });
+    await saveEpisodeAssetDesignStore(
+      upsertEpisodeRecord(store, {
+        episodeId: "ep-1",
+        episodeNumber: 1,
+        status: "generating",
+        revision: 5,
+        contentFingerprint: fingerprint,
+        generationId: null,
+        activeGeneration: {
+          generationId: "gen-ws-active-1",
+          idempotencyKey: "idem-ws-active-1",
+          outputKind: "episode_asset_design",
+          startedAt: now,
+          updatedAt: now,
+        },
+        items: [],
+        confirmedAt: null,
+        confirmedBy: null,
+        confirmedRevision: null,
+        updatedAt: now,
+      }),
+    );
+    await syncManagementToWorkspace(projectId);
+
+    const applied = await applyWorkspaceEpisodeAssetDesignGeneration({
+      projectId,
+      episodeId: "ep-1",
+      generationId: "gen-ws-active-1",
+      expectedRevision: 4,
+      fingerprint,
+      rawText: JSON.stringify({
+        version: 1,
+        assets: [
+          {
+            type: "prop",
+            name: "上游道具",
+            design: {
+              description: "from upstream",
+              propType: "道具",
+              usage: "剧情",
+              usageInEpisode: "第一集",
+              evidence: "正文",
+            },
+          },
+        ],
+      }),
+    });
+
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    expect(applied.record.status).toBe("review");
+    expect(applied.record.items).toHaveLength(1);
+
+    const detail = await getWorkspaceEpisodeAssetDesignDetail(projectId, "ep-1");
+    expect(detail.ok).toBe(true);
+    if (!detail.ok) return;
+    expect(detail.record.status).toBe("review");
+    expect(detail.record.items).toHaveLength(1);
+  });
+});
+
+describe("storyboard authorized workspace loading", () => {
+  it("loads project, script, workspace, and assets draft in parallel", () => {
+    const source = readFileSync(
+      path.join(
+        process.cwd(),
+        "src/projects/storyboard/api-helpers.ts",
+      ),
+      "utf-8",
+    );
+    expect(source).toContain(
+      "const [project, scriptDraft, existing, assetsDraft] = await Promise.all([",
+    );
+    expect(source).toContain("loadWorkspace(projectId)");
+    expect(source).not.toMatch(
+      /const scriptDraft = await loadScriptDraft\(projectId\);[\s\S]{0,120}const savedWorkspace = await updateWorkspaceUnderLock/,
+    );
   });
 });

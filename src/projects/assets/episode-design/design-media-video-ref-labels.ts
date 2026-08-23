@@ -4,12 +4,13 @@ import type {
   GeneratedMediaState,
 } from "@/projects/assets/episode-design/types";
 import type { VideoRefSafety } from "@/projects/assets/types";
+import { isSd2CertifiedForVideoRef } from "@/video-generation/sd2-cert-safety";
 
-/** 已通过 SD 认证的图片不可再校验（客户端/服务端均可引用）。 */
+/** 已通过 SD2 真人认证的图片不可再校验（客户端/服务端均可引用）。 */
 export function isDesignMediaVideoRefLocked(
   safety: VideoRefSafety | null | undefined,
 ): boolean {
-  return safety?.status === "ok";
+  return isSd2CertifiedForVideoRef(safety);
 }
 
 /**
@@ -32,8 +33,9 @@ export function getCurrentDesignMediaVideoRefSafety(
 
 /**
  * Personal project-management “确认入库”: block characters whose *current*
- * image has not passed SD person verification (`status === "ok"`).
- * Scenes/props are never blocked. Risk / pending / failed / missing ≠ pass.
+ * image has not passed SD2 person certification (`isSd2CertifiedForVideoRef`).
+ * Scenes/props are never blocked by person cert. Risk / pending / failed / missing ≠ pass.
+ * `status === "ok"` alone (non-SD2 model) must not pass.
  */
 export function characterNeedsUncheckedVideoRefBlock(
   item: Pick<
@@ -45,7 +47,7 @@ export function characterNeedsUncheckedVideoRefBlock(
   if (item.libraryAssetId?.trim()) return false;
   const mediaId = item.generatedMedia?.currentId?.trim();
   if (!mediaId) return false;
-  return !isDesignMediaVideoRefLocked(
+  return !isSd2CertifiedForVideoRef(
     getCurrentDesignMediaVideoRefSafety(item.generatedMedia),
   );
 }
@@ -57,9 +59,12 @@ export function designVideoRefSafetyBadge(
   tone: "ok" | "risk" | "warn" | "muted" | "pending";
 } | null {
   if (!safety) return null;
+  if (isSd2CertifiedForVideoRef(safety)) {
+    return { label: "SD 已认证", tone: "ok" };
+  }
   switch (safety.status) {
     case "ok":
-      return { label: "SD 已认证", tone: "ok" };
+      return { label: "需重新人物校验", tone: "warn" };
     case "likely_real_person":
       return { label: "疑似真人", tone: "risk" };
     case "other_risk":
@@ -85,9 +90,12 @@ export function formatDesignVideoRefSafetyNotice(
         : assetType === "prop"
           ? "道具参考图"
           : "参考图";
+  if (isSd2CertifiedForVideoRef(safety)) {
+    return `${subject}已上传至 SD 审核资产库并通过认证，可用于视频生成`;
+  }
   switch (safety.status) {
     case "ok":
-      return `${subject}已上传至 SD 审核资产库并通过认证，可用于视频生成`;
+      return `${subject}尚未通过移动 SD2 真人素材认证，请点击「人物校验」完成认证后再入库`;
     case "likely_real_person":
       return `${subject}未通过 SD 真人素材认证（疑似真人/不可用）。建议改用插画、设定图或三视图后重新生成，再点「人物校验」`;
     case "other_risk":

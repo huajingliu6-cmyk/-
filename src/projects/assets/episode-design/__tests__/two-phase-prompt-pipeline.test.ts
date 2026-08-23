@@ -140,8 +140,19 @@ describe("two-phase asset extract vs formal prompt contracts", () => {
   it("resumes missing formal prompts after refresh without repeating extract", () => {
     expect(workspaceUi).toContain("record.items.some(itemNeedsFormalDesignPrompt)");
     expect(workspaceUi).toContain(
-      "void kickOffFormalDesignPrompts(record, record.episodeId)",
+      "await kickOffFormalDesignPrompts(record, record.episodeId)",
     );
+  });
+
+  it("runs the existing batch prompt route before personal-space sync", () => {
+    expect(workspaceUi).toContain("await kickOffFormalDesignPrompts(record, record.episodeId)");
+    expect(workspaceUi).toContain("await finalizeExtraction({");
+    const resumeStart = workspaceUi.indexOf(
+      "await kickOffFormalDesignPrompts(record, record.episodeId)",
+    );
+    const finalizeStart = workspaceUi.indexOf("await finalizeExtraction({");
+    expect(resumeStart).toBeGreaterThan(-1);
+    expect(finalizeStart).toBeGreaterThan(resumeStart);
   });
 
   it("does not treat extract JSON / field titles as formal prompts", () => {

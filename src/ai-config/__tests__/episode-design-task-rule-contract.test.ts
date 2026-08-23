@@ -266,7 +266,7 @@ describe("full-script extraction UI error contract", () => {
     expect(workspace).toContain("AI_TASK_RULE_CONTRACT_CONFLICT");
     expect(workspace).toContain("EMPTY_MODEL_OUTPUT");
     expect(workspace).toContain("EPISODE_ASSET_DESIGN_OUTPUT_INVALID");
-    expect(workspace).toContain('data-testid="ead-extract-all-retry"');
+    expect(workspace).toContain('data-testid="ead-extract-episode-retry"');
     expect(workspace).toContain("setExtractionError(null)");
     expect(workspace).not.toMatch(
       /applyPayload\.record\.items\.length === 0[\s\S]{0,80}提取完成/,

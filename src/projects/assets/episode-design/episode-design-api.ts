@@ -7,7 +7,6 @@ import type {
 } from "@/projects/assets/episode-design/normalize-raw-asset";
 import { getTextJob } from "@/text-generation/job-store";
 import {
-  getScriptSourceFingerprint,
   loadScriptDraft,
 } from "@/projects/script/script-draft-store";
 import type { ScriptEpisode } from "@/projects/script/types";
@@ -27,7 +26,6 @@ import type {
   EpisodeAssetDesignStatus,
   EpisodeDesignConversationMessage,
 } from "@/projects/assets/episode-design/types";
-import { SCRIPT_ASSET_DESIGN_ID } from "@/projects/assets/episode-design/types";
 import { buildEpisodeDesignConversationFromExtract } from "@/projects/assets/episode-design/design-conversation";
 import {
   mergeGeneratedMediaState,
@@ -189,46 +187,11 @@ export async function getEpisodeAssetDesignDetail(
   | { ok: false; code: "EPISODE_NOT_FOUND"; message: string }
 > {
   const scriptDraft = await loadScriptDraft(projectId);
-  if (episodeId === SCRIPT_ASSET_DESIGN_ID) {
-    const content = scriptDraft?.sourceText?.trim() ?? "";
-    if (!content) {
-      return {
-        ok: false,
-        code: "EPISODE_NOT_FOUND",
-        message: "未找到主理人上传的未分集完整剧本",
-      };
-    }
-    const store = await loadEpisodeAssetDesignStore(projectId);
-    const { record } = getOrCreateEpisodeRecord(
-      store,
-      SCRIPT_ASSET_DESIGN_ID,
-      0,
-    );
-    const currentFingerprint = getScriptSourceFingerprint(content) ?? "";
-    const now = scriptDraft?.updatedAt ?? new Date().toISOString();
-    const episode: ScriptEpisode = {
-      id: SCRIPT_ASSET_DESIGN_ID,
-      projectId,
-      episodeNumber: 0,
-      title: "完整原始剧本",
-      content,
-      wordCount: content.length,
-      status: "saved",
-      createdAt: now,
-      updatedAt: now,
-    };
-    const reconciled = await withReconciledGeneratingDetail({
-      projectId,
-      episode,
-      record,
-      currentFingerprint,
-    });
+  if (episodeId === "__full_script__") {
     return {
-      ok: true,
-      episode,
-      record: reconciled.record,
-      currentFingerprint,
-      designStatus: reconciled.designStatus,
+      ok: false,
+      code: "EPISODE_NOT_FOUND",
+      message: "全剧本提取已迁移到资产提取任务，请使用当前生效版本",
     };
   }
   const episode = scriptDraft?.episodes.find((ep) => ep.id === episodeId);
@@ -589,9 +552,13 @@ export async function applyEpisodeAssetDesignGeneration(input: {
       repaired: false,
     };
   }
+  const sameActiveGeneration =
+    detail.record.status === "generating" &&
+    detail.record.activeGeneration?.generationId === input.generationId;
   if (
     input.expectedRevision !== undefined &&
-    detail.record.revision !== input.expectedRevision
+    detail.record.revision !== input.expectedRevision &&
+    !sameActiveGeneration
   ) {
     return {
       ok: false,

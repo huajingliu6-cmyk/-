@@ -1,25 +1,61 @@
+import "server-only";
+
 import {
-  loadWorkspace,
-  saveWorkspace,
+  PRODUCTION_REVISION_CONFLICT,
+  loadWorkspaceUnrecovered,
+  saveWorkspaceDocumentCas,
 } from "@/projects/storyboard/production-store";
+import { withProjectStoryboardLock } from "@/projects/storyboard/production-lock";
+import { carryStoryboardRemoteRevision } from "@/projects/storyboard/remote-production-store";
 import { invalidateAfterScriptChange } from "@/projects/storyboard/services/invalidate";
 
-/**
- * Mark all episode productions stale after script draft content changes.
- * Preserves history rows and does not create GenerationRecords.
- */
-export async function invalidateWorkspaceAfterScriptDraftChange(
+export async function invalidateProductionsAfterScriptSave(
   projectId: string,
 ): Promise<void> {
-  const workspace = await loadWorkspace(projectId);
-  if (!workspace || workspace.productions.length === 0) return;
+  await withProjectStoryboardLock(projectId, async () => {
+    const latest = await loadWorkspaceUnrecovered(projectId);
+    if (!latest) return;
+    if (latest.productions.length === 0) return;
 
-  const productions = workspace.productions.map((production) =>
-    invalidateAfterScriptChange(production),
-  );
-  await saveWorkspace({
-    ...workspace,
-    productions,
-    updatedAt: new Date().toISOString(),
+    const { loadScriptDraft } = await import(
+      "@/projects/script/script-draft-store"
+    );
+    const { refreshProductionPrompts } = await import(
+      "@/projects/script/script-prompt-refresh"
+    );
+    const script = await loadScriptDraft(projectId).catch(() => null);
+    const scriptRevision = script?.documentRevision ?? 0;
+    const next = {
+      ...latest,
+      productions: latest.productions.map((production) => {
+        const invalidated = invalidateAfterScriptChange(production);
+        const episode = script?.episodes.find(
+          (item) => item.id === production.episodeId,
+        );
+        const scriptText =
+          episode?.content ||
+          invalidated.confirmedScriptText ||
+          invalidated.workingScriptText ||
+          "";
+        return refreshProductionPrompts({
+          production: invalidated,
+          scriptText,
+          scriptRevision,
+        });
+      }),
+      updatedAt: new Date().toISOString(),
+    };
+    carryStoryboardRemoteRevision(latest, next);
+    try {
+      await saveWorkspaceDocumentCas(next);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === PRODUCTION_REVISION_CONFLICT
+      ) {
+        throw error;
+      }
+      throw error;
+    }
   });
 }

@@ -32,6 +32,8 @@ export function PropCreateDialog({
   const formId = useId();
   const confirmBounce = useChipBounce();
   const [draft, setDraft] = useState<PropDraftInput>(initialDraft ?? EMPTY);
+  const [formError, setFormError] = useState("");
+  const isNew = !initialDraft;
 
   if (!open) return null;
 
@@ -44,8 +46,14 @@ export function PropCreateDialog({
   const resetAndClose = () => {
     revokeImage();
     setDraft(EMPTY);
+    setFormError("");
     onClose();
   };
+
+  const hasImage = Boolean(
+    draft.pendingImageFile ||
+      (!isNew && (draft.imageFileName || draft.imageObjectUrl)),
+  );
 
   return (
     <div
@@ -74,23 +82,37 @@ export function PropCreateDialog({
           </div>
           <AssetImageUpload
             id={`${formId}-image`}
-            label="上传道具图片"
+            label={
+              isNew ? (
+                <>
+                  上传道具图片<span className="req">*</span>
+                </>
+              ) : (
+                "上传道具图片"
+              )
+            }
             value={{
               fileName: draft.imageFileName,
               objectUrl: draft.imageObjectUrl,
               mimeType: draft.imageMimeType,
               pendingFile: draft.pendingImageFile,
             }}
-            onChange={(image) =>
+            onChange={(image) => {
+              setFormError("");
               setDraft((prev) => ({
                 ...prev,
                 imageFileName: image.fileName,
                 imageObjectUrl: image.objectUrl,
                 imageMimeType: image.mimeType,
                 pendingImageFile: image.pendingFile ?? null,
-              }))
-            }
+              }));
+            }}
           />
+          {formError ? (
+            <p className="amw-field-error" role="alert">
+              {formError}
+            </p>
+          ) : null}
         </div>
         <div className="amw-dialog-actions">
           <button type="button" className="amw-btn" onClick={resetAndClose}>
@@ -101,9 +123,18 @@ export function PropCreateDialog({
             className={`amw-btn amw-btn-primary ${confirmBounce.bounceClass}`}
             disabled={!draft.name.trim()}
             onClick={() => {
+              if (isNew && !draft.pendingImageFile) {
+                setFormError("请先上传道具图片后再创建");
+                return;
+              }
+              if (!hasImage) {
+                setFormError("请先上传道具图片后再保存");
+                return;
+              }
               confirmBounce.trigger();
               onSubmit({ ...draft, name: draft.name.trim() });
               setDraft(EMPTY);
+              setFormError("");
             }}
             onAnimationEnd={confirmBounce.onAnimationEnd}
           >

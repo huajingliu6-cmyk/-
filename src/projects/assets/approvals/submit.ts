@@ -35,8 +35,10 @@ import {
   getDesignMediaVoiceBinding,
   isMediaVoiceBound,
 } from "@/projects/assets/episode-design/design-media-voice";
+import { getDesignMediaVideoRefSafety } from "@/projects/assets/episode-design/design-media-video-ref-precheck";
 import { getProjectRecord } from "@/projects/project-access";
 import { getWorkspaceEpisodeAssetDesignDetail } from "@/projects/workspace-sync/workspace-episode-design-api";
+import { isSd2CertifiedForVideoRef } from "@/video-generation/sd2-cert-safety";
 
 export type SubmitAssetApprovalResult =
   | {
@@ -194,6 +196,25 @@ async function submitAssetApprovalAttempt(input: {
           ok: false,
           code: "CHARACTER_VOICE_REQUIRED",
           message: `角色「${candidate.assetName}」的生成图尚未绑定音色（每张历史图需单独绑定）。请打开设计弹窗选中该图，选择音色并点击「绑定音色」后再提交。`,
+          status: 422,
+        };
+      }
+    }
+
+    for (const { mediaId, candidate } of accepted) {
+      if (candidate.category !== "character") continue;
+      const designItem = designById.get(candidate.assetDesignItemId);
+      if (designItem?.assetType !== "character") continue;
+      // Server-side only: prefer history entry for this mediaId (never trust client).
+      const safety = getDesignMediaVideoRefSafety(
+        designItem.generatedMedia,
+        mediaId,
+      );
+      if (!isSd2CertifiedForVideoRef(safety)) {
+        return {
+          ok: false,
+          code: "VIDEO_REF_REQUIRED",
+          message: `角色「${candidate.assetName}」的生成图尚未通过 SD 真人素材认证。请打开设计弹窗选中该图，完成「人物校验」后再提交审批。`,
           status: 422,
         };
       }

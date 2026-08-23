@@ -7,6 +7,7 @@ import type { AuthUser } from "@/auth/types";
 import { addCardEngineer } from "@/auth/project-members";
 import { createProjectRecord } from "@/projects/project-access";
 import { saveAssetBundleDraft } from "@/projects/assets/asset-bundle-store";
+import { bindAssetBundleRevisionForSave } from "@/projects/assets/asset-bundle-revision";
 import {
   PROJECT_ASSET_IMAGE_MAX_BYTES,
   listTmpFilesInAssetImagesDir,
@@ -346,13 +347,15 @@ describe("project asset image upload/read routes", () => {
       ).status,
     ).toBe(404);
 
-    await saveAssetBundleDraft({
+    await saveAssetBundleDraft(
+      await bindAssetBundleRevisionForSave(other.projectId, {
       projectId: other.projectId,
       characters: [character(other.projectId, "char_other_only")],
       scenes: [],
       props: [],
       audios: [],
-    });
+      }),
+    );
     expect(
       (
         await putFileRequest(
@@ -569,7 +572,8 @@ describe("project asset image upload/read routes", () => {
   it("upload patches image meta without wiping unrelated fields", async () => {
     const owner = auth("user", "owner-img-7");
     const project = await seedProjectWithCharacter(owner);
-    await saveAssetBundleDraft({
+    await saveAssetBundleDraft(
+      await bindAssetBundleRevisionForSave(project.projectId, {
       projectId: project.projectId,
       characters: [
         {
@@ -582,7 +586,8 @@ describe("project asset image upload/read routes", () => {
       scenes: [],
       props: [],
       audios: [],
-    });
+      }),
+    );
     vi.mocked(requireSessionUser).mockResolvedValue({ ok: true, user: owner });
     await putFileRequest(
       project.projectId,

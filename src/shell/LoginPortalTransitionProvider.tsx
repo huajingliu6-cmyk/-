@@ -17,6 +17,7 @@ import {
   writeLoginPortalFlag,
 } from "@/shell/login-portal";
 import { LoginPortalOverlay } from "@/shell/LoginPortalOverlay";
+import { APP_POST_LOGIN_PATH } from "@/shell/nav";
 import "@/shell/shell.css";
 
 type PortalPhase = "idle" | "exit" | "enter";
@@ -105,7 +106,7 @@ export function LoginPortalTransitionProvider({
       const safeTarget =
         target.startsWith("/") && !target.startsWith("//")
           ? target
-          : "/app";
+          : APP_POST_LOGIN_PATH;
 
       if (prefersReducedMotion()) {
         writeLoginPortalFlag(safeTarget);

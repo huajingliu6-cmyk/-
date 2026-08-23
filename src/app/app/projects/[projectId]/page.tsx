@@ -20,6 +20,14 @@ type ProjectPayload = {
   effectiveRole: string;
 };
 
+async function readJsonResponse<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text.trim()) {
+    throw new Error("EMPTY_RESPONSE");
+  }
+  return JSON.parse(text) as T;
+}
+
 export default function ProjectManagementDetailPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
@@ -39,7 +47,7 @@ export default function ProjectManagementDetailPage() {
         const res = await fetch(
           `/api/projects/${encodeURIComponent(projectId)}`,
         );
-        const payload = (await res.json()) as ProjectPayload & { error?: string };
+        const payload = await readJsonResponse<ProjectPayload & { error?: string }>(res);
         if (!res.ok) throw new Error(payload.error ?? "加载失败");
         if (!cancelled) {
           setData(payload);
@@ -68,17 +76,23 @@ export default function ProjectManagementDetailPage() {
           `/api/projects/${encodeURIComponent(projectId)}/entry`,
           { credentials: "include", cache: "no-store" },
         );
-        const payload = (await response.json()) as {
+        const payload = await readJsonResponse<{
           path?: string;
           error?: string;
-        };
+        }>(response);
         if (!response.ok || !payload.path) {
           throw new Error(payload.error ?? "无法判断项目进度");
         }
         if (!cancelled) router.replace(payload.path);
       } catch (reason) {
         if (!cancelled) {
-          setError(reason instanceof Error ? reason.message : "无法打开项目");
+          const message =
+            reason instanceof Error && reason.message === "EMPTY_RESPONSE"
+              ? "无法打开项目：服务返回空响应，请刷新后重试"
+              : reason instanceof Error
+                ? reason.message
+                : "无法打开项目";
+          setError(message);
           setLoading(false);
         }
       }

@@ -13,6 +13,12 @@ export const APP_WORKBENCH_PATH = "/app/workspace";
 /** 项目管理列表 */
 export const APP_PROJECTS_PATH = "/app/projects";
 
+/**
+ * 登录/注册成功后的默认落地页。
+ * 不用空白门户 /app，避免「登录成功却像没进去」。
+ */
+export const APP_POST_LOGIN_PATH = APP_PROJECTS_PATH;
+
 /** 视频制作画布（React Flow / WorkflowEditor） */
 export const WORKFLOW_EDITOR_PATH = "/workflow";
 
@@ -28,9 +34,14 @@ export const AUTH_NAV_ITEMS: ShellNavItem[] = [
     href: "/app/enterprise-assets",
   },
   { id: "workspace", label: "工作台", href: APP_WORKBENCH_PATH },
-  { id: "showcase", label: "作品展示", href: "/app/showcase" },
+  { id: "materials", label: "素材引擎", href: "/app/materials" },
   { id: "guide", label: "创作指引", href: "/app/guide" },
   { id: "team", label: "团队管理", href: "/app/team" },
+  {
+    id: "admin-materials",
+    label: "管理素材",
+    href: "/app/admin/materials",
+  },
   { id: "admin", label: "系统管理", href: APP_ADMIN_PATH },
 ];
 

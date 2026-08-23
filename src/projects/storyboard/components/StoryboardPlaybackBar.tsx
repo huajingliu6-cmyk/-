@@ -2,16 +2,20 @@
 
 import {
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Expand,
   Film,
   LoaderCircle,
   Pause,
   Play,
+  Plus,
   RefreshCw,
   SkipBack,
   SkipForward,
   Volume2,
   VolumeX,
+  X,
 } from "lucide-react";
 import {
   useCallback,
@@ -21,6 +25,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
+import { createPortal } from "react-dom";
 import { fetchShotVideoHistory } from "@/projects/storyboard/api-client";
 import type { StoryboardShot } from "@/projects/storyboard/types";
 import type { ShotVideoHistoryItem } from "@/projects/storyboard/shot-video-history";
@@ -33,7 +38,10 @@ type Props = {
   workspaceMode?: boolean;
   selectedShotId?: string | null;
   onSelectShot?: (shotId: string) => void;
-  previewVideosByShotId?: Record<string, ShotVideoHistoryItem[]>;
+  onInsertShotAfter?: (shotId: string) => Promise<void> | void;
+  insertShotBusyAfterId?: string | null;
+  onDeleteShot?: (shotId: string) => Promise<void> | void;
+  deleteShotBusyId?: string | null;
 };
 
 type Clip = {
@@ -42,6 +50,9 @@ type Clip = {
   start: number;
   duration: number;
 };
+
+/** Workspace timeline: how many shot cards fit on one page. */
+export const WORKSPACE_TIMELINE_PAGE_SIZE = 6;
 
 function formatTime(seconds: number): string {
   const safe = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
@@ -82,23 +93,17 @@ export function StoryboardPlaybackBar({
   workspaceMode = false,
   selectedShotId = null,
   onSelectShot,
-  previewVideosByShotId,
+  onInsertShotAfter,
+  insertShotBusyAfterId = null,
+  onDeleteShot,
+  deleteShotBusyId = null,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const pendingSeekRef = useRef<number | null>(null);
   const [latestVideos, setLatestVideos] = useState<
     Map<string, ShotVideoHistoryItem | null>
-  >(() =>
-    previewVideosByShotId
-      ? new Map(
-          shots.map((shot) => [
-            shot.id,
-            previewVideosByShotId[shot.id]?.[0] ?? null,
-          ]),
-        )
-      : new Map(),
-  );
-  const [loading, setLoading] = useState(!previewVideosByShotId);
+  >(() => new Map());
+  const [loading, setLoading] = useState(true);
   const [reloadToken, setReloadToken] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -108,6 +113,15 @@ export function StoryboardPlaybackBar({
   const [aspectRatio, setAspectRatio] = useState<"16:9" | "9:16">(
     initialAspectRatio,
   );
+  const [timelinePage, setTimelinePage] = useState(0);
+  const [deleteConfirmShotId, setDeleteConfirmShotId] = useState<string | null>(
+    null,
+  );
+
+  const canDeleteShot = shots.length > 1;
+  const deleteConfirmShot = deleteConfirmShotId
+    ? shots.find((shot) => shot.id === deleteConfirmShotId) ?? null
+    : null;
 
   const historyKey = shots
     .map(
@@ -117,7 +131,6 @@ export function StoryboardPlaybackBar({
     .join("|");
 
   useEffect(() => {
-    if (previewVideosByShotId) return;
     let cancelled = false;
     void loadLatestVideos(projectId, episodeId, shots).then((videos) => {
       if (cancelled) return;
@@ -130,7 +143,6 @@ export function StoryboardPlaybackBar({
   }, [
     episodeId,
     historyKey,
-    previewVideosByShotId,
     projectId,
     reloadToken,
     shots,
@@ -159,6 +171,30 @@ export function StoryboardPlaybackBar({
   const activeClip = clips[activeIndex] ?? null;
   const playableCount = clips.filter((clip) => clip.video).length;
   const progress = totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0;
+  const timelinePageCount = Math.max(
+    1,
+    Math.ceil(clips.length / WORKSPACE_TIMELINE_PAGE_SIZE),
+  );
+  const safeTimelinePage = Math.min(timelinePage, timelinePageCount - 1);
+  const timelinePageClips = useMemo(() => {
+    const start = safeTimelinePage * WORKSPACE_TIMELINE_PAGE_SIZE;
+    return clips
+      .slice(start, start + WORKSPACE_TIMELINE_PAGE_SIZE)
+      .map((clip, offset) => ({ clip, index: start + offset }));
+  }, [clips, safeTimelinePage]);
+
+  useEffect(() => {
+    const selectedIndex = selectedShotId
+      ? clips.findIndex((clip) => clip.shot.id === selectedShotId)
+      : activeIndex;
+    const index = selectedIndex >= 0 ? selectedIndex : activeIndex;
+    if (index < 0) return;
+    const page = Math.floor(index / WORKSPACE_TIMELINE_PAGE_SIZE);
+    const timer = window.setTimeout(() => {
+      setTimelinePage((current) => (current === page ? current : page));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeIndex, clips, selectedShotId]);
 
   const findPlayable = useCallback(
     (from: number, direction: 1 | -1) => {
@@ -269,6 +305,7 @@ export function StoryboardPlaybackBar({
 
   if (workspaceMode) {
     return (
+      <>
       <section
         className="sbw-playback is-workspace-timeline"
         data-testid="storyboard-playback-bar"
@@ -335,7 +372,7 @@ export function StoryboardPlaybackBar({
               className="sbw-playback__icon-btn"
               title="刷新视频"
               aria-label="刷新视频"
-              disabled={loading || Boolean(previewVideosByShotId)}
+              disabled={loading}
               onClick={() => {
                 setLoading(true);
                 setReloadToken((value) => value + 1);
@@ -355,44 +392,203 @@ export function StoryboardPlaybackBar({
           </div>
         </div>
 
-        <div className="sbw-playback__shot-strip" role="list">
-          {clips.map((clip, index) => (
+        <div className="sbw-playback__workspace-timeline">
+          {timelinePageCount > 1 ? (
             <button
-              key={clip.shot.id}
               type="button"
-              className={`sbw-playback__shot-card${
-                clip.shot.id === selectedShotId || index === activeIndex
-                  ? " is-active"
-                  : ""
-              }`}
-              onClick={() => selectClip(index)}
-              aria-label={`编辑镜头 ${String(clip.shot.shotNumber).padStart(2, "0")}`}
+              className="sbw-playback__page-btn"
+              title="上一页"
+              aria-label="上一页分镜"
+              disabled={safeTimelinePage <= 0}
+              onClick={() =>
+                setTimelinePage((page) => Math.max(0, page - 1))
+              }
             >
-              <span className="sbw-playback__shot-number">
-                {String(clip.shot.shotNumber).padStart(2, "0")}
-              </span>
-              <span className="sbw-playback__shot-frame">
-                {clip.video ? (
-                  <video
-                    src={clip.video.videoUrl}
-                    muted
-                    preload="metadata"
-                    playsInline
-                  />
-                ) : (
-                  <span className="sbw-playback__shot-empty">
-                    <Film size={21} />
-                    {clip.shot.videoContentStale ? "待再次生成" : "待生成"}
-                  </span>
-                )}
-              </span>
-              <span className="sbw-playback__shot-duration">
-                {clip.duration.toFixed(1)}s
-              </span>
+              <ChevronLeft size={18} />
             </button>
-          ))}
+          ) : null}
+          <div className="sbw-playback__shot-strip is-paged" role="list">
+            {timelinePageClips.map(({ clip, index }, pageIndex) => (
+              <div
+                key={clip.shot.id}
+                className="sbw-playback__shot-slot"
+                role="listitem"
+              >
+                <button
+                  type="button"
+                  className={`sbw-playback__shot-card${
+                    clip.shot.id === selectedShotId || index === activeIndex
+                      ? " is-active"
+                      : ""
+                  }`}
+                  onClick={() => selectClip(index)}
+                  aria-label={`编辑镜头 ${String(clip.shot.shotNumber).padStart(2, "0")}`}
+                >
+                  <span className="sbw-playback__shot-number">
+                    {String(clip.shot.shotNumber).padStart(2, "0")}
+                  </span>
+                  {onDeleteShot ? (
+                    <span
+                      className="sbw-playback__shot-delete"
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        className="sbw-playback__shot-delete-btn"
+                        title={
+                          !canDeleteShot
+                            ? "至少保留一个分镜"
+                            : `删除镜头 ${String(clip.shot.shotNumber).padStart(2, "0")}`
+                        }
+                        aria-label={
+                          !canDeleteShot
+                            ? "至少保留一个分镜"
+                            : `删除镜头 ${String(clip.shot.shotNumber).padStart(2, "0")}`
+                        }
+                        disabled={
+                          !canDeleteShot || deleteShotBusyId !== null
+                        }
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (!canDeleteShot || deleteShotBusyId) return;
+                          setDeleteConfirmShotId(clip.shot.id);
+                        }}
+                      >
+                        {deleteShotBusyId === clip.shot.id ? (
+                          <LoaderCircle size={12} className="animate-spin" />
+                        ) : (
+                          <X size={12} />
+                        )}
+                      </button>
+                    </span>
+                  ) : null}
+                  <span className="sbw-playback__shot-frame">
+                    {clip.video ? (
+                      <video
+                        src={clip.video.videoUrl}
+                        muted
+                        preload="metadata"
+                        playsInline
+                      />
+                    ) : (
+                      <span className="sbw-playback__shot-empty">
+                        <Film size={21} />
+                        {clip.shot.videoContentStale ? "待再次生成" : "待生成"}
+                      </span>
+                    )}
+                  </span>
+                  <span className="sbw-playback__shot-duration">
+                    {clip.duration.toFixed(1)}s
+                  </span>
+                </button>
+                {onInsertShotAfter &&
+                pageIndex < timelinePageClips.length - 1 ? (
+                  <button
+                    type="button"
+                    className="sbw-playback__insert-shot"
+                    title={`在镜头 ${String(clip.shot.shotNumber).padStart(2, "0")} 后插入空白分镜`}
+                    aria-label={`在镜头 ${String(clip.shot.shotNumber).padStart(2, "0")} 后插入空白分镜`}
+                    disabled={insertShotBusyAfterId !== null}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void onInsertShotAfter(clip.shot.id);
+                    }}
+                  >
+                    {insertShotBusyAfterId === clip.shot.id ? (
+                      <LoaderCircle size={14} className="animate-spin" />
+                    ) : (
+                      <Plus size={14} />
+                    )}
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          {timelinePageCount > 1 ? (
+            <button
+              type="button"
+              className="sbw-playback__page-btn"
+              title="下一页"
+              aria-label="下一页分镜"
+              disabled={safeTimelinePage >= timelinePageCount - 1}
+              onClick={() =>
+                setTimelinePage((page) =>
+                  Math.min(timelinePageCount - 1, page + 1),
+                )
+              }
+            >
+              <ChevronRight size={18} />
+            </button>
+          ) : null}
         </div>
+        {timelinePageCount > 1 ? (
+          <p className="sbw-playback__page-hint">
+            第 {safeTimelinePage + 1}/{timelinePageCount} 页 · 每页{" "}
+            {WORKSPACE_TIMELINE_PAGE_SIZE} 个分镜
+          </p>
+        ) : null}
       </section>
+      {deleteConfirmShot && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="sbw-dialog"
+              role="presentation"
+              data-testid="delete-shot-confirm"
+              onClick={() => {
+                if (deleteShotBusyId) return;
+                setDeleteConfirmShotId(null);
+              }}
+            >
+              <div
+                className="sbw-dialog__card"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="delete-shot-title"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <h3 id="delete-shot-title">删除分镜</h3>
+                <p>
+                  确认删除“镜头{" "}
+                  {String(deleteConfirmShot.shotNumber).padStart(2, "0")}
+                  ”？删除后无法恢复。
+                </p>
+                <div className="sbw-dialog__footer">
+                  <button
+                    type="button"
+                    className="sbw-btn"
+                    disabled={deleteShotBusyId !== null}
+                    onClick={() => setDeleteConfirmShotId(null)}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    className="sbw-btn sbw-btn-danger"
+                    disabled={deleteShotBusyId !== null}
+                    onClick={() => {
+                      const id = deleteConfirmShot.id;
+                      void (async () => {
+                        try {
+                          await onDeleteShot?.(id);
+                          setDeleteConfirmShotId(null);
+                        } catch {
+                          // Parent surfaces the error note; keep dialog open.
+                        }
+                      })();
+                    }}
+                  >
+                    {deleteShotBusyId === deleteConfirmShot.id
+                      ? "删除中…"
+                      : "删除"}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+      </>
     );
   }
 

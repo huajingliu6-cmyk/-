@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { useChipBounce } from "@/shell/useChipBounce";
 import { safeRandomUUID } from "@/lib/safe-random-id";
 import type { ScriptEpisode } from "@/projects/script/types";
 import {
@@ -12,9 +11,11 @@ import {
   generateStoryboard,
   patchStoryboardWorkspace,
   patchWorkspaceActiveEpisode,
-  patchWorkingScript,
+  scanInvalidStoryboardRefsApi,
   StoryboardGenerateInProgressError,
 } from "@/projects/storyboard/api-client";
+import { InvalidRefsRepairDialog } from "@/projects/storyboard/components/InvalidRefsRepairDialog";
+import type { InvalidRefScanResult } from "@/projects/storyboard/invalid-refs/types";
 import { storyboardNeedsLibraryRematch } from "@/projects/storyboard/services/shot-library-match";
 import type { PickerAsset } from "@/projects/storyboard/components/ProjectAssetPickerDialog";
 import { EpisodeSidebar } from "@/projects/storyboard/components/EpisodeSidebar";
@@ -38,6 +39,7 @@ import {
 import {
   APP_WORKBENCH_PATH,
   projectManagementPath,
+  workspaceProjectAssetsPath,
 } from "@/shell/nav";
 import { RouteLoadingOverlay } from "@/shell/RouteLoadingOverlay";
 import "@/projects/storyboard/storyboard-workspace.css";
@@ -105,7 +107,6 @@ export function StoryboardCreationWorkspace({
   projectId,
   context = "management",
 }: Props) {
-  const saveBounce = useChipBounce();
   const isWorkspace = context === "workspace";
   const promptSnap = useSyncExternalStore(
     subscribePromptGeneration,
@@ -123,11 +124,16 @@ export function StoryboardCreationWorkspace({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saveNote, setSaveNote] = useState("");
-  const [saving, setSaving] = useState(false);
   const [switchingEpisode, setSwitchingEpisode] = useState(false);
   const [scriptDraft, setScriptDraft] = useState<string | null>(null);
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [savingGlobalSettings, setSavingGlobalSettings] = useState(false);
+  const [invalidRefScan, setInvalidRefScan] =
+    useState<InvalidRefScanResult | null>(null);
+  const [repairOpen, setRepairOpen] = useState(false);
+  const [repairFocusShotId, setRepairFocusShotId] = useState<string | null>(
+    null,
+  );
 
   const activeEpisodeId = workspace?.activeEpisodeId ?? null;
   const productions = workspace?.productions ?? [];
@@ -140,6 +146,27 @@ export function StoryboardCreationWorkspace({
     promptSnap.generatingCount > 0 || promptSnap.queuedCount > 0
       ? `（生成中 ${promptSnap.generatingCount}/${STORYBOARD_PROMPT_GEN_MAX_CONCURRENT}，等待 ${promptSnap.queuedCount}）`
       : "";
+
+  const refreshInvalidRefs = useCallback(
+    async (episodeId: string | null) => {
+      if (!episodeId) {
+        setInvalidRefScan(null);
+        return;
+      }
+      try {
+        const res = await scanInvalidStoryboardRefsApi(projectId, {
+          scope: "episode",
+          episodeId,
+          context,
+          checkBlobs: true,
+        });
+        setInvalidRefScan(res.scan);
+      } catch {
+        // Non-blocking: repair entry remains available via manual open.
+      }
+    },
+    [projectId, context],
+  );
 
   const loadProduction = useCallback(
     async (episodeId: string, opts?: { prefer?: EpisodeProduction | null }) => {
@@ -183,9 +210,10 @@ export function StoryboardCreationWorkspace({
       }
       setProduction(prod);
       setScriptDraft(null);
+      void refreshInvalidRefs(episodeId);
       return prod;
     },
-    [projectId],
+    [projectId, refreshInvalidRefs],
   );
 
   const loadAll = useCallback(async () => {
@@ -342,41 +370,6 @@ export function StoryboardCreationWorkspace({
     [activeEpisodeId, loadProduction, projectId],
   );
 
-  const handleSaveDraft = useCallback(async () => {
-    if (!production || !activeEpisodeId) return;
-    setSaving(true);
-    setSaveNote("");
-    try {
-      let updated = production;
-      const scriptToSave = scriptDraft ?? production.workingScriptText;
-      if (scriptToSave.trim()) {
-        updated = await patchWorkingScript(
-          projectId,
-          production.episodeId,
-          scriptToSave,
-        );
-        handleProductionChange(updated);
-        setScriptDraft(null);
-      }
-      const savedWorkspace = await patchWorkspaceActiveEpisode(
-        projectId,
-        activeEpisodeId,
-      );
-      setWorkspace(savedWorkspace);
-      setSaveNote("草稿已保存。");
-    } catch (err) {
-      setSaveNote(err instanceof Error ? err.message : "保存失败，请稍后重试");
-    } finally {
-      setSaving(false);
-    }
-  }, [
-    activeEpisodeId,
-    handleProductionChange,
-    production,
-    projectId,
-    scriptDraft,
-  ]);
-
   const handleSaveGlobalSettings = useCallback(
     async (next: StoryboardVideoDefaults) => {
       setSavingGlobalSettings(true);
@@ -404,6 +397,10 @@ export function StoryboardCreationWorkspace({
     ? APP_WORKBENCH_PATH
     : `${projectManagementPath(projectId)}/script`;
   const emptyBackLabel = isWorkspace ? "返回工作台" : "返回剧本处理";
+  const assetsHref = isWorkspace
+    ? workspaceProjectAssetsPath(projectId)
+    : `${projectManagementPath(projectId)}/assets`;
+  const hasConfirmedAssets = pickerAssets.length > 0;
 
   const activePromptStatus = production
     ? resolveEpisodePromptGenDisplayStatus({
@@ -449,10 +446,10 @@ export function StoryboardCreationWorkspace({
         <div className="sbw-inner">
           <header className="sbw-head">
             <div className="sbw-head__titles">
-              <h1>分镜创作</h1>
+              <h1>尚未创建分集</h1>
               <p>
                 {projectName ? `${projectName} · ` : ""}
-                尚未创建分集
+                请先完成剧本分集
               </p>
             </div>
           </header>
@@ -470,41 +467,14 @@ export function StoryboardCreationWorkspace({
   return (
     <div className="sbw">
       <div className="sbw-inner">
-        <header className="sbw-head">
-          <div className="sbw-head__titles">
-            <h1>分镜创作</h1>
-            <p>
-              确认本集剧本后生成分镜提示词。
-              {projectName ? ` · ${projectName}` : ""}
-              {error ? ` · ${error}` : ""}
-              {promptQueueHint ? ` · ${promptQueueHint}` : ""}
-            </p>
+        {!hasConfirmedAssets ? (
+          <div className="sbw-empty" data-testid="storyboard-empty-assets">
+            <p>当前还没有已确认的资产。请先到资产页提取资产后再匹配分镜。</p>
+            <Link href={assetsHref} className="sbw-link" style={{ marginTop: 12 }}>
+              前往资产页
+            </Link>
           </div>
-          <div className="sbw-head__actions">
-            <button
-              type="button"
-              className="sbw-link"
-              data-testid="storyboard-global-settings-btn"
-              onClick={() => setGlobalSettingsOpen(true)}
-            >
-              全局设置
-            </button>
-            <button
-              type="button"
-              className={`sbw-btn sbw-btn-primary sbw-head__save ${saveBounce.bounceClass}`}
-              disabled={saving || !production}
-              onClick={() => {
-                saveBounce.trigger();
-                void handleSaveDraft();
-              }}
-              onAnimationEnd={saveBounce.onAnimationEnd}
-            >
-              {saving ? "保存中…" : "保存页面"}
-            </button>
-          </div>
-          {saveNote ? <p className="sbw-head__note">{saveNote}</p> : null}
-        </header>
-
+        ) : null}
         <div className="sbw-layout">
           <EpisodeSidebar
             episodes={episodes}
@@ -529,6 +499,7 @@ export function StoryboardCreationWorkspace({
               onAssetsRefresh={async () => {
                 const data = await fetchStoryboardWorkspace(projectId);
                 setAssetsSummary(data.assetsSummary);
+                void refreshInvalidRefs(production.episodeId);
               }}
               onNote={setSaveNote}
               onScriptDraftChange={setScriptDraft}
@@ -543,9 +514,36 @@ export function StoryboardCreationWorkspace({
               onRequestPromptGenerate={(opts) =>
                 handleRequestPromptGenerate(production.episodeId, opts)
               }
+              onOpenGlobalSettings={() => setGlobalSettingsOpen(true)}
+              pageSaveNote={
+                [saveNote, error, promptQueueHint].filter(Boolean).join(" · ") ||
+                undefined
+              }
+              invalidRefScan={invalidRefScan}
+              onOpenInvalidRefsRepair={(shotId) => {
+                setRepairFocusShotId(shotId ?? null);
+                setRepairOpen(true);
+              }}
             />
           )}
         </div>
+
+        <InvalidRefsRepairDialog
+          open={repairOpen}
+          projectId={projectId}
+          context={context}
+          episodeId={activeEpisodeId}
+          assets={pickerAssets}
+          focusShotId={repairFocusShotId}
+          onClose={() => {
+            setRepairOpen(false);
+            setRepairFocusShotId(null);
+          }}
+          onApplied={(rescan) => {
+            setInvalidRefScan(rescan);
+            void loadProduction(activeEpisodeId ?? production?.episodeId ?? "");
+          }}
+        />
       </div>
 
       <StoryboardGlobalSettingsDialog

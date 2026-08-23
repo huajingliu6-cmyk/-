@@ -10,10 +10,35 @@ import {
   type GenerationApiId,
 } from "@/auth/api-config";
 import { aiConfigErrorResponse } from "@/app/api/admin/ai-admin-helpers";
+import { migrateAssetExtractionSlotBindings } from "@/ai-config/migrate-asset-extraction-slot-bindings";
+import { migrateStyPlatformAssetExtractTaskRules } from "@/ai-config/migrate-sty-platform-asset-extract-task-rules";
 
 export async function GET() {
   const auth = await requireSystemAdmin();
   if (!auth.ok) return auth.response;
+
+  let migrationHint: string | null = null;
+  const hints: string[] = [];
+  try {
+    const migrated = await migrateAssetExtractionSlotBindings();
+    if (migrated.ran && migrated.adminHint) {
+      hints.push(migrated.adminHint);
+    }
+  } catch {
+    /* non-fatal */
+  }
+  try {
+    const styRules = await migrateStyPlatformAssetExtractTaskRules();
+    if (styRules.ran && styRules.adminHint) {
+      hints.push(styRules.adminHint);
+    }
+  } catch {
+    /* non-fatal */
+  }
+  if (hints.length > 0) {
+    migrationHint = [...new Set(hints)].join("\n");
+  }
+
   const bindings = await listSlotBindings();
   return NextResponse.json({
     bindings,
@@ -21,6 +46,7 @@ export async function GET() {
       profileSlot: d.id,
       label: d.label,
     })),
+    migrationHint,
   });
 }
 

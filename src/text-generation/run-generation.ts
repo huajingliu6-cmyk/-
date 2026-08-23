@@ -22,6 +22,7 @@ import {
   assetExtractEpisodeIdForOutputKind,
   findBlockingAssetExtract,
 } from "@/projects/assets/episode-design/assert-extract-not-busy";
+import { isLegacyAssetExtractOutputKind } from "@/projects/assets/extraction/extraction-capabilities";
 import { buildScriptAssetChunks } from "@/projects/assets/episode-design/script-asset-chunks";
 import type { ScriptAssetChunk } from "@/projects/assets/episode-design/script-asset-chunks";
 import {
@@ -152,6 +153,18 @@ export async function* runTextGenerationStream(
       });
       return;
     }
+  }
+
+  if (isLegacyAssetExtractOutputKind(input.outputKind)) {
+    yield sseEncode({
+      event: "error",
+      data: {
+        code: "LEGACY_ASSET_EXTRACT_DEPRECATED",
+        message:
+          "旧版 script_asset_design / episode_asset_design 提取已停用，请使用资产库「开始提取资产」（roster + detail 两阶段）。",
+      },
+    });
+    return;
   }
 
   const creditAccount = await resolveProjectCreditAccount({

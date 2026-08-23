@@ -22,6 +22,8 @@ type Props = {
   emptyMessage?: string;
   className?: string;
   "aria-label"?: string;
+  /** When false, only the preview pane is shown (character prompt-split layout). */
+  showControls?: boolean;
 };
 
 /**
@@ -45,6 +47,7 @@ export function AssetDetailLayout({
   emptyMessage = "在左侧选择资产，或新建后开始编辑。",
   className = "",
   "aria-label": ariaLabel,
+  showControls = true,
 }: Props) {
   const previewNode = preview ?? image;
   const hasVoice = voice != null;
@@ -68,9 +71,14 @@ export function AssetDetailLayout({
       className={`amw-panel asset-library-detail asset-detail ${className}`.trim()}
       aria-label={ariaLabel ?? title}
       data-testid="asset-library-detail"
+      data-show-controls={showControls ? "true" : "false"}
     >
       {banner}
-      <div className="asset-library-detail__body">
+      <div
+        className={`asset-library-detail__body${
+          showControls ? "" : " asset-library-detail__body--preview-only"
+        }`}
+      >
         <section
           className={`asset-library-preview${
             previewContent ? " asset-library-preview--with-content" : ""
@@ -100,43 +108,45 @@ export function AssetDetailLayout({
           ) : null}
         </section>
 
-        <section
-          className={`asset-library-controls${
-            hasVoice ? "" : " asset-library-controls--no-voice"
-          }`}
-          data-testid="asset-library-controls"
-        >
-          <header className="asset-controls__header">
-            <h2>{title}</h2>
-            {status}
-          </header>
+        {showControls ? (
+          <section
+            className={`asset-library-controls${
+              hasVoice ? "" : " asset-library-controls--no-voice"
+            }`}
+            data-testid="asset-library-controls"
+          >
+            <header className="asset-controls__header">
+              <h2>{title}</h2>
+              {status}
+            </header>
 
-          <div className="asset-controls__basic">{basicInfo}</div>
+            <div className="asset-controls__basic">{basicInfo}</div>
 
-          {notes ? (
-            <div className="asset-controls__notes">{notes}</div>
-          ) : null}
+            {notes ? (
+              <div className="asset-controls__notes">{notes}</div>
+            ) : null}
 
-          {imageActions ? (
-            <div className="asset-controls__image-actions">
-              {imageActions}
-            </div>
-          ) : null}
+            {imageActions ? (
+              <div className="asset-controls__image-actions">
+                {imageActions}
+              </div>
+            ) : null}
 
-          {hasVoice ? (
-            <div className="asset-controls__voice">{voice}</div>
-          ) : (
-            <div className="asset-controls__grow" aria-hidden />
-          )}
+            {hasVoice ? (
+              <div className="asset-controls__voice">{voice}</div>
+            ) : (
+              <div className="asset-controls__grow" aria-hidden />
+            )}
 
-          {remainingContent ? (
-            <div className="asset-controls__extra">{remainingContent}</div>
-          ) : null}
+            {remainingContent ? (
+              <div className="asset-controls__extra">{remainingContent}</div>
+            ) : null}
 
-          {footer ? (
-            <footer className="asset-controls__footer">{footer}</footer>
-          ) : null}
-        </section>
+            {footer ? (
+              <footer className="asset-controls__footer">{footer}</footer>
+            ) : null}
+          </section>
+        ) : null}
       </div>
     </section>
   );

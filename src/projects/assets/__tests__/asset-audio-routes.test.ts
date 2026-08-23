@@ -364,13 +364,17 @@ describe("project asset audio upload/read/delete routes", () => {
       "audio/wav",
     );
     // other project also has audio_1 — that succeeds. Cross means using A's id on B without that asset.
-    await saveAssetBundleDraft({
+    const { bindAssetBundleRevisionForSave } = await import(
+      "@/projects/assets/asset-bundle-revision"
+    );
+    const otherDraft = await bindAssetBundleRevisionForSave(other.projectId, {
       projectId: other.projectId,
       characters: [],
       scenes: [],
       props: [],
       audios: [audioRow(other.projectId, "audio_other")],
     });
+    await saveAssetBundleDraft(otherDraft);
     const cross2 = await putFileRequest(
       other.projectId,
       "audio_1",
@@ -669,6 +673,81 @@ describe("project asset audio upload/read/delete routes", () => {
     expect(readFileSync(disk).equals(bytes)).toBe(true);
     spy.mockRestore();
     expect(await listTmpFilesInAssetAudioDir(project.projectId)).toEqual([]);
+  });
+
+  it("DELETE ?hard=1 removes audio row and clears character voice refs", async () => {
+    const owner = auth("user", "owner_hard");
+    vi.mocked(requireSessionUser).mockResolvedValue({
+      ok: true,
+      user: owner,
+    });
+    const project = await createProjectRecord(owner.id, {
+      name: `aud-hard-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      creationSource: "story",
+      projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
+      passwordEnabled: false,
+    });
+    const voiceId = "audio_voice_1";
+    await saveAssetBundleDraft({
+      projectId: project.projectId,
+      characters: [
+        {
+          ...character(project.projectId, "char_1"),
+          voiceId,
+          voiceName: "Custom",
+          voiceStyle: "项目音色",
+          mediaVoices: {
+            media_1: { voiceId, voiceName: "Custom" },
+            media_2: { voiceId: "audio_other", voiceName: "Keep" },
+          },
+        },
+      ],
+      scenes: [],
+      props: [],
+      audios: [
+        {
+          ...audioRow(project.projectId, voiceId),
+          type: "voice",
+          name: "Custom Voice",
+        },
+      ],
+    });
+    const bytes = wavBytes(7);
+    await writeProjectAssetAudioFile({
+      projectId: project.projectId,
+      assetId: voiceId,
+      buffer: bytes,
+      mimeType: "audio/wav",
+    });
+    const disk = resolveAssetAudioFilePath(project.projectId, voiceId)!;
+    expect(existsSync(disk)).toBe(true);
+
+    const del = await deleteAssetAudio(
+      new Request(
+        `http://localhost/api/projects/${project.projectId}/assets-draft/audio/${voiceId}?hard=1`,
+        { method: "DELETE", headers: { "X-Hard-Delete": "1" } },
+      ),
+      {
+        params: Promise.resolve({
+          projectId: project.projectId,
+          assetId: voiceId,
+        }),
+      },
+    );
+    expect(del.status).toBe(200);
+    const payload = (await del.json()) as { hard?: boolean };
+    expect(payload.hard).toBe(true);
+    expect(existsSync(disk)).toBe(false);
+
+    const draft = await loadAssetBundleDraft(project.projectId);
+    expect(draft?.audios.find((a) => a.id === voiceId)).toBeUndefined();
+    expect(draft?.characters[0]?.voiceId).toBeNull();
+    expect(draft?.characters[0]?.voiceName).toBeNull();
+    expect(draft?.characters[0]?.voiceStyle).toBeNull();
+    expect(draft?.characters[0]?.mediaVoices).toEqual({
+      media_2: { voiceId: "audio_other", voiceName: "Keep" },
+    });
   });
 
   it("replace keeps old file when write fails mid-flight; patch fail restores", async () => {

@@ -1,7 +1,5 @@
 import "server-only";
 
-import { runProjectAssetTransaction } from "@/projects/assets/remote-transaction-client";
-
 import { isRemoteRevisionConflict } from "@/persistence/remote-data-client";
 import {
   normalizeAssetBundleDraft,
@@ -24,6 +22,8 @@ import {
   loadEpisodeAssetDesignStoreRemoteDocument,
 } from "@/projects/assets/episode-design/remote-store";
 import type { ProjectAssetBundle } from "@/projects/assets/types";
+import { wrapWriteFailure } from "@/projects/operation-failed";
+import { runProjectAssetTransaction } from "@/projects/assets/remote-transaction-client";
 
 const MAX_WRITE_ATTEMPTS = 6;
 
@@ -38,7 +38,6 @@ export async function confirmEpisodeAssetDesignRemote(input: {
   userId: string;
   fingerprint: string;
   itemId?: string;
-  requireGeneratedMedia?: boolean;
 }): Promise<ConfirmEpisodeAssetDesignResult> {
   for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
     const [designDocument, assetDocument] = await Promise.all([
@@ -48,8 +47,9 @@ export async function confirmEpisodeAssetDesignRemote(input: {
     const store = designDocument
       ? normalizeEpisodeAssetDesignStore(input.projectId, designDocument.value)
       : emptyEpisodeAssetDesignStore(input.projectId);
-    const bundle = normalizeAssetBundleDraft(input.projectId, assetDocument?.value)
-      ?? emptyAssetBundle(input.projectId);
+    const bundle =
+      normalizeAssetBundleDraft(input.projectId, assetDocument?.value) ??
+      emptyAssetBundle(input.projectId);
     const transformed = transformEpisodeAssetDesignConfirmation({
       ...input,
       store,
@@ -62,14 +62,39 @@ export async function confirmEpisodeAssetDesignRemote(input: {
     try {
       await runProjectAssetTransaction({
         writes: [
-          { ...designIdentity, expectedRevision: designDocument?.revision ?? 0, value: transformed.nextStore },
-          { ...assetIdentity, expectedRevision: assetDocument?.revision ?? 0, value: transformed.nextBundle },
+          {
+            namespace: designIdentity.namespace,
+            key: designIdentity.key,
+            expectedRevision: designDocument?.revision ?? 0,
+            value: transformed.nextStore,
+          },
+          {
+            namespace: assetIdentity.namespace,
+            key: assetIdentity.key,
+            expectedRevision: assetDocument?.revision ?? 0,
+            value: transformed.nextBundle,
+          },
         ],
       });
-      return transformed.result;
     } catch (error) {
-      if (!isRemoteRevisionConflict(error)) throw error;
+      if (isRemoteRevisionConflict(error)) continue;
+      wrapWriteFailure(error);
     }
+
+    try {
+      const { syncManagementToWorkspace } = await import(
+        "@/projects/workspace-sync/sync-management-to-workspace"
+      );
+      await syncManagementToWorkspace(input.projectId);
+    } catch (error) {
+      wrapWriteFailure(error);
+    }
+
+    return transformed.result;
   }
-  return { ok: false, code: "REVISION_CONFLICT", message: "资产设计版本已变更，请刷新后重试" };
+  return {
+    ok: false,
+    code: "REVISION_CONFLICT",
+    message: "资产设计版本已变更，请刷新后重试",
+  };
 }

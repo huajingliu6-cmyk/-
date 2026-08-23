@@ -29,7 +29,7 @@ export function ScriptProcessPanel({
   selectedId,
   page,
   numbersOnly = false,
-  emptyHint = "确认导入后将自动生成分集方案。",
+  emptyHint = "上传剧本后将自动分集并创建剧集。",
   onSelect,
   onPageChange,
 }: Props) {
@@ -70,6 +70,7 @@ export function ScriptProcessPanel({
             className={`scs-episode-list${numbersOnly ? " is-numbers" : ""}`}
             role="listbox"
             aria-label="分集列表"
+            data-testid="script-episode-list"
           >
             {pageItems.map((ep) => {
               const selected = ep.id === selectedId;
@@ -80,6 +81,7 @@ export function ScriptProcessPanel({
                   role="option"
                   aria-selected={selected}
                   className={`scs-episode-pick${numbersOnly ? " is-number" : ""}${selected ? " is-selected" : ""}`}
+                  data-testid={`script-episode-${ep.episodeNumber}`}
                   onClick={() => onSelect(ep.id)}
                 >
                   {numbersOnly ? (

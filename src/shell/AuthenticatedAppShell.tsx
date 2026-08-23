@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { AuthenticatedHeader } from "@/shell/AuthenticatedHeader";
 import { GenerationBusyGuard } from "@/shell/GenerationBusyGuard";
 import { useAuthUser } from "@/shell/useAuthUser";
-import { APP_SHELL_ROOT } from "@/shell/nav";
+import { APP_POST_LOGIN_PATH } from "@/shell/nav";
 import {
   ACTIVE_ENTERPRISE_EVENT,
   readActiveSpace,
@@ -62,7 +62,7 @@ export function AuthenticatedAppShell({
     // 仅确认 guest 时踢回；loading 期间不要误判
     if (auth.status === "guest") {
       router.replace(
-        `/?login=1&next=${encodeURIComponent(pathname || APP_SHELL_ROOT)}`,
+        `/?login=1&next=${encodeURIComponent(pathname || APP_POST_LOGIN_PATH)}`,
       );
     }
   }, [auth.status, pathname, router]);

@@ -1,6 +1,6 @@
 "use client";
 
-import { Volume2 } from "lucide-react";
+import { Play, Square } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { AudioAsset } from "@/projects/assets/types";
 import { resolveVoicePreviewSrc } from "@/projects/assets/resolve-voice-preview-src";
@@ -15,6 +15,12 @@ type Props = {
   className?: string;
   testId?: string;
   onStatus?: (message: string) => void;
+  /**
+   * iconOnly: two small buttons (legacy).
+   * toggle: one large play/stop button for the compact voice bar.
+   */
+  iconOnly?: boolean;
+  toggle?: boolean;
 };
 
 export function VoicePreviewButton({
@@ -25,6 +31,8 @@ export function VoicePreviewButton({
   className = "amw-btn",
   testId,
   onStatus,
+  iconOnly = false,
+  toggle: toggleMode = false,
 }: Props) {
   const { playing, error, setError, toggle, stop } = useVoicePreviewPlayer();
   const onStatusRef = useRef(onStatus);
@@ -58,56 +66,103 @@ export function VoicePreviewButton({
     }
   }, [playing, error]);
 
-  return (
-    <div className="voice-preview-control">
+  const runToggle = () => {
+    if (disabled) {
+      const msg = "当前不可试听";
+      setError(msg);
+      onStatusRef.current?.(msg);
+      return;
+    }
+    if (!voiceId) {
+      const msg = "请先选择并绑定音色后再试听";
+      setError(msg);
+      onStatusRef.current?.(msg);
+      return;
+    }
+    if (playing) {
+      stop();
+      onStatusRef.current?.("");
+      return;
+    }
+    const resolved = resolveVoicePreviewSrc({
+      projectId,
+      voiceId,
+      audios,
+    });
+    if (!resolved.ok) {
+      setError(resolved.message);
+      onStatusRef.current?.(resolved.message);
+      return;
+    }
+    void toggle(resolved.src);
+  };
+
+  if (toggleMode) {
+    return (
       <button
         type="button"
-        className={`${className}${playing ? " is-playing" : ""}`}
-        data-testid={testId}
-        // Never use HTML disabled — it looks "unselectable" and swallows clicks.
+        className={`voice-preview-toggle${playing ? " is-playing" : ""} ${className}`.trim()}
+        data-testid={testId ?? "voice-preview-toggle"}
         aria-disabled={!voiceId || disabled ? true : undefined}
         aria-pressed={playing}
+        aria-label={playing ? "停止试听" : "试听音色"}
+        title={
+          !voiceId
+            ? "请先选择并绑定音色后再试听"
+            : playing
+              ? "停止试听"
+              : "试听音色"
+        }
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          runToggle();
+        }}
+      >
+        {playing ? (
+          <Square size={22} aria-hidden fill="currentColor" />
+        ) : (
+          <Play size={24} aria-hidden fill="currentColor" />
+        )}
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className={`voice-preview-control${iconOnly ? " voice-preview-control--icon" : ""}`}
+    >
+      <button
+        type="button"
+        className={`${className}${playing ? " is-playing" : ""}${
+          iconOnly ? " voice-preview-control__icon-btn" : ""
+        }`}
+        data-testid={testId}
+        aria-disabled={!voiceId || disabled ? true : undefined}
+        aria-pressed={playing}
+        aria-label={playing ? "暂停试听" : "试听音色"}
         title={
           !voiceId
             ? "请先选择并绑定音色后再试听"
             : playing
               ? "暂停试听"
-              : "试听"
+              : "试听音色"
         }
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          if (disabled) {
-            const msg = "当前不可试听";
-            setError(msg);
-            onStatusRef.current?.(msg);
-            return;
-          }
-          if (!voiceId) {
-            const msg = "请先选择并绑定音色后再试听";
-            setError(msg);
-            onStatusRef.current?.(msg);
-            return;
-          }
-          const resolved = resolveVoicePreviewSrc({
-            projectId,
-            voiceId,
-            audios,
-          });
-          if (!resolved.ok) {
-            setError(resolved.message);
-            onStatusRef.current?.(resolved.message);
-            return;
-          }
-          void toggle(resolved.src);
+          runToggle();
         }}
       >
-        试听
+        {iconOnly ? <Play size={16} aria-hidden /> : "试听"}
       </button>
       <button
         type="button"
-        className={className}
+        className={`${className}${
+          iconOnly ? " voice-preview-control__icon-btn" : ""
+        }`}
         disabled={!playing}
+        aria-label="停止试听"
         title="停止试听"
         onClick={(event) => {
           event.preventDefault();
@@ -116,20 +171,8 @@ export function VoicePreviewButton({
           onStatusRef.current?.("");
         }}
       >
-        停止
+        {iconOnly ? <Square size={14} aria-hidden /> : "停止"}
       </button>
-      {playing ? (
-        <span className="voice-preview-speaker" aria-hidden title="播放中">
-          <Volume2
-            size={16}
-            strokeWidth={2}
-            className="voice-preview-speaker__icon"
-          />
-          <span className="voice-preview-speaker__wave voice-preview-speaker__wave--1" />
-          <span className="voice-preview-speaker__wave voice-preview-speaker__wave--2" />
-          <span className="voice-preview-speaker__wave voice-preview-speaker__wave--3" />
-        </span>
-      ) : null}
     </div>
   );
 }

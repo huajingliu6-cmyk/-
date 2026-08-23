@@ -211,6 +211,7 @@ describe("episode asset design routes", () => {
       projectMode: "full-stack",
       visualStyle: "live_action_cinematic",
       passwordEnabled: false,
+      approvalEnabled: true,
     });
     const now = new Date().toISOString();
     await saveScriptDraft(baseDraft(project.projectId, now));
@@ -256,7 +257,11 @@ describe("episode asset design routes", () => {
       new Request("http://localhost", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ expectedRevision: 1, fingerprint }),
+        body: JSON.stringify({
+          expectedRevision: 1,
+          fingerprint,
+          itemId: "i1",
+        }),
       }),
       {
         params: Promise.resolve({
@@ -478,6 +483,154 @@ describe("episode asset design routes", () => {
     expect(replay.record.items).toHaveLength(1);
   });
 
+  it("allows apply during generating when activeGeneration matches generationId", async () => {
+    const owner = auth("user", "owner_ads_apply_active_gen");
+    vi.mocked(requireSessionUser).mockResolvedValue({ ok: true, user: owner });
+    const project = await createProjectRecord(owner.id, {
+      name: `ads-apply-active-${Date.now()}`,
+      creationSource: "script-upload",
+      projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
+      passwordEnabled: false,
+    });
+    const now = new Date().toISOString();
+    const draft = baseDraft(project.projectId, now);
+    await saveScriptDraft(draft);
+    const episode = draft.episodes[0]!;
+    const fingerprint = getScriptEpisodeContentFingerprint({
+      episodeNumber: episode.episodeNumber,
+      title: episode.title,
+      content: episode.content,
+    });
+    const store = await loadEpisodeAssetDesignStore(project.projectId);
+    await saveEpisodeAssetDesignStore(
+      upsertEpisodeRecord(store, {
+        episodeId: episode.id,
+        episodeNumber: episode.episodeNumber,
+        status: "generating",
+        revision: 5,
+        contentFingerprint: fingerprint,
+        generationId: null,
+        activeGeneration: {
+          generationId: "gen-active-1",
+          idempotencyKey: "idem-active-1",
+          outputKind: "episode_asset_design",
+          startedAt: now,
+          updatedAt: now,
+        },
+        items: [],
+        confirmedAt: null,
+        confirmedBy: null,
+        confirmedRevision: null,
+        updatedAt: now,
+      }),
+    );
+
+    const rawText = JSON.stringify({
+      version: 1,
+      assets: [
+        {
+          type: "prop",
+          name: "钥匙",
+          design: {
+            description: "铜钥匙",
+            propType: "线索",
+            usage: "开门",
+            usageInEpisode: "第一集",
+            evidence: "正文",
+          },
+        },
+      ],
+    });
+
+    const applied = await applyEpisodeAssetDesignGeneration({
+      projectId: project.projectId,
+      episodeId: episode.id,
+      generationId: "gen-active-1",
+      expectedRevision: 4,
+      fingerprint,
+      rawText,
+    });
+
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    expect(applied.record.status).toBe("review");
+    expect(applied.record.items).toHaveLength(1);
+    expect(applied.record.revision).toBeGreaterThan(5);
+  });
+
+  it("rejects apply with stale revision when generationId does not match activeGeneration", async () => {
+    const owner = auth("user", "owner_ads_apply_conflict");
+    vi.mocked(requireSessionUser).mockResolvedValue({ ok: true, user: owner });
+    const project = await createProjectRecord(owner.id, {
+      name: `ads-apply-conflict-${Date.now()}`,
+      creationSource: "script-upload",
+      projectMode: "full-stack",
+      visualStyle: "live_action_cinematic",
+      passwordEnabled: false,
+    });
+    const now = new Date().toISOString();
+    const draft = baseDraft(project.projectId, now);
+    await saveScriptDraft(draft);
+    const episode = draft.episodes[0]!;
+    const fingerprint = getScriptEpisodeContentFingerprint({
+      episodeNumber: episode.episodeNumber,
+      title: episode.title,
+      content: episode.content,
+    });
+    const store = await loadEpisodeAssetDesignStore(project.projectId);
+    await saveEpisodeAssetDesignStore(
+      upsertEpisodeRecord(store, {
+        episodeId: episode.id,
+        episodeNumber: episode.episodeNumber,
+        status: "generating",
+        revision: 5,
+        contentFingerprint: fingerprint,
+        generationId: null,
+        activeGeneration: {
+          generationId: "gen-active-1",
+          idempotencyKey: "idem-active-1",
+          outputKind: "episode_asset_design",
+          startedAt: now,
+          updatedAt: now,
+        },
+        items: [],
+        confirmedAt: null,
+        confirmedBy: null,
+        confirmedRevision: null,
+        updatedAt: now,
+      }),
+    );
+
+    const conflict = await applyEpisodeAssetDesignGeneration({
+      projectId: project.projectId,
+      episodeId: episode.id,
+      generationId: "gen-other",
+      expectedRevision: 4,
+      fingerprint,
+      rawText: JSON.stringify({
+        version: 1,
+        assets: [
+          {
+            type: "prop",
+            name: "钥匙",
+            design: {
+              description: "铜钥匙",
+              propType: "线索",
+              usage: "开门",
+              usageInEpisode: "第一集",
+              evidence: "正文",
+            },
+          },
+        ],
+      }),
+    });
+
+    expect(conflict.ok).toBe(false);
+    if (conflict.ok) return;
+    expect(conflict.code).toBe("REVISION_CONFLICT");
+  });
+
   it("returns sourceText as content for full-script design viewer", async () => {
     const owner = auth("user", "owner_full_script_view");
     vi.mocked(requireSessionUser).mockResolvedValue({ ok: true, user: owner });
@@ -500,12 +653,6 @@ describe("episode asset design routes", () => {
         episodeId: SCRIPT_ASSET_DESIGN_ID,
       }),
     });
-    expect(getRes.status).toBe(200);
-    const json = (await getRes.json()) as {
-      episode: { id: string; title: string; content?: string };
-    };
-    expect(json.episode.id).toBe(SCRIPT_ASSET_DESIGN_ID);
-    expect(json.episode.title).toBe("完整原始剧本");
-    expect(json.episode.content).toBe("完整原始上传剧本正文用于查看");
+    expect(getRes.status).toBe(404);
   });
 });

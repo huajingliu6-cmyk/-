@@ -43,6 +43,16 @@ export type ParsedGenerateAssetReferenceSlot =
       kind: "upload";
       index: number;
       image: ParsedGenerateAssetReferenceImage;
+    }
+  | {
+      kind: "personal-material";
+      index: number;
+      personalMaterialId: string;
+    }
+  | {
+      kind: "system-material";
+      index: number;
+      materialId: string;
     };
 
 export type ParsedGenerateAssetRequest = {
@@ -310,10 +320,134 @@ async function parseIndexedReferenceSlots(
     () => null,
   );
 
+  const sourcesRaw = readFormString(form, "referenceSources");
+  if (sourcesRaw) {
+    let sources: unknown;
+    try {
+      sources = JSON.parse(sourcesRaw);
+    } catch {
+      return {
+        ok: false,
+        error: {
+          error: "参考图来源参数无效",
+          code: "INVALID_REFERENCE_SOURCES",
+          status: 400,
+        },
+      };
+    }
+    if (!Array.isArray(sources)) {
+      return {
+        ok: false,
+        error: {
+          error: "参考图来源参数无效",
+          code: "INVALID_REFERENCE_SOURCES",
+          status: 400,
+        },
+      };
+    }
+    for (const item of sources) {
+      if (!item || typeof item !== "object") continue;
+      const rec = item as Record<string, unknown>;
+      const index =
+        typeof rec.slot === "number" ? rec.slot : Number(rec.slot);
+      if (
+        !Number.isInteger(index) ||
+        index < 0 ||
+        index >= GENERATE_ASSET_REFERENCE_SLOT_COUNT
+      ) {
+        return {
+          ok: false,
+          error: {
+            error: `参考图最多 ${GENERATE_ASSET_REFERENCE_SLOT_COUNT} 张`,
+            code: "TOO_MANY_REFERENCE_IMAGES",
+            status: 400,
+          },
+        };
+      }
+      const sourceType = rec.sourceType;
+      if (sourceType === "personal-material") {
+        const personalMaterialId =
+          typeof rec.personalMaterialId === "string"
+            ? rec.personalMaterialId.trim()
+            : "";
+        if (!personalMaterialId) {
+          return {
+            ok: false,
+            error: {
+              error: `参考图槽位 ${index + 1} 缺少个人素材 ID`,
+              code: "INVALID_REFERENCE_SOURCES",
+              status: 400,
+            },
+          };
+        }
+        slots[index] = {
+          kind: "personal-material",
+          index,
+          personalMaterialId,
+        };
+        continue;
+      }
+      if (sourceType === "system-material") {
+        const materialId =
+          typeof rec.materialId === "string" ? rec.materialId.trim() : "";
+        if (!materialId) {
+          return {
+            ok: false,
+            error: {
+              error: `参考图槽位 ${index + 1} 缺少系统素材 ID`,
+              code: "INVALID_REFERENCE_SOURCES",
+              status: 400,
+            },
+          };
+        }
+        slots[index] = { kind: "system-material", index, materialId };
+        continue;
+      }
+      if (sourceType === "project-asset") {
+        const mediaId =
+          typeof rec.mediaId === "string" ? rec.mediaId.trim() : "";
+        if (!mediaId) {
+          return {
+            ok: false,
+            error: {
+              error: `参考图槽位 ${index + 1} 缺少项目媒体 ID`,
+              code: "INVALID_REFERENCE_SOURCES",
+              status: 400,
+            },
+          };
+        }
+        slots[index] = { kind: "media", index, mediaId };
+        continue;
+      }
+      if (sourceType === "upload") {
+        // File bytes still come from referenceImage[index].
+        continue;
+      }
+    }
+  }
+
   for (let index = 0; index < GENERATE_ASSET_REFERENCE_SLOT_COUNT; index += 1) {
     const mediaId = readFormString(form, `referenceMediaId[${index}]`);
     const fileEntry = form.get(`referenceImage[${index}]`);
     const hasFile = fileEntry instanceof File && fileEntry.size > 0;
+    const existing = slots[index];
+    if (
+      existing &&
+      (existing.kind === "personal-material" ||
+        existing.kind === "system-material")
+    ) {
+      if (mediaId || hasFile) {
+        return {
+          ok: false,
+          error: {
+            error: `参考图槽位 ${index + 1} 素材引用不能同时附带 mediaId/上传文件`,
+            code: "REFERENCE_SLOT_CONFLICT",
+            status: 400,
+          },
+        };
+      }
+      continue;
+    }
     if (mediaId && hasFile) {
       return {
         ok: false,

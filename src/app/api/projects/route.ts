@@ -12,23 +12,17 @@ import {
   ProjectNameConflictError,
 } from "@/projects/project-access";
 import { parseCreateProjectBody } from "@/projects/validate-create-project";
-import { getEnterprise, listEnterpriseProjectIdsForUser } from "@/enterprise/store";
+import { requireEnterpriseAccess } from "@/enterprise/access";
+import { hasEnterprisePermission } from "@/enterprise/permissions";
+import {
+  assignEnterpriseProjects,
+  listEnterpriseProjectIdsForUser,
+} from "@/enterprise/store";
 
 /** Next.js 仅负责会话、权限和请求边界；项目数据统一由内网 Go 服务处理。 */
 export async function GET(request: Request) {
   const session = await requireSessionUser();
   if (!session.ok) return session.response;
-
-  let management;
-  try {
-    management = await requireProjectManagementAccess();
-  } catch (error) {
-    if (isRemoteDataServiceError(error)) {
-      return NextResponse.json({ error: "内网数据服务不可用" }, { status: 503 });
-    }
-    throw error;
-  }
-  if (!management.ok) return management.response;
 
   const url = new URL(request.url);
   const page = Math.max(1, Math.trunc(Number(url.searchParams.get("page") ?? "1")) || 1);
@@ -36,6 +30,29 @@ export async function GET(request: Request) {
   const pageSize = Math.min(100, Math.max(1, rawSize));
   const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
   const enterpriseId = (url.searchParams.get("enterpriseId") ?? "").trim();
+  let enterpriseAccess:
+    | Extract<Awaited<ReturnType<typeof requireEnterpriseAccess>>, { ok: true }>
+    | null = null;
+
+  if (enterpriseId) {
+    const access = await requireEnterpriseAccess(enterpriseId);
+    if (!access.ok) return access.response;
+    enterpriseAccess = access;
+  } else {
+    let management;
+    try {
+      management = await requireProjectManagementAccess();
+    } catch (error) {
+      if (isRemoteDataServiceError(error)) {
+        return NextResponse.json(
+          { error: "内网数据服务不可用" },
+          { status: 503 },
+        );
+      }
+      throw error;
+    }
+    if (!management.ok) return management.response;
+  }
 
   try {
     const { projects } = await listProjectListItems();
@@ -44,14 +61,11 @@ export async function GET(request: Request) {
       managed === "all"
         ? projects
         : projects.filter((p) => managed.includes(p.projectId));
+    let canCreateInScope = canCreateProject(session.user);
     if (enterpriseId) {
-      const enterprise = await getEnterprise(enterpriseId);
-      const isMember = enterprise?.members.some(
-        (member) => member.userId === session.user.id,
-      );
-      if (!enterprise || !isMember) {
-        return NextResponse.json({ error: "无权访问该企业" }, { status: 403 });
-      }
+      const enterprise = enterpriseAccess!.enterprise;
+      const member = enterpriseAccess!.member;
+      canCreateInScope = hasEnterprisePermission(member, "projects.assign");
       const enterpriseProjects = new Set(enterprise.projectIds);
       filtered = filtered.filter((project) =>
         enterpriseProjects.has(project.projectId),
@@ -92,7 +106,7 @@ export async function GET(request: Request) {
         page,
         pageSize,
         hasMore: start + slice.length < total,
-        canCreateProject: canCreateProject(session.user),
+        canCreateProject: canCreateInScope,
       },
       { headers: { "Cache-Control": "no-store" } },
     );
@@ -111,18 +125,32 @@ export async function POST(request: Request) {
   const session = await requireSessionUser();
   if (!session.ok) return session.response;
 
-  if (!canCreateProject(session.user)) {
-    return NextResponse.json(
-      { error: "当前账号无法新建项目" },
-      { status: 403 },
-    );
-  }
-
   let body: unknown;
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "无效请求" }, { status: 400 });
+  }
+
+  const enterpriseId =
+    body &&
+    typeof body === "object" &&
+    typeof (body as { enterpriseId?: unknown }).enterpriseId === "string"
+      ? (body as { enterpriseId: string }).enterpriseId.trim()
+      : "";
+  let enterpriseProjectIds: string[] | null = null;
+  if (enterpriseId) {
+    const access = await requireEnterpriseAccess(
+      enterpriseId,
+      "projects.assign",
+    );
+    if (!access.ok) return access.response;
+    enterpriseProjectIds = access.enterprise.projectIds;
+  } else if (!canCreateProject(session.user)) {
+    return NextResponse.json(
+      { error: "当前账号无法新建项目" },
+      { status: 403 },
+    );
   }
 
   const parsed = parseCreateProjectBody(body);
@@ -158,6 +186,13 @@ export async function POST(request: Request) {
         idempotencyKey,
       );
       if (prior) {
+        if (enterpriseProjectIds) {
+          await assignEnterpriseProjects({
+            enterpriseId,
+            projectIds: [...enterpriseProjectIds, prior.projectId],
+            actorUserId: session.user.id,
+          });
+        }
         return NextResponse.json(
           { project: prior, rootFolderId: prior.rootFolderId, reused: true },
           { status: 200 },
@@ -174,8 +209,16 @@ export async function POST(request: Request) {
   try {
     const project = await createProjectRecord(session.user.id, {
       ...parsed.value,
+      approvalEnabled: enterpriseId ? parsed.value.approvalEnabled : false,
       idempotencyKey: idempotencyKey || undefined,
     });
+    if (enterpriseProjectIds) {
+      await assignEnterpriseProjects({
+        enterpriseId,
+        projectIds: [...enterpriseProjectIds, project.projectId],
+        actorUserId: session.user.id,
+      });
+    }
     return NextResponse.json(
       { project, rootFolderId: project.rootFolderId },
       { status: 201 },

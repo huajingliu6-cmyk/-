@@ -24,6 +24,7 @@ import {
   markNotificationRead,
 } from "@/notifications/store";
 import { loadAssetBundleDraft } from "@/projects/assets/asset-bundle-store";
+import { bindAssetBundleRevisionForSave } from "@/projects/assets/asset-bundle-revision";
 import {
   getEffectiveWorkspaceAssetBundle,
   getWorkspaceEpisodeAssetDesignDetail,
@@ -44,6 +45,7 @@ import { POST as workspaceConfirm } from "@/app/api/workspace/projects/[projectI
 import { POST as workspaceSubmit } from "@/app/api/workspace/projects/[projectId]/asset-approvals/route";
 import { POST as ownerApprove } from "@/app/api/projects/[projectId]/asset-approvals/[submissionId]/approve/route";
 import { GET as listNotifications } from "@/app/api/notifications/route";
+import { SD2_CERT_MODEL_TAG } from "@/video-generation/sd2-cert-safety";
 
 vi.mock("@/auth/require-user", () => ({
   requireSessionUser: vi.fn(),
@@ -89,6 +91,12 @@ function makeItem(
     previewKind: "image" as const,
   };
   if (assetType === "character") {
+    const sd2Ok = {
+      status: "ok" as const,
+      checkedAt: "2026-07-01T00:00:00.000Z",
+      modelId: SD2_CERT_MODEL_TAG,
+      reason: "test sd2 cert",
+    };
     return {
       id,
       name,
@@ -109,6 +117,7 @@ function makeItem(
       },
       generatedMedia: {
         ...media,
+        videoRefSafety: sd2Ok,
         history: media.history.map((entry) =>
           entry.mediaId === mediaId
             ? {
@@ -116,6 +125,7 @@ function makeItem(
                 voiceId: "localvoice_test",
                 voiceName: "测试音色",
                 voiceBound: true,
+                videoRefSafety: sd2Ok,
               }
             : entry,
         ),
@@ -405,13 +415,19 @@ describe("WORKSPACE-ASSET-APPROVAL-H1", () => {
     );
 
     // local override should not hide approved assets after merge
-    await saveWorkspaceLocalAssets({
-      projectId: project.projectId,
-      characters: [],
-      scenes: [],
-      props: [],
-      audios: [],
-    });
+    await saveWorkspaceLocalAssets(
+      await bindAssetBundleRevisionForSave(
+        project.projectId,
+        {
+          projectId: project.projectId,
+          characters: [],
+          scenes: [],
+          props: [],
+          audios: [],
+        },
+        "workspace",
+      ),
+    );
     // re-merge by approving remaining will refresh; also check effective after re-approve path
     const rest = await approveAssetApprovalItems({
       projectId: project.projectId,

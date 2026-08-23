@@ -12,6 +12,7 @@ type Props = {
   file: ScriptSourceFile | null;
   importing: boolean;
   onScriptFile: (file: File) => void;
+  onRemove?: () => void;
   onClientError: (message: string) => void;
 };
 
@@ -41,6 +42,7 @@ export function ScriptUploadPanel({
   file,
   importing,
   onScriptFile,
+  onRemove,
   onClientError,
 }: Props) {
   const inputId = useId();
@@ -110,12 +112,27 @@ export function ScriptUploadPanel({
         <span className="scs-req-star" aria-hidden>
           *
         </span>
-        选择 TXT / DOCX / Markdown 后先预览解析结果，确认导入后将自动生成分集方案。
+        选择 TXT / DOCX / Markdown 后将自动保存并创建剧集，无需再点确认分集。
       </p>
 
       {file ? (
-        <div className="scs-file-card">
-          <div className="scs-file-name">{file.name}</div>
+        <div className="scs-file-card" data-testid="script-upload-file-card">
+          <div className="scs-file-card__head">
+            <div className="scs-file-name">{file.name}</div>
+            {onRemove ? (
+              <button
+                type="button"
+                className="scs-file-remove"
+                data-testid="script-upload-remove"
+                disabled={importing}
+                aria-label="移除已上传剧本"
+                title={importing ? "处理中，暂不能移除" : "移除已上传剧本"}
+                onClick={onRemove}
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
           <div className="scs-meta-row">
             <span>{formatSize(file.size)}</span>
             <span>

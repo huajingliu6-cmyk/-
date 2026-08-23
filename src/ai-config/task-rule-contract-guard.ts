@@ -51,8 +51,50 @@ export function looksLikeDesignPromptExtractionRule(content: string): boolean {
 }
 
 /**
+ * Detect admin task rules that contradict roster JSON protocol.
+ */
+export function findRosterExtractTaskRuleContractConflicts(
+  content: string,
+): TaskRuleContractConflict | null {
+  const text = content.trim();
+  if (!text) return null;
+  const contract = buildImmutableOutputContract("asset.roster.extract");
+  if (!/"assets"\s*:/.test(contract)) return null;
+  const matched = EPISODE_DESIGN_PROMPT_ONLY_PATTERNS.filter((p) =>
+    p.re.test(text),
+  );
+  if (matched.length === 0) return null;
+  return {
+    code: "OUTPUT_CONTRACT_CONFLICT",
+    message:
+      "任务规则与资产名单提取固定输出协议冲突：该能力必须输出 roster JSON，不能要求只输出提示词或禁止 JSON。",
+    patterns: matched.map((m) => m.label),
+  };
+}
+
+/**
+ * Detect admin task rules that contradict detail JSON protocol.
+ */
+export function findDetailExtractTaskRuleContractConflicts(
+  content: string,
+): TaskRuleContractConflict | null {
+  const text = content.trim();
+  if (!text) return null;
+  const matched = EPISODE_DESIGN_PROMPT_ONLY_PATTERNS.filter((p) =>
+    p.re.test(text),
+  );
+  if (matched.length === 0) return null;
+  return {
+    code: "OUTPUT_CONTRACT_CONFLICT",
+    message:
+      "任务规则与资产详情提取固定输出协议冲突：该能力必须输出含 design 的 JSON，不能要求只输出提示词或禁止 JSON。",
+    patterns: matched.map((m) => m.label),
+  };
+}
+
+/**
  * Detect admin task rules that contradict the immutable JSON assets protocol
- * for asset.episode-design.generate (script_asset_design / episode_asset_design).
+ * for asset.episode-design.generate (legacy read-only).
  */
 export function findEpisodeDesignTaskRuleContractConflicts(
   content: string,
@@ -84,6 +126,12 @@ export function findTaskRuleOutputContractConflict(
   capabilityId: AiCapabilityId,
   content: string,
 ): TaskRuleContractConflict | null {
+  if (capabilityId === "asset.roster.extract") {
+    return findRosterExtractTaskRuleContractConflicts(content);
+  }
+  if (capabilityId === "asset.detail.extract") {
+    return findDetailExtractTaskRuleContractConflicts(content);
+  }
   if (capabilityId === "asset.episode-design.generate") {
     return findEpisodeDesignTaskRuleContractConflicts(content);
   }

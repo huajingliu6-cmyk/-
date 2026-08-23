@@ -71,9 +71,12 @@ function CharacterCreateDialogInner({
       ? projectVoices.find((v) => v.id === seed.voiceId) ?? null
       : null,
   );
+  const [formError, setFormError] = useState("");
+  const isNew = !initialDraft;
 
   const patch = (partial: Partial<CharacterDraftInput>) => {
     setDraft((prev) => ({ ...prev, ...partial }));
+    setFormError("");
   };
 
   const revokeImage = () => {
@@ -153,7 +156,15 @@ function CharacterCreateDialogInner({
           </div>
           <AssetImageUpload
             id={`${formId}-image`}
-            label="上传角色图片"
+            label={
+              isNew ? (
+                <>
+                  上传角色图片<span className="req">*</span>
+                </>
+              ) : (
+                "上传角色图片"
+              )
+            }
             tip="允许超写实真人影视风格的虚构角色图；禁止上传现实可识别个人肖像。部分视频平台可能拒识写实人脸参考。"
             value={{
               fileName: draft.imageFileName,
@@ -179,6 +190,11 @@ function CharacterCreateDialogInner({
               patch({ voiceId: v?.id ?? null });
             }}
           />
+          {formError ? (
+            <p className="amw-field-error" role="alert">
+              {formError}
+            </p>
+          ) : null}
         </div>
 
         <div className="amw-dialog-actions">
@@ -190,6 +206,10 @@ function CharacterCreateDialogInner({
             className={`amw-btn amw-btn-primary ${confirmBounce.bounceClass}`}
             disabled={!draft.name.trim()}
             onClick={() => {
+              if (isNew && !draft.pendingImageFile) {
+                setFormError("请先上传角色图片后再创建");
+                return;
+              }
               confirmBounce.trigger();
               onSubmit({
                 ...draft,
@@ -198,6 +218,7 @@ function CharacterCreateDialogInner({
               });
               setDraft(EMPTY);
               setVoice(null);
+              setFormError("");
             }}
             onAnimationEnd={confirmBounce.onAnimationEnd}
           >

@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"/><title>materials browser</title>
+<style>.hidden{display:none!important}.chip.active{outline:2px solid #06c}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.35)}
+.panel{background:#fff;margin:8vh auto;padding:16px;width:440px}</style></head>
+<body>
+<nav>
+  <a data-testid="nav-materials" href="/app/materials">素材引擎</a>
+  <a data-testid="nav-admin-materials" class="hidden" href="/app/admin/materials">管理素材</a>
+</nav>
+<section data-testid="materials-browse">
+  <div data-testid="gender-chips">
+    <button type="button" class="chip" data-gender="male">男装</button>
+    <button type="button" class="chip" data-gender="female">女装</button>
+  </div>
+  <div data-testid="theme-chips">
+    <button type="button" class="chip" data-theme="ancient">古装</button>
+    <button type="button" class="chip" data-theme="modern">现代</button>
+  </div>
+  <div data-testid="materials-grid"></div>
+  <div data-testid="my-library"></div>
+  <div data-testid="detail" class="hidden">
+    <button type="button" data-testid="cite-btn">引用到资产库</button>
+    <input data-testid="materials-import-character-id" />
+    <button type="button" data-testid="import-btn">导入到项目</button>
+    <p data-testid="import-error" class="hidden"></p>
+  </div>
+</section>
+<section data-testid="materials-admin" class="hidden">
+  <button type="button" data-testid="open-upload-modal">上传素材</button>
+  <div data-testid="upload-modal" class="modal hidden">
+    <div class="panel">
+      <input type="file" data-testid="upload-file" accept="image/*" />
+      <img data-testid="upload-preview" class="hidden" alt="preview" />
+      <div data-testid="upload-gender-chips">
+        <button type="button" class="chip" data-gender="male">男装</button>
+        <button type="button" class="chip" data-gender="female">女装</button>
+      </div>
+      <div data-testid="upload-theme-chips">
+        <button type="button" class="chip" data-theme="ancient">古装</button>
+        <button type="button" class="chip" data-theme="modern">现代</button>
+      </div>
+      <button type="button" data-testid="upload-confirm">确认保存</button>
+      <button type="button" data-testid="upload-cancel">取消</button>
+    </div>
+  </div>
+</section>
+<pre data-testid="log"></pre>
+<script>
+const state = {
+  role: "user",
+  requestId: 0,
+  tempMediaId: null,
+  selected: null,
+  filterGenders: new Set(),
+  filterThemes: new Set(),
+  fetches: [],
+  materials: [
+    { id: "m1", name: "男装古装", type: "clothing", genderTags: ["male"], themeTags: ["ancient"], status: "active", mediaId: "media-1" },
+    { id: "m2", name: "女装现代", type: "clothing", genderTags: ["female"], themeTags: ["modern"], status: "active", mediaId: "media-2" }
+  ],
+  library: []
+};
+function log(msg){ document.querySelector("[data-testid=log]").textContent += msg + "\n"; }
+function setRole(role){
+  state.role = role;
+  const show = role === "admin";
+  document.querySelector("[data-testid=nav-admin-materials]").classList.toggle("hidden", !show);
+  document.querySelector("[data-testid=materials-admin]").classList.toggle("hidden", !show);
+}
+window.__setRole = setRole;
+window.__state = state;
+window.__softDeleteCatalog = (id) => {
+  const m = state.materials.find(x => x.id === id);
+  if (m) m.status = "deleted";
+  renderGrid(state.materials.filter(x => x.status === "active"));
+};
+async function fakeFetch(url, init={}){
+  const method = (init.method || "GET").toUpperCase();
+  state.fetches.push({ url, method });
+  if (url.includes("/api/materials/media/") && method === "DELETE") {
+    state.tempMediaId = null;
+    return { ok:true, status:200, json: async()=>({ok:true}) };
+  }
+  if (url.includes("/api/materials/upload") && method === "POST") {
+    state.tempMediaId = "temp-media-1";
+    return { ok:true, status:200, json: async()=>({ mediaId: "temp-media-1" }) };
+  }
+  if (url.endsWith("/api/materials") && method === "POST") {
+    state.tempMediaId = null;
+    return { ok:true, status:201, json: async()=>({ok:true}) };
+  }
+  if (url.includes("/cite") && method === "POST") {
+    const id = state.selected.id;
+    if (!state.library.some(a => a.sourceMaterialId === id)) {
+      state.library.push({ id: "pa-" + id, sourceMaterialId: id, name: state.selected.name });
+    }
+    renderLibrary();
+    return { ok:true, status:200, json: async()=>({alreadyCited:false}) };
+  }
+  if (url.includes("/import-to-project") && method === "POST") {
+    const body = JSON.parse(init.body || "{}");
+    if (state.selected.type === "clothing" && !body.characterId) {
+      return { ok:false, status:400, json: async()=>({ code: "CLOTHING_REQUIRES_CHARACTER" }) };
+    }
+    return { ok:true, status:200, json: async()=>({ created: { kind: "clothing-look" } }) };
+  }
+  if (url.includes("/api/materials?")) {
+    const reqId = ++state.requestId;
+    const u = new URL(url, "http://local");
+    const genders = (u.searchParams.get("genders") || "").split(",").filter(Boolean);
+    const themes = (u.searchParams.get("themes") || "").split(",").filter(Boolean);
+    await new Promise(r => setTimeout(r, Number(u.searchParams.get("delay") || 0)));
+    if (reqId !== state.requestId) return { ok:true, status:200, json: async()=>({ materials: [], stale:true }) };
+    let items = state.materials.filter(m => m.status === "active");
+    if (genders.length) items = items.filter(m => m.genderTags.some(g => genders.includes(g)));
+    if (themes.length) items = items.filter(m => m.themeTags.some(t => themes.includes(t)));
+    return { ok:true, status:200, json: async()=>({ materials: items }) };
+  }
+  return { ok:true, status:200, json: async()=>({}) };
+}
+window.fetch = fakeFetch;
+function renderGrid(items){
+  const grid = document.querySelector("[data-testid=materials-grid]");
+  grid.innerHTML = items.map(m =>
+    '<button type="button" data-testid="material-card-' + m.id + '" data-id="' + m.id + '">' + m.name + "</button>"
+  ).join("");
+  grid.querySelectorAll("button").forEach(btn => {
+    btn.onclick = () => {
+      state.selected = state.materials.find(m => m.id === btn.dataset.id);
+      document.querySelector("[data-testid=detail]").classList.remove("hidden");
+    };
+  });
+}
+function renderLibrary(){
+  const el = document.querySelector("[data-testid=my-library]");
+  el.innerHTML = state.library.map(a =>
+    '<div data-testid="library-asset-' + a.id + '" data-source="' + a.sourceMaterialId + '">' + a.name + "</div>"
+  ).join("");
+}
+document.querySelectorAll("[data-testid=gender-chips] .chip").forEach(chip => {
+  chip.onclick = async () => {
+    const g = chip.dataset.gender;
+    if (state.filterGenders.has(g)) state.filterGenders.delete(g); else state.filterGenders.add(g);
+    chip.classList.toggle("active");
+    const res = await fakeFetch("/api/materials?genders=" + [...state.filterGenders].join(",") + "&delay=20");
+    const data = await res.json();
+    if (!data.stale) renderGrid(data.materials);
+  };
+});
+document.querySelectorAll("[data-testid=theme-chips] .chip").forEach(chip => {
+  chip.onclick = async () => {
+    const g = chip.dataset.theme;
+    if (state.filterThemes.has(g)) state.filterThemes.delete(g); else state.filterThemes.add(g);
+    chip.classList.toggle("active");
+    const res = await fakeFetch("/api/materials?themes=" + [...state.filterThemes].join(",") + "&delay=20");
+    const data = await res.json();
+    if (!data.stale) renderGrid(data.materials);
+  };
+});
+document.querySelector("[data-testid=cite-btn]").onclick = async () => {
+  await fakeFetch("/api/materials/" + state.selected.id + "/cite", { method: "POST" });
+  log("cited");
+};
+document.querySelector("[data-testid=import-btn]").onclick = async () => {
+  const characterId = document.querySelector("[data-testid=materials-import-character-id]").value.trim();
+  const res = await fakeFetch("/api/materials/" + state.selected.id + "/import-to-project", {
+    method: "POST",
+    body: JSON.stringify({ projectId: "p1", characterId: characterId || undefined })
+  });
+  const data = await res.json();
+  const err = document.querySelector("[data-testid=import-error]");
+  if (!res.ok) { err.textContent = data.code; err.classList.remove("hidden"); }
+  else { err.classList.add("hidden"); log("imported:" + data.created.kind); }
+};
+document.querySelector("[data-testid=open-upload-modal]").onclick = () => {
+  document.querySelector("[data-testid=upload-modal]").classList.remove("hidden");
+};
+document.querySelector("[data-testid=upload-file]").onchange = async () => {
+  const res = await fakeFetch("/api/materials/upload", { method: "POST" });
+  const data = await res.json();
+  const img = document.querySelector("[data-testid=upload-preview]");
+  img.src = "data:image/png;base64,aaa";
+  img.dataset.mediaId = data.mediaId;
+  img.classList.remove("hidden");
+};
+document.querySelector("[data-testid=upload-cancel]").onclick = async () => {
+  const img = document.querySelector("[data-testid=upload-preview]");
+  if (img.dataset.mediaId) await fakeFetch("/api/materials/media/" + img.dataset.mediaId, { method: "DELETE" });
+  document.querySelector("[data-testid=upload-modal]").classList.add("hidden");
+  img.classList.add("hidden");
+  delete img.dataset.mediaId;
+};
+document.querySelector("[data-testid=upload-confirm]").onclick = async () => {
+  await fakeFetch("/api/materials", { method: "POST", body: "{}" });
+  document.querySelector("[data-testid=upload-modal]").classList.add("hidden");
+};
+document.querySelectorAll("[data-testid=upload-gender-chips] .chip, [data-testid=upload-theme-chips] .chip").forEach(chip => {
+  chip.onclick = () => chip.classList.toggle("active");
+});
+setRole("user");
+renderGrid(state.materials.filter(m => m.status === "active"));
+</script>
+</body></html>

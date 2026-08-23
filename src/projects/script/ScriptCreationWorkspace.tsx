@@ -24,7 +24,12 @@ import type { ScriptDraft } from "@/projects/script/script-draft-store";
 import {
   createScriptSplitConfirmIdempotencyKey,
   episodeContentFingerprintClient,
+  scriptSplitConfirmIdempotencyKey,
 } from "@/projects/script/script-split-client";
+import {
+  formatScriptAutoSplitNote,
+  scriptShowsFormalEpisodeList,
+} from "@/projects/script/script-auto-split-ui";
 import {
   emptyEpisodeSplitState,
   type ProposedEpisode,
@@ -41,7 +46,12 @@ import { EPISODE_CHARS_DEFAULT } from "@/projects/script/types";
 import { countVisibleChars } from "@/text-generation/char-count";
 import { useChipBounce } from "@/shell/useChipBounce";
 import { useGenerationBusy } from "@/shell/GenerationBusyGuard";
+import { ScriptAssetExtractPromptCard } from "@/projects/script/ScriptAssetExtractPromptCard";
+import { defaultAssetExtractionModelKey } from "@/projects/assets/extraction/models";
+import { isLiveExtractionStatus } from "@/projects/assets/extraction/types";
 import "@/projects/script/script-workspace.css";
+
+type ExtractionAction = "prompt" | "noop" | "auto-reextract";
 
 type Props = {
   projectId: string;
@@ -139,10 +149,54 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
   const [importPreview, setImportPreview] =
     useState<ScriptImportApiResponse | null>(null);
   const [uiNote, setUiNote] = useState("");
+  const [extractPromptOpen, setExtractPromptOpen] = useState(false);
+  const [extractPromptModel, setExtractPromptModel] = useState(
+    defaultAssetExtractionModelKey(),
+  );
+  const [extractPromptStarting, setExtractPromptStarting] = useState(false);
   const importSeqRef = useRef(0);
   const splitRequestSeqRef = useRef(0);
   const splitGenerationIdRef = useRef<string | null>(null);
   const splitInFlightRef = useRef(false);
+
+  const openExtractPrompt = useCallback(() => {
+    setExtractPromptOpen(true);
+    setUiNote("分集已确认。可选择是否立即提取资产。");
+  }, []);
+
+  const shouldPromptExtraction = useCallback(async () => {
+    const res = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/asset-extraction`,
+      { credentials: "include" },
+    );
+    if (!res.ok) return false;
+    const payload = (await res.json()) as {
+      extractPromptAvailable?: boolean;
+      hasActiveVersion?: boolean;
+      task?: { status?: string } | null;
+    };
+    if (payload.extractPromptAvailable === true) return true;
+    return (
+      payload.hasActiveVersion !== true &&
+      !isLiveExtractionStatus(payload.task?.status)
+    );
+  }, [projectId]);
+
+  const applyExtractionAction = useCallback(
+    (action: ExtractionAction | undefined) => {
+      if (action === "prompt") {
+        openExtractPrompt();
+        return true;
+      }
+      return false;
+    },
+    [openExtractPrompt],
+  );
+
+  const goToAssets = useCallback(() => {
+    nextBounce.trigger();
+    router.push(`/app/projects/${encodeURIComponent(projectId)}/assets`);
+  }, [nextBounce, projectId, router]);
 
   const selectedEpisode =
     episodes.find((ep) => ep.id === selectedId) ?? null;
@@ -251,6 +305,158 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
     };
   }, [draftSetters, projectId]);
 
+  const persistImportedScriptAndAutoSplit = useCallback(
+    async (preview: ScriptImportApiResponse): Promise<void> => {
+      const sourceImportMeta = buildSourceImportFromPreview(preview);
+      const nextSourceFile: ScriptSourceFile = {
+        id: `file-${preview.sha256.slice(0, 12)}`,
+        name: preview.fileName,
+        type: scriptSourceFileTypeFromFormat(preview.format),
+        size: preview.byteLength,
+        status: "uploaded",
+      };
+      setConfirmingImport(true);
+      setSplitStage("剧本已导入，正在自动分集…");
+      const replaceExisting =
+        episodes.length > 0 ||
+        Boolean(sourceText?.trim()) ||
+        Boolean(sourceImport);
+      try {
+        const res = await fetch(
+          `/api/projects/${encodeURIComponent(projectId)}/script-draft`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              projectId,
+              autoSplit: true,
+              replaceExisting,
+              sourceFile: nextSourceFile,
+              sourceText: preview.sourceText,
+              preambleNotes: preview.preamble || null,
+              sourceImport: sourceImportMeta,
+              novelTask,
+              episodes,
+              selectedId,
+              listPage,
+              splitConfig,
+              novelOpen,
+              episodeSplit,
+            }),
+          },
+        );
+        const payload = (await res.json()) as {
+          error?: string;
+          code?: string;
+          draft?: ScriptDraft;
+          idempotent?: boolean;
+          mode?: string;
+          warnings?: string[];
+          downstreamSync?: { syncStatus?: string };
+          extractionAction?: ExtractionAction;
+        };
+        if (payload.draft) {
+          applyDraftToState(payload.draft, draftSetters);
+        }
+        if (!res.ok) {
+          throw new Error(payload.error ?? "自动分集失败");
+        }
+        const formalCount = payload.draft?.episodes.length ?? 0;
+        setUiNote(
+          formatScriptAutoSplitNote({
+            episodeCount: formalCount,
+            mode: payload.mode,
+            warnings: payload.warnings,
+            idempotent: payload.idempotent,
+            downstreamSync: payload.downstreamSync?.syncStatus ?? null,
+          }),
+        );
+        applyExtractionAction(payload.extractionAction);
+        setImportPreview(null);
+      } finally {
+        setConfirmingImport(false);
+        setSplitStage("");
+      }
+    },
+    [
+      draftSetters,
+      episodeSplit,
+      episodes,
+      listPage,
+      novelOpen,
+      novelTask,
+      projectId,
+      selectedId,
+      splitConfig,
+      applyExtractionAction,
+      sourceImport,
+      sourceText,
+    ],
+  );
+
+  const handleRemoveUploadedScript = useCallback(async () => {
+    if (importing || confirmingImport || splitGenerating) return;
+    const hasContent =
+      Boolean(sourceFile) ||
+      Boolean(sourceText?.trim()) ||
+      episodes.length > 0;
+    if (!hasContent) return;
+    if (episodes.length > 0) {
+      const confirmed = window.confirm(
+        "移除剧本将清空已分集内容，是否继续？",
+      );
+      if (!confirmed) return;
+    }
+    importSeqRef.current += 1;
+    splitRequestSeqRef.current += 1;
+    splitInFlightRef.current = false;
+    setSplitGenerating(false);
+    setSplitStage("");
+    setImportPreview(null);
+    setUiNote("");
+    try {
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/script-draft`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId, clearScript: true }),
+        },
+      );
+      const payload = (await res.json()) as {
+        draft?: ScriptDraft;
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(payload.error ?? "无法移除剧本");
+      }
+      if (payload.draft) {
+        applyDraftToState(payload.draft, draftSetters);
+      } else {
+        setSourceFile(null);
+        setSourceText("");
+        setSourceImport(null);
+        setPreambleNotes("");
+        setEpisodes([]);
+        setSelectedId(null);
+        setProposedEpisodes([]);
+        setEpisodeSplit(emptyEpisodeSplitState());
+      }
+      setUiNote("已移除上传的剧本，可重新上传。");
+    } catch (error) {
+      setUiNote(error instanceof Error ? error.message : "无法移除剧本");
+    }
+  }, [
+    confirmingImport,
+    draftSetters,
+    episodes.length,
+    importing,
+    projectId,
+    sourceFile,
+    sourceText,
+    splitGenerating,
+  ]);
+
   const handleScriptFile = useCallback(
     async (file: File) => {
       const seq = ++importSeqRef.current;
@@ -276,17 +482,16 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
       try {
         const preview = await postScriptImportByFile(projectId, file);
         if (seq !== importSeqRef.current) return;
-        setImportPreview(preview);
         setSourceFile({
           id: `file-${preview.sha256.slice(0, 12)}`,
           name: preview.fileName,
           type,
           size: preview.byteLength,
-          status: "selected",
+          status: "uploaded",
         });
-        setUiNote(
-          `已解析 ${preview.episodeCount} 集预览，确认后将保存源文本并进入本地分集。`,
-        );
+        setImporting(false);
+        await persistImportedScriptAndAutoSplit(preview);
+        if (seq !== importSeqRef.current) return;
       } catch (error) {
         if (seq !== importSeqRef.current) return;
         setImportPreview(null);
@@ -308,7 +513,7 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
         }
       }
     },
-    [projectId],
+    [persistImportedScriptAndAutoSplit, projectId],
   );
 
   const handleCancelImport = useCallback(() => {
@@ -349,6 +554,9 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
           draft?: ScriptDraft;
           warnings?: string[];
           mode?: string;
+          idempotent?: boolean;
+          downstreamSync?: { syncStatus?: string };
+          extractionAction?: ExtractionAction;
         };
         if (
           seq !== splitRequestSeqRef.current ||
@@ -374,15 +582,16 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
         }
         const warn =
           payload.warnings && payload.warnings.length > 0
-            ? `（${payload.warnings.slice(0, 2).join("；")}）`
-            : "";
-        const modeHint =
-          payload.mode === "blocks"
-            ? "（按段落均分）"
-            : payload.mode === "title"
-              ? "（按标题）"
-              : "";
-        return `本地分集完成${modeHint}，请核对各集后确认剧本。${warn}`;
+            ? payload.warnings
+            : [];
+        applyExtractionAction(payload.extractionAction);
+        return formatScriptAutoSplitNote({
+          episodeCount: payload.draft?.episodes.length ?? 0,
+          mode: payload.mode,
+          warnings: warn,
+          idempotent: payload.idempotent,
+          downstreamSync: payload.downstreamSync?.syncStatus ?? null,
+        });
       } catch (error) {
         if (
           seq !== splitRequestSeqRef.current ||
@@ -413,94 +622,22 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
         }
       }
     },
-    [draftSetters, projectId],
+    [applyExtractionAction, draftSetters, projectId],
   );
 
   const handleConfirmImport = useCallback(async () => {
     if (!importPreview || confirmingImport || splitInFlightRef.current) return;
-    setConfirmingImport(true);
     setUiNote("");
     const preview = importPreview;
     try {
-      const sourceImportMeta = buildSourceImportFromPreview(preview);
-      const nextSourceFile: ScriptSourceFile = {
-        id: `file-${preview.sha256.slice(0, 12)}`,
-        name: preview.fileName,
-        type: scriptSourceFileTypeFromFormat(preview.format),
-        size: preview.byteLength,
-        status: "uploaded",
-      };
-      const resetSplit = emptyEpisodeSplitState();
-      const res = await fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/script-draft`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            projectId,
-            sourceFile: nextSourceFile,
-            sourceText: preview.sourceText,
-            preambleNotes: preview.preamble || null,
-            sourceImport: sourceImportMeta,
-            novelTask,
-            episodes: [],
-            selectedId: null,
-            listPage: 1,
-            splitConfig,
-            novelOpen,
-            episodeSplit: resetSplit,
-          }),
-        },
-      );
-      const payload = (await res.json()) as {
-        error?: string;
-        draft?: ScriptDraft;
-      };
-      if (!res.ok) {
-        throw new Error(payload.error ?? "保存失败");
-      }
-      if (payload.draft) {
-        applyDraftToState(payload.draft, draftSetters);
-      } else {
-        setSourceFile(nextSourceFile);
-        setSourceText(preview.sourceText);
-        setPreambleNotes(preview.preamble || null);
-        setSourceImport(sourceImportMeta);
-        setEpisodes([]);
-        setSelectedId(null);
-        setEpisodeSplit(resetSplit);
-        setProposedEpisodes([]);
-      }
-      setImportPreview(null);
-      setConfirmingImport(false);
-      try {
-        const note = await runLocalSplit({
-          body: {},
-          stageMessage: "剧本已导入，正在自动分集…",
-        });
-        setUiNote(note);
-      } catch (splitError) {
-        const message =
-          splitError instanceof Error
-            ? splitError.message
-            : "本地分集失败";
-        if (message !== "已取消" && message !== "分集进行中，请稍候") {
-          setUiNote(`自动分集失败，请点击重新分集。${message}`);
-        }
-      }
+      await persistImportedScriptAndAutoSplit(preview);
     } catch (error) {
       setUiNote(error instanceof Error ? error.message : "保存失败");
-      setConfirmingImport(false);
     }
   }, [
     confirmingImport,
-    draftSetters,
     importPreview,
-    novelOpen,
-    novelTask,
-    projectId,
-    runLocalSplit,
-    splitConfig,
+    persistImportedScriptAndAutoSplit,
   ]);
 
   const handleStartSplit = useCallback(async () => {
@@ -587,7 +724,7 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
 
   const handleConfirmSplit = useCallback(() => {
     setSplitOpen(false);
-    setUiNote("手动分集规则仅作备用；确认导入后将自动生成分集方案。");
+    setUiNote("手动分集规则仅作备用；上传剧本后将自动分集并创建剧集。");
     void splitScriptEpisodes({
       projectId,
       ...splitConfig,
@@ -598,8 +735,11 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
 
   const handleConfirmScript = useCallback(async () => {
     if (episodeSplit.status === "confirmed" && episodes.length > 0) {
-      nextBounce.trigger();
-      router.push(`/app/projects/${encodeURIComponent(projectId)}/assets`);
+      if (await shouldPromptExtraction()) {
+        openExtractPrompt();
+        return;
+      }
+      goToAssets();
       return;
     }
     if (episodeSplit.status !== "review" || proposedEpisodes.length === 0) {
@@ -628,13 +768,16 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
             sourceFingerprint,
             confirmedRevision: episodeSplit.confirmedRevision,
             proposedEpisodes: withFingerprints,
-            idempotencyKey: createScriptSplitConfirmIdempotencyKey(),
+            idempotencyKey: sourceFingerprint
+              ? scriptSplitConfirmIdempotencyKey(sourceFingerprint)
+              : createScriptSplitConfirmIdempotencyKey(),
           }),
         },
       );
       const payload = (await res.json()) as {
         error?: string;
         draft?: ScriptDraft;
+        extractionAction?: ExtractionAction;
       };
       if (!res.ok) {
         throw new Error(payload.error ?? "确认分集失败");
@@ -642,24 +785,28 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
       if (payload.draft) {
         applyDraftToState(payload.draft, draftSetters);
       }
+      if (applyExtractionAction(payload.extractionAction)) {
+        return;
+      }
       setUiNote("分集已确认，正在进入资产设计…");
-      nextBounce.trigger();
-      router.push(`/app/projects/${encodeURIComponent(projectId)}/assets`);
+      goToAssets();
     } catch (error) {
       setUiNote(error instanceof Error ? error.message : "确认分集失败");
     } finally {
       setConfirmingSplit(false);
     }
   }, [
+    applyExtractionAction,
     draftSetters,
     episodeSplit.confirmedRevision,
     episodeSplit.sourceFingerprint,
     episodeSplit.status,
     episodes.length,
-    nextBounce,
+    goToAssets,
+    openExtractPrompt,
     projectId,
     proposedEpisodes,
-    router,
+    shouldPromptExtraction,
   ]);
 
   const updateProposedEpisode = useCallback(
@@ -845,17 +992,22 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
     !importing &&
     !confirmingImport;
   const replacing = hasFormalEpisodes || Boolean(sourceText?.trim());
+  const showFormalEpisodeList = scriptShowsFormalEpisodeList({
+    splitStatus: episodeSplit.status,
+    formalEpisodeCount: episodes.length,
+  });
   const showSplitReview =
-    splitInReview ||
-    episodeSplit.status === "failed" ||
-    episodeSplit.status === "stale";
+    !showFormalEpisodeList &&
+    (splitInReview ||
+      episodeSplit.status === "failed" ||
+      episodeSplit.status === "stale");
   const fabDisabled =
     !canGoNext || splitGenerating || confirmingSplit || confirmingImport;
   const fabTitle = splitConfirmed
     ? undefined
     : splitInReview
       ? "确认分集方案并进入资产设计"
-      : "请先导入源文本；确认导入后将自动生成分集方案";
+      : "请先上传剧本；上传成功后将自动分集并创建剧集";
 
   return (
     <div className="scw-script">
@@ -906,6 +1058,9 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
               importing={importing || confirmingImport || splitGenerating}
               onScriptFile={(file) => {
                 void handleScriptFile(file);
+              }}
+              onRemove={() => {
+                void handleRemoveUploadedScript();
               }}
               onClientError={(message) => {
                 importSeqRef.current += 1;
@@ -975,7 +1130,15 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
                 );
               }}
             />
-            {uiNote ? <p className="scs-ui-note">{uiNote}</p> : null}
+            {uiNote ? (
+              <p
+                className="scs-ui-note"
+                data-testid="script-auto-split-note"
+                role="status"
+              >
+                {uiNote}
+              </p>
+            ) : null}
             {episodeSplit.status === "failed" && episodeSplit.errorMessage ? (
               <p className="scs-error" role="alert">
                 {episodeSplit.errorMessage}
@@ -993,7 +1156,7 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
               }))}
               selectedId={selectedId}
               page={listPage}
-              emptyHint="分集方案为空，请重新分集。"
+              emptyHint="无法识别分集或尚未上传剧本。"
               onSelect={(id) => {
                 setSelectedId(id);
               }}
@@ -1085,7 +1248,7 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
             <span className="scs-req-star" aria-hidden>
               *
             </span>
-            确认导入后将自动分集，核对方案后再确认剧本
+            上传剧本后将自动分集并创建剧集
           </p>
         ) : null}
         <button
@@ -1112,6 +1275,50 @@ export function ScriptCreationWorkspace({ projectId }: Props) {
         onClose={() => setSplitOpen(false)}
         onChange={setSplitConfig}
         onConfirm={handleConfirmSplit}
+      />
+
+      <ScriptAssetExtractPromptCard
+        open={extractPromptOpen}
+        modelKey={extractPromptModel}
+        starting={extractPromptStarting}
+        onModelKeyChange={setExtractPromptModel}
+        onSkip={() => {
+          setExtractPromptOpen(false);
+          goToAssets();
+        }}
+        onStart={() => {
+          void (async () => {
+            setExtractPromptStarting(true);
+            try {
+              const res = await fetch(
+                `/api/projects/${encodeURIComponent(projectId)}/asset-extraction/tasks`,
+                {
+                  method: "POST",
+                  credentials: "include",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    scope: "all",
+                    modelKey: extractPromptModel,
+                  }),
+                },
+              );
+              if (!res.ok) {
+                const payload = (await res.json().catch(() => ({}))) as {
+                  error?: string;
+                };
+                throw new Error(payload.error ?? "无法开始提取");
+              }
+              setExtractPromptOpen(false);
+              goToAssets();
+            } catch (error) {
+              setUiNote(
+                error instanceof Error ? error.message : "无法开始提取",
+              );
+            } finally {
+              setExtractPromptStarting(false);
+            }
+          })();
+        }}
       />
 
       {importPreview ? (

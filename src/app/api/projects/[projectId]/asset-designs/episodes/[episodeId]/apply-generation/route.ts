@@ -92,11 +92,12 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  const syncResult = await syncManagementToWorkspace(projectId);
-  if (!syncResult.ok) {
+  try {
+    await syncManagementToWorkspace(projectId);
+  } catch (error) {
     console.error(
       `[workspace-sync] management→workspace sync failed for ${projectId}:`,
-      syncResult.error,
+      error,
     );
   }
 

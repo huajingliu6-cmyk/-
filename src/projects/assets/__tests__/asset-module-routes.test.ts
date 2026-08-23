@@ -45,7 +45,18 @@ describe("asset module management routes", () => {
     const shell = readSrc("src/projects/assets/ProjectAssetsShell.tsx");
     const css = readSrc("src/projects/assets/asset-workspace.css");
     expect(workspace).toContain("amw-library-workspace");
+    expect(workspace).not.toContain("amw-head");
+    expect(workspace).toContain("asset-library-toolbar__save");
+    expect(workspace).toContain('"保存"');
+    expect(workspace).toContain("persistLibraryDesignItems");
+    expect(workspace).toContain("UnsavedPromptDialog");
     expect(shell).not.toContain("amw-head--shell");
+    expect(css).toMatch(
+      /\.asset-library-page__inner[\s\S]*?grid-template-rows:\s*auto minmax\(0, 1fr\)/,
+    );
+    expect(css).not.toMatch(
+      /\.asset-library-page__inner[\s\S]*?grid-template-rows:\s*auto auto minmax\(0, 1fr\)/,
+    );
     expect(css).toMatch(
       /\.amw-layout\s*\{[\s\S]*grid-template-columns:\s*minmax\(260px, 3fr\) minmax\(0, 7fr\)/,
     );
@@ -119,28 +130,50 @@ describe("asset module management routes", () => {
     );
     expect(workspace).toContain("EpisodeAssetDesignWorkspace");
     expect(workspace).toContain("headless");
+    expect(workspace).not.toContain("onExtractionRequestConsumed={handleExtractionRequestConsumed}");
+    expect(workspace).not.toContain("`asset-extract-${projectId}-${safeRandomUUID()}`");
     expect(workspace).not.toContain("asset-library-extraction-panel");
+    expect(workspace).toMatch(
+      /className="asset-library-library-surface"\s*key=\{`\$\{visibleTab\}-\$\{tabKey\}-\$\{viewEpisodeId \?\? "all"\}`\}/,
+    );
     expect(toolbar).toContain("GlassSelect");
-    expect(toolbar).toContain("一键提取资产");
-    expect(toolbar).toContain("全剧本提取");
-    expect(toolbar).toContain("选集提取");
+    expect(toolbar).toContain("提取本集资产");
+    expect(toolbar).not.toContain("全剧本提取");
+    expect(toolbar).not.toContain("一键提取资产");
     expect(toolbar).not.toContain("已入库");
     expect(toolbar).toContain("查看单集资产");
+    expect(toolbar).toContain("trailing");
+    expect(toolbar).toContain("asset-extraction-toolbar__trailing");
     expect(toolbar).not.toContain("当前资产");
+    expect(workspace).toContain("trailing={");
     expect(workspace).toContain("showApprovalUi={approvalEnabled}");
     expect(workspace).toContain("submitApprovalRequestId={submitApprovalRequestId}");
     expect(workspace).toContain('data-testid="asset-submit-approval"');
     expect(workspace).toContain("提交审批");
-    expect(workspace).toContain("所有人协作");
+    expect(workspace).not.toContain("所有人协作");
+    expect(workspace).not.toContain("审批协作");
+    expect(workspace).not.toContain("asset-collaboration-badge");
     expect(workspace).not.toContain("activeSurface");
     expect(workspace).not.toContain("asset-library-surface-toggle");
-    expect(character).toContain("character-looks");
-    expect(character).toContain("角色造型");
-    expect(character).toContain("新增造型");
+    expect(character).toContain("character-prompt-split");
+    expect(character).toContain("character-history-trigger");
+    expect(character).toContain("character-history-popover");
+    expect(character).not.toContain("character-generation-history");
     expect(character).toContain("LibraryCharacterLookEditor");
+    expect(character).not.toContain("CreateCharacterLookDialog");
+    expect(character).toContain("新增人物造型");
+    expect(character).toContain("LibraryAssetPromptPanel");
+    expect(character).not.toContain("AssetBasicInfo");
     expect(lookEditor).toContain("/assets-draft/media/generate");
-    expect(lookEditor).toContain("/assets-draft/media/save");
+    expect(lookEditor).toContain("/assets-draft/characters/");
+    expect(lookEditor).toContain("append-appearance-media");
+    expect(lookEditor).toContain("add-look");
+    expect(lookEditor).toContain('form.set("setPrimary", "false")');
+    expect(lookEditor).not.toContain("confirm-appearance");
+    expect(lookEditor).not.toContain("/assets-draft/media/save");
     expect(lookEditor).not.toContain("入库");
+    expect(character).toContain("confirm-appearance");
+    expect(character).toContain("确认使用");
   });
 
   it("design workspace no longer embeds 查看资产库 shortcut", () => {
@@ -156,8 +189,10 @@ describe("asset module management routes", () => {
     expect(source).not.toContain("AudioCreateDialog");
     expect(source).toContain("pendingMedia");
     expect(source).toContain("createdAssets");
-    expect(source).toContain("ead-extract-all");
-    expect(source).toContain("一键提取");
+    expect(source).toContain("ead-extract-episode");
+    expect(source).toContain("提取本集资产");
+    expect(source).not.toContain("ead-extract-all");
+    expect(source).not.toContain("一键提取");
     expect(source).toContain("按集补提取");
     expect(source).toContain("ead-episode-select");
     expect(source).not.toContain("ead-ep-list");

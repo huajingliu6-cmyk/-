@@ -9,6 +9,8 @@ import {
 } from "@/projects/assets/episode-design/store";
 import { projectRootDir } from "@/projects/project-storage";
 import { isRemoteDataOnly } from "@/persistence/remote-data-client";
+import { readAssetDocumentRevisionField } from "@/projects/assets/asset-bundle-revision";
+import { wrapWriteFailure } from "@/projects/operation-failed";
 import {
   transformEpisodeAssetDesignConfirmation,
   type ConfirmEpisodeAssetDesignResult,
@@ -86,7 +88,6 @@ export async function confirmEpisodeAssetDesign(input: {
   userId: string;
   fingerprint: string;
   itemId?: string;
-  requireGeneratedMedia?: boolean;
 }): Promise<ConfirmEpisodeAssetDesignResult> {
   if (isRemoteDataOnly()) {
     return confirmEpisodeAssetDesignRemote(input);
@@ -114,10 +115,41 @@ export async function confirmEpisodeAssetDesign(input: {
   });
   if (!transformed.writeRequired) return transformed.result;
 
-  await atomicWriteTwoJsonFiles({
-    projectId: input.projectId,
-    designJson: JSON.stringify(transformed.nextStore, null, 2),
-    assetsJson: JSON.stringify(transformed.nextBundle, null, 2),
-  });
+  const designExpected = readAssetDocumentRevisionField(store);
+  const assetsExpected = readAssetDocumentRevisionField(bundleDraft);
+
+  try {
+    await atomicWriteTwoJsonFiles({
+      projectId: input.projectId,
+      designJson: JSON.stringify(
+        {
+          ...transformed.nextStore,
+          documentRevision: designExpected + 1,
+        },
+        null,
+        2,
+      ),
+      assetsJson: JSON.stringify(
+        {
+          ...transformed.nextBundle,
+          documentRevision: assetsExpected + 1,
+        },
+        null,
+        2,
+      ),
+    });
+  } catch (error) {
+    wrapWriteFailure(error);
+  }
+
+  try {
+    const { syncManagementToWorkspace } = await import(
+      "@/projects/workspace-sync/sync-management-to-workspace"
+    );
+    await syncManagementToWorkspace(input.projectId);
+  } catch (error) {
+    wrapWriteFailure(error);
+  }
+
   return transformed.result;
 }

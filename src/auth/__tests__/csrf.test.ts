@@ -60,4 +60,36 @@ describe("assertSameOriginMutation", () => {
     });
     expect(assertSameOriginMutation(req)).toBeNull();
   });
+
+  it("allows LAN gateway Origin when proxy Host omits port but WEB_PORT is set", () => {
+    const prev = process.env.WEB_PORT;
+    process.env.WEB_PORT = "3080";
+    try {
+      const req = new Request("http://192.168.100.164/api/auth/login", {
+        method: "POST",
+        headers: {
+          host: "192.168.100.164",
+          origin: "http://192.168.100.164:3080",
+          "x-forwarded-proto": "http",
+        },
+      });
+      expect(assertSameOriginMutation(req)).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.WEB_PORT;
+      else process.env.WEB_PORT = prev;
+    }
+  });
+
+  it("allows LAN gateway Origin when X-Forwarded-Host includes port", () => {
+    const req = new Request("http://web:3000/api/auth/login", {
+      method: "POST",
+      headers: {
+        host: "192.168.100.164:3080",
+        origin: "http://192.168.100.164:3080",
+        "x-forwarded-host": "192.168.100.164:3080",
+        "x-forwarded-proto": "http",
+      },
+    });
+    expect(assertSameOriginMutation(req)).toBeNull();
+  });
 });

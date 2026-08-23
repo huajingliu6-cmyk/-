@@ -100,7 +100,7 @@ export function AuthenticatedNavigation({
             onClick={(event) => {
               if (isGenerationBusy()) {
                 event.preventDefault();
-                void confirmGenerationLeaveIfNeeded();
+                void confirmGenerationLeaveIfNeeded(item.href);
                 return;
               }
               bounce(item.id);

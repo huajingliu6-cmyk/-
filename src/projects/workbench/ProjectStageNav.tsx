@@ -84,7 +84,7 @@ export function ProjectStageNav({
               onClick={(event) => {
                 if (isGenerationBusy()) {
                   event.preventDefault();
-                  void confirmGenerationLeaveIfNeeded();
+                  void confirmGenerationLeaveIfNeeded(stage.href);
                   return;
                 }
                 if (!isActive && stage.id === "storyboard") {

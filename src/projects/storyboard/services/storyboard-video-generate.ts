@@ -487,10 +487,13 @@ export async function ensureShotVideoRefPrechecks(params: {
     const { runAndPersistAssetSd2Certification } = await import(
       "@/video-generation/sd2-asset-certification"
     );
+    const { isSd2CertRejectedForVideoRef } = await import(
+      "@/video-generation/sd2-cert-safety"
+    );
     const {
-      isSd2CertifiedForVideoRef,
-      isSd2CertRejectedForVideoRef,
-    } = await import("@/video-generation/sd2-cert-safety");
+      isCharacterMediaSd2Certified,
+      getCharacterMediaVideoRefSafety,
+    } = await import("@/projects/assets/character-media-video-ref");
 
     for (const assetId of params.characterIds) {
       const draft = await loadAssetBundleDraft(params.projectId);
@@ -502,16 +505,30 @@ export async function ensureShotVideoRefPrechecks(params: {
           character.imageMimeType,
       );
       if (!hasImage) continue;
-      if (isSd2CertifiedForVideoRef(character.videoRefSafety)) continue;
-      if (isSd2CertRejectedForVideoRef(character.videoRefSafety)) continue;
+      const primaryId =
+        character.primaryMediaId?.trim() ||
+        character.imageFileName?.trim() ||
+        character.id;
+      if (isCharacterMediaSd2Certified(character, primaryId)) continue;
+      if (
+        isSd2CertRejectedForVideoRef(
+          getCharacterMediaVideoRefSafety(character, primaryId),
+        )
+      ) {
+        continue;
+      }
       try {
         await runAndPersistAssetSd2Certification({
           projectId: params.projectId,
           assetId,
+          mediaId: primaryId,
           label: character.name,
         });
-      } catch {
-        /* persisted inside helper */
+      } catch (error) {
+        const { isVideoRefPersistProtocolError } = await import(
+          "@/projects/assets/video-ref-precheck-persist"
+        );
+        if (isVideoRefPersistProtocolError(error)) throw error;
       }
     }
   } else {
@@ -531,9 +548,13 @@ export async function ensureShotVideoRefPrechecks(params: {
         await runAndPersistAssetVideoRefPrecheck({
           projectId: params.projectId,
           assetId,
+          store: "management",
         });
-      } catch {
-        /* persist check_failed inside helper when possible */
+      } catch (error) {
+        const { isVideoRefPersistProtocolError } = await import(
+          "@/projects/assets/video-ref-precheck-persist"
+        );
+        if (isVideoRefPersistProtocolError(error)) throw error;
       }
     }
   }
@@ -554,11 +575,31 @@ export async function ensureShotVideoRefPrechecks(params: {
       draft.scenes.find((s) => s.id === id) ??
       draft.props.find((p) => p.id === id);
     if (!asset) continue;
-    safetyByAssetId.set(id, asset.videoRefSafety);
+    if ("mediaVideoRefSafety" in asset || "primaryMediaId" in asset) {
+      const character = asset as CharacterAsset;
+      const primaryId =
+        character.primaryMediaId?.trim() ||
+        character.imageFileName?.trim() ||
+        character.id;
+      const { getCharacterMediaVideoRefSafety } = await import(
+        "@/projects/assets/character-media-video-ref"
+      );
+      safetyByAssetId.set(
+        id,
+        getCharacterMediaVideoRefSafety(character, primaryId),
+      );
+    } else {
+      safetyByAssetId.set(id, asset.videoRefSafety);
+    }
   }
 
-  const { isSd2CertifiedForVideoRef, isSd2CertRejectedForVideoRef } =
-    await import("@/video-generation/sd2-cert-safety");
+  const { isSd2CertRejectedForVideoRef } = await import(
+    "@/video-generation/sd2-cert-safety"
+  );
+  const {
+    isCharacterMediaSd2Certified,
+    getCharacterMediaVideoRefSafety,
+  } = await import("@/projects/assets/character-media-video-ref");
 
   const uncertified: string[] = [];
   for (const id of params.characterIds) {
@@ -570,28 +611,32 @@ export async function ensureShotVideoRefPrechecks(params: {
         character.imageMimeType,
     );
     if (!hasImage) continue;
+    const primaryId =
+      character.primaryMediaId?.trim() ||
+      character.imageFileName?.trim() ||
+      character.id;
+    const safety = getCharacterMediaVideoRefSafety(character, primaryId);
 
     if (sd2PlatformConfigured) {
-      if (isSd2CertifiedForVideoRef(character.videoRefSafety)) continue;
-      if (isSd2CertRejectedForVideoRef(character.videoRefSafety)) {
+      if (isCharacterMediaSd2Certified(character, primaryId)) continue;
+      if (isSd2CertRejectedForVideoRef(safety)) {
         skippedCharacters.push({
           id: character.id,
           name: character.name,
-          reason: character.videoRefSafety?.reason,
+          reason: safety?.reason,
         });
         continue;
       }
-      if (character.videoRefSafety?.status === "check_failed") {
+      if (safety?.status === "check_failed") {
         uncertified.push(character.name);
         continue;
       }
-      // pending / missing after attempt
       uncertified.push(character.name);
-    } else if (isLikelyRealPersonForVideoRef(character.videoRefSafety)) {
+    } else if (isLikelyRealPersonForVideoRef(safety)) {
       skippedCharacters.push({
         id: character.id,
         name: character.name,
-        reason: character.videoRefSafety?.reason,
+        reason: safety?.reason,
       });
     }
   }

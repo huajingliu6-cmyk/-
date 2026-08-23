@@ -31,9 +31,9 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain("提交审批素材");
     expect(workspace).toContain("ead-submit-approval");
     expect(workspace).not.toContain("保存本集设计");
-    expect(workspace).toContain("handleExtract");
+    expect(workspace).toContain("runExtract");
     expect(workspace).toContain("saveItems");
-    expect(workspace).toContain("取消生成");
+    expect(workspace).not.toContain("取消生成");
   });
 
   it("only keeps image generation on the global navigation lock", () => {
@@ -46,10 +46,10 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain("currentEpisodeExtracting");
     expect(workspace).toContain('designStatus === "generating"');
     expect(workspace).toContain("selectedIdRef");
-    expect(workspace).toContain("extractJobsRef");
+    expect(workspace).not.toContain("extractJobsRef");
     expect(workspace).toContain("assetPageLocked");
     expect(workspace).toMatch(
-      /const assetPageLocked\s*=\s*\n?\s*extractionBusy \|\| promptGenerationBusy/,
+      /const assetPageLocked\s*=\s*promptGenerationBusy/,
     );
     expect(workspace).not.toMatch(
       /const assetPageLocked\s*=\s*[\s\S]{0,100}generatingAssetIds\.size > 0/,
@@ -58,32 +58,25 @@ describe("Batch G1-UI episode asset design chrome", () => {
 
   it("shows extract progress and locks navigation while busy", () => {
     expect(workspace).toContain("提取中…");
-    expect(workspace).toContain("正在提取全剧本资产，通常需要 2-10 分钟");
-    expect(workspace).toContain('data-testid="ead-extract-background-note"');
-    expect(workspace).toContain('data-testid="ead-extract-all-background-note"');
-    expect(workspace).toContain('aria-live="polite"');
+    expect(workspace).not.toContain("正在提取全剧本资产，通常需要 2-10 分钟");
+    expect(workspace).not.toContain('data-testid="ead-extract-all-background-note"');
     expect(workspace).toContain("aria-busy={extractionBusy}");
-    expect(workspace).toContain("disabled={extractionBusy}");
-    expect(workspace).toContain("extractionBusy ||");
-    expect(css).toContain(".ead-background-task-note");
+    expect(workspace).toContain("disabled={extractionBusy");
     expect(css).toContain(".ead-extract-btn");
     expect(workspace).toContain("extractionBusy");
   });
 
   it("scopes extract cancel and completion to the job episode id", () => {
-    expect(workspace).toContain("handleCancelGenerate(SCRIPT_ASSET_DESIGN_ID)");
-    expect(workspace).toContain("selectedIdRef.current === extractingEpisodeId");
-    expect(workspace).toContain("markExtractStatusForEpisode");
-    expect(workspace).toContain("extractJobsRef.current.has(selectedId)");
-    expect(workspace).toContain("startExtractPoll");
-    expect(workspace).toContain("stopExtractPoll");
+    expect(workspace).not.toContain("handleCancelGenerate(SCRIPT_ASSET_DESIGN_ID)");
+    expect(workspace).toContain("asset-extraction/tasks");
   });
 
-  it("restores extracting UI from server generating status with polling", () => {
-    expect(workspace).toContain('payload.designStatus === "generating"');
-    expect(workspace).toContain("startExtractPoll(episodeId)");
-    expect(workspace).toContain("extractPollTimersRef");
-    expect(workspace).toMatch(/setInterval\(\(\) => \{\s*void tick\(\);\s*\}, 2000\)/);
+  it("restores extracting UI from the versioned extraction snapshot", () => {
+    expect(workspace).toContain("/asset-extraction");
+    expect(workspace).toContain("applyExtractionTask");
+    expect(workspace).toContain("LIVE_EXTRACTION_STATUSES");
+    expect(workspace).not.toContain("startExtractPoll");
+    expect(workspace).not.toContain("extractPollTimersRef");
     expect(workspace).not.toContain("210_000");
   });
 
@@ -102,7 +95,7 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain("meaningfulEpisodeTitle");
     expect(workspace).toContain("ead-script-dialog__close");
     expect(workspace).toContain("sourceText");
-    expect(workspace).toContain("SCRIPT_ASSET_DESIGN_ID");
+    expect(workspace).not.toContain("SCRIPT_ASSET_DESIGN_ID");
     expect(workspace).not.toContain("dangerouslySetInnerHTML");
     expect(workspace).toContain("<pre");
   });
@@ -113,13 +106,9 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).not.toContain("一次识别完整剧本中的全部资产");
     expect(workspace).not.toContain("大模型将自动");
     expect(workspace).toContain(">资产提取</h2>");
-    expect(workspace).toContain("一键提取基本资产");
-    expect(workspace).toContain("ASSET_EXTRACTION_MODEL_OPTIONS");
-    expect(workspace).toContain("deepseek-v4-pro");
-    expect(workspace).toContain("Deepseek V4 Pro");
-    expect(workspace).toContain("assetExtractionModel");
-    expect(workspace).toContain("modelKey: assetExtractionModel");
-    expect(workspace).toContain('data-testid="ead-extract-model"');
+    expect(workspace).toContain("提取本集资产");
+    expect(workspace).not.toContain("一键提取基本资产");
+    expect(workspace).not.toContain('data-testid="ead-extract-model"');
     expect(workspace).toContain('testId="ead-summary-extracted"');
     expect(workspace).toContain('testId="ead-summary-library"');
     expect(workspace).toContain('testId="ead-summary-generated"');
@@ -172,30 +161,23 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(css).toContain("grid-template-columns: auto minmax(240px, 1fr)");
     expect(css).toContain("width: min(140px, 100%)");
     expect(workspace).toContain("menuPortal");
-    expect(workspace).toContain("ead-back-full-script");
-    expect(workspace).toContain("返回全剧本资产");
+    expect(workspace).not.toContain("ead-back-full-script");
+    expect(workspace).not.toContain("返回全剧本资产");
     expect(workspace).not.toContain("ead-ep-list");
     expect(workspace).not.toContain("EPISODES_PER_PAGE");
   });
 
   it("uses the original unsplit script as the default one-call extraction flow", () => {
-    expect(workspace).toContain('outputKind: "script_asset_design"');
-    expect(workspace).toContain("SCRIPT_ASSET_DESIGN_ID");
-    expect(workspace).toContain("一键提取基本资产");
-    expect(workspace).toContain("fullScriptAssetCount");
-    expect(workspace).toContain("ead-layout${isAwaitingFullScriptExtraction");
+    expect(workspace).not.toContain('outputKind: "script_asset_design"');
+    expect(workspace).not.toContain("SCRIPT_ASSET_DESIGN_ID");
+    expect(workspace).not.toContain("一键提取基本资产");
+    expect(workspace).toContain("asset-extraction/tasks");
     expect(workspace).toContain("尚未提取资产");
     expect(workspace).toContain("extractionError");
     expect(workspace).toContain('data-testid="ead-extraction-error"');
     expect(workspace).not.toContain("尚未完成全剧本一键提取");
-    expect(workspace).not.toContain("并不代表资产丢失");
     expect(workspace).toContain('data-testid="ead-pending-assets"');
-    expect(workspace).toContain('data-testid="ead-open-extracted-episode"');
     expect(workspace).toContain("extractedEpisodes");
-    expect(workspace).not.toContain('data-testid="ead-full-script-pending"');
-    expect(workspace).not.toContain("setFullScriptPending");
-    expect(workspace).not.toContain("ead-full-script-pending__button");
-    expect(workspace).not.toContain("for (let index = 0; index < targets.length");
   });
 
   it("shows batch percentage, locks asset controls, and keeps storyboard available", () => {
@@ -205,16 +187,13 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain('data-testid="ead-prompt-progress"');
     expect(workspace).toContain('data-testid="ead-page-lock"');
     expect(workspace).toContain('data-testid="ead-workflow-progress-percent"');
-    expect(workspace).toContain("extractionStreamPercent");
-    expect(workspace).toContain("onDelta: (text) =>");
+    expect(workspace).toContain("LIVE_EXTRACTION_STATUSES");
     expect(workspace).toContain("共提取");
     expect(workspace).toContain("正在提取资产");
     expect(css).toContain("ead-progress-flow");
     expect(workspace).toContain("* 75");
     expect(workspace).toContain("inert={assetPageLocked ? true : undefined}");
     expect(workspace).toContain('data-testid="ead-open-storyboard-while-generating"');
-    expect(workspace).toContain('target="_blank"');
-    expect(workspace).toContain("workspaceProjectStoryboardPath(projectId)");
     expect(workspace).not.toContain('data-testid="ead-back-full-script-detail"');
     expect(css).toContain(".ead-prompt-progress");
     expect(css).toContain(".ead-page-lock");
@@ -224,6 +203,7 @@ describe("Batch G1-UI episode asset design chrome", () => {
 
   it("confirm success copy no longer links to library", () => {
     expect(workspace).toContain("本集资产已确认并自动加入资产库。");
+    expect(workspace).toContain("部分入库，仍待处理。");
     expect(workspace).not.toMatch(
       /ead-confirm-note[\s\S]{0,200}查看资产库/,
     );
@@ -456,5 +436,15 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).not.toContain(
       'item.generatedMedia?.previewKind === "image"',
     );
+  });
+
+  it("batch handleConfirm surfaces promoted/skipped/failed partial summary", () => {
+    expect(workspace).toContain("const handleConfirm = useCallback");
+    expect(workspace).toContain("payload.promoted");
+    expect(workspace).toContain("payload.skipped");
+    expect(workspace).toContain("payload.failed");
+    expect(workspace).toContain("已入库");
+    expect(workspace).toContain("已跳过");
+    expect(workspace).toContain("characterNeedsUncheckedVideoRefBlock");
   });
 });

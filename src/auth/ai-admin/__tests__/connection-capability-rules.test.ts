@@ -179,6 +179,101 @@ describe("connection capability rule filter", () => {
     expect(matched.every((item) => item.modality === "text")).toBe(true);
   });
 
+  it("maps legacy slot connections directly to matching capabilities", () => {
+    const capabilities = [
+      summary({
+        capabilityId: "asset.roster.extract",
+        defaultProfileSlot: "asset-roster-extract-text",
+      }),
+      summary({
+        capabilityId: "asset.detail.extract",
+        defaultProfileSlot: "asset-detail-extract-text",
+      }),
+    ];
+    const diagnostics = [
+      diag({
+        capabilityId: "asset.roster.extract",
+        profileSlotId: "asset-roster-extract-text",
+      }),
+      diag({
+        capabilityId: "asset.detail.extract",
+        profileSlotId: "asset-detail-extract-text",
+      }),
+    ];
+    const bindings = [
+      binding(
+        "asset-roster-extract-text",
+        "legacy-slot-episode-asset-design-text",
+      ),
+      binding(
+        "asset-detail-extract-text",
+        "legacy-slot-episode-asset-design-text",
+      ),
+    ];
+
+    const rosterOnly = filterCapabilityRulesForConnection(
+      capabilities,
+      diagnostics,
+      bindings,
+      "legacy-slot-asset-roster-extract-text",
+    );
+    expect(rosterOnly.map((item) => item.capabilityId)).toEqual([
+      "asset.roster.extract",
+    ]);
+
+    const detailOnly = filterCapabilityRulesForConnection(
+      capabilities,
+      diagnostics,
+      bindings,
+      "legacy-slot-asset-detail-extract-text",
+    );
+    expect(detailOnly.map((item) => item.capabilityId)).toEqual([
+      "asset.detail.extract",
+    ]);
+  });
+
+  it("matches capabilities when connection displayName equals slot label", () => {
+    const capabilities = [
+      summary({
+        capabilityId: "asset.roster.extract",
+        defaultProfileSlot: "asset-roster-extract-text",
+      }),
+    ];
+    const diagnostics = [
+      diag({
+        capabilityId: "asset.roster.extract",
+        profileSlotId: "asset-roster-extract-text",
+      }),
+    ];
+    const connections = [
+      {
+        id: "mc_custom_roster",
+        displayName: "资产名单提取文本模型",
+        modality: "text" as const,
+        providerMode: "http" as const,
+        baseUrl: "https://api.deepseek.com/v1",
+        modelId: "deepseek-v4-pro",
+        enabled: true,
+        apiKeyConfigured: true,
+        apiKeyMasked: "****",
+        lastTestStatus: "untested" as const,
+        lastTestedAt: null,
+        lastTestMessage: null,
+      },
+    ];
+
+    const matched = filterCapabilityRulesForConnection(
+      capabilities,
+      diagnostics,
+      [binding("asset-roster-extract-text", null)],
+      "mc_custom_roster",
+      connections,
+    );
+    expect(matched.map((item) => item.capabilityId)).toEqual([
+      "asset.roster.extract",
+    ]);
+  });
+
   it("returns empty when connection id is missing or unbound", () => {
     const capabilities = [
       summary({

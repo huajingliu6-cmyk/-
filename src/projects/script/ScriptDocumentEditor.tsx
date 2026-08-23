@@ -35,7 +35,7 @@ export function ScriptDocumentEditor({
         <div className="scs-status-card">
           <p className="scs-hint" style={{ margin: 0 }}>
             {hasSourceText && splitStatus !== "confirmed"
-              ? "源文本已导入。确认导入后将自动生成分集方案；在中间选择集数后于此处核对正文。"
+              ? "源文本已导入。上传成功后将自动分集；在中间选择集数后于此处阅读正文。"
               : "请在中间选择某一集后，在此阅读与修改正文。"}
           </p>
         </div>
@@ -55,7 +55,7 @@ export function ScriptDocumentEditor({
           />
           <p className="scs-hint">
             {reviewMode
-              ? "核对并修改后，点击下方「确认剧本」写入正式剧集。"
+              ? "核对后可修改正文；上传已自动创建剧集，点击下方「确认剧本」进入资产设计。"
               : "修改后点击页头「保存页面」保存当前集文本。"}
           </p>
         </div>

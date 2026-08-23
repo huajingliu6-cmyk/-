@@ -16,6 +16,7 @@ type Props = {
   fit?: "cover" | "contain";
   /** Sidebar row thumb — hide bulky empty copy. */
   compact?: boolean;
+  context?: "management" | "workspace";
 };
 
 /** List/avatar thumb: server URL or blob preview; falls back to category glyph. */
@@ -26,8 +27,9 @@ export function AssetListThumb({
   revision,
   fit = "cover",
   compact = false,
+  context = "management",
 }: Props) {
-  const src = resolveAssetImageSrc(projectId, asset, { revision });
+  const src = resolveAssetImageSrc(projectId, asset, { revision, context });
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const failed = !src || failedSrc === src;
 

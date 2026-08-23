@@ -9,6 +9,10 @@ import { mergeMediaIdLists } from "@/projects/assets/episode-design/generated-me
 
 type ImageableAsset = CharacterAsset | SceneAsset | PropAsset;
 
+function isCharacterAsset(asset: ImageableAsset): asset is CharacterAsset {
+  return "voiceId" in asset;
+}
+
 function mergeImageableById(
   local: ImageableAsset[],
   upstream: ImageableAsset[],
@@ -33,14 +37,31 @@ function mergeImageableById(
       item.imageFileName ?? upstreamItem.imageFileName ?? null;
     const approvalProvenance =
       item.approvalProvenance ?? upstreamItem.approvalProvenance ?? null;
-    map.set(item.id, {
+    const merged: ImageableAsset = {
       ...upstreamItem,
       ...item,
       ...(approvedMediaIds.length > 0 ? { approvedMediaIds } : {}),
       ...(primaryMediaId ? { primaryMediaId } : {}),
       ...(imageFileName ? { imageFileName } : {}),
       ...(approvalProvenance ? { approvalProvenance } : {}),
-    });
+    };
+    if (isCharacterAsset(item) && isCharacterAsset(upstreamItem)) {
+      const historyMediaIds = mergeMediaIdLists(
+        item.historyMediaIds,
+        upstreamItem.historyMediaIds,
+      );
+      const lookMediaIds = mergeMediaIdLists(
+        item.lookMediaIds,
+        upstreamItem.lookMediaIds,
+      );
+      map.set(item.id, {
+        ...merged,
+        ...(historyMediaIds.length > 0 ? { historyMediaIds } : {}),
+        ...(lookMediaIds.length > 0 ? { lookMediaIds } : {}),
+      } as CharacterAsset);
+      continue;
+    }
+    map.set(item.id, merged);
   }
   return [...map.values()];
 }

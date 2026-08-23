@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promises as fs } from "fs";
-import { mkdtempSync, rmSync } from "fs";
-import os from "os";
+import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import path from "path";
 import {
   loadAssetBundleDraft,
@@ -17,7 +16,9 @@ describe("videoRefSafety cleared on image change", () => {
   let tmp: string;
 
   beforeEach(() => {
-    tmp = mkdtempSync(path.join(os.tmpdir(), "ic-safety-"));
+    const root = path.join("E:", "DevWorkspace", "runtime", "tmp");
+    mkdirSync(root, { recursive: true });
+    tmp = mkdtempSync(path.join(root, "ic-safety-"));
     process.env.APP_DATA_DIR = tmp;
   });
 

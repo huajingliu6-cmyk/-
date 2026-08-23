@@ -208,6 +208,7 @@ export type ProjectEpisodeAssetDesignStore = {
   projectId: string;
   records: EpisodeAssetDesignRecord[];
   updatedAt: string;
+  documentRevision?: number;
 };
 
 export const SCRIPT_ASSET_DESIGN_ID = "__full_script__";

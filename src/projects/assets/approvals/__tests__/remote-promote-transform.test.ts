@@ -87,6 +87,8 @@ describe('remote approval promote transform', () => {
       workspaceDesigns: designStore,
     });
 
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
     expect(result.created).toBe(true);
     expect(result.managementAssets.scenes[0]).toMatchObject({
       id: result.assetId,
@@ -179,6 +181,8 @@ describe('remote approval promote transform', () => {
       workspaceDesigns: designs,
     });
 
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
     expect(result).toMatchObject({ assetId: 'asset_1', created: false });
     expect(result.managementAssets.props[0]).toMatchObject({
       primaryMediaId: 'media_1',

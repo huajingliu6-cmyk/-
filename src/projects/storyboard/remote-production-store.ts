@@ -3,6 +3,7 @@ import "server-only";
 import { requestRemoteData } from "@/persistence/remote-data-client";
 import type { ProjectStoryboardWorkspace } from "@/projects/storyboard/types";
 
+export const STORYBOARD_PRODUCTION_NAMESPACE = "storyboard-productions";
 const ENDPOINT = "/v1/storyboard-productions";
 const REMOTE_REVISION = Symbol("storyboard-production-remote-revision");
 
@@ -65,11 +66,20 @@ export async function saveStoryboardWorkspaceRemote(
   workspace: ProjectStoryboardWorkspace,
 ): Promise<ProjectStoryboardWorkspace> {
   const carriedRevision = storyboardRemoteRevision(workspace);
-  const current =
-    carriedRevision === null
-      ? await loadStoryboardWorkspaceRemoteDocument(workspace.projectId)
-      : null;
-  const expectedRevision = carriedRevision ?? current?.revision ?? 0;
+  const current = await loadStoryboardWorkspaceRemoteDocument(workspace.projectId);
+
+  if (current !== null) {
+    if (carriedRevision === null) {
+      throw new Error("PRODUCTION_REVISION_REQUIRED");
+    }
+    if (carriedRevision !== current.revision) {
+      throw new Error("PRODUCTION_REVISION_CONFLICT");
+    }
+  } else if (carriedRevision !== null && carriedRevision !== 0) {
+    throw new Error("PRODUCTION_REVISION_CONFLICT");
+  }
+
+  const expectedRevision = current === null ? 0 : carriedRevision!;
   const result = await storyboardRequest<{
     workspace: ProjectStoryboardWorkspace;
     revision: number;

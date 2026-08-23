@@ -71,7 +71,7 @@ export function resolveBackTarget(pathname: string): BackTarget {
     APP_PROJECTS_PATH,
     "/app/enterprise-assets",
     APP_WORKBENCH_PATH,
-    "/app/showcase",
+    "/app/materials",
     "/app/guide",
     "/app/team",
     APP_ADMIN_PATH,

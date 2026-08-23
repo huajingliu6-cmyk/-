@@ -2,6 +2,9 @@ import { promises as fs } from "fs";
 import path from "path";
 import { isRemoteDataOnly } from "@/persistence/remote-data-client";
 import { projectRootDir } from "@/projects/project-storage";
+import { readAssetDocumentRevisionField } from "@/projects/assets/asset-bundle-revision";
+import { atomicWriteJson } from "@/projects/atomic-write-json";
+import { wrapWriteFailure } from "@/projects/operation-failed";
 import {
   loadEpisodeAssetDesignStoreRemoteValue,
   saveEpisodeAssetDesignStoreRemote,
@@ -408,6 +411,7 @@ export function normalizeEpisodeAssetDesignStore(
         .map((rec) => parseRecord(rec))
         .filter((rec): rec is EpisodeAssetDesignRecord => rec !== null)
     : [];
+  const documentRevision = readAssetDocumentRevisionField(raw);
   return {
     projectId,
     records,
@@ -415,6 +419,7 @@ export function normalizeEpisodeAssetDesignStore(
       typeof raw.updatedAt === "string"
         ? raw.updatedAt
         : new Date().toISOString(),
+    ...(documentRevision > 0 ? { documentRevision } : {}),
   };
 }
 
@@ -455,13 +460,38 @@ export async function saveEpisodeAssetDesignStore(
     ...store,
     updatedAt: new Date().toISOString(),
   };
-  if (isRemoteDataOnly()) return saveEpisodeAssetDesignStoreRemote(next);
-  await ensureDrafts(store.projectId);
-  const target = storePath(store.projectId);
-  const temp = `${target}.${process.pid}.tmp`;
-  await fs.writeFile(temp, JSON.stringify(next, null, 2), "utf-8");
-  await fs.rename(temp, target);
-  return next;
+  const expectedRevision = readAssetDocumentRevisionField(next);
+  let saved: ProjectEpisodeAssetDesignStore;
+  if (isRemoteDataOnly()) {
+    saved = await saveEpisodeAssetDesignStoreRemote(next);
+  } else {
+    await ensureDrafts(store.projectId);
+    const target = storePath(store.projectId);
+    let diskRev = 0;
+    let diskExists = false;
+    try {
+      const raw = JSON.parse(await fs.readFile(target, "utf-8")) as unknown;
+      diskExists = true;
+      diskRev = readAssetDocumentRevisionField(raw);
+    } catch {
+      diskExists = false;
+    }
+    if (diskExists && expectedRevision !== diskRev) {
+      throw new Error("REVISION_CONFLICT");
+    }
+    const afterRevision = expectedRevision + 1;
+    saved = { ...next, documentRevision: afterRevision };
+    await atomicWriteJson(target, saved);
+  }
+  try {
+    const { syncManagementToWorkspace } = await import(
+      "@/projects/workspace-sync/sync-management-to-workspace"
+    );
+    await syncManagementToWorkspace(store.projectId);
+  } catch (error) {
+    wrapWriteFailure(error);
+  }
+  return saved;
 }
 
 export function getEpisodeDesignRecord(

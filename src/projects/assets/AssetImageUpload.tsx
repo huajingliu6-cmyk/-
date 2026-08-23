@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AmwImagePreview } from "@/projects/assets/AmwImagePreview";
-import { getProjectAssetImageUrl } from "@/projects/assets/asset-image-url";
+import {
+  getProjectAssetImageUrl,
+  type AssetImageApiContext,
+} from "@/projects/assets/asset-image-url";
 import {
   deleteProjectAssetImage,
   uploadProjectAssetImage,
@@ -21,12 +24,14 @@ export type AssetImageValue = {
 
 type Props = {
   id: string;
-  label: string;
+  label: ReactNode;
   /** Asterisk tip shown under the control */
   tip?: string;
   value: AssetImageValue;
   onChange: (next: AssetImageValue) => void;
   projectId?: string;
+  /** management | workspace — drives image upload/preview API root. */
+  context?: AssetImageApiContext;
   /** When set, choosing a file uploads immediately (after ensurePersisted). */
   assetId?: string | null;
   /** Replace this owned media key while keeping assetId as the parent asset. */
@@ -48,6 +53,14 @@ type Props = {
   actionLabel?: string;
   /** Generated sub-media replacement must not rewrite the parent image metadata. */
   preserveValueOnUpload?: boolean;
+  /**
+   * When set, bypasses the default asset image upload route
+   * (e.g. character replace-primary which always allocates a new mediaId).
+   */
+  customUpload?: (file: File) => Promise<{
+    imageFileName: string;
+    imageMimeType: string | null;
+  } | void>;
 };
 
 function revokeIfBlob(url: string | null | undefined) {
@@ -63,6 +76,7 @@ export function AssetImageUpload({
   value,
   onChange,
   projectId,
+  context = "management",
   assetId,
   uploadTargetId,
   ensurePersisted,
@@ -75,6 +89,7 @@ export function AssetImageUpload({
   adaptiveContrast = false,
   actionLabel = "选择图片",
   preserveValueOnUpload = false,
+  customUpload,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
@@ -95,7 +110,7 @@ export function AssetImageUpload({
   const previewSrc = (() => {
     if (value.objectUrl?.startsWith("blob:")) return value.objectUrl;
     if (projectId && assetId && value.fileName) {
-      return getProjectAssetImageUrl(projectId, assetId, { revision });
+      return getProjectAssetImageUrl(projectId, assetId, { revision, context });
     }
     return null;
   })();
@@ -214,11 +229,26 @@ export function AssetImageUpload({
         if (ensurePersisted) {
           await ensurePersisted();
         }
+        if (customUpload) {
+          const uploaded = await customUpload(file);
+          if (!preserveValueOnUpload) revokeIfBlob(blobUrl);
+          const nextRevision = revision + 1;
+          onRevisionChange?.(nextRevision);
+          if (!preserveValueOnUpload && uploaded) {
+            onChange({
+              fileName: uploaded.imageFileName,
+              objectUrl: null,
+              mimeType: uploaded.imageMimeType,
+              pendingFile: null,
+            });
+          }
+          return;
+        }
         const uploaded = await uploadProjectAssetImage(
           projectId,
           assetId,
           file,
-          { targetMediaId: uploadTargetId },
+          { targetMediaId: uploadTargetId, context },
         );
         if (!preserveValueOnUpload) revokeIfBlob(blobUrl);
         const nextRevision = revision + 1;
@@ -269,7 +299,7 @@ export function AssetImageUpload({
     void (async () => {
       setBusy(true);
       try {
-        await deleteProjectAssetImage(projectId, assetId);
+        await deleteProjectAssetImage(projectId, assetId, { context });
         revokeIfBlob(previousBlob);
         onChange({
           fileName: null,

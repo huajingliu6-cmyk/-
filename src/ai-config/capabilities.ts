@@ -18,6 +18,8 @@ export type AiCapabilityId =
   | "script.split.generate"
   | "script.continue.generate"
   | "asset.episode-design.generate"
+  | "asset.roster.extract"
+  | "asset.detail.extract"
   | "asset.design-prompt.generate"
   | "text.storyboard-prompt.generate"
   | "image.character.generate"
@@ -36,6 +38,8 @@ export type AiModelProfileSlotId =
   | "script-episodes-text"
   | "script-split-text"
   | "episode-asset-design-text"
+  | "asset-roster-extract-text"
+  | "asset-detail-extract-text"
   | "asset-design-prompt-text"
   | "storyboard-prompt-text"
   | "character-image"
@@ -141,11 +145,12 @@ export const AI_CAPABILITIES: readonly AiCapabilityDefinition[] = [
   },
   {
     id: "asset.episode-design.generate",
-    label: "剧本资产智能提取（单集/全剧本）",
-    description: "资产库 · 使用系统从单集或全剧本提取角色、场景、道具与音频需求",
+    label: "剧本资产智能提取（已废弃）",
+    description:
+      "旧版一次性全剧本资产提取 · 已由 asset.roster.extract + asset.detail.extract 取代",
     modality: "text",
-    status: "active",
-    surface: "AssetDesignWorkspace / script-asset-extraction",
+    status: "deprecated",
+    surface: "Legacy / text-generations",
     route: "/app/workspace/projects/[id]/assets/library",
     buttonText: "一键提取",
     allowedRoles: ["PROJECT_OWNER", "CARD_ENGINEER"],
@@ -154,6 +159,40 @@ export const AI_CAPABILITIES: readonly AiCapabilityDefinition[] = [
     supportsCancel: true,
     paidRisk: "possible",
     defaultProfileSlot: "episode-asset-design-text",
+    classification: "DEPRECATED",
+  },
+  {
+    id: "asset.roster.extract",
+    label: "资产名单提取",
+    description: "从完整剧本中发现并合并全量资产名单（仅名称/类型/别名/证据）",
+    modality: "text",
+    status: "active",
+    surface: "AssetManagementWorkspace / asset-extraction roster phase",
+    route: "/app/workspace/projects/[id]/assets/library",
+    buttonText: "提取资产名单",
+    allowedRoles: ["PROJECT_OWNER", "CARD_ENGINEER"],
+    requiresCredits: true,
+    supportsStreaming: false,
+    supportsCancel: false,
+    paidRisk: "possible",
+    defaultProfileSlot: "asset-roster-extract-text",
+    classification: "AI_REQUIRED",
+  },
+  {
+    id: "asset.detail.extract",
+    label: "资产详情提取",
+    description: "为指定资产批次补充 character/scene/prop/audio 结构化 design",
+    modality: "text",
+    status: "active",
+    surface: "AssetManagementWorkspace / asset-extraction detail phase",
+    route: "/app/workspace/projects/[id]/assets/library",
+    buttonText: "提取资产详情",
+    allowedRoles: ["PROJECT_OWNER", "CARD_ENGINEER"],
+    requiresCredits: true,
+    supportsStreaming: false,
+    supportsCancel: false,
+    paidRisk: "possible",
+    defaultProfileSlot: "asset-detail-extract-text",
     classification: "AI_REQUIRED",
   },
   {
@@ -373,6 +412,12 @@ export function outputKindToCapabilityId(
   if (outputKind === "episode_asset_design") {
     return "asset.episode-design.generate";
   }
+  if (outputKind === "asset_roster_extract") {
+    return "asset.roster.extract";
+  }
+  if (outputKind === "asset_detail_extract") {
+    return "asset.detail.extract";
+  }
   if (outputKind === "asset_design_prompt") {
     return "asset.design-prompt.generate";
   }
@@ -391,6 +436,8 @@ export function profileSlotModality(
     case "script-episodes-text":
     case "script-split-text":
     case "episode-asset-design-text":
+    case "asset-roster-extract-text":
+    case "asset-detail-extract-text":
     case "asset-design-prompt-text":
     case "storyboard-prompt-text":
       return "text";

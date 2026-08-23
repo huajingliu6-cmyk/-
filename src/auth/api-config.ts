@@ -184,8 +184,8 @@ export const GENERATION_API_DEFS: Array<{
   },
   {
     id: "episode-asset-design-text",
-    label: "剧本资产提取文本模型",
-    description: "资产库单集/全剧本资产提取 · text-generations（episode_asset_design）",
+    label: "剧本资产提取文本模型（已废弃）",
+    description: "旧版一次性提取 · 已由 asset-roster-extract-text / asset-detail-extract-text 取代",
     envProvider: ["TEXT_LLM_PROVIDER", "EPISODE_ASSET_DESIGN_TEXT_PROVIDER"],
     envUrl: [
       "DASHSCOPE_COMPATIBLE_BASE_URL",
@@ -198,6 +198,54 @@ export const GENERATION_API_DEFS: Array<{
       "OPENAI_API_KEY",
     ],
     envModel: [
+      "EPISODE_ASSET_DESIGN_TEXT_MODEL",
+      "TEXT_LLM_MODEL_ID",
+      "DASHSCOPE_TEXT_MODEL_ID",
+    ],
+  },
+  {
+    id: "asset-roster-extract-text",
+    label: "资产名单提取文本模型",
+    description: "资产提取 · roster 阶段（asset.roster.extract）",
+    envProvider: ["TEXT_LLM_PROVIDER", "ASSET_ROSTER_EXTRACT_TEXT_PROVIDER"],
+    envUrl: [
+      "DASHSCOPE_COMPATIBLE_BASE_URL",
+      "ASSET_ROSTER_EXTRACT_TEXT_API_URL",
+      "EPISODE_ASSET_DESIGN_TEXT_API_URL",
+    ],
+    envKey: [
+      "DASHSCOPE_API_KEY",
+      "ASSET_ROSTER_EXTRACT_TEXT_API_KEY",
+      "EPISODE_ASSET_DESIGN_TEXT_API_KEY",
+      "STORY_TEXT_API_KEY",
+      "OPENAI_API_KEY",
+    ],
+    envModel: [
+      "ASSET_ROSTER_EXTRACT_TEXT_MODEL",
+      "EPISODE_ASSET_DESIGN_TEXT_MODEL",
+      "TEXT_LLM_MODEL_ID",
+      "DASHSCOPE_TEXT_MODEL_ID",
+    ],
+  },
+  {
+    id: "asset-detail-extract-text",
+    label: "资产详情提取文本模型",
+    description: "资产提取 · detail 阶段（asset.detail.extract）",
+    envProvider: ["TEXT_LLM_PROVIDER", "ASSET_DETAIL_EXTRACT_TEXT_PROVIDER"],
+    envUrl: [
+      "DASHSCOPE_COMPATIBLE_BASE_URL",
+      "ASSET_DETAIL_EXTRACT_TEXT_API_URL",
+      "EPISODE_ASSET_DESIGN_TEXT_API_URL",
+    ],
+    envKey: [
+      "DASHSCOPE_API_KEY",
+      "ASSET_DETAIL_EXTRACT_TEXT_API_KEY",
+      "EPISODE_ASSET_DESIGN_TEXT_API_KEY",
+      "STORY_TEXT_API_KEY",
+      "OPENAI_API_KEY",
+    ],
+    envModel: [
+      "ASSET_DETAIL_EXTRACT_TEXT_MODEL",
       "EPISODE_ASSET_DESIGN_TEXT_MODEL",
       "TEXT_LLM_MODEL_ID",
       "DASHSCOPE_TEXT_MODEL_ID",
@@ -369,6 +417,8 @@ function defaultFromEnv(
       def.id === "script-episodes-text" ||
       def.id === "script-split-text" ||
       def.id === "episode-asset-design-text" ||
+      def.id === "asset-roster-extract-text" ||
+      def.id === "asset-detail-extract-text" ||
       def.id === "asset-design-prompt-text" ||
       def.id === "storyboard-prompt-text")
   ) {
@@ -382,6 +432,8 @@ function defaultFromEnv(
       def.id === "script-episodes-text" ||
       def.id === "script-split-text" ||
       def.id === "episode-asset-design-text" ||
+      def.id === "asset-roster-extract-text" ||
+      def.id === "asset-detail-extract-text" ||
       def.id === "asset-design-prompt-text" ||
       def.id === "storyboard-prompt-text")
   ) {

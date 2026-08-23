@@ -1,4 +1,5 @@
 import type { ProjectAssetBundle } from "@/projects/assets/types";
+import { parseResponseJson } from "@/projects/assets/parse-response-json";
 
 export type PersistAssetBundleContext = "management" | "workspace";
 
@@ -23,14 +24,15 @@ export async function persistAssetBundle(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(bundle),
   });
-  const payload = (await res.json()) as {
+  const payload = await parseResponseJson<{
     error?: string;
+    code?: string;
     draft?: ProjectAssetBundle & { updatedAt?: string };
-  };
+  }>(res);
   if (!res.ok) {
-    throw new Error(payload.error ?? "保存失败");
+    throw new Error(payload?.error ?? "保存失败");
   }
-  if (!payload.draft) {
+  if (!payload?.draft) {
     throw new Error("保存响应无效");
   }
   return {

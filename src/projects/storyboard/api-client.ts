@@ -3,7 +3,14 @@ import type {
   AssetsSummary,
   EpisodeProduction,
   ProjectStoryboardWorkspace,
+  StoryboardShot,
 } from "@/projects/storyboard/types";
+import type {
+  InvalidRefMediaSelection,
+  InvalidRefPreview,
+  InvalidRefScanResult,
+  InvalidRefScope,
+} from "@/projects/storyboard/invalid-refs/types";
 
 export type StoryboardWorkspaceResponse = {
   project?: { projectId: string; name: string };
@@ -15,9 +22,9 @@ export type StoryboardWorkspaceResponse = {
 async function parseError(res: Response): Promise<string> {
   try {
     const data = (await res.json()) as { error?: string };
-    return data.error ?? `请求失败 (${res.status})`;
+    return data.error ?? `???? (${res.status})`;
   } catch {
-    return `请求失败 (${res.status})`;
+    return `???? (${res.status})`;
   }
 }
 
@@ -31,8 +38,8 @@ async function parseJsonSafe(res: Response): Promise<Record<string, unknown>> {
   } catch {
     return {
       error: res.ok
-        ? "响应无效"
-        : `请求失败 (${res.status})，请稍后重试或检查管理后台配置`,
+        ? "????"
+        : `???? (${res.status})???????????????`,
     };
   }
 }
@@ -41,10 +48,18 @@ function apiBase(projectId: string): string {
   return `/api/projects/${encodeURIComponent(projectId)}/storyboard-workspace`;
 }
 
+function storyboardFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const method = (init.method ?? "GET").toUpperCase();
+  if (method === "GET" || method === "HEAD") {
+    return fetch(url, { credentials: "include", ...init });
+  }
+  return fetch(url, { credentials: "include", ...init });
+}
+
 export async function fetchStoryboardWorkspace(
   projectId: string,
 ): Promise<StoryboardWorkspaceResponse> {
-  const res = await fetch(apiBase(projectId), { credentials: "include" });
+  const res = await storyboardFetch(apiBase(projectId), { credentials: "include" });
   if (!res.ok) {
     throw new Error(await parseError(res));
   }
@@ -65,7 +80,7 @@ export async function patchStoryboardWorkspace(
     videoDefaults?: import("@/projects/storyboard/storyboard-video-params").StoryboardVideoDefaults | null;
   },
 ): Promise<ProjectStoryboardWorkspace> {
-  const res = await fetch(apiBase(projectId), {
+  const res = await storyboardFetch(apiBase(projectId), {
     method: "PATCH",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -82,7 +97,7 @@ export async function fetchEpisodeProduction(
   projectId: string,
   episodeId: string,
 ): Promise<EpisodeProduction> {
-  const res = await fetch(`${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}`, {
+  const res = await storyboardFetch(`${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}`, {
     credentials: "include",
   });
   if (!res.ok) {
@@ -106,7 +121,7 @@ export async function patchWorkingScript(
   workingScriptText: string,
   options?: { acknowledgeInvalidate?: boolean },
 ): Promise<EpisodeProduction> {
-  const res = await fetch(`${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}`, {
+  const res = await storyboardFetch(`${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}`, {
     method: "PATCH",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -134,13 +149,13 @@ export async function patchWorkingScript(
     ) {
       throw new ScriptInvalidateRequiredError(
         data.error ??
-          "修改本集剧本后，现有分镜提示词可能不再完全适用。保存后仍可继续使用，也可整集或按镜头重新生成。",
+          "???????????????????????????????????????????????",
       );
     }
-    throw new Error(data.error ?? `请求失败 (${res.status})`);
+    throw new Error(data.error ?? `???? (${res.status})`);
   }
   if (!data.production) {
-    throw new Error("保存响应无效");
+    throw new Error("??????");
   }
   return data.production;
 }
@@ -149,7 +164,7 @@ export async function confirmScript(
   projectId: string,
   episodeId: string,
 ): Promise<EpisodeProduction> {
-  const res = await fetch(
+  const res = await storyboardFetch(
     `${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}/confirm-script`,
     { method: "POST", credentials: "include" },
   );
@@ -175,7 +190,7 @@ export async function generateStoryboard(
   episodeId: string,
   idempotencyKey: string,
 ): Promise<EpisodeProduction> {
-  const res = await fetch(
+  const res = await storyboardFetch(
     `${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}/storyboard/generate`,
     {
       method: "POST",
@@ -196,35 +211,35 @@ export async function generateStoryboard(
   if (!res.ok) {
     if (res.status === 409 && data.production) {
       throw new StoryboardGenerateInProgressError(
-        data.error ?? "分镜正在生成中",
+        data.error ?? "???????",
         data.production,
       );
     }
-    // Failed generate persists generation_failed on the production — sync it.
+    // Failed generate persists generation_failed on the production ? sync it.
     if (data.production) {
       const code = data.code;
       if (code === "STORYBOARD_MODEL_RESPONSE_EMPTY") {
         data.production = {
           ...data.production,
-          generationError: data.error ?? "模型未返回分镜提示词正文",
+          generationError: data.error ?? "????????????",
         };
       } else if (code === "STORYBOARD_MODEL_RESPONSE_UNPARSEABLE") {
         data.production = {
           ...data.production,
-          generationError: data.error ?? "模型返回无法解析为分镜提示词",
+          generationError: data.error ?? "??????????????",
         };
       } else if (code === "STORYBOARD_PROMPTS_NOT_MATCHED") {
         data.production = {
           ...data.production,
-          generationError: data.error ?? "模型返回中未匹配到任何镜头提示词",
+          generationError: data.error ?? "????????????????",
         };
       }
       return data.production;
     }
-    throw new Error(data.error ?? `请求失败 (${res.status})`);
+    throw new Error(data.error ?? `???? (${res.status})`);
   }
   if (!data.production) {
-    throw new Error("分镜生成响应无效");
+    throw new Error("????????");
   }
   if (
     data.warningCode === "STORYBOARD_PROMPTS_PARTIALLY_MATCHED" &&
@@ -235,7 +250,7 @@ export async function generateStoryboard(
       ...data.production,
       generationError:
         data.production.generationError ||
-        `已生成 ${data.generatedCount} 个镜头，${data.unmatchedCount} 个镜头未匹配，可重试未完成镜头。`,
+        `??? ${data.generatedCount} ????${data.unmatchedCount} ????????????????`,
     };
   }
   return data.production;
@@ -246,7 +261,7 @@ export async function autoMatchStoryboardAssets(
   projectId: string,
   episodeId: string,
 ): Promise<EpisodeProduction> {
-  const res = await fetch(
+  const res = await storyboardFetch(
     `${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}/storyboard/auto-match-assets`,
     { method: "POST", credentials: "include" },
   );
@@ -258,7 +273,67 @@ export async function autoMatchStoryboardAssets(
     throw new Error(data.error ?? (await parseError(res)));
   }
   if (!data.production) {
-    throw new Error("素材自动匹配响应无效");
+    throw new Error("??????????");
+  }
+  return data.production;
+}
+
+export async function insertBlankStoryboardShot(
+  projectId: string,
+  episodeId: string,
+  afterShotId: string,
+): Promise<{ production: EpisodeProduction; shot: StoryboardShot }> {
+  const res = await storyboardFetch(
+    `${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}/storyboard/shots`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ afterShotId }),
+    },
+  );
+  const data = (await res.json()) as {
+    production?: EpisodeProduction;
+    shot?: StoryboardShot;
+    error?: string;
+  };
+  if (!res.ok) {
+    throw new Error(data.error ?? (await parseError(res)));
+  }
+  if (!data.production || !data.shot) {
+    throw new Error("??????????");
+  }
+  return { production: data.production, shot: data.shot };
+}
+
+export async function deleteStoryboardShot(
+  projectId: string,
+  episodeId: string,
+  shotId: string,
+  input?: { revision?: number },
+): Promise<EpisodeProduction> {
+  const res = await storyboardFetch(
+    `${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}/storyboard/shots/${encodeURIComponent(shotId)}`,
+    {
+      method: "DELETE",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input ?? {}),
+    },
+  );
+  const data = (await res.json()) as {
+    production?: EpisodeProduction;
+    error?: string;
+    code?: string;
+  };
+  if (!res.ok) {
+    if (res.status === 409 && data.code === "REVISION_CONFLICT") {
+      throw new Error("???????????????????");
+    }
+    throw new Error(data.error ?? `???? (${res.status})`);
+  }
+  if (!data.production) {
+    throw new Error("????????");
   }
   return data.production;
 }
@@ -269,7 +344,7 @@ export async function regenerateShotPrompt(
   shotId: string,
   input: { revision: number; idempotencyKey: string },
 ): Promise<EpisodeProduction> {
-  const res = await fetch(
+  const res = await storyboardFetch(
     `${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}/storyboard/shots/${encodeURIComponent(shotId)}/regenerate-prompt`,
     {
       method: "POST",
@@ -285,12 +360,12 @@ export async function regenerateShotPrompt(
   };
   if (!res.ok) {
     if (res.status === 409 && data.code === "REVISION_CONFLICT") {
-      throw new Error("镜头已被更新，请重新加载当前镜头后重试");
+      throw new Error("???????????????????");
     }
-    throw new Error(data.error ?? `请求失败 (${res.status})`);
+    throw new Error(data.error ?? `???? (${res.status})`);
   }
   if (!data.production) {
-    throw new Error("提示词重新生成响应无效");
+    throw new Error("???????????");
   }
   return data.production;
 }
@@ -315,7 +390,7 @@ export async function confirmStoryboard(
   projectId: string,
   episodeId: string,
 ): Promise<EpisodeProduction> {
-  const res = await fetch(
+  const res = await storyboardFetch(
     `${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}/storyboard/confirm`,
     { method: "POST", credentials: "include" },
   );
@@ -332,15 +407,15 @@ export async function confirmStoryboard(
     ) {
       throw new StoryboardConfirmIncompleteError(
         data.error ??
-          `当前还有 ${data.incompleteCount} 个镜头需要补充提示词或素材。`,
+          `???? ${data.incompleteCount} ??????????????`,
         data.incompleteCount,
         data.firstIncompleteShotId ?? null,
       );
     }
-    throw new Error(data.error ?? `请求失败 (${res.status})`);
+    throw new Error(data.error ?? `???? (${res.status})`);
   }
   if (!data.production) {
-    throw new Error("确认分镜响应无效");
+    throw new Error("????????");
   }
   return data.production;
 }
@@ -365,11 +440,13 @@ export async function patchStoryboardShot(
     promptLocked?: boolean;
     locked?: boolean;
     unlock?: boolean;
+    /** Explicit intent to edit prompt while promptLocked (required for prompt updates). */
+    editPrompt?: boolean;
     confirmed?: boolean;
     revision?: number;
   },
 ): Promise<EpisodeProduction> {
-  const res = await fetch(
+  const res = await storyboardFetch(
     `${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}/storyboard/shots/${encodeURIComponent(shotId)}`,
     {
       method: "PATCH",
@@ -385,12 +462,12 @@ export async function patchStoryboardShot(
   };
   if (!res.ok) {
     if (res.status === 409 && data.code === "REVISION_CONFLICT") {
-      throw new Error("镜头已被更新，请重新加载当前镜头后重试");
+      throw new Error("???????????????????");
     }
-    throw new Error(data.error ?? `请求失败 (${res.status})`);
+    throw new Error(data.error ?? `???? (${res.status})`);
   }
   if (!data.production) {
-    throw new Error("保存镜头响应无效");
+    throw new Error("????????");
   }
   return data.production;
 }
@@ -415,7 +492,7 @@ export async function generateEpisodeVideos(
     confirmPaidGeneration?: boolean;
   },
 ): Promise<StoryboardVideoBatchResponse> {
-  const res = await fetch(
+  const res = await storyboardFetch(
     `${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}/storyboard/generate-videos`,
     {
       method: "POST",
@@ -426,7 +503,7 @@ export async function generateEpisodeVideos(
   );
   const data = (await parseJsonSafe(res)) as StoryboardVideoBatchResponse;
   if (!res.ok) {
-    throw Object.assign(new Error(data.error ?? `请求失败 (${res.status})`), {
+    throw Object.assign(new Error(data.error ?? `???? (${res.status})`), {
       code: data.code,
       firstBlockedShotId: data.firstBlockedShotId,
     });
@@ -465,7 +542,7 @@ export async function generateShotVideo(
   };
   notice?: string;
 }> {
-  const res = await fetch(
+  const res = await storyboardFetch(
     `${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}/storyboard/shots/${encodeURIComponent(shotId)}/generate-video`,
     {
       method: "POST",
@@ -493,12 +570,12 @@ export async function generateShotVideo(
     code?: string;
   };
   if (!res.ok) {
-    throw Object.assign(new Error(data.error ?? `请求失败 (${res.status})`), {
+    throw Object.assign(new Error(data.error ?? `???? (${res.status})`), {
       code: data.code,
     });
   }
   if (!data.production || !data.generation) {
-    throw new Error("生成响应无效");
+    throw new Error("??????");
   }
   return {
     production: data.production,
@@ -516,9 +593,9 @@ export async function fetchVideoGenerationPublicConfig(): Promise<{
   recommendedPollIntervalMs: number;
   usesSd2RealPersonCertification: boolean;
 }> {
-  const res = await fetch("/api/generations", { credentials: "include" });
+  const res = await storyboardFetch("/api/generations", { credentials: "include" });
   if (!res.ok) {
-    throw new Error("无法加载视频配置");
+    throw new Error("????????");
   }
   const data = (await res.json()) as {
     config: {
@@ -552,12 +629,12 @@ export async function fetchGenerationStatus(generationId: string): Promise<{
   providerModelId: string | null;
   isMock: boolean;
 }> {
-  const res = await fetch(
+  const res = await storyboardFetch(
     `/api/generations/${encodeURIComponent(generationId)}`,
     { credentials: "include" },
   );
   if (!res.ok) {
-    throw new Error("无法加载生成状态");
+    throw new Error("????????");
   }
   const data = (await res.json()) as {
     generation: {
@@ -597,7 +674,7 @@ export async function fetchShotVideoHistory(
   }>;
   latestGenerationId: string | null;
 }> {
-  const res = await fetch(
+  const res = await storyboardFetch(
     `${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}/storyboard/shots/${encodeURIComponent(shotId)}/video-history`,
     { credentials: "include" },
   );
@@ -619,7 +696,7 @@ export async function fetchShotVideoHistory(
     error?: string;
   };
   if (!res.ok) {
-    throw new Error(data.error ?? `请求失败 (${res.status})`);
+    throw new Error(data.error ?? `???? (${res.status})`);
   }
   return {
     shotId: data.shotId ?? shotId,
@@ -627,8 +704,139 @@ export async function fetchShotVideoHistory(
       ...v,
       versionLabel:
         v.versionLabel ??
-        `版本 ${Math.max(1, arr.length - index)}`,
+        `?? ${Math.max(1, arr.length - index)}`,
     })),
     latestGenerationId: data.latestGenerationId ?? null,
+  };
+}
+
+function invalidRefsBase(
+  projectId: string,
+  context: "management" | "workspace" = "management",
+): string {
+  if (context === "workspace") {
+    return `/api/workspace/projects/${encodeURIComponent(projectId)}/storyboard-workspace/invalid-refs`;
+  }
+  return `${apiBase(projectId)}/invalid-refs`;
+}
+
+export async function scanInvalidStoryboardRefsApi(
+  projectId: string,
+  options: {
+    scope: InvalidRefScope;
+    episodeId?: string | null;
+    context?: "management" | "workspace";
+    checkBlobs?: boolean;
+  },
+): Promise<{ scan: InvalidRefScanResult; store: string }> {
+  const qs = new URLSearchParams({ scope: options.scope });
+  if (options.episodeId) qs.set("episodeId", options.episodeId);
+  if (options.checkBlobs === false) qs.set("checkBlobs", "0");
+  const res = await storyboardFetch(
+    `${invalidRefsBase(projectId, options.context)}?${qs.toString()}`,
+    { credentials: "include" },
+  );
+  const data = (await res.json()) as {
+    scan?: InvalidRefScanResult;
+    store?: string;
+    error?: string;
+  };
+  if (!res.ok || !data.scan) {
+    throw new Error(data.error ?? `???????????? (${res.status})`);
+  }
+  return { scan: data.scan, store: data.store ?? "management" };
+}
+
+export async function previewInvalidStoryboardRefsApi(
+  projectId: string,
+  body: {
+    scope: InvalidRefScope;
+    episodeId?: string | null;
+    mediaSelections?: InvalidRefMediaSelection[];
+    nameChangeHints?: Array<{ assetId: string; oldName: string }>;
+    context?: "management" | "workspace";
+  },
+): Promise<{
+  scan: InvalidRefScanResult;
+  preview: InvalidRefPreview;
+  store: string;
+}> {
+  const res = await storyboardFetch(
+    `${invalidRefsBase(projectId, body.context)}/preview`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: body.scope,
+        episodeId: body.episodeId ?? undefined,
+        mediaSelections: body.mediaSelections ?? [],
+        nameChangeHints: body.nameChangeHints ?? [],
+      }),
+    },
+  );
+  const data = (await res.json()) as {
+    scan?: InvalidRefScanResult;
+    preview?: InvalidRefPreview;
+    store?: string;
+    error?: string;
+  };
+  if (!res.ok || !data.scan || !data.preview) {
+    throw new Error(data.error ?? `preview failed (${res.status})`);
+  }
+  return {
+    scan: data.scan,
+    preview: data.preview,
+    store: data.store ?? "management",
+  };
+}
+
+export async function applyInvalidStoryboardRefsApi(
+  projectId: string,
+  body: {
+    previewId: string;
+    planDigest: string;
+    confirm: true;
+    context?: "management" | "workspace";
+  },
+): Promise<{
+  ok: true;
+  savedShotCount: number;
+  rescan: InvalidRefScanResult;
+  store: string;
+}> {
+  const res = await storyboardFetch(
+    `${invalidRefsBase(projectId, body.context)}/apply`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        previewId: body.previewId,
+        planDigest: body.planDigest,
+        confirm: true,
+      }),
+    },
+  );
+  const data = (await res.json()) as {
+    ok?: boolean;
+    savedShotCount?: number;
+    rescan?: InvalidRefScanResult;
+    store?: string;
+    error?: string;
+    code?: string;
+  };
+  if (!res.ok || !data.ok || !data.rescan) {
+    const err = new Error(data.error ?? `apply failed (${res.status})`) as Error & {
+      code?: string;
+    };
+    err.code = data.code;
+    throw err;
+  }
+  return {
+    ok: true,
+    savedShotCount: data.savedShotCount ?? 0,
+    rescan: data.rescan,
+    store: data.store ?? "management",
   };
 }

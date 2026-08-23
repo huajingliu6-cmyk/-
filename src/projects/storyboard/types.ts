@@ -143,15 +143,26 @@ export type StoryboardShot = {
   sceneCharacterPlacements?: SceneCharacterPlacement[];
   requirements: ShotAssetRequirement[];
   manuallyEdited: boolean;
-  /** 锁定提示词，批量生成不得覆盖 */
+  /** 默认只读展示提示词；批量生成不得覆盖。不禁用素材/视频参数操作 */
   promptLocked: boolean;
-  /** 整镜锁定（兼容旧字段；与 promptLocked 同步推进） */
+  /** 整镜锁定（兼容旧字段）；禁用素材增删与匹配等整镜操作 */
   locked: boolean;
   confirmed: boolean;
   revision: number;
   order: number;
   /** 单镜提示词重生成幂等键；旧数据缺省为 null */
   promptRegenJobId: string | null;
+  /** auto = 系统根据剧本生成；manual = 用户手改 */
+  promptOrigin?: "auto" | "manual";
+  promptVersion?: number;
+  promptUpdatedAt?: string | null;
+  promptScriptRevision?: number | null;
+  /** 最近一次自动生成的提示词（手改保护时仅作建议，不覆盖 videoPrompt） */
+  autoPromptText?: string | null;
+  /** 手改/锁定镜头无法安全套用新提示词 */
+  promptNeedsReview?: boolean;
+  /** 最近一次成功生成视频所用的提示词版本 */
+  generatedWithPromptVersion?: number | null;
 };
 
 export type StoryboardScene = {
@@ -220,6 +231,14 @@ export type EpisodeProduction = {
   lastEditedAt: string;
   createdAt: string;
   updatedAt: string;
+  /** 剧本变更后的提示词刷新摘要；缺省为 null */
+  promptRefresh?: {
+    scriptRevision: number;
+    updatedAt: string;
+    appliedShotIds: string[];
+    reviewShotIds: string[];
+    notice: string;
+  } | null;
 };
 
 /** 本集一键视频生成批次元数据 */
@@ -254,11 +273,6 @@ export const EPISODE_STATUS_LABEL: Record<EpisodeProductionStatus, string> = {
   storyboard_review: "分镜待确认",
   storyboard_done: "分镜已确认",
   generation_failed: "生成失败",
-};
-
-export const CREATION_STEP_LABEL: Record<CreationStep, string> = {
-  1: "选择剧集",
-  2: "分镜创作",
 };
 
 export const SHOT_STATUS_LABEL: Record<ShotCompletenessStatus, string> = {

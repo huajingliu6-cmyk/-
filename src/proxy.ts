@@ -7,18 +7,6 @@ const PUBLIC_PATHS = new Set(["/", "/login", "/build-revision"]);
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;
-  // Layout preview routes: open in local `next dev`, and on LAN when explicitly enabled.
-  if (
-    pathname === "/asset-fusion-preview" ||
-    pathname === "/storyboard-layout-preview"
-  ) {
-    if (
-      process.env.NODE_ENV === "development" ||
-      process.env.ALLOW_LAYOUT_PREVIEWS === "true"
-    ) {
-      return true;
-    }
-  }
   if (pathname.startsWith("/api/auth/")) return true;
   // 静态资源 + 非敏感构建标识（LAN 诊断）
   if (

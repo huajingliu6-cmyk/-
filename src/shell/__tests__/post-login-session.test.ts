@@ -19,6 +19,17 @@ describe("post-login session handoff", () => {
     expect(home).toContain("session?.refresh()");
   });
 
+  it("defaults post-login landing to projects list, not blank portal", () => {
+    const nav = readSrc("src/shell/nav.ts");
+    const login = readSrc("src/home/components/HeaderLoginPanel.tsx");
+    const hero = readSrc("src/home/components/HeroCta.tsx");
+    expect(nav).toContain("APP_POST_LOGIN_PATH = APP_PROJECTS_PATH");
+    expect(login).toContain("APP_POST_LOGIN_PATH");
+    expect(login).not.toMatch(/:\s*"\/app";/);
+    expect(hero).toContain("APP_POST_LOGIN_PATH");
+    expect(hero).not.toContain('router.push("/app")');
+  });
+
   it("clears client session on logout before leaving /app", () => {
     const menu = readSrc("src/auth/AuthUserMenu.tsx");
     expect(menu).toContain("session?.applyUser(null)");

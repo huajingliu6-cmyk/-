@@ -56,7 +56,7 @@ func NewAiTaskRules(store *postgres.Store, documentCache *cache.Documents) *AiTa
 
 var taskRuleCapabilities = []string{
 	"story.generate", "script.outline.generate", "script.episodes.generate", "script.split.generate", "script.continue.generate",
-	"asset.episode-design.generate", "asset.design-prompt.generate", "text.storyboard-prompt.generate", "image.character.generate",
+	"asset.episode-design.generate", "asset.roster.extract", "asset.detail.extract", "asset.design-prompt.generate", "text.storyboard-prompt.generate", "image.character.generate",
 	"audio.character-voice.generate", "image.scene.generate", "image.prop.generate", "video.storyboard-shot.generate",
 	"video.storyboard-episode.generate", "video.workflow-node.generate", "video.reference-image.precheck",
 }

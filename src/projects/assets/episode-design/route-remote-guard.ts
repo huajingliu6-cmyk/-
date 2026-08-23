@@ -5,6 +5,10 @@ import {
   isRemoteDataOnly,
   isRemoteDataServiceError,
 } from '@/persistence/remote-data-client';
+import {
+  isOperationFailedError,
+  operationFailedResponse,
+} from "@/projects/operation-failed";
 
 export async function guardEpisodeAssetDesignRemoteData<T>(
   operation: () => Promise<T>,
@@ -14,6 +18,9 @@ export async function guardEpisodeAssetDesignRemoteData<T>(
   } catch (error) {
     if (isRemoteDataServiceError(error)) {
       return NextResponse.json({ error: '内网数据服务不可用' }, { status: 503 });
+    }
+    if (isOperationFailedError(error)) {
+      return operationFailedResponse();
     }
     throw error;
   }

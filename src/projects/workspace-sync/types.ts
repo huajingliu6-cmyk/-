@@ -12,6 +12,7 @@ export type WorkspaceSnapshot = {
   projectId: string;
   upstreamRevision: number;
   syncedAt: string;
+  documentRevision?: number;
   sourceFingerprint: string | null;
   /** Confirmed formal episodes only (copy from management script.json episodes) */
   episodes: WorkspaceSnapshotEpisode[];
@@ -19,8 +20,11 @@ export type WorkspaceSnapshot = {
   assets: ProjectAssetBundle;
   /** Snapshot of management episode-asset-designs store */
   episodeAssetDesigns: ProjectEpisodeAssetDesignStore;
-  syncStatus: "ok" | "failed";
+  syncStatus: "ok" | "pending" | "failed" | "unknown";
   syncError: string | null;
+  syncOperationId?: string | null;
+  parentOperationId?: string | null;
+  sourceManagementRevision?: number | null;
 };
 
 export type WorkspaceLocalStore = {

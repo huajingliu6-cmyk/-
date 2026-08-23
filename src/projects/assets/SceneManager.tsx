@@ -1,26 +1,20 @@
 "use client";
 
-import { useState } from "react";
-import { MapPinned } from "lucide-react";
-import { AssetBasicInfo } from "@/projects/assets/AssetBasicInfo";
+import { useCallback, useState, type MutableRefObject } from "react";
 import {
   AssetCompactList,
   AssetListPanelHeader,
 } from "@/projects/assets/AssetCompactList";
-import { AssetDetailImage } from "@/projects/assets/AssetDetailImage";
-import { AssetDetailLayout } from "@/projects/assets/AssetDetailLayout";
-import { AssetImageUpload } from "@/projects/assets/AssetImageUpload";
 import { AssetLibraryLayout } from "@/projects/assets/AssetLibraryLayout";
-import { LibraryAssetPromptModal } from "@/projects/assets/LibraryAssetPromptModal";
 import { SceneCreateDialog } from "@/projects/assets/SceneCreateDialog";
+import { SceneDetail } from "@/projects/assets/SceneDetail";
+import { UnsavedPromptDialog } from "@/projects/assets/UnsavedPromptDialog";
 import { deriveSceneStatus, sceneDisplayStatus } from "@/projects/assets/status";
-import { resolveAssetImageSrc } from "@/projects/assets/asset-image-url";
-import { persistThenUploadAssetImage } from "@/projects/assets/upload-asset-image";
+import { createLibraryScene } from "@/projects/assets/create-library-asset-client";
+import { deleteLibraryAssetClient } from "@/projects/assets/delete-library-asset-client";
+import { AssetDeleteInUseDialog } from "@/projects/assets/AssetDeleteInUseDialog";
+import type { AssetReferenceImpact } from "@/projects/assets/asset-reference-impact-types";
 import type { EpisodeAssetDesignItem } from "@/projects/assets/episode-design/types";
-import {
-  findLibraryDesignItem,
-  type LibraryPromptAsset,
-} from "@/projects/assets/library-asset-prompt";
 import type { SceneAsset, SceneDraftInput } from "@/projects/assets/types";
 
 type Props = {
@@ -33,6 +27,8 @@ type Props = {
   designItems?: EpisodeAssetDesignItem[];
   designEpisodeId?: string;
   onDesignItemChange?: (item: EpisodeAssetDesignItem) => void;
+  onPromptDirtyChange?: (dirty: boolean) => void;
+  promptFlushRef?: MutableRefObject<(() => Promise<void>) | null>;
 };
 
 export function SceneManager({
@@ -45,89 +41,172 @@ export function SceneManager({
   designItems,
   designEpisodeId,
   onDesignItemChange,
+  onPromptDirtyChange,
+  promptFlushRef,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(
     scenes[0]?.id ?? null,
   );
+  const [promptDirty, setPromptDirty] = useState(false);
+  const [pendingSelectId, setPendingSelectId] = useState<string | null>(null);
+  const [unsavedBusy, setUnsavedBusy] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
-  const [imageEditorId, setImageEditorId] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [imageRevisions, setImageRevisions] = useState<Record<string, number>>(
     {},
   );
+  const [inUseDialog, setInUseDialog] = useState<{
+    assetId: string;
+    assetName: string;
+    impact: AssetReferenceImpact;
+  } | null>(null);
+  const [inUseBusy, setInUseBusy] = useState(false);
 
   const selected = scenes.find((s) => s.id === selectedId) ?? null;
+
+  const handlePromptDirtyChange = useCallback(
+    (dirty: boolean) => {
+      setPromptDirty(dirty);
+      onPromptDirtyChange?.(dirty);
+    },
+    [onPromptDirtyChange],
+  );
+
+  const requestSelect = useCallback(
+    (id: string) => {
+      if (id === selectedId) return;
+      if (promptDirty) {
+        setPendingSelectId(id);
+        return;
+      }
+      setSelectedId(id);
+    },
+    [promptDirty, selectedId],
+  );
+
+  const completePendingSelect = useCallback((id: string) => {
+    setPendingSelectId(null);
+    setPromptDirty(false);
+    setSelectedId(id);
+  }, []);
+
+  const handleUnsavedSave = useCallback(async () => {
+    setUnsavedBusy(true);
+    try {
+      await promptFlushRef?.current?.();
+      if (pendingSelectId) completePendingSelect(pendingSelectId);
+    } finally {
+      setUnsavedBusy(false);
+    }
+  }, [completePendingSelect, pendingSelectId, promptFlushRef]);
+
+  const handleUnsavedDiscard = useCallback(() => {
+    if (pendingSelectId) completePendingSelect(pendingSelectId);
+  }, [completePendingSelect, pendingSelectId]);
 
   const updateOne = (next: SceneAsset) => {
     const withStatus = { ...next, status: deriveSceneStatus(next) };
     onChange(scenes.map((s) => (s.id === withStatus.id ? withStatus : s)));
   };
 
-  const previewSrc = selected
-    ? resolveAssetImageSrc(projectId, selected, {
-        revision: imageRevisions[selected.id] ?? 0,
-      })
-    : null;
+  const applyLocalDelete = (id: string) => {
+    const deletedIndex = scenes.findIndex((scene) => scene.id === id);
+    if (deletedIndex < 0) return;
+    const next = scenes.filter((scene) => scene.id !== id);
+    onChange(next);
+    if (selectedId === id) {
+      setSelectedId(next[Math.min(deletedIndex, next.length - 1)]?.id ?? null);
+    }
+    setImageRevisions((previous) => {
+      const updated = { ...previous };
+      delete updated[id];
+      return updated;
+    });
+  };
+
+  const handleDelete = async (id: string): Promise<"deleted" | "in_use"> => {
+    const target = scenes.find((scene) => scene.id === id);
+    if (!target) return "deleted";
+    setNote("正在删除场景…");
+    const outcome = await deleteLibraryAssetClient({
+      projectId,
+      context,
+      kind: "scene",
+      assetId: id,
+      unlinkStoryboardRefs: false,
+    });
+    if (outcome.status === "in_use") {
+      setInUseDialog({
+        assetId: id,
+        assetName: target.name || "未命名场景",
+        impact: outcome.impact,
+      });
+      setNote(outcome.message);
+      return "in_use";
+    }
+    if (outcome.status === "error") {
+      setNote(outcome.message);
+      throw new Error(outcome.message);
+    }
+    applyLocalDelete(id);
+    setNote(
+      outcome.unlinkedStoryboard
+        ? "已解除分镜关联并删除场景。"
+        : "已删除场景。",
+    );
+    return "deleted";
+  };
+
+  const handleUnlinkAndDelete = async () => {
+    if (!inUseDialog) return;
+    const id = inUseDialog.assetId;
+    setInUseBusy(true);
+    setNote("正在解除关联并删除场景…");
+    try {
+      const outcome = await deleteLibraryAssetClient({
+        projectId,
+        context,
+        kind: "scene",
+        assetId: id,
+        unlinkStoryboardRefs: true,
+      });
+      if (outcome.status !== "deleted") {
+        setNote(outcome.message);
+        return;
+      }
+      applyLocalDelete(id);
+      setInUseDialog(null);
+      setNote("已解除分镜关联并删除场景。");
+    } finally {
+      setInUseBusy(false);
+    }
+  };
 
   const handleDialogSubmit = (draft: SceneDraftInput) => {
-    const pendingFile = draft.pendingImageFile ?? null;
+    if (!draft.pendingImageFile) {
+      setNote("请先上传场景图片后再创建");
+      return;
+    }
     if (draft.imageObjectUrl?.startsWith("blob:")) {
       URL.revokeObjectURL(draft.imageObjectUrl);
     }
-
-    const created: SceneAsset = {
-      id: `scene_${Date.now()}`,
-      projectId,
-      name: draft.name,
-      sceneType: "",
-      description: draft.description,
-      timeOfDay: draft.timeOfDay,
-      location: "",
-      style: "",
-      imageFileName: null,
-      imageObjectUrl: null,
-      imageMimeType: null,
-      status: "draft",
-    };
-    created.status = deriveSceneStatus(created);
-    const next = [...scenes, created];
-    onChange(next);
-    setSelectedId(created.id);
     setCreateOpen(false);
-    setNote("已创建场景，正在保存…");
+    setNote("正在创建场景…");
     void (async () => {
       try {
-        const uploaded = await persistThenUploadAssetImage({
+        const created = await createLibraryScene({
           projectId,
-          assetId: created.id,
-          pendingFile,
-          persist: () => onPersist(next),
+          context,
+          draft,
         });
-        if (uploaded) {
-          const withImage: SceneAsset = {
-            ...created,
-            imageFileName: uploaded.imageFileName,
-            imageMimeType: uploaded.imageMimeType,
-            imageObjectUrl: null,
-            status: deriveSceneStatus({
-              ...created,
-              imageFileName: uploaded.imageFileName,
-              imageObjectUrl: null,
-            }),
-          };
-          const uploadedNext = next.map((item) =>
-            item.id === created.id ? withImage : item,
-          );
-          onChange(uploadedNext);
-          setImageRevisions((previous) => ({
-            ...previous,
-            [created.id]: (previous[created.id] ?? 0) + 1,
-          }));
-          await onPersist(uploadedNext);
-          setNote("已创建并保存场景图片。");
-        } else {
-          setNote("已创建并保存场景。");
-        }
+        const next = [...scenes, created];
+        onChange(next);
+        setSelectedId(created.id);
+        setImageRevisions((previous) => ({
+          ...previous,
+          [created.id]: (previous[created.id] ?? 0) + 1,
+        }));
+        setNote("已创建并保存场景图片。");
       } catch (error) {
         setNote(error instanceof Error ? error.message : "保存失败");
       }
@@ -156,17 +235,10 @@ export function SceneManager({
         list={
           <AssetCompactList
             projectId={projectId}
+            context={context}
             selectedId={selectedId}
-            onSelect={setSelectedId}
-            onEdit={
-              canEdit
-                ? (id) => {
-                    setSelectedId(id);
-                    setCreateOpen(false);
-                    setImageEditorId(id);
-                  }
-                : undefined
-            }
+            onSelect={requestSelect}
+            onDelete={canEdit ? handleDelete : undefined}
             emptyMessage="暂无场景资产。"
             testId="scene-compact-list"
             items={scenes.map((s) => {
@@ -184,131 +256,26 @@ export function SceneManager({
           />
         }
         details={
-          <AssetDetailLayout
-            title="场景详情"
-            aria-label="场景详情"
-            className="scene-detail"
-            empty={!selected}
-            emptyMessage="选择或新建场景以编辑详情。"
-            status={
-              selected ? (
-                <span className="amw-badge">
-                  {sceneDisplayStatus(selected)}
-                </span>
-              ) : null
+          <SceneDetail
+            key={selected?.id ?? "none"}
+            projectId={projectId}
+            context={context}
+            scene={selected}
+            canEdit={canEdit}
+            imageRevision={selected ? (imageRevisions[selected.id] ?? 0) : 0}
+            onChange={updateOne}
+            onImageRevision={(assetId, next) =>
+              setImageRevisions((prev) => ({ ...prev, [assetId]: next }))
             }
-            preview={
-              selected ? (
-                <AssetDetailImage
-                  fill
-                  src={previewSrc}
-                  alt={selected.imageFileName ?? selected.name}
-                  testId="scene-detail-image"
-                  emptyIcon={<MapPinned size={36} strokeWidth={1.5} />}
-                />
-              ) : null
-            }
-            basicInfo={
-              selected ? (
-                <AssetBasicInfo
-                  compact
-                  fields={[
-                    {
-                      key: "name",
-                      label: (
-                        <>
-                          名称<span className="req">*</span>
-                        </>
-                      ),
-                      value: selected.name,
-                      disabled: !canEdit,
-                      onChange: (v) => updateOne({ ...selected, name: v }),
-                    },
-                    {
-                      key: "sceneType",
-                      label: "类型",
-                      value: selected.sceneType,
-                      disabled: !canEdit,
-                      placeholder: "如：室内 / 外景",
-                      onChange: (v) =>
-                        updateOne({ ...selected, sceneType: v }),
-                    },
-                    {
-                      key: "timeOfDay",
-                      label: "时间",
-                      value: selected.timeOfDay,
-                      disabled: !canEdit,
-                      onChange: (v) =>
-                        updateOne({ ...selected, timeOfDay: v }),
-                    },
-                    {
-                      key: "location",
-                      label: "位置",
-                      value: selected.location,
-                      disabled: !canEdit,
-                      onChange: (v) =>
-                        updateOne({ ...selected, location: v }),
-                    },
-                  ]}
-                />
-              ) : null
-            }
-            notes={
-              selected ? (
-                <div className="amw-field amw-field--notes-compact">
-                  <label>备注</label>
-                  <textarea
-                    className="amw-textarea asset-controls__notes-textarea"
-                    value={selected.description}
-                    disabled={!canEdit}
-                    onChange={(e) =>
-                      updateOne({
-                        ...selected,
-                        description: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-              ) : null
-            }
-            previewOverlayActions={
-              selected ? (
-                <AssetImageUpload
-                  id={`scene-image-${selected.id}`}
-                  label="场景图片"
-                  compact
-                  replaceOnly
-                  hidePreview
-                  disabled={!canEdit}
-                  projectId={projectId}
-                  assetId={selected.id}
-                  actionLabel="替换场景"
-                  ensurePersisted={async () => {
-                    await onPersist(scenes);
-                  }}
-                  revision={imageRevisions[selected.id] ?? 0}
-                  onRevisionChange={(next) =>
-                    setImageRevisions((prev) => ({
-                      ...prev,
-                      [selected.id]: next,
-                    }))
-                  }
-                  value={{
-                    fileName: selected.imageFileName,
-                    objectUrl: selected.imageObjectUrl,
-                    mimeType: selected.imageMimeType,
-                  }}
-                  onChange={(image) =>
-                    updateOne({
-                      ...selected,
-                      imageFileName: image.fileName,
-                      imageObjectUrl: image.objectUrl,
-                      imageMimeType: image.mimeType,
-                    })
-                  }
-                />
-              ) : null
-            }
+            onPersist={async () => {
+              await onPersist(scenes);
+            }}
+            designItems={designItems}
+            designEpisodeId={designEpisodeId}
+            onDesignItemChange={onDesignItemChange}
+            onPromptDirtyChange={handlePromptDirtyChange}
+            promptFlushRef={promptFlushRef}
+            onStatus={setNote}
             footer={note ? <p className="amw-note">{note}</p> : null}
           />
         }
@@ -320,26 +287,21 @@ export function SceneManager({
         onSubmit={handleDialogSubmit}
       />
 
-      <LibraryAssetPromptModal
-        key={`${imageEditorId ?? "closed"}:${designEpisodeId ?? ""}`}
-        open={Boolean(imageEditorId)}
-        projectId={projectId}
-        context={context}
-        episodeId={designEpisodeId}
-        kind="scene"
-        asset={
-          scenes.find((item) => item.id === imageEditorId) as
-            | LibraryPromptAsset
-            | null
-        }
-        designItem={findLibraryDesignItem(
-          scenes.find((item) => item.id === imageEditorId) as
-            | LibraryPromptAsset
-            | null,
-          designItems,
-        )}
-        onClose={() => setImageEditorId(null)}
-        onItemChange={onDesignItemChange}
+      <AssetDeleteInUseDialog
+        open={Boolean(inUseDialog)}
+        assetName={inUseDialog?.assetName ?? ""}
+        impact={inUseDialog?.impact ?? null}
+        busy={inUseBusy}
+        onCancel={() => setInUseDialog(null)}
+        onUnlinkAndDelete={() => void handleUnlinkAndDelete()}
+      />
+
+      <UnsavedPromptDialog
+        open={pendingSelectId != null}
+        busy={unsavedBusy}
+        onSave={() => void handleUnsavedSave()}
+        onDiscard={handleUnsavedDiscard}
+        onCancel={() => setPendingSelectId(null)}
       />
     </>
   );

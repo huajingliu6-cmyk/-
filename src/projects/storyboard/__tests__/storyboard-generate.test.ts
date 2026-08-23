@@ -60,6 +60,10 @@ describe("storyboard-generate", () => {
     for (const scene of doc.scenes) {
       expect(scene.shots.length).toBeGreaterThanOrEqual(2);
       expect(scene.shots.length).toBeLessThanOrEqual(4);
+      for (const shot of scene.shots) {
+        expect(shot.promptLocked).toBe(true);
+        expect(shot.locked).toBe(false);
+      }
     }
     expect(doc.scenes[0]?.shots[0]?.characterAssetIds).toContain("c1");
     expect(doc.scenes[0]?.shots[0]?.videoPrompt.length).toBeGreaterThan(20);

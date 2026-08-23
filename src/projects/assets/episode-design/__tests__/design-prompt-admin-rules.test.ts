@@ -11,7 +11,9 @@ import { createProjectRecord } from "@/projects/project-storage";
 import { FICTIONAL_PHOTOREAL_LIKENESS_POLICY } from "@/ai-config/system-policy";
 
 const streamTextMock = vi.fn();
-let streamDeltaQueue: string[] = ["自定义提示词正文"];
+const VALID_FORMAL_PROMPT =
+  "超写实真人影视摄影质感，虚构角色林晚，清晰短发与青衫布料褶皱，服装具有细密织物纹理，人物神态沉静坚定，置身古朴茶馆入口，柔和侧逆光勾勒轮廓，背景保持自然景深与真实空间层次，电影级色彩管理，画面细节完整，构图稳定，可直接用于生成统一风格的角色资产。";
+let streamDeltaQueue: string[] = [VALID_FORMAL_PROMPT];
 
 vi.mock("@/text-generation/provider/http-compatible-provider", () => ({
   HttpCompatibleTextProvider: class {
@@ -53,7 +55,7 @@ describe("streamRedesignPromptInConversation admin task rules", () => {
     process.env.APP_DATA_DIR = tmp;
     process.env.TEXT_LLM_PROVIDER = "mock";
     streamTextMock.mockClear();
-    streamDeltaQueue = ["自定义提示词正文"];
+    streamDeltaQueue = [VALID_FORMAL_PROMPT];
 
     await updateGenerationApiConfig("asset-design-prompt-text", {
       provider: "mock",
@@ -324,7 +326,7 @@ describe("streamRedesignPromptInConversation admin task rules", () => {
   it("rejects extract-field dump, retries once, then saves corrected prompt", async () => {
     streamDeltaQueue = [
       "【角色描述】女主\n【外貌】短发\n【服装】青衫",
-      "超写实真人影视摄影，虚构角色林晚，青衫褶皱，侧光剧照",
+      VALID_FORMAL_PROMPT,
     ];
     const { streamRedesignPromptInConversation } = await import(
       "@/projects/assets/episode-design/generate-design-prompt"
@@ -415,9 +417,7 @@ describe("streamRedesignPromptInConversation admin task rules", () => {
   });
 
   it("generates with empty designConversation for legacy extracted assets", async () => {
-    streamDeltaQueue = [
-      "横构图电影剧照，虚构角色林晚立于雨巷，青衫褶皱，冷硬侧光，写实影视摄影质感。",
-    ];
+    streamDeltaQueue = [VALID_FORMAL_PROMPT];
     const { streamRedesignPromptInConversation } = await import(
       "@/projects/assets/episode-design/generate-design-prompt"
     );
@@ -453,7 +453,7 @@ describe("streamRedesignPromptInConversation admin task rules", () => {
     expect(result.capabilityId).toBe("asset.design-prompt.generate");
     expect(result.diagnostics.outputKind).toBe("asset_design_prompt");
     expect(result.messageRoles).toBe("system,user");
-    expect(result.text).toContain("横构图电影剧照");
+    expect(result.text).toBe(VALID_FORMAL_PROMPT);
     expect(result.text).not.toContain("【角色描述】");
     expect(result.nextConversation.length).toBeGreaterThanOrEqual(2);
     expect(result.nextConversation.some((m) => m.role === "system")).toBe(
@@ -594,7 +594,8 @@ describe("platform likeness policy copy", () => {
     );
     const rule = getBuiltinTaskRule("asset.design-prompt.generate");
     expect(rule).toContain("一整段");
-    expect(rule).toContain("禁止输出 JSON");
+    expect(rule).toContain("单资产模式");
+    expect(rule).toContain("批量模式");
     expect(rule).toContain("允许超写实真人影视摄影质感");
     expect(rule).not.toContain("【角色描述】");
   });

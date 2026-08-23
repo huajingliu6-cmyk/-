@@ -9,6 +9,10 @@ import {
   resolveAssetImageStorageKey,
 } from "@/projects/assets/asset-image-url";
 import { mergeMediaIdLists } from "@/projects/assets/episode-design/generated-media-history";
+import {
+  isCharacterMediaSd2Certified,
+  listCertifiedCharacterMediaIds,
+} from "@/projects/assets/character-media-video-ref";
 import type {
   AudioAsset,
   CharacterAsset,
@@ -19,8 +23,10 @@ import { loadScriptDraft } from "@/projects/script/script-draft-store";
 import type { ScriptEpisode } from "@/projects/script/types";
 import {
   loadWorkspace,
-  saveWorkspace,
+  updateWorkspaceUnderLock,
 } from "@/projects/storyboard/production-store";
+import { wrapWriteFailure } from "@/projects/operation-failed";
+import { storyboardRemoteRevision } from "@/projects/storyboard/remote-production-store";
 import { ensureEpisodeProductions } from "@/projects/storyboard/services/ensure-productions";
 import type {
   AssetKind,
@@ -30,7 +36,6 @@ import type {
   EpisodeProduction,
   ProjectStoryboardWorkspace,
 } from "@/projects/storyboard/types";
-import { carryStoryboardRemoteRevision } from "@/projects/storyboard/remote-production-store";
 
 export type { AssetsSummary, AssetSummaryItem } from "@/projects/storyboard/types";
 
@@ -61,14 +66,23 @@ function buildMediaOptions(
       string,
       { voiceId: string | null; voiceName: string | null }
     >;
+    mediaVideoRefSafety?: CharacterAsset["mediaVideoRefSafety"];
+    videoRefSafety?: CharacterAsset["videoRefSafety"];
   },
   projectId: string,
+  options?: { characterCertFilter?: boolean },
 ): AssetMediaOption[] {
-  const mediaIds = mergeMediaIdLists(
+  let mediaIds = mergeMediaIdLists(
     asset.approvedMediaIds,
     asset.primaryMediaId ? [asset.primaryMediaId] : [],
     asset.imageFileName ? [asset.imageFileName] : [],
   );
+  if (options?.characterCertFilter) {
+    const certified = new Set(
+      listCertifiedCharacterMediaIds(asset as CharacterAsset),
+    );
+    mediaIds = mediaIds.filter((id) => certified.has(id));
+  }
   if (mediaIds.length === 0) return [];
   const primary =
     resolveAssetImageStorageKey(asset) ||
@@ -102,25 +116,68 @@ function toSummaryItem(
     imageFileName?: string | null;
     primaryMediaId?: string | null;
     approvedMediaIds?: string[];
+    lookMediaIds?: string[];
+    historyMediaIds?: string[];
     voiceId?: string | null;
     voiceName?: string | null;
     mediaVoices?: Record<
       string,
       { voiceId: string | null; voiceName: string | null }
     >;
-    videoRefSafety?: { status?: string } | null;
+    mediaVideoRefSafety?: CharacterAsset["mediaVideoRefSafety"];
+    videoRefSafety?: { status?: string; modelId?: string } | null;
   },
   projectId: string,
-  options?: { includeVoiceBound?: boolean },
-): AssetSummaryItem {
-  const hasImage = Boolean(
-    asset.imageFileName ||
-      asset.primaryMediaId ||
-      (asset.approvedMediaIds && asset.approvedMediaIds.length > 0),
+  options?: { includeVoiceBound?: boolean; characterCertFilter?: boolean },
+): AssetSummaryItem | null {
+  const mediaOptions = buildMediaOptions(
+    {
+      id: asset.id,
+      imageFileName: asset.imageFileName,
+      primaryMediaId: asset.primaryMediaId,
+      approvedMediaIds: asset.approvedMediaIds,
+      revision: asset.revision,
+      voiceId: asset.voiceId,
+      voiceName: asset.voiceName,
+      mediaVoices: asset.mediaVoices,
+      mediaVideoRefSafety: asset.mediaVideoRefSafety,
+      videoRefSafety: asset.videoRefSafety as CharacterAsset["videoRefSafety"],
+    },
+    projectId,
+    {
+      characterCertFilter: options?.characterCertFilter,
+    },
   );
-  const storageKey = resolveAssetImageStorageKey(asset);
-  const safetyStatus = asset.videoRefSafety?.status;
-  const mediaOptions = buildMediaOptions(asset, projectId);
+  if (options?.characterCertFilter && mediaOptions.length === 0) {
+    return null;
+  }
+
+  const certifiedPrimary =
+    options?.characterCertFilter && mediaOptions.length > 0
+      ? mediaOptions.find((m) => m.isPrimary)?.mediaId ??
+        mediaOptions[0]!.mediaId
+      : resolveAssetImageStorageKey(asset);
+
+  const hasImage = options?.characterCertFilter
+    ? mediaOptions.length > 0
+    : Boolean(
+        asset.imageFileName ||
+          asset.primaryMediaId ||
+          (asset.approvedMediaIds && asset.approvedMediaIds.length > 0),
+      );
+
+  const primaryForSafety =
+    certifiedPrimary ||
+    asset.primaryMediaId?.trim() ||
+    asset.imageFileName?.trim() ||
+    "";
+  const perMediaSafety =
+    options?.characterCertFilter && primaryForSafety
+      ? isCharacterMediaSd2Certified(asset as CharacterAsset, primaryForSafety)
+        ? { status: "ok" as const, modelId: "sd2-real-person-cert" }
+        : null
+      : asset.videoRefSafety;
+  const safetyStatus = perMediaSafety?.status ?? null;
   const voiceLabel = asset.voiceId?.trim()
     ? asset.voiceName?.trim() || asset.voiceId.trim()
     : null;
@@ -133,7 +190,7 @@ function toSummaryItem(
         : 1,
     hasImage,
     thumbUrl: hasImage
-      ? getProjectAssetImageUrl(projectId, storageKey, {
+      ? getProjectAssetImageUrl(projectId, certifiedPrimary, {
           revision: asset.revision,
         })
       : null,
@@ -160,17 +217,22 @@ export function buildAssetsSummary(
   if (!draft) return null;
   const projectId = draft.projectId;
   return {
-    characters: draft.characters.map((item: CharacterAsset) =>
-      toSummaryItem(item, projectId, { includeVoiceBound: true }),
+    characters: draft.characters
+      .map((item: CharacterAsset) =>
+        toSummaryItem(item, projectId, {
+          includeVoiceBound: true,
+          characterCertFilter: true,
+        }),
+      )
+      .filter((item): item is AssetSummaryItem => item != null),
+    scenes: draft.scenes.map(
+      (item: SceneAsset) => toSummaryItem(item, projectId) as AssetSummaryItem,
     ),
-    scenes: draft.scenes.map((item: SceneAsset) =>
-      toSummaryItem(item, projectId),
+    props: draft.props.map(
+      (item: PropAsset) => toSummaryItem(item, projectId) as AssetSummaryItem,
     ),
-    props: draft.props.map((item: PropAsset) =>
-      toSummaryItem(item, projectId),
-    ),
-    audios: draft.audios.map((item: AudioAsset) =>
-      toSummaryItem(item, projectId),
+    audios: draft.audios.map(
+      (item: AudioAsset) => toSummaryItem(item, projectId) as AssetSummaryItem,
     ),
   };
 }
@@ -197,42 +259,53 @@ export function replaceProduction(
 }
 
 /**
- * 按集合并保存：先重新加载磁盘/远端最新 workspace，再只替换目标集，
- * 避免长耗时生成用过期快照覆盖其它已生成分镜。
+ * 按集合并保存：在项目分镜锁内重新加载最新 workspace，再只替换目标集，
+ * 避免长耗时生成用过期快照覆盖其它已生成分镜，并与 invalid-refs apply 共用互斥。
  */
 export async function persistProduction(
   workspace: ProjectStoryboardWorkspace,
   updated: EpisodeProduction,
 ): Promise<EpisodeProduction> {
   const projectId = updated.projectId || workspace.projectId;
-  const latest = (await loadWorkspace(projectId)) ?? workspace;
+  try {
+    const saved = await updateWorkspaceUnderLock(projectId, async (loaded) => {
+      const latest = loaded ?? workspace;
 
-  const byEpisode = new Map<string, EpisodeProduction>();
-  for (const production of latest.productions) {
-    byEpisode.set(production.episodeId, production);
-  }
-  // 调用方 workspace 里尚未落盘的新集也要保留
-  for (const production of workspace.productions) {
-    if (!byEpisode.has(production.episodeId)) {
-      byEpisode.set(production.episodeId, production);
+      const byEpisode = new Map<string, EpisodeProduction>();
+      for (const production of latest.productions) {
+        byEpisode.set(production.episodeId, production);
+      }
+      for (const production of workspace.productions) {
+        if (!byEpisode.has(production.episodeId)) {
+          byEpisode.set(production.episodeId, production);
+        }
+      }
+      byEpisode.set(updated.episodeId, updated);
+
+      return {
+        projectId,
+        activeEpisodeId: latest.activeEpisodeId ?? workspace.activeEpisodeId,
+        productions: Array.from(byEpisode.values()),
+        ...(latest.videoDefaults !== undefined
+          ? { videoDefaults: latest.videoDefaults }
+          : workspace.videoDefaults !== undefined
+            ? { videoDefaults: workspace.videoDefaults }
+            : {}),
+        updatedAt: new Date().toISOString(),
+      };
+    });
+
+    if (!saved) {
+      throw new Error("分集制作状态保存失败");
     }
+    const savedProduction = findProduction(saved, updated.episodeId);
+    if (!savedProduction) {
+      throw new Error("分集制作状态保存失败");
+    }
+    return savedProduction;
+  } catch (error) {
+    wrapWriteFailure(error);
   }
-  byEpisode.set(updated.episodeId, updated);
-
-  const merged: ProjectStoryboardWorkspace = {
-    projectId,
-    activeEpisodeId: latest.activeEpisodeId ?? workspace.activeEpisodeId,
-    productions: Array.from(byEpisode.values()),
-    updatedAt: new Date().toISOString(),
-  };
-  carryStoryboardRemoteRevision(latest, merged);
-
-  const saved = await saveWorkspace(merged);
-  const savedProduction = findProduction(saved, updated.episodeId);
-  if (!savedProduction) {
-    throw new Error("分集制作状态保存失败");
-  }
-  return savedProduction;
 }
 
 export async function loadAuthorizedWorkspace(
@@ -246,7 +319,13 @@ export async function loadAuthorizedWorkspace(
     return { ok: false, response: gated.response };
   }
 
-  const project = await getProjectRecord(projectId);
+  const [project, scriptDraft, existing, assetsDraft] = await Promise.all([
+    getProjectRecord(projectId),
+    loadScriptDraft(projectId),
+    loadWorkspace(projectId),
+    loadAssetBundleDraft(projectId),
+  ]);
+
   if (!project) {
     return {
       ok: false,
@@ -254,17 +333,33 @@ export async function loadAuthorizedWorkspace(
     };
   }
 
-  const scriptDraft = await loadScriptDraft(projectId);
   const episodes = scriptDraft?.episodes ?? [];
-  const existing = await loadWorkspace(projectId);
   const workspace = ensureEpisodeProductions(projectId, episodes, existing);
-  const savedWorkspace =
+
+  let savedWorkspace: ProjectStoryboardWorkspace;
+  if (
     existing === null ||
     existing.productions.length !== workspace.productions.length ||
     existing.activeEpisodeId !== workspace.activeEpisodeId
-      ? await saveWorkspace(workspace)
-      : workspace;
-  const assetsDraft = await loadAssetBundleDraft(projectId);
+  ) {
+    const saved = await updateWorkspaceUnderLock(projectId, async (loaded) => {
+      const next = ensureEpisodeProductions(projectId, episodes, loaded);
+      if (
+        loaded === null ||
+        loaded.productions.length !== next.productions.length ||
+        loaded.activeEpisodeId !== next.activeEpisodeId
+      ) {
+        return next;
+      }
+      return null;
+    });
+    if (!saved) {
+      throw new Error("分镜工作台数据格式无效");
+    }
+    savedWorkspace = saved;
+  } else {
+    savedWorkspace = existing;
+  }
 
   return {
     ok: true,

@@ -5,7 +5,9 @@ export type NotificationType =
   | "asset_approval_approved"
   | "asset_approval_rejected"
   | "enterprise_join_approved"
-  | "enterprise_join_rejected";
+  | "enterprise_join_rejected"
+  | "image_generation_succeeded"
+  | "image_generation_failed";
 
 export type AppNotification = {
   id: string;

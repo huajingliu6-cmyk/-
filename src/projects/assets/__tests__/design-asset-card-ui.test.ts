@@ -51,7 +51,7 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(modal).toContain("ead-modal");
     expect(modal).toContain("design-image-preview");
     expect(modal).toContain("const previewBlock");
-    expect(modal).toContain("{previewBlock}");
+    expect(modal).toContain("isEmbedded ? null : previewBlock");
     expect(modal).toContain("{imageOptionsBlock}");
     expect(modal).toContain("{imageHistoryBlock}");
     expect(modal).toContain("design-image-model");
@@ -72,6 +72,14 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(modal).not.toContain("ead-requirement-dialog");
     expect(modal).not.toContain("输入素材要求");
     expect(modal).toContain("design-prompt-copy-row");
+    expect(modal).toContain('data-testid="design-copy"');
+    expect(modal).toMatch(
+      /data-testid="design-copy"[\s\S]{0,240}>\s*复制提示词\s*</,
+    );
+    expect(modal).not.toMatch(
+      /data-testid="design-copy"[\s\S]{0,240}<Copy\b/,
+    );
+    expect(css).toContain(".prompt-panel__copy");
     expect(modal).toContain("design-image-edit-toggle");
     expect(modal).toContain("imageEditEnabled");
     expect(modal).toContain("design-multi-angle");
@@ -79,22 +87,17 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(modal).toContain("handleMultiAngleChange");
     expect(modal).not.toContain("主卡片");
     expect(modal).not.toContain("副卡片");
-    const previewIdx = modal.indexOf("{previewBlock}");
+    const previewIdx = modal.indexOf("isEmbedded ? null : previewBlock");
     const optionsIdx = modal.indexOf("{imageOptionsBlock}");
     const historyIdx = modal.indexOf("{imageHistoryBlock}");
     expect(previewIdx).toBeGreaterThan(-1);
-    expect(optionsIdx).toBeGreaterThan(previewIdx);
-    expect(historyIdx).toBeGreaterThan(optionsIdx);
+    expect(optionsIdx).toBeGreaterThan(-1);
+    expect(historyIdx).toBeGreaterThan(-1);
     const textareaIdx = modal.indexOf('data-testid="design-prompt-textarea"');
     const copyRowIdx = modal.indexOf('data-testid="design-prompt-copy-row"');
-    const footIdx = modal.indexOf('className="ead-modal__foot"');
     expect(textareaIdx).toBeGreaterThan(-1);
     expect(copyRowIdx).toBeGreaterThan(textareaIdx);
-    expect(footIdx).toBeGreaterThan(copyRowIdx);
-    expect(modal.slice(footIdx, footIdx + 800)).toContain("二次编辑");
-    expect(modal.slice(footIdx, footIdx + 800)).not.toContain(
-      'data-testid="design-copy"',
-    );
+    expect(modal).toContain("二次编辑");
   });
 
   it("includes card and modal layout styles", () => {
@@ -164,6 +167,8 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(overlay).not.toContain("LoaderCircle");
     expect(overlay).not.toContain("Check");
     expect(overlay).not.toContain("STAGE_LABELS");
+    expect(overlay).toContain("defaultStageMessage");
+    expect(overlay).toContain("ead-generation-overlay__message");
     expect(overlay).not.toContain("ead-generation-overlay__track");
     expect(overlay).not.toContain("ead-generation-overlay__steps");
 
@@ -180,6 +185,11 @@ describe("Batch H1 design asset card UI contract", () => {
         /<DesignGenerationOverlay progress=\{generationProgress\} \/>/g,
       ),
     ).toHaveLength(2);
+
+    const designModal = readSrc("src/projects/assets/DesignAssetModal.tsx");
+    expect(designModal).toContain(
+      "<DesignGenerationOverlay progress={generationProgress} />",
+    );
 
     const visualCardIdx = workspace.indexOf(
       '<article className="ead-card ead-card--visual-asset">',

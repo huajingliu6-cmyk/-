@@ -2,6 +2,7 @@ import {
   PROJECT_ASSET_IMAGE_MAX_BYTES,
   PROJECT_ASSET_IMAGE_MIME,
 } from "@/projects/assets/asset-image-constants";
+import type { AssetImageApiContext } from "@/projects/assets/asset-image-url";
 
 export type UploadProjectAssetImageResult = {
   assetId: string;
@@ -39,11 +40,26 @@ export function validateProjectAssetImageFileClient(file: File): string | null {
   return null;
 }
 
+function imagesApiBase(
+  projectId: string,
+  assetId: string,
+  context: AssetImageApiContext,
+): string {
+  const encodedProject = encodeURIComponent(projectId);
+  const encodedAsset = encodeURIComponent(assetId);
+  return context === "workspace"
+    ? `/api/workspace/projects/${encodedProject}/assets-draft/images/${encodedAsset}`
+    : `/api/projects/${encodedProject}/assets-draft/images/${encodedAsset}`;
+}
+
 export async function uploadProjectAssetImage(
   projectId: string,
   assetId: string,
   file: File,
-  options?: { targetMediaId?: string | null },
+  options?: {
+    targetMediaId?: string | null;
+    context?: AssetImageApiContext;
+  },
 ): Promise<UploadProjectAssetImageResult> {
   const form = new FormData();
   form.append("file", file);
@@ -51,8 +67,9 @@ export async function uploadProjectAssetImage(
   const query = targetMediaId
     ? `?targetMediaId=${encodeURIComponent(targetMediaId)}`
     : "";
+  const context = options?.context ?? "management";
   const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/assets-draft/images/${encodeURIComponent(assetId)}${query}`,
+    `${imagesApiBase(projectId, assetId, context)}${query}`,
     { method: "PUT", body: form },
   );
   const payload = (await res.json().catch(() => ({}))) as {
@@ -87,11 +104,12 @@ export async function uploadProjectAssetImage(
 export async function deleteProjectAssetImage(
   projectId: string,
   assetId: string,
+  options?: { context?: AssetImageApiContext },
 ): Promise<void> {
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/assets-draft/images/${encodeURIComponent(assetId)}`,
-    { method: "DELETE" },
-  );
+  const context = options?.context ?? "management";
+  const res = await fetch(imagesApiBase(projectId, assetId, context), {
+    method: "DELETE",
+  });
   if (res.status === 404) return;
   if (!res.ok) {
     const payload = (await res.json().catch(() => ({}))) as { error?: string };
@@ -111,6 +129,7 @@ export async function persistThenUploadAssetImage(params: {
   assetId: string;
   pendingFile: File | null | undefined;
   persist: () => Promise<void>;
+  context?: AssetImageApiContext;
 }): Promise<UploadProjectAssetImageResult | null> {
   await params.persist();
   if (!params.pendingFile) return null;
@@ -118,5 +137,6 @@ export async function persistThenUploadAssetImage(params: {
     params.projectId,
     params.assetId,
     params.pendingFile,
+    { context: params.context },
   );
 }

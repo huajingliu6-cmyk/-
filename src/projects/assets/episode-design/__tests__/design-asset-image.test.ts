@@ -120,16 +120,18 @@ describe("design asset image generation contract", () => {
     );
     expect(modal).toContain("design-image-preview");
     expect(modal).toContain("const previewBlock");
-    expect(modal).toContain("{previewBlock}");
+    expect(modal).toContain("isEmbedded ? null : previewBlock");
     expect(modal).toContain("{imageOptionsBlock}");
     expect(modal).toContain("{imageHistoryBlock}");
     expect(modal).toContain("design-download");
-    expect(modal).toContain("design-prompt-history");
+    expect(modal).not.toContain("design-prompt-history");
     expect(modal).toContain("design-image-history");
     expect(modal).toContain("design-image-quality");
     expect(modal).toContain("design-image-aspect-ratio");
     expect(modal).toContain("design-image-count");
     expect(modal).toContain("design-image-model");
+    expect(modal).toContain("design-adjust-params");
+    expect(modal).toContain("prompt-generation-summary");
     expect(modal).toContain("imageModelId");
     expect(modal).toContain("model: imageModelId");
     expect(modal).toContain('form.set("model", imageModelId)');
@@ -204,17 +206,31 @@ describe("design asset image generation contract", () => {
     expect(parse).toContain("MULTI_ANGLE_TEMPLATE_FORBIDDEN");
 
     for (const routePath of [
-      "src/app/api/projects/[projectId]/asset-designs/episodes/[episodeId]/items/[itemId]/generate-asset/route.ts",
-      "src/app/api/workspace/projects/[projectId]/asset-designs/episodes/[episodeId]/items/[itemId]/generate-asset/route.ts",
+      "src/projects/assets/image-generation/enqueue-design-asset.ts",
     ]) {
       const route = readFileSync(path.join(process.cwd(), routePath), "utf-8");
       expect(route).toContain("model: requestedModel");
-      expect(route).toContain("appendGeneratedMediaGenerations");
       expect(route).toContain("buildMultiAngleEditPrompt");
-      expect(route).toContain("useRawPrompt: Boolean(multiAngleMode)");
       expect(route).toContain("MULTI_ANGLE_SCENE_ONLY");
       expect(route).toContain("referenceSlots.slice(0, 1)");
+      expect(route).toContain("createAndEnqueueImageJob");
     }
+    const processJob = readFileSync(
+      path.join(
+        process.cwd(),
+        "src/projects/assets/image-generation/process-job.ts",
+      ),
+      "utf-8",
+    );
+    expect(processJob).toContain("useRawPrompt: Boolean(job.params.multiAngleMode)");
+    const link = readFileSync(
+      path.join(
+        process.cwd(),
+        "src/projects/assets/image-generation/link-design-item-result.ts",
+      ),
+      "utf-8",
+    );
+    expect(link).toContain("appendGeneratedMediaGenerations");
   });
 
   it("image generation entrypoints call buildAssembledImagePrompt", () => {

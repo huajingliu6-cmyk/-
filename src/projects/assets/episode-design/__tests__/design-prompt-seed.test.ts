@@ -129,6 +129,20 @@ describe("resolveFormalDesignPromptText dirty data", () => {
       ),
     ).toBe(formal);
   });
+
+  it("uses extraction detail description when designPrompt is empty", () => {
+    const detailPrompt =
+      "16:9 横屏；左侧 1/3 为超高清正面面部特写；右侧 2/3 等距排布三张全身站姿 Front 正面、严格 90° Profile 侧面、Back 背面。" +
+      "超写实真人影视角色设定卡，写实哑光皮肤，8K 超高清。" +
+      "仅一名角色、无第二人物、无双人、无多人、无群像。".repeat(3);
+    expect(
+      resolveFormalDesignPromptText(
+        characterItem({
+          draft: { description: detailPrompt },
+        }),
+      ),
+    ).toBe(detailPrompt);
+  });
 });
 
 describe("assertValidDesignPromptText", () => {

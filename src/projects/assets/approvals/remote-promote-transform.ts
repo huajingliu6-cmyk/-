@@ -22,6 +22,7 @@ import type {
   AssetApprovalProvenance,
   ProjectAssetBundle,
 } from '@/projects/assets/types';
+import { isSd2CertifiedForVideoRef } from '@/video-generation/sd2-cert-safety';
 
 function updateApprovedDesignItem(input: {
   item: EpisodeAssetDesignItem;
@@ -72,6 +73,22 @@ function updateApprovedDesignItem(input: {
     : next;
 }
 
+export type PromoteApprovalItemDocumentsResult =
+  | {
+      ok: true;
+      assetId: string;
+      created: boolean;
+      managementAssets: ProjectAssetBundle;
+      managementDesigns: ProjectEpisodeAssetDesignStore;
+      workspaceAssets: ProjectAssetBundle;
+      workspaceDesigns: ProjectEpisodeAssetDesignStore;
+    }
+  | {
+      ok: false;
+      code: string;
+      message: string;
+    };
+
 export function promoteApprovalItemDocuments(input: {
   projectId: string;
   episodeId: string;
@@ -87,8 +104,31 @@ export function promoteApprovalItemDocuments(input: {
   managementDesigns: ProjectEpisodeAssetDesignStore;
   workspaceAssets: ProjectAssetBundle | null;
   workspaceDesigns: ProjectEpisodeAssetDesignStore;
-}) {
+}): PromoteApprovalItemDocumentsResult {
   const mediaId = input.item.generatedMediaId;
+  if (!mediaId?.trim()) {
+    return {
+      ok: false,
+      code: 'GENERATED_MEDIA_INVALID',
+      message: '入库缺少有效图片 mediaId',
+    };
+  }
+
+  const videoRefSafety = resolveVideoRefSafetyFromDesignMedia(
+    input.workspaceItem,
+    mediaId,
+  );
+  if (
+    input.item.category === 'character' &&
+    !isSd2CertifiedForVideoRef(videoRefSafety)
+  ) {
+    return {
+      ok: false,
+      code: 'VIDEO_REF_REQUIRED',
+      message: `角色「${input.item.assetNameSnapshot}」的入库图尚未通过 SD 真人素材认证，无法写入资产库。请先完成人物校验。`,
+    };
+  }
+
   const provenance: AssetApprovalProvenance = {
     source: 'workspace_approval',
     approvalSubmissionId: input.submissionId,
@@ -106,10 +146,6 @@ export function promoteApprovalItemDocuments(input: {
     input.item.category,
     input.item.assetDesignItemId,
     input.workspaceItem.libraryAssetId,
-  );
-  const videoRefSafety = resolveVideoRefSafetyFromDesignMedia(
-    input.workspaceItem,
-    mediaId,
   );
   let managementAssets = input.managementAssets;
   let assetId: string;
@@ -214,6 +250,7 @@ export function promoteApprovalItemDocuments(input: {
     : input.workspaceDesigns;
 
   return {
+    ok: true,
     assetId,
     created,
     managementAssets,

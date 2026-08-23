@@ -18,6 +18,8 @@ import { parsePromptImageSegments } from "@/projects/storyboard/services/shot-pr
 type Props = {
   value: string;
   disabled?: boolean;
+  /** Read-only display: not editable, but not visually "disabled"/dimmed. */
+  readOnly?: boolean;
   imageUrlById: Map<string, string>;
   /** 本镜头已添加的素材，可作为 @ 挂载范围 */
   mentionAssets: PickerAsset[];
@@ -381,10 +383,12 @@ export function filterShotMentionAssets(
 export function ShotPromptEditor({
   value,
   disabled,
+  readOnly = false,
   imageUrlById,
   mentionAssets,
   onChange,
 }: Props) {
+  const inert = Boolean(disabled || readOnly);
   const ref = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -429,7 +433,7 @@ export function ShotPromptEditor({
 
   const refreshMention = useCallback(() => {
     const root = ref.current;
-    if (!root || disabled) {
+    if (!root || inert) {
       mentionRef.current = null;
       setOpen(false);
       return;
@@ -454,7 +458,7 @@ export function ShotPromptEditor({
     setOpen(true);
     setQuery(active.query);
     setActiveIndex(0);
-  }, [disabled]);
+  }, [inert]);
 
   const updateMenuPosition = useCallback(() => {
     if (!open) {
@@ -638,7 +642,7 @@ export function ShotPromptEditor({
       }
     }
 
-    if (disabled) return;
+    if (inert) return;
     const root = ref.current;
     if (!root) return;
 
@@ -666,7 +670,7 @@ export function ShotPromptEditor({
   const handleEditorClick = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement | null;
     const chip = target?.closest?.("[data-asset-id]") as HTMLElement | null;
-    if (chip && ref.current?.contains(chip) && !disabled) {
+    if (chip && ref.current?.contains(chip) && !inert) {
       const sel = window.getSelection();
       if (sel) {
         const range = document.createRange();
@@ -751,8 +755,10 @@ export function ShotPromptEditor({
     <div ref={wrapRef} className="sbw-prompt-editor-wrap">
       <div
         ref={ref}
-        className={`sbw-prompt-editor${disabled ? " is-disabled" : ""}`}
-        contentEditable={!disabled}
+        className={`sbw-prompt-editor${
+          readOnly ? " is-readonly" : disabled ? " is-disabled" : ""
+        }`}
+        contentEditable={!inert}
         suppressContentEditableWarning
         role="textbox"
         aria-multiline="true"

@@ -21,3 +21,10 @@ export function createScriptSplitIdempotencyKey(): string {
 export function createScriptSplitConfirmIdempotencyKey(): string {
   return `split_confirm_${safeRandomUUID()}`;
 }
+
+/** Stable confirm key for a script source fingerprint (retry / refresh). */
+export function scriptSplitConfirmIdempotencyKey(
+  sourceFingerprint: string,
+): string {
+  return `split_confirm_${sourceFingerprint}`;
+}

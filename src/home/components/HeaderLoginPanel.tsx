@@ -10,6 +10,7 @@ import {
 import { useLoginPortalTransition } from "@/shell/LoginPortalTransitionProvider";
 import { useChipBounce } from "@/shell/useChipBounce";
 import { prefersReducedMotion } from "@/shell/login-portal";
+import { APP_POST_LOGIN_PATH } from "@/shell/nav";
 
 type Props = {
   onLoggedIn: (user: AuthUser) => void;
@@ -118,7 +119,7 @@ export function HeaderLoginPanel({
       const target =
         nextPath && nextPath.startsWith("/") && !nextPath.startsWith("//")
           ? nextPath
-          : "/app";
+          : APP_POST_LOGIN_PATH;
 
       setOpen(false);
       await playLoginSuccess({
@@ -230,7 +231,9 @@ export function HeaderLoginPanel({
           ) : null}
 
           <label className="mb-3 block">
-            <span className="mb-1 block text-[11px] text-white/45">用户名</span>
+            <span className="mb-1 block text-[11px] text-white/45">
+              用户名（账号，不是昵称）
+            </span>
             <input
               className="w-full rounded-lg border border-white/12 bg-black/35 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-400/60"
               autoComplete="username"
@@ -239,6 +242,7 @@ export function HeaderLoginPanel({
               disabled={busy}
               autoFocus
               required
+              placeholder={isLogin ? "例如 admin_test" : "至少 2 个字符"}
             />
           </label>
 

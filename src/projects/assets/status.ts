@@ -5,6 +5,8 @@ import type {
   PropAsset,
   SceneAsset,
 } from "@/projects/assets/types";
+import { getCharacterLibraryReadiness } from "@/projects/assets/character-library-readiness";
+import { characterHasPrimaryMedia } from "@/projects/assets/character-media-state";
 
 export const ASSET_STATUS_LABEL: Record<AssetStatus, string> = {
   draft: "草稿",
@@ -20,9 +22,14 @@ function hasImage(
 
 /** 角色展示状态：优先暴露业务提示，不用随机值 */
 export function characterDisplayStatus(asset: CharacterAsset): string {
+  const readiness = getCharacterLibraryReadiness(asset);
+  if (!readiness.hasPrimaryMedia) return "缺少主图，无法入库/确认";
   if (!asset.voiceId) return "待绑定音色";
   if (!hasImage(asset) || !asset.description.trim() || !asset.role.trim()) {
     return "待完善";
+  }
+  if (!readiness.readyForLibrary) {
+    return readiness.reason ?? "待完善认证";
   }
   return ASSET_STATUS_LABEL[asset.status];
 }
@@ -54,16 +61,29 @@ export function audioDisplayStatus(asset: AudioAsset): string {
 export function deriveCharacterStatus(
   asset: Pick<
     CharacterAsset,
-    "name" | "role" | "description" | "voiceId" | "imageFileName" | "imageObjectUrl"
+    | "name"
+    | "role"
+    | "description"
+    | "voiceId"
+    | "imageFileName"
+    | "imageObjectUrl"
+    | "primaryMediaId"
+    | "approvedMediaIds"
   >,
 ): AssetStatus {
   if (!asset.name.trim()) return "draft";
   if (!asset.voiceId) return "pending";
-  if (
-    asset.role.trim() &&
-    asset.description.trim() &&
-    hasImage(asset)
-  ) {
+  const asCharacter = asset as CharacterAsset;
+  if (!characterHasPrimaryMedia(asCharacter) && !hasImage(asset)) {
+    return "draft";
+  }
+  if (!characterHasPrimaryMedia(asCharacter)) {
+    // Has legacy image meta but no resolvable primary — not library-complete.
+    return "draft";
+  }
+  if (asset.role.trim() && asset.description.trim() && hasImage(asset)) {
+    const readiness = getCharacterLibraryReadiness(asCharacter);
+    if (!readiness.readyForLibrary) return "draft";
     return "completed";
   }
   return "draft";

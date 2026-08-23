@@ -22,24 +22,19 @@ describe("character asset portrait UI contracts", () => {
     expect(detail).not.toContain("视觉设定");
     expect(detail).not.toContain("外貌描述");
     expect(detail).not.toContain("服装描述");
-    expect(detail).toContain("AssetBasicInfo");
-    expect(detail).toContain("年龄");
+    expect(detail).not.toContain("AssetBasicInfo");
     expect(detail).not.toContain('label: "性别"');
-    expect(detail).toContain("hidePreview");
-    expect(detail).toContain("adaptiveContrast");
     expect(detail).toContain("character-hero-image");
     expect(detail).toContain("AssetDetailImage");
-    expect(detail).toContain("replaceOnly");
-    expect(detail).toContain("character-preview__voice");
-    expect(detail).toContain("voice={voicePanel}");
+    expect(detail).toContain("character-voice-bar");
+    expect(detail).toContain("LibraryAssetPromptPanel");
+    expect(detail).not.toContain("替换形象");
+    expect(detail).not.toContain("replaceOnly");
     expect(upload).toContain("replaceOnly");
     expect(upload).toContain("adaptiveContrast");
     expect(upload).toContain("data-image-tone");
     expect(upload).toContain("asset-image-upload__select");
     expect(upload).toContain("asset-image-upload__clear");
-    expect(readSrc("src/projects/assets/AssetBasicInfo.tsx")).toContain(
-      "基础信息",
-    );
   });
 
   it("library cards are compact list rows with independent scroll", () => {
@@ -55,14 +50,24 @@ describe("character asset portrait UI contracts", () => {
   });
 
   it("uses the asset id for manually uploaded image bytes", () => {
-    expect(detail).toContain("uploadedMediaId");
-    expect(detail).toContain("resolveAssetImageStorageKey({");
-    expect(detail).not.toContain(
-      "character.imageFileName ? [character.imageFileName] : []",
+    const mediaState = readSrc(
+      "src/projects/assets/character-media-state.ts",
     );
-    expect(manager).toContain("const uploaded = await persistThenUploadAssetImage");
-    expect(manager).toContain("imageFileName: uploaded.imageFileName");
-    expect(manager).toContain("await onPersist(uploadedNext)");
+    expect(mediaState).toContain("resolveAssetImageStorageKey({");
+    expect(mediaState).toContain("imageFileName: asset.imageFileName");
+    expect(mediaState).toContain("id: asset.id");
+    expect(detail).toContain(
+      'export { resolveCharacterPrimaryMediaId } from "@/projects/assets/character-media-state"',
+    );
+    expect(manager).toContain("createLibraryCharacter");
+    expect(manager).toContain("请先上传角色图片后再创建");
+    expect(manager).toContain("正在创建角色并校验");
+    const createServer = readSrc(
+      "src/projects/assets/create-library-imageable-asset.ts",
+    );
+    expect(createServer).toContain("runSd2CertificationOnImageBuffer");
+    expect(createServer).toContain("人物校验未通过，角色未入库");
+    expect(createServer).toContain("cleanupCandidate");
   });
 
   it("design character cards restore side-by-side layout without portrait class", () => {

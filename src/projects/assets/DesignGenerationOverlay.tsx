@@ -92,6 +92,9 @@ export function DesignGenerationOverlay({ progress }: Props) {
   }, [progress.percent, progress.stage, reducedMotion]);
 
   const percent = clampPercent(displayPercent);
+  const message =
+    progress.message?.trim() ||
+    defaultStageMessage(progress.stage);
 
   return (
     <div
@@ -104,13 +107,38 @@ export function DesignGenerationOverlay({ progress }: Props) {
         .join(" ")}
       role="status"
       aria-live="polite"
-      aria-label={`图片生成进度 ${percent}%`}
+      aria-label={`${message} ${percent}%`}
       data-testid="ead-generation-overlay"
+      data-stage={progress.stage}
     >
       <div className="ead-generation-overlay__readout">
         <span className="ead-generation-overlay__number">{percent}</span>
         <span className="ead-generation-overlay__unit">%</span>
       </div>
+      {message ? (
+        <p className="ead-generation-overlay__message" data-testid="ead-generation-overlay-message">
+          {message}
+        </p>
+      ) : null}
     </div>
   );
+}
+
+function defaultStageMessage(stage: AssetGenerationStage): string {
+  switch (stage) {
+    case "validating":
+      return "正在校验参考图";
+    case "submitted":
+      return "已提交生成任务";
+    case "generating":
+      return "正在生成图片";
+    case "saving":
+      return "正在保存图片";
+    case "completed":
+      return "图片生成完成";
+    case "failed":
+      return "图片生成失败";
+    default:
+      return "";
+  }
 }

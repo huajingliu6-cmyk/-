@@ -93,7 +93,10 @@ export default function ProjectsPage() {
 
   const allowedBySession =
     auth.status === "authenticated" && canCreateProject(auth.user);
-  const canCreate = apiCanCreate ?? allowedBySession;
+  const canCreate =
+    activeSpace.kind === "enterprise"
+      ? apiCanCreate === true
+      : (apiCanCreate ?? allowedBySession);
   const canEditRules =
     auth.status === "authenticated" &&
     getSystemRole(auth.user) === "SYSTEM_ADMIN";
@@ -106,6 +109,9 @@ export default function ProjectsPage() {
         page: "1",
         pageSize: "50",
       });
+      if (activeSpace.kind === "enterprise") {
+        params.set("enterpriseId", activeSpace.enterpriseId);
+      }
       if (debouncedQuery.trim()) {
         params.set("q", debouncedQuery.trim());
         params.set("pageSize", "100");
@@ -130,7 +136,7 @@ export default function ProjectsPage() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedQuery]);
+  }, [activeSpace, debouncedQuery]);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
@@ -152,6 +158,7 @@ export default function ProjectsPage() {
   useEffect(() => {
     const onSpaceChanged = (event: Event) => {
       const detail = (event as CustomEvent<ActiveSpace>).detail;
+      setApiCanCreate(null);
       setActiveSpace(detail ?? readActiveSpace());
       setBlankContextMenu(null);
     };
@@ -507,6 +514,9 @@ export default function ProjectsPage() {
 
       <CreateProjectWizardDialog
         open={wizardOpen}
+        enterpriseId={
+          activeSpace.kind === "enterprise" ? activeSpace.enterpriseId : null
+        }
         onClose={() => setWizardOpen(false)}
         returnFocusRef={newBtnRef}
         onAdvance={() => {

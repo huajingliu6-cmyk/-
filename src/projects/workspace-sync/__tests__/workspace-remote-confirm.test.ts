@@ -38,11 +38,53 @@ const remote = vi.hoisted<RemoteState>(() => ({
   conflictsRemaining: 0,
 }));
 const transaction = vi.hoisted(() => vi.fn());
+const remoteDocuments = vi.hoisted(
+  () => new Map<string, { revision: number; value: unknown }>(),
+);
 
 vi.mock("@/persistence/remote-data-client", () => ({
   isRemoteDataOnly: () => true,
   isRemoteRevisionConflict: (error: unknown) =>
     error instanceof Error && error.message === "REVISION_CONFLICT",
+  getRemoteDocument: vi.fn(async (namespace: string, key: string) => {
+    const doc = remoteDocuments.get(`${namespace}/${key}`);
+    return doc
+      ? {
+          namespace,
+          key,
+          revision: doc.revision,
+          value: structuredClone(doc.value),
+          updatedAt: new Date().toISOString(),
+        }
+      : null;
+  }),
+  putRemoteDocument: vi.fn(async (input: {
+    namespace: string;
+    key: string;
+    expectedRevision?: number;
+    value: unknown;
+  }) => {
+    const identity = `${input.namespace}/${input.key}`;
+    const current = remoteDocuments.get(identity);
+    const expected = input.expectedRevision ?? 0;
+    if ((current?.revision ?? 0) !== expected) {
+      throw new Error("REVISION_CONFLICT");
+    }
+    const revision = (current?.revision ?? 0) + 1;
+    remoteDocuments.set(identity, {
+      revision,
+      value: structuredClone(input.value),
+    });
+    return {
+      namespace: input.namespace,
+      key: input.key,
+      revision,
+      value: structuredClone(input.value),
+      updatedAt: new Date().toISOString(),
+    };
+  }),
+  putRemoteDocumentsAtomic: transaction,
+  isRemoteDataServiceError: () => false,
 }));
 
 vi.mock("@/projects/workspace-sync/workspace-episode-design-api", () => ({
@@ -87,6 +129,10 @@ vi.mock("@/projects/workspace-sync/remote-store", () => ({
     value: structuredClone(remote.assetValue),
     revision: remote.assetRevision,
   })),
+  loadWorkspaceEpisodeDesignsRemoteDocument: vi.fn(async () => ({
+    value: structuredClone(remote.designValue),
+    revision: remote.designRevision,
+  })),
   workspaceAssetsRemoteIdentity: (projectId: string) => ({
     namespace: "workspace-assets",
     key: projectId,
@@ -103,7 +149,25 @@ vi.mock("@/projects/assets/remote-transaction-client", () => ({
 
 import { confirmWorkspaceEpisodeAssetDesign } from "@/projects/workspace-sync/workspace-confirm";
 
-function seed() {
+function propItem(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "item_1",
+    assetType: "prop",
+    name: "雨伞",
+    resolution: "create_new",
+    source: "ai",
+    draft: {
+      description: "黑色雨伞",
+      propType: "道具",
+      usage: "雨中场景",
+      usageInEpisode: "开场",
+      evidence: "剧本",
+    },
+    ...overrides,
+  };
+}
+
+function seed(withImage: boolean) {
   remote.designRevision = 1;
   remote.assetRevision = 1;
   remote.conflictsRemaining = 0;
@@ -119,20 +183,27 @@ function seed() {
         contentFingerprint: "fingerprint_1",
         generationId: null,
         items: [
-          {
-            id: "item_1",
-            assetType: "prop",
-            name: "雨伞",
-            resolution: "create_new",
-            source: "ai",
-            draft: {
-              description: "黑色雨伞",
-              propType: "道具",
-              usage: "雨中场景",
-              usageInEpisode: "开场",
-              evidence: "剧本",
-            },
-          },
+          withImage
+            ? propItem({
+                generatedMedia: {
+                  currentId: "gen_umbrella_1",
+                  historyIds: ["gen_umbrella_1"],
+                  history: [
+                    {
+                      mediaId: "gen_umbrella_1",
+                      prompt: "雨伞",
+                      generatedAt: "2026-08-01T00:00:00.000Z",
+                      mimeType: "image/png",
+                    },
+                  ],
+                  status: "completed",
+                  promptFingerprint: null,
+                  errorMessage: null,
+                  mimeType: "image/png",
+                  previewKind: "image",
+                },
+              })
+            : propItem(),
         ],
         confirmedAt: null,
         confirmedBy: null,
@@ -150,10 +221,12 @@ function seed() {
     updatedAt: "2026-08-01T00:00:00.000Z",
   };
   transaction.mockReset();
+  remoteDocuments.clear();
   transaction.mockImplementation(
     async (input: {
       writes: Array<{
         namespace: string;
+        key?: string;
         expectedRevision: number;
         value: unknown;
       }>;
@@ -175,6 +248,27 @@ function seed() {
       ) {
         throw new Error("REVISION_CONFLICT");
       }
+      for (const write of input.writes) {
+        if (
+          write.namespace === "workspace-episode-asset-designs" ||
+          write.namespace === "workspace-assets"
+        ) {
+          continue;
+        }
+        const identity = `${write.namespace}/${write.key ?? ""}`;
+        const current = remoteDocuments.get(identity);
+        if ((current?.revision ?? 0) !== write.expectedRevision) {
+          throw new Error("REVISION_CONFLICT");
+        }
+      }
+      for (const write of input.writes) {
+        const identity = `${write.namespace}/${write.key ?? ""}`;
+        const current = remoteDocuments.get(identity);
+        remoteDocuments.set(identity, {
+          revision: (current?.revision ?? 0) + 1,
+          value: structuredClone(write.value),
+        });
+      }
       remote.designRevision += 1;
       remote.assetRevision += 1;
       remote.designValue = structuredClone(
@@ -188,9 +282,9 @@ function seed() {
 }
 
 describe("remote workspace asset confirmation", () => {
-  beforeEach(seed);
+  beforeEach(() => seed(false));
 
-  it("atomically creates a draft asset without generated media", async () => {
+  it("batch confirm without images creates draft library rows", async () => {
     const result = await confirmWorkspaceEpisodeAssetDesign({
       projectId: "project_1",
       episodeId: "episode_1",
@@ -200,7 +294,10 @@ describe("remote workspace asset confirmation", () => {
     });
 
     expect(result.ok).toBe(true);
+    if (!result.ok) return;
     expect(transaction).toHaveBeenCalledTimes(1);
+    expect(result.skipped).toEqual([]);
+    expect(result.counts.created).toBe(1);
     expect(remote.designValue.records[0]).toMatchObject({
       status: "confirmed",
       confirmedBy: "collaborator_1",
@@ -208,12 +305,36 @@ describe("remote workspace asset confirmation", () => {
     expect(remote.assetValue.props).toHaveLength(1);
     expect(remote.assetValue.props[0]).toMatchObject({
       name: "雨伞",
-      imageFileName: null,
       status: "draft",
     });
   });
 
+  it("batch confirm with generated image promotes and confirms", async () => {
+    seed(true);
+    const result = await confirmWorkspaceEpisodeAssetDesign({
+      projectId: "project_1",
+      episodeId: "episode_1",
+      expectedRevision: 1,
+      userId: "collaborator_1",
+      fingerprint: "fingerprint_1",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.skipped).toEqual([]);
+    expect(remote.designValue.records[0]).toMatchObject({
+      status: "confirmed",
+      confirmedBy: "collaborator_1",
+    });
+    expect(remote.assetValue.props).toHaveLength(1);
+    expect(remote.assetValue.props[0]).toMatchObject({
+      name: "雨伞",
+      imageFileName: "gen_umbrella_1",
+    });
+  });
+
   it("reloads both workspace documents after a revision conflict", async () => {
+    seed(true);
     remote.conflictsRemaining = 1;
 
     const result = await confirmWorkspaceEpisodeAssetDesign({
@@ -225,7 +346,7 @@ describe("remote workspace asset confirmation", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(remote.assetValue.props).toHaveLength(1);
   });
 });

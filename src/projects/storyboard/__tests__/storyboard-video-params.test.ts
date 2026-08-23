@@ -68,7 +68,7 @@ describe("storyboard video output params", () => {
 
     const fallback = resolveStoryboardVideoOutputParams({}, 5);
     expect(fallback.resolution).toBe("720P");
-    expect(fallback.aspectRatio).toBe("16:9");
+    expect(fallback.aspectRatio).toBe("9:16");
     expect(fallback.durationSeconds).toBe(5);
     expect(fallback.modelChoice).toBe("seedance-2.0");
     expect(fallback.stylePreset).toBe("");

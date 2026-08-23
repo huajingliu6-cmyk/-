@@ -126,6 +126,20 @@ export function NotificationBell() {
       return;
     }
     if (
+      note.type === "image_generation_succeeded" ||
+      note.type === "image_generation_failed"
+    ) {
+      const jobId = note.submissionId;
+      const base =
+        note.episodeId && note.episodeId.length > 0
+          ? `/app/workspace/projects/${encodeURIComponent(note.projectId)}/assets/library?episodeId=${encodeURIComponent(note.episodeId)}`
+          : `/app/projects/${encodeURIComponent(note.projectId)}/assets/library`;
+      router.push(
+        `${base}${base.includes("?") ? "&" : "?"}imageJobId=${encodeURIComponent(jobId)}`,
+      );
+      return;
+    }
+    if (
       (note.type === "enterprise_join_approved" ||
         note.type === "enterprise_join_rejected") &&
       note.enterpriseId

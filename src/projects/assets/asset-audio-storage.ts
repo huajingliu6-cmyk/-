@@ -6,7 +6,8 @@ import {
   saveAssetBundleDraft,
   type AssetBundleDraft,
 } from "@/projects/assets/asset-bundle-store";
-import type { AudioAsset } from "@/projects/assets/types";
+import { carryAssetBundleRevision } from "@/projects/assets/asset-bundle-revision";
+import type { AudioAsset, CharacterAsset } from "@/projects/assets/types";
 import {
   type ProjectAssetAudioMime,
 } from "@/projects/assets/asset-audio-constants";
@@ -431,6 +432,82 @@ export async function patchAudioAssetFileMeta(params: {
     ),
   };
 
+  carryAssetBundleRevision(draft, next);
+  await saveAssetBundleDraft(next);
+  return "ok";
+}
+
+/** Clear character default voice + appearance overrides + legacy mediaVoices. */
+export function clearCharacterVoiceRefsForAudio(
+  characters: CharacterAsset[],
+  voiceId: string,
+): CharacterAsset[] {
+  return characters.map((character) => {
+    const clearPrimary = character.voiceId === voiceId;
+    let mediaVoices = character.mediaVoices;
+    let mediaChanged = false;
+    if (mediaVoices) {
+      const nextMedia: NonNullable<CharacterAsset["mediaVoices"]> = {};
+      for (const [mediaId, entry] of Object.entries(mediaVoices)) {
+        if (entry?.voiceId === voiceId) {
+          mediaChanged = true;
+          continue;
+        }
+        nextMedia[mediaId] = entry;
+      }
+      mediaVoices = Object.keys(nextMedia).length > 0 ? nextMedia : undefined;
+    }
+    let appearances = character.appearances;
+    let appearanceChanged = false;
+    if (appearances) {
+      appearances = appearances.map((item) => {
+        if (item.voiceOverrideId !== voiceId) return item;
+        appearanceChanged = true;
+        return {
+          ...item,
+          voiceOverrideId: null,
+          voiceOverrideName: null,
+          revision: item.revision + 1,
+        };
+      });
+    }
+    if (!clearPrimary && !mediaChanged && !appearanceChanged) return character;
+    return {
+      ...character,
+      ...(clearPrimary
+        ? { voiceId: null, voiceName: null, voiceStyle: null }
+        : {}),
+      ...(mediaChanged ? { mediaVoices } : {}),
+      ...(appearanceChanged ? { appearances } : {}),
+    };
+  });
+}
+
+/**
+ * Hard-delete an AudioAsset row and clear character voice references.
+ * Does not touch disk files — caller handles file delete + rollback.
+ */
+export async function hardDeleteAudioAssetRow(params: {
+  projectId: string;
+  assetId: string;
+}): Promise<"ok" | "not_found"> {
+  const draft = await loadAssetBundleDraft(params.projectId);
+  if (!draft) return "not_found";
+  const found = findAudioAssetInDraft(draft, params.assetId);
+  if (!found) return "not_found";
+
+  const next = {
+    projectId: draft.projectId,
+    characters: clearCharacterVoiceRefsForAudio(
+      draft.characters,
+      params.assetId,
+    ),
+    scenes: draft.scenes,
+    props: draft.props,
+    audios: draft.audios.filter((item) => item.id !== params.assetId),
+  };
+
+  carryAssetBundleRevision(draft, next);
   await saveAssetBundleDraft(next);
   return "ok";
 }

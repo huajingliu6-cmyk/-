@@ -16,6 +16,8 @@ import { safeRandomUUID } from "@/lib/safe-random-id";
 import type { PickerAsset } from "@/projects/storyboard/components/ProjectAssetPickerDialog";
 import type { SceneCharacterPlacement } from "@/projects/storyboard/types";
 import { SceneCharacterPlacementEditor } from "@/projects/storyboard/components/SceneCharacterPlacementEditor";
+import { useLibraryImageGenerationJob } from "@/projects/assets/image-generation/useLibraryImageGenerationJob";
+import { ImageGenerationTaskPanel } from "@/projects/assets/image-generation/ImageGenerationTaskPanel";
 import "@/projects/assets/asset-workspace.css";
 
 export type StoryboardAssetImageEditorProps = {
@@ -89,11 +91,24 @@ export function StoryboardAssetImageEditor({
   );
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<{
+    prompt?: boolean;
+    referenceImages?: boolean;
+  }>({});
   const [placementEditorOpen, setPlacementEditorOpen] = useState(false);
   const [savedMediaCandidate, setSavedMediaCandidate] =
     useState<SavedMediaCandidate | null>(null);
   const [applyBusy, setApplyBusy] = useState(false);
   const referenceSlotsRef = useRef(referenceSlots);
+  const lastGenerateFormRef = useRef<FormData | null>(null);
+
+  const imageJob = useLibraryImageGenerationJob({
+    projectId,
+    context: "management",
+    assetId: asset.id,
+    assetKind: asset.kind,
+    enabled: open,
+  });
 
   useEffect(() => {
     referenceSlotsRef.current = referenceSlots;
@@ -104,6 +119,32 @@ export function StoryboardAssetImageEditor({
       revokeAssetImageEditSlots(referenceSlotsRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    const job = imageJob.job;
+    if (!job?.primaryMediaId) return;
+    if (job.status !== "succeeded" && job.status !== "save_failed") return;
+    setCurrentMediaId(job.primaryMediaId);
+    setHistoryIds((prev) => {
+      const next = [...prev];
+      for (const id of job.mediaIds) {
+        if (!next.includes(id)) next.push(id);
+      }
+      return next;
+    });
+    setShowHistory(true);
+    setGenerateBusy(false);
+  }, [imageJob.job]);
+
+  useEffect(() => {
+    const job = imageJob.job;
+    if (!job || job.status !== "failed") return;
+    const next: { prompt?: boolean; referenceImages?: boolean } = {};
+    if (job.errorFields.includes("prompt")) next.prompt = true;
+    if (job.errorFields.includes("referenceImages")) next.referenceImages = true;
+    if (Object.keys(next).length > 0) setFieldErrors(next);
+    if (job.errorMessage) setError(job.errorMessage);
+  }, [imageJob.job]);
 
   const previewUrl = useMemo(() => {
     if (!currentMediaId) return null;
@@ -117,57 +158,96 @@ export function StoryboardAssetImageEditor({
     (Boolean(imageEditPrompt.trim()) ||
       (asset.kind === "scene" && sceneCharacterPlacements.length > 0)) &&
     filledReferenceCount > 0 &&
-    !generateBusy;
+    !generateBusy &&
+    !imageJob.generationBlocked;
   const canSave = Boolean(currentMediaId) && !saveBusy;
 
+  const buildGenerateForm = useCallback(() => {
+    const form = new FormData();
+    form.set("assetId", asset.id);
+    form.set("assetKind", asset.kind);
+    form.set("mode", "image_to_image");
+    form.set("model", imageModelId);
+    form.set("prompt", imageEditPrompt.trim());
+    form.set("idempotencyKey", safeRandomUUID());
+    form.set("quality", imageOptions.quality);
+    form.set("aspectRatio", imageOptions.aspectRatio);
+    form.set("count", String(imageOptions.count));
+    if (asset.kind === "scene" && sceneCharacterPlacements.length > 0) {
+      form.set(
+        "sceneCharacterPlacements",
+        JSON.stringify(sceneCharacterPlacements),
+      );
+      for (const placement of sceneCharacterPlacements) {
+        const mediaId =
+          shotAssetMediaIds[placement.characterAssetId] ||
+          shotCharacterAssets
+            .find((c) => c.id === placement.characterAssetId)
+            ?.mediaOptions?.find((m) => m.isPrimary)?.mediaId ||
+          shotCharacterAssets.find((c) => c.id === placement.characterAssetId)
+            ?.mediaOptions?.[0]?.mediaId;
+        if (mediaId) {
+          form.set(`characterMediaId[${placement.characterAssetId}]`, mediaId);
+        }
+      }
+    }
+    referenceSlots.forEach((slot, index) => {
+      if (!slot) return;
+      if (slot.source === "asset-media") {
+        form.set(`referenceMediaId[${index}]`, slot.mediaId);
+      } else if (slot.source === "upload") {
+        form.set(`referenceImage[${index}]`, slot.file);
+      }
+    });
+    return form;
+  }, [
+    asset.id,
+    asset.kind,
+    imageEditPrompt,
+    imageModelId,
+    imageOptions,
+    referenceSlots,
+    sceneCharacterPlacements,
+    shotAssetMediaIds,
+    shotCharacterAssets,
+  ]);
+
   const handleGenerate = useCallback(async () => {
+    if (imageJob.canRetry) {
+      setGenerateBusy(true);
+      setError("");
+      setNotice("");
+      const result = await imageJob.retryFromServer();
+      if (!result.ok) {
+        setError(result.error);
+        if (result.code === "REFERENCE_IMAGE_REQUIRED") {
+          setFieldErrors({ referenceImages: true });
+        }
+      } else {
+        setNotice("已按原参数重新提交生成。");
+      }
+      setGenerateBusy(false);
+      return;
+    }
     if (!canGenerate) return;
+    if (imageJob.generationBlocked) {
+      setError("该素材正在生成中，请等待完成后再试。");
+      return;
+    }
     if (!referenceSlots.some(Boolean)) {
       setError("缺少参考图片");
+      setFieldErrors({ referenceImages: true });
       return;
     }
     setGenerateBusy(true);
     setError("");
     setNotice("");
+    setFieldErrors({});
+    imageJob.setServiceNotice("");
     try {
-      const form = new FormData();
-      form.set("assetId", asset.id);
-      form.set("assetKind", asset.kind);
-      form.set("mode", "image_to_image");
-      form.set("model", imageModelId);
-      form.set("prompt", imageEditPrompt.trim());
-      form.set("idempotencyKey", safeRandomUUID());
-      form.set("quality", imageOptions.quality);
-      form.set("aspectRatio", imageOptions.aspectRatio);
-      form.set("count", String(imageOptions.count));
-      if (asset.kind === "scene" && sceneCharacterPlacements.length > 0) {
-        form.set(
-          "sceneCharacterPlacements",
-          JSON.stringify(sceneCharacterPlacements),
-        );
-        for (const placement of sceneCharacterPlacements) {
-          const mediaId =
-            shotAssetMediaIds[placement.characterAssetId] ||
-            shotCharacterAssets
-              .find((c) => c.id === placement.characterAssetId)
-              ?.mediaOptions?.find((m) => m.isPrimary)?.mediaId ||
-            shotCharacterAssets.find((c) => c.id === placement.characterAssetId)
-              ?.mediaOptions?.[0]?.mediaId;
-          if (mediaId) {
-            form.set(`characterMediaId[${placement.characterAssetId}]`, mediaId);
-          }
-        }
-      }
-
-      referenceSlots.forEach((slot, index) => {
-        if (!slot) return;
-        // Preserve UI slot indices so empty holes are not compacted in FormData.
-        if (slot.source === "asset-media") {
-          form.set(`referenceMediaId[${index}]`, slot.mediaId);
-        } else {
-          form.set(`referenceImage[${index}]`, slot.file);
-        }
-      });
+      const form = buildGenerateForm();
+      form.set("sourceEntry", "storyboard_image");
+      lastGenerateFormRef.current = form;
 
       const res = await fetch(
         `/api/projects/${encodeURIComponent(projectId)}/assets-draft/media/generate`,
@@ -175,12 +255,30 @@ export function StoryboardAssetImageEditor({
       );
       const payload = (await res.json()) as {
         error?: string;
+        code?: string;
+        async?: boolean;
+        jobId?: string;
+        job?: Parameters<typeof imageJob.beginFromGenerateResponse>[0]["job"];
         mediaId?: string;
         mediaIds?: string[];
         notice?: string;
       };
       if (!res.ok) {
+        if (payload.code === "INVALID_PARAMS" || payload.code === "PROMPT_REQUIRED") {
+          setFieldErrors({ prompt: true });
+        }
+        if (
+          payload.code === "REFERENCE_IMAGE_REQUIRED" ||
+          payload.code === "IMAGE_TO_IMAGE_REQUIRED"
+        ) {
+          setFieldErrors({ referenceImages: true });
+        }
         throw new Error(payload.error ?? "图生图失败");
+      }
+      if (payload.async && (payload.jobId || payload.job)) {
+        imageJob.beginFromGenerateResponse(payload);
+        setNotice("已提交生成任务，预计进度见下方。");
+        return;
       }
       const mediaIds = payload.mediaIds?.length
         ? payload.mediaIds
@@ -200,37 +298,13 @@ export function StoryboardAssetImageEditor({
         return next;
       });
       setShowHistory(true);
-      setReferenceSlots((prev) => {
-        const next = [...prev];
-        revokeAssetImageEditSlots([next[0] ?? null]);
-        next[0] = {
-          source: "asset-media",
-          mediaId: nextCurrent,
-          previewUrl: getProjectAssetImageUrl(projectId, nextCurrent, {
-            revision: Date.now(),
-          }),
-        };
-        return next;
-      });
       setNotice(payload.notice ?? `已生成 ${mediaIds.length} 张`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "图生图失败");
     } finally {
-      setGenerateBusy(false);
+      if (!imageJob.generationBlocked) setGenerateBusy(false);
     }
-  }, [
-    asset.id,
-    asset.kind,
-    canGenerate,
-    imageEditPrompt,
-    imageModelId,
-    imageOptions,
-    projectId,
-    referenceSlots,
-    sceneCharacterPlacements,
-    shotAssetMediaIds,
-    shotCharacterAssets,
-  ]);
+  }, [buildGenerateForm, canGenerate, imageJob, projectId, referenceSlots]);
 
   const handleSave = useCallback(async () => {
     if (!currentMediaId || savedMediaIds.has(currentMediaId)) return;
@@ -256,6 +330,7 @@ export function StoryboardAssetImageEditor({
         throw new Error(payload.error ?? "保存图片失败");
       }
       setSavedMediaIds((prev) => new Set(prev).add(currentMediaId));
+      await imageJob.markSaved();
       await onAssetsChanged();
       setSavedMediaCandidate({
         assetId: asset.id,
@@ -263,7 +338,9 @@ export function StoryboardAssetImageEditor({
         mediaId: currentMediaId,
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "保存图片失败");
+      const message = e instanceof Error ? e.message : "保存图片失败";
+      setError(message);
+      await imageJob.markSaveFailed(message);
     } finally {
       setSaveBusy(false);
     }
@@ -271,6 +348,7 @@ export function StoryboardAssetImageEditor({
     asset.id,
     asset.kind,
     currentMediaId,
+    imageJob,
     onAssetsChanged,
     projectId,
     savedMediaIds,
@@ -299,20 +377,21 @@ export function StoryboardAssetImageEditor({
         onImageOptionsChange={setImageOptions}
         imageModelId={imageModelId}
         onImageModelIdChange={setImageModelId}
-        generateBusy={generateBusy}
+        generateBusy={generateBusy || imageJob.generationBlocked}
         saveBusy={saveBusy}
         saved={Boolean(currentMediaId && savedMediaIds.has(currentMediaId))}
-        canGenerate={canGenerate}
+        canGenerate={canGenerate || imageJob.canRetry}
         canSave={canSave}
+        fieldErrors={fieldErrors}
         error={error}
-        notice={notice}
+        notice={notice || imageJob.serviceNotice}
         sceneActions={
           asset.kind === "scene" ? (
             <button
               type="button"
               className="amw-btn"
               data-testid="aie-placement-open"
-              disabled={generateBusy}
+              disabled={generateBusy || imageJob.generationBlocked}
               onClick={() => setPlacementEditorOpen(true)}
             >
               人物位置
@@ -322,6 +401,34 @@ export function StoryboardAssetImageEditor({
         onGenerate={() => void handleGenerate()}
         onSave={() => void handleSave()}
         onClose={onClose}
+      />
+
+      <ImageGenerationTaskPanel
+        projectId={projectId}
+        context="management"
+        job={imageJob.job}
+        fieldErrors={fieldErrors}
+        canRetry={imageJob.canRetry}
+        busyAction={imageJob.busyAction}
+        serviceNotice={imageJob.serviceNotice}
+        timeoutDialogOpen={imageJob.timeoutDialogOpen}
+        deleteConfirmOpen={imageJob.deleteConfirmOpen}
+        onRetry={() => void handleGenerate()}
+        onRetrySave={() => void handleSave()}
+        onRequestDeletePending={() => imageJob.setDeleteConfirmOpen(true)}
+        onContinueWait={() => void imageJob.continueWaiting()}
+        onDismissTimeout={() => imageJob.setTimeoutDialogOpen(false)}
+        onRedetectService={() => void imageJob.redetectService()}
+        onReplaceReferences={(files) => {
+          void imageJob.replaceReferences(files).then((result) => {
+            if (!result.ok) setError(result.error);
+            else setNotice("参考图已更新，可点击使用原参数重试。");
+          });
+        }}
+        needsReferenceReplace={imageJob.needsReferenceReplace}
+        retrySnapshotIncomplete={imageJob.retrySnapshotIncomplete}
+        onConfirmDeletePending={() => void imageJob.confirmDeletePending()}
+        onCancelDeletePending={() => imageJob.setDeleteConfirmOpen(false)}
       />
 
       {placementEditorOpen && asset.kind === "scene" ? (

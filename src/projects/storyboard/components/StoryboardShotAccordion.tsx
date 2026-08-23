@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   fetchGenerationStatus,
   fetchShotVideoHistory,
@@ -18,6 +19,7 @@ import { ShotSceneRequiredDialog } from "@/projects/storyboard/components/ShotSc
 import { ShotVideoGenerationButton } from "@/projects/storyboard/components/ShotVideoGenerationButton";
 import { ShotVideoOutputParams } from "@/projects/storyboard/components/ShotVideoOutputParams";
 import { ShotVideoPreview } from "@/projects/storyboard/components/ShotVideoPreview";
+import { StoryboardWorkspaceShell } from "@/projects/storyboard/components/StoryboardWorkspaceShell";
 import {
   VideoGenerationConfirmationDialog,
   type VideoGenerationConfirmPayload,
@@ -92,10 +94,11 @@ type Props = {
   videoDefaults?: StoryboardVideoDefaults | null;
   /** Render one shot as the fixed three-column editing workspace. */
   workspaceMode?: boolean;
-  /** Local-only behavior for the development layout preview. */
-  previewMode?: boolean;
-  previewHistoryVideos?: ShotVideoHistoryItem[];
-  onPreviewShotChange?: (shot: StoryboardShot) => void;
+  /** Timeline under prompt + video only; materials stay a full-height left column. */
+  workspaceTimeline?: ReactNode;
+  /** Q80：当前镜头的失效引用（结构化扫描结果） */
+  invalidRefIssues?: import("@/projects/storyboard/invalid-refs/types").InvalidRefIssue[];
+  onRepairInvalidRefs?: (shotId: string) => void;
 };
 
 type PickerTarget = {
@@ -162,20 +165,15 @@ export function StoryboardShotAccordion({
   videoConfig,
   videoDefaults = null,
   workspaceMode = false,
-  previewMode = false,
-  previewHistoryVideos = [],
-  onPreviewShotChange,
+  workspaceTimeline = null,
+  invalidRefIssues = [],
+  onRepairInvalidRefs,
 }: Props) {
   void _episodeConfirmed;
-  const serverPrompt = getShotVideoPrompt(shot);
-  const [draftPrompt, setDraftPrompt] = useState<string | null>(null);
-  const [draftRevision, setDraftRevision] = useState(shot.revision);
-  if (draftRevision !== shot.revision) {
-    setDraftRevision(shot.revision);
-    setDraftPrompt(null);
-  }
-  const prompt = draftPrompt ?? serverPrompt;
-  const savedPrompt = serverPrompt;
+  const savedPrompt = getShotVideoPrompt(shot);
+  const [editPromptOpen, setEditPromptOpen] = useState(false);
+  const [editPromptDraft, setEditPromptDraft] = useState("");
+  const [editPromptError, setEditPromptError] = useState("");
   const [saving, setSaving] = useState(false);
   const [promptSaveFailed, setPromptSaveFailed] = useState(false);
   const [note, setNoteState] = useState("");
@@ -216,29 +214,11 @@ export function StoryboardShotAccordion({
     }>
   >([]);
   const [sceneDialogOpen, setSceneDialogOpen] = useState(false);
-  const [generationSnap, setGenerationSnap] = useState<ShotGenerationSnapshot | null>(() =>
-    previewMode && previewHistoryVideos.length > 0
-      ? {
-          id: previewHistoryVideos[0]!.id,
-          status: "completed",
-          progress: 100,
-          errorMessage: null,
-          completedAt: previewHistoryVideos[0]!.completedAt,
-          localVideoAssetId: null,
-          actualDurationSeconds: previewHistoryVideos[0]!.actualDurationSeconds,
-          actualResolution: previewHistoryVideos[0]!.actualResolution,
-          providerModelId: previewHistoryVideos[0]!.providerModelId,
-          isMock: true,
-          updatedAt: previewHistoryVideos[0]!.completedAt,
-        }
-      : null,
-  );
+  const [generationSnap, setGenerationSnap] = useState<ShotGenerationSnapshot | null>(null);
   const [successSnaps, setSuccessSnaps] = useState<ShotGenerationSnapshot[]>(
     [],
   );
-  const [historyVideos, setHistoryVideos] = useState<ShotVideoHistoryItem[]>(
-    previewHistoryVideos,
-  );
+  const [historyVideos, setHistoryVideos] = useState<ShotVideoHistoryItem[]>([]);
   const videoKeyRef = useRef<string>(safeRandomUUID());
   const sceneSectionRef = useRef<HTMLDivElement | null>(null);
   const lastSceneTokenRef = useRef(0);
@@ -247,7 +227,8 @@ export function StoryboardShotAccordion({
     promptGenerating: false,
     promptSaveFailed,
   });
-  const locked = shot.promptLocked || shot.locked;
+  /** Whole-shot lock only; promptLocked is display/read-only semantics, not material ops. */
+  const wholeShotLocked = shot.locked;
   const requirements = useMemo(() => ensureShotRequirements(shot), [shot]);
   const unresolvedIds = useMemo(
     () => new Set(listUnresolvedRequirementIds(shot)),
@@ -343,24 +324,6 @@ export function StoryboardShotAccordion({
       setSaving(true);
       setNote("");
       try {
-        if (previewMode) {
-          const { revision: _revision, unlock: _unlock, ...changes } = patch;
-          void _revision;
-          void _unlock;
-          const next = {
-            ...shot,
-            ...changes,
-            revision: shot.revision + 1,
-            manuallyEdited: true,
-          } as StoryboardShot;
-          onPreviewShotChange?.(next);
-          setNote("已保存。");
-          setDraftPrompt(null);
-          if (typeof patch.videoPrompt === "string") {
-            setPromptSaveFailed(false);
-          }
-          return undefined;
-        }
         const updated = await patchStoryboardShot(
           projectId,
           episodeId,
@@ -369,7 +332,6 @@ export function StoryboardShotAccordion({
         );
         onProductionChange(updated);
         setNote("已保存。");
-        setDraftPrompt(null);
         if (typeof patch.videoPrompt === "string") {
           setPromptSaveFailed(false);
         }
@@ -388,8 +350,6 @@ export function StoryboardShotAccordion({
     [
       episodeId,
       onProductionChange,
-      onPreviewShotChange,
-      previewMode,
       projectId,
       setNote,
       shot,
@@ -444,9 +404,16 @@ export function StoryboardShotAccordion({
   );
 
   const handleSaveAllFields = useCallback(async () => {
-    if (prompt === savedPrompt) return;
-    await savePatch({ videoPrompt: prompt });
-  }, [prompt, savedPrompt, savePatch]);
+    if (!editPromptOpen) return;
+    if (editPromptDraft === savedPrompt) return;
+    try {
+      await savePatch({ videoPrompt: editPromptDraft, editPrompt: true });
+      setEditPromptOpen(false);
+      setEditPromptError("");
+    } catch (error) {
+      setEditPromptError(error instanceof Error ? error.message : "保存失败");
+    }
+  }, [editPromptOpen, editPromptDraft, savedPrompt, savePatch]);
 
   useEffect(() => {
     const onSaveAll = () => {
@@ -459,7 +426,7 @@ export function StoryboardShotAccordion({
   /** 展开时合并重复场景需求（每镜头最多自动合并一次，避免 persist 环） */
   const consolidatedShotRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!expanded || locked || saving) return;
+    if (!expanded || wholeShotLocked || saving) return;
     if (consolidatedShotRef.current === shot.id) return;
     const consolidated = consolidateShotSceneRequirements(shot);
     if (consolidated === shot) {
@@ -475,7 +442,7 @@ export function StoryboardShotAccordion({
     return () => window.clearTimeout(timer);
   }, [
     expanded,
-    locked,
+    wholeShotLocked,
     saving,
     persistShotShape,
     setNote,
@@ -584,7 +551,7 @@ export function StoryboardShotAccordion({
 
   // 仅展开时拉历史；同 key 不重复请求
   useEffect(() => {
-    if (!expanded || previewMode) return;
+    if (!expanded) return;
     let cancelled = false;
     void (async () => {
       if (cancelled) return;
@@ -593,7 +560,7 @@ export function StoryboardShotAccordion({
     return () => {
       cancelled = true;
     };
-  }, [expanded, previewMode, refreshVideoHistory]);
+  }, [expanded, refreshVideoHistory]);
 
   // Poll parallel pending preview slots (including re-generations while in flight).
   const pendingPollKey = pendingSlots
@@ -959,41 +926,6 @@ export function StoryboardShotAccordion({
     setNote("");
     setVideoDialogOpen(false);
     try {
-      if (previewMode) {
-        await new Promise<void>((resolve) => {
-          window.setTimeout(resolve, 900);
-        });
-        const completedAt = new Date().toISOString();
-        const generationId = `preview-${shot.id}-${Date.now()}`;
-        const previewVideo = previewHistoryVideos[0] ?? historyVideos[0];
-        if (previewVideo) {
-          setHistoryVideos((prev) => [
-            {
-              ...previewVideo,
-              id: generationId,
-              completedAt,
-              versionLabel: `版本 ${prev.length + 1}`,
-            },
-            ...prev,
-          ]);
-        }
-        setGenerationSnap({
-          id: generationId,
-          status: "completed",
-          progress: 100,
-          errorMessage: null,
-          completedAt,
-          localVideoAssetId: null,
-          actualDurationSeconds: videoOutputParams.durationSeconds,
-          actualResolution: videoOutputParams.resolution,
-          providerModelId: "preview",
-          isMock: true,
-          updatedAt: completedAt,
-        });
-        setPendingSlots((prev) => prev.filter((slot) => slot.id !== clientKey));
-        setNote("本镜头视频已生成，可在历史中查看版本。");
-        return;
-      }
       const result = await generateShotVideo(projectId, episodeId, shot.id, {
         storyboardRevision,
         shotRevision: shot.revision,
@@ -1066,8 +998,6 @@ export function StoryboardShotAccordion({
   }, [
     episodeId,
     onProductionChange,
-    previewHistoryVideos,
-    previewMode,
     projectId,
     setNote,
     shot,
@@ -1079,23 +1009,35 @@ export function StoryboardShotAccordion({
     videoOutputParams.resolution,
     videoOutputParams.modelChoice,
     videoOutputParams.stylePreset,
-    historyVideos,
   ]);
 
-  const handleSavePrompt = useCallback(async () => {
-    await savePatch({ videoPrompt: prompt });
-  }, [prompt, savePatch]);
+  const openEditPromptModal = useCallback(
+    (initial?: string) => {
+      setEditPromptDraft(initial ?? savedPrompt);
+      setEditPromptError("");
+      setEditPromptOpen(true);
+    },
+    [savedPrompt],
+  );
 
-  const handleRestorePrompt = useCallback(() => {
-    setDraftPrompt(null);
-    setPromptSaveFailed(false);
+  const handleCancelEditPrompt = useCallback(() => {
+    setEditPromptOpen(false);
+    setEditPromptDraft("");
+    setEditPromptError("");
   }, []);
 
-  const handleReplacePromptAssets = useCallback(() => {
-    if (locked) {
-      setNote("请先解除提示词锁定");
-      return;
+  const handleSaveEditPrompt = useCallback(async () => {
+    setEditPromptError("");
+    try {
+      await savePatch({ videoPrompt: editPromptDraft, editPrompt: true });
+      setEditPromptOpen(false);
+      setEditPromptError("");
+    } catch (error) {
+      setEditPromptError(error instanceof Error ? error.message : "保存失败");
     }
+  }, [editPromptDraft, savePatch]);
+
+  const handleReplacePromptAssets = useCallback(() => {
     const mountAssets = [
       ...characterAssets.map((a) => ({
         id: a.id,
@@ -1131,12 +1073,11 @@ export function StoryboardShotAccordion({
       setNote("已绑素材尚无参考图，请先在资产库生成或上传图片后再替换。");
       return;
     }
-    const result = applyShotPromptAssetMount(prompt, mountAssets);
+    const result = applyShotPromptAssetMount(savedPrompt, mountAssets);
     if (!result.changed) {
       setNote("提示词挂载与图片替换已是最新，无需再次替换。");
       return;
     }
-    setDraftPrompt(result.prompt);
     const parts = ["已将挂载行与正文中的素材换成参考图"];
     if (
       result.mountLine?.includes("【图:") ||
@@ -1147,28 +1088,17 @@ export function StoryboardShotAccordion({
     if (result.replacedNames.length > 0) {
       parts.push(`正文替换 ${result.replacedNames.length} 处`);
     }
-    setNote(`${parts.join("；")}。请确认后点击保存。`);
+    openEditPromptModal(result.prompt);
+    setNote(`${parts.join("；")}。请在弹窗中确认后保存。`);
   }, [
     characterAssets,
-    locked,
-    prompt,
+    openEditPromptModal,
     promptImageUrlById,
     propAssets,
+    savedPrompt,
     sceneAssets,
     shot.assetMediaIds,
   ]);
-
-  const handleLockPrompt = useCallback(async () => {
-    if (!prompt.trim()) {
-      setNote("请先填写并保存视频提示词。");
-      return;
-    }
-    if (prompt !== savedPrompt) {
-      await savePatch({ videoPrompt: prompt, promptLocked: true });
-    } else {
-      await savePatch({ promptLocked: true });
-    }
-  }, [prompt, savedPrompt, savePatch]);
 
   const handleMarkNotRequired = useCallback(
     async (req: ShotAssetRequirement) => {
@@ -1201,7 +1131,7 @@ export function StoryboardShotAccordion({
   );
 
   const handleMatchAssets = useCallback(async () => {
-    if (locked || saving || matchingAssets) return;
+    if (wholeShotLocked || saving || matchingAssets) return;
     setMatchingAssets(true);
     setNote("");
     try {
@@ -1239,7 +1169,7 @@ export function StoryboardShotAccordion({
     }
   }, [
     assets,
-    locked,
+    wholeShotLocked,
     matchingAssets,
     persistShotShape,
     saving,
@@ -1419,7 +1349,7 @@ export function StoryboardShotAccordion({
                 <button
                   type="button"
                   className="sbw-link"
-                  disabled={saving || locked}
+                  disabled={saving || wholeShotLocked}
                   onClick={() => void handleUnlink(req)}
                 >
                   移除绑定
@@ -1428,7 +1358,7 @@ export function StoryboardShotAccordion({
               <button
                 type="button"
                 className="sbw-link"
-                disabled={saving || locked}
+                disabled={saving || wholeShotLocked}
                 onClick={() => void handleMarkNotRequired(req)}
               >
                 此镜头无需独立资产
@@ -1459,6 +1389,28 @@ export function StoryboardShotAccordion({
               {shot.cameraMovement}
             </span>
             <span className="sbw-badge">{SHOT_STATUS_LABEL[status]}</span>
+            {invalidRefIssues.length > 0 ? (
+              <span
+                className="sbw-badge"
+                data-testid="shot-invalid-ref-badges"
+                title={invalidRefIssues.map((i) => i.label).join("；")}
+              >
+                {invalidRefIssues.map((i) => i.label).join(" / ")}
+              </span>
+            ) : null}
+            {invalidRefIssues.length > 0 && onRepairInvalidRefs ? (
+              <button
+                type="button"
+                className="sbw-link"
+                data-testid="shot-invalid-ref-repair"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRepairInvalidRefs(shot.id);
+                }}
+              >
+                修复
+              </button>
+            ) : null}
             <span className="sbw-shot-card__chevron">
               {expanded ? "收起" : "展开"}
             </span>
@@ -1467,27 +1419,290 @@ export function StoryboardShotAccordion({
       ) : null}
 
       {expanded ? (
-        <div
-          className={`sbw-shot-card__body${
-            workspaceMode ? " sbw-shot-workspace" : ""
-          }`}
-        >
-          {workspaceMode ? (
-            <div className="sbw-shot-workspace__bar">
-              <div>
-                <strong>{shotLabel}</strong>
-                <span>
-                  {shot.durationSeconds.toFixed(1)} 秒 · {shot.shotSize} ·{" "}
-                  {shot.cameraMovement}
-                </span>
-              </div>
-              <span className="sbw-badge">{SHOT_STATUS_LABEL[status]}</span>
-            </div>
-          ) : null}
+        workspaceMode ? (
+          <div className="sbw-shot-card__body">
+            <StoryboardWorkspaceShell
+              video={
+                <ShotVideoPreview
+                  workspaceMode
+                  aspectRatio={videoOutputParams.aspectRatio}
+                  status={uiVideoStatus}
+                  progress={resolvedVideo.generation?.progress ?? null}
+                  errorMessage={resolvedVideo.generation?.errorMessage ?? null}
+                  generation={
+                    resolvedVideo.playbackGeneration ?? resolvedVideo.generation
+                  }
+                  contentStale={resolvedVideo.contentStale}
+                  projectId={projectId}
+                  historyVideos={historyVideos}
+                  successGenerations={successSnaps}
+                  pendingSlots={pendingSlots.map((slot) => ({
+                    id: slot.id,
+                    status: slot.status,
+                    progress: slot.progress,
+                    errorMessage: slot.errorMessage,
+                  }))}
+                />
+              }
+              prompt={
+                <>
+                  {invalidRefIssues.length > 0 ? (
+                    <div
+                      className="sbw-note"
+                      data-testid="shot-invalid-ref-workspace-banner"
+                    >
+                      <span className="sbw-badge">
+                        {invalidRefIssues.map((i) => i.label).join(" / ")}
+                      </span>{" "}
+                      {onRepairInvalidRefs ? (
+                        <button
+                          type="button"
+                          className="sbw-link"
+                          data-testid="shot-invalid-ref-repair"
+                          onClick={() => onRepairInvalidRefs(shot.id)}
+                        >
+                          修复
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <h4>
+                    {`${shotLabel.replace(" ", "")} 分镜提示词 ${Math.round(shot.durationSeconds)}S`}
+                  </h4>
+                  <ShotPromptEditor
+                    value={savedPrompt}
+                    readOnly
+                    imageUrlById={promptImageUrlById}
+                    mentionAssets={mentionAssets}
+                    onChange={() => undefined}
+                  />
+                  <div className="sbw-actions sbw-actions--prompt">
+                    <div className="sbw-actions__left">
+                      <button
+                        type="button"
+                        className="sbw-btn"
+                        disabled={saving}
+                        onClick={() => openEditPromptModal()}
+                      >
+                        编辑提示词
+                      </button>
+                      <button
+                        type="button"
+                        className="sbw-btn"
+                        data-testid="replace-prompt-assets"
+                        disabled={
+                          saving ||
+                          (characterAssets.length === 0 &&
+                            propAssets.length === 0 &&
+                            sceneAssets.length === 0)
+                        }
+                        title={
+                          characterAssets.length === 0 &&
+                          propAssets.length === 0 &&
+                          sceneAssets.length === 0
+                            ? "请先匹配或添加素材"
+                            : "将人名/资产名换成参考图，并同步挂载行（含场景）"
+                        }
+                        onClick={handleReplacePromptAssets}
+                      >
+                        一键替换素材
+                      </button>
+                    </div>
+                    <ShotVideoGenerationButton
+                      enabled={shotVideoClickable}
+                      hasSucceeded={
+                        uiVideoStatus === "completed" && !shot.videoContentStale
+                      }
+                      contentStale={
+                        uiVideoStatus === "stale" || shot.videoContentStale
+                      }
+                      failed={uiVideoStatus === "failed"}
+                      disabledReason={
+                        !canGenerateVideo
+                          ? "当前账号无视频生成权限"
+                          : !savedPrompt.trim()
+                            ? "请先填写视频提示词"
+                            : videoBusy
+                              ? "正在提交生成任务"
+                              : "暂不可生成"
+                      }
+                      busy={videoBusy}
+                      onClick={handleRequestGenerate}
+                      paramsSlot={
+                        <ShotVideoOutputParams
+                          value={videoOutputParams}
+                          onChange={setVideoOutputParams}
+                          disabled={videoBusy}
+                        />
+                      }
+                    />
+                  </div>
+                </>
+              }
+              assets={
+                <>
+                  <div className="sbw-shot-section__head">
+                    <h4>添加素材</h4>
+                    <button
+                      type="button"
+                      className="sbw-btn"
+                      data-testid="match-shot-assets"
+                      disabled={
+                        saving || wholeShotLocked || matchingAssets || assets.length === 0
+                      }
+                      title={
+                        wholeShotLocked
+                          ? "请先解除镜头锁定"
+                          : assets.length === 0
+                            ? "项目资产库为空"
+                            : "按名称自动匹配资产库中的人物、道具、场景"
+                      }
+                      onClick={() => void handleMatchAssets()}
+                    >
+                      {matchingAssets ? "匹配中…" : "匹配资产"}
+                    </button>
+                  </div>
+                  <ShotAssetGallery
+                    kind="character"
+                    title="人物"
+                    assets={characterAssets}
+                    mediaByAssetId={shot.assetMediaIds}
+                    disabled={saving || wholeShotLocked || matchingAssets}
+                    onAdd={() => setPicker({ kind: "character" })}
+                    onSelectMedia={handleSelectAssetMedia}
+                    onEditAsset={(asset) => setEditingAsset(asset)}
+                    onRemove={(id) => {
+                      const nextIds = shot.characterAssetIds.filter((x) => x !== id);
+                      const assetMediaIds = { ...(shot.assetMediaIds ?? {}) };
+                      delete assetMediaIds[id];
+                      let next: StoryboardShot = {
+                        ...shot,
+                        characterAssetIds: nextIds,
+                        assetMediaIds:
+                          Object.keys(assetMediaIds).length > 0
+                            ? assetMediaIds
+                            : undefined,
+                        sceneCharacterPlacements: (
+                          shot.sceneCharacterPlacements ?? []
+                        ).filter((p) => p.characterAssetId !== id),
+                      };
+                      if ((next.sceneCharacterPlacements?.length ?? 0) === 0) {
+                        next = { ...next, sceneCharacterPlacements: undefined };
+                      }
+                      for (const req of characterReqs) {
+                        if (req.selectedAssetId === id) {
+                          next = unlinkRequirementAsset(next, req.requirementId);
+                        }
+                      }
+                      void persistShotShape(next);
+                    }}
+                  >
+                    {characterReqs.length === 0 ? (
+                      <p className="sbw-hint">无剧本人物需求</p>
+                    ) : (
+                      characterReqs.map(renderRequirementRow)
+                    )}
+                  </ShotAssetGallery>
 
-          <div className={workspaceMode ? "sbw-shot-workspace__video" : undefined}>
+                  <div
+                    data-scene-assets
+                    ref={(el) => {
+                      sceneSectionRef.current = el;
+                    }}
+                  >
+                    <ShotAssetGallery
+                      kind="scene"
+                      title="场景"
+                      assets={sceneAssets}
+                      mediaByAssetId={shot.assetMediaIds}
+                      disabled={saving || wholeShotLocked || matchingAssets}
+                      onAdd={() => setPicker({ kind: "scene" })}
+                      onSelectMedia={handleSelectAssetMedia}
+                      onEditAsset={(asset) => setEditingAsset(asset)}
+                      onRemove={() => {
+                        const assetMediaIds = { ...(shot.assetMediaIds ?? {}) };
+                        if (shot.sceneAssetId) delete assetMediaIds[shot.sceneAssetId];
+                        let next: StoryboardShot = {
+                          ...shot,
+                          sceneAssetId: null,
+                          sceneAssetIds: [],
+                          sceneCharacterPlacements: undefined,
+                          assetMediaIds:
+                            Object.keys(assetMediaIds).length > 0
+                              ? assetMediaIds
+                              : undefined,
+                        };
+                        for (const req of sceneReqs) {
+                          if (req.resolution === "NOT_REQUIRED") continue;
+                          next = unlinkRequirementAsset(next, req.requirementId);
+                        }
+                        void persistShotShape(next);
+                      }}
+                    >
+                      {sceneReqs.length === 0 ? (
+                        <p className="sbw-hint">无剧本场景需求</p>
+                      ) : (
+                        sceneReqs.map(renderRequirementRow)
+                      )}
+                    </ShotAssetGallery>
+                  </div>
+
+                  <ShotAssetGallery
+                    kind="prop"
+                    title="道具"
+                    assets={propAssets}
+                    mediaByAssetId={shot.assetMediaIds}
+                    disabled={saving || wholeShotLocked || matchingAssets}
+                    onAdd={() => setPicker({ kind: "prop" })}
+                    onSelectMedia={handleSelectAssetMedia}
+                    onEditAsset={(asset) => setEditingAsset(asset)}
+                    onRemove={(id) => {
+                      const nextIds = shot.propAssetIds.filter((x) => x !== id);
+                      const assetMediaIds = { ...(shot.assetMediaIds ?? {}) };
+                      delete assetMediaIds[id];
+                      let next: StoryboardShot = {
+                        ...shot,
+                        propAssetIds: nextIds,
+                        assetMediaIds:
+                          Object.keys(assetMediaIds).length > 0
+                            ? assetMediaIds
+                            : undefined,
+                      };
+                      for (const req of propReqs) {
+                        if (req.selectedAssetId === id) {
+                          next = unlinkRequirementAsset(next, req.requirementId);
+                        }
+                      }
+                      void persistShotShape(next);
+                    }}
+                  >
+                    {propReqs.length === 0 ? (
+                      <p className="sbw-hint">无剧本道具需求</p>
+                    ) : (
+                      propReqs.map(renderRequirementRow)
+                    )}
+                  </ShotAssetGallery>
+                </>
+              }
+              note={
+                note ? (
+                  <p
+                    className={`sbw-note${noteIsError ? " is-error" : ""}`}
+                    data-testid={noteIsError ? "shot-video-error-note" : undefined}
+                  >
+                    {note}
+                  </p>
+                ) : undefined
+              }
+              timeline={workspaceTimeline}
+            />
+          </div>
+        ) : (
+        <div className="sbw-shot-card__body">
+          <div>
             <ShotVideoPreview
-              workspaceMode={workspaceMode}
+              workspaceMode={false}
+              aspectRatio={videoOutputParams.aspectRatio}
               status={uiVideoStatus}
               progress={resolvedVideo.generation?.progress ?? null}
               errorMessage={resolvedVideo.generation?.errorMessage ?? null}
@@ -1507,40 +1722,24 @@ export function StoryboardShotAccordion({
             />
           </div>
 
-          <section className="sbw-shot-section sbw-shot-workspace__prompt">
+          <section className="sbw-shot-section">
             <h4>分镜提示词</h4>
             <ShotPromptEditor
-              value={prompt}
-              disabled={locked || saving}
+              value={savedPrompt}
+              readOnly
               imageUrlById={promptImageUrlById}
               mentionAssets={mentionAssets}
-              onChange={setDraftPrompt}
+              onChange={() => undefined}
             />
             <div className="sbw-actions sbw-actions--prompt">
               <div className="sbw-actions__left">
                 <button
                   type="button"
-                  className={`sbw-btn${
-                    !saving && !locked && prompt !== savedPrompt
-                      ? " sbw-btn-primary"
-                      : " sbw-btn-muted"
-                  }`}
-                  disabled={
-                    saving || locked || prompt === savedPrompt
-                  }
-                  onClick={() => void handleSavePrompt()}
-                >
-                  {saving ? "保存中…" : "保存更改"}
-                </button>
-                <button
-                  type="button"
                   className="sbw-btn"
-                  disabled={
-                    saving || locked || prompt === savedPrompt
-                  }
-                  onClick={handleRestorePrompt}
+                  disabled={saving}
+                  onClick={() => openEditPromptModal()}
                 >
-                  恢复
+                  编辑提示词
                 </button>
                 <button
                   type="button"
@@ -1548,48 +1747,21 @@ export function StoryboardShotAccordion({
                   data-testid="replace-prompt-assets"
                   disabled={
                     saving ||
-                    locked ||
                     (characterAssets.length === 0 &&
                       propAssets.length === 0 &&
                       sceneAssets.length === 0)
                   }
                   title={
-                    locked
-                      ? "请先解除提示词锁定"
-                      : characterAssets.length === 0 &&
-                          propAssets.length === 0 &&
-                          sceneAssets.length === 0
-                        ? "请先匹配或添加素材"
-                        : "将人名/资产名换成参考图，并同步挂载行（含场景）"
+                    characterAssets.length === 0 &&
+                    propAssets.length === 0 &&
+                    sceneAssets.length === 0
+                      ? "请先匹配或添加素材"
+                      : "将人名/资产名换成参考图，并同步挂载行（含场景）"
                   }
                   onClick={handleReplacePromptAssets}
                 >
                   一键替换素材
                 </button>
-                <button
-                  type="button"
-                  className="sbw-btn"
-                  disabled={saving || locked}
-                  onClick={() => void handleLockPrompt()}
-                >
-                  锁定
-                </button>
-                {locked ? (
-                  <button
-                    type="button"
-                    className="sbw-btn"
-                    disabled={saving}
-                    onClick={() =>
-                      void savePatch({
-                        unlock: true,
-                        promptLocked: false,
-                        locked: false,
-                      })
-                    }
-                  >
-                    解锁
-                  </button>
-                ) : null}
               </div>
               <ShotVideoGenerationButton
                 enabled={shotVideoClickable}
@@ -1618,24 +1790,21 @@ export function StoryboardShotAccordion({
                 }
               />
             </div>
-            {locked ? (
-              <p className="sbw-hint">请先解除提示词锁定</p>
-            ) : null}
           </section>
 
-          <section className="sbw-shot-section sbw-shot-workspace__assets">
+          <section className="sbw-shot-section">
             <div className="sbw-shot-section__head">
-              <h4>当前分镜素材</h4>
+              <h4>添加素材</h4>
               <button
                 type="button"
                 className="sbw-btn"
                 data-testid="match-shot-assets"
                 disabled={
-                  saving || locked || matchingAssets || assets.length === 0
+                  saving || wholeShotLocked || matchingAssets || assets.length === 0
                 }
                 title={
-                  locked
-                    ? "请先解除提示词锁定"
+                  wholeShotLocked
+                    ? "请先解除镜头锁定"
                     : assets.length === 0
                       ? "项目资产库为空"
                       : "按名称自动匹配资产库中的人物、道具、场景"
@@ -1650,7 +1819,7 @@ export function StoryboardShotAccordion({
               title="人物"
               assets={characterAssets}
               mediaByAssetId={shot.assetMediaIds}
-              disabled={saving || locked || matchingAssets}
+              disabled={saving || wholeShotLocked || matchingAssets}
               onAdd={() => setPicker({ kind: "character" })}
               onSelectMedia={handleSelectAssetMedia}
               onEditAsset={(asset) => setEditingAsset(asset)}
@@ -1687,42 +1856,6 @@ export function StoryboardShotAccordion({
               )}
             </ShotAssetGallery>
 
-            <ShotAssetGallery
-              kind="prop"
-              title="道具"
-              assets={propAssets}
-              mediaByAssetId={shot.assetMediaIds}
-              disabled={saving || locked || matchingAssets}
-              onAdd={() => setPicker({ kind: "prop" })}
-              onSelectMedia={handleSelectAssetMedia}
-              onEditAsset={(asset) => setEditingAsset(asset)}
-              onRemove={(id) => {
-                const nextIds = shot.propAssetIds.filter((x) => x !== id);
-                const assetMediaIds = { ...(shot.assetMediaIds ?? {}) };
-                delete assetMediaIds[id];
-                let next: StoryboardShot = {
-                  ...shot,
-                  propAssetIds: nextIds,
-                  assetMediaIds:
-                    Object.keys(assetMediaIds).length > 0
-                      ? assetMediaIds
-                      : undefined,
-                };
-                for (const req of propReqs) {
-                  if (req.selectedAssetId === id) {
-                    next = unlinkRequirementAsset(next, req.requirementId);
-                  }
-                }
-                void persistShotShape(next);
-              }}
-            >
-              {propReqs.length === 0 ? (
-                <p className="sbw-hint">无剧本道具需求</p>
-              ) : (
-                propReqs.map(renderRequirementRow)
-              )}
-            </ShotAssetGallery>
-
             <div
               data-scene-assets
               ref={(el) => {
@@ -1734,7 +1867,7 @@ export function StoryboardShotAccordion({
                 title="场景"
                 assets={sceneAssets}
                 mediaByAssetId={shot.assetMediaIds}
-                disabled={saving || locked || matchingAssets}
+                disabled={saving || wholeShotLocked || matchingAssets}
                 onAdd={() => setPicker({ kind: "scene" })}
                 onSelectMedia={handleSelectAssetMedia}
                 onEditAsset={(asset) => setEditingAsset(asset)}
@@ -1765,17 +1898,54 @@ export function StoryboardShotAccordion({
                 )}
               </ShotAssetGallery>
             </div>
+
+            <ShotAssetGallery
+              kind="prop"
+              title="道具"
+              assets={propAssets}
+              mediaByAssetId={shot.assetMediaIds}
+              disabled={saving || wholeShotLocked || matchingAssets}
+              onAdd={() => setPicker({ kind: "prop" })}
+              onSelectMedia={handleSelectAssetMedia}
+              onEditAsset={(asset) => setEditingAsset(asset)}
+              onRemove={(id) => {
+                const nextIds = shot.propAssetIds.filter((x) => x !== id);
+                const assetMediaIds = { ...(shot.assetMediaIds ?? {}) };
+                delete assetMediaIds[id];
+                let next: StoryboardShot = {
+                  ...shot,
+                  propAssetIds: nextIds,
+                  assetMediaIds:
+                    Object.keys(assetMediaIds).length > 0
+                      ? assetMediaIds
+                      : undefined,
+                };
+                for (const req of propReqs) {
+                  if (req.selectedAssetId === id) {
+                    next = unlinkRequirementAsset(next, req.requirementId);
+                  }
+                }
+                void persistShotShape(next);
+              }}
+            >
+              {propReqs.length === 0 ? (
+                <p className="sbw-hint">无剧本道具需求</p>
+              ) : (
+                propReqs.map(renderRequirementRow)
+              )}
+            </ShotAssetGallery>
           </section>
 
           {note ? (
             <p
-              className={`sbw-note sbw-shot-workspace__note${noteIsError ? " is-error" : ""}`}
+              className={`sbw-note${noteIsError ? " is-error" : ""}`}
               data-testid={noteIsError ? "shot-video-error-note" : undefined}
             >
               {note}
             </p>
           ) : null}
         </div>
+        )
       ) : null}
 
       <ProjectAssetPickerDialog
@@ -1829,6 +1999,60 @@ export function StoryboardShotAccordion({
         }}
         onConfirm={() => void handleShotGenerate()}
       />
+
+      {editPromptOpen && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="sbw-dialog"
+              role="presentation"
+              data-testid="edit-prompt-modal"
+              onClick={() => {
+                if (saving) return;
+                handleCancelEditPrompt();
+              }}
+            >
+              <div
+                className="sbw-dialog__card sbw-dialog__card--prompt-edit"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="edit-prompt-title"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <h3 id="edit-prompt-title">编辑提示词</h3>
+                <ShotPromptEditor
+                  value={editPromptDraft}
+                  disabled={saving}
+                  imageUrlById={promptImageUrlById}
+                  mentionAssets={mentionAssets}
+                  onChange={setEditPromptDraft}
+                />
+                {editPromptError ? (
+                  <p className="sbw-note is-error">{editPromptError}</p>
+                ) : null}
+                <div className="sbw-dialog__footer">
+                  <button
+                    type="button"
+                    className="sbw-btn"
+                    disabled={saving}
+                    onClick={handleCancelEditPrompt}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    className="sbw-btn sbw-btn-primary"
+                    data-testid="edit-prompt-save"
+                    disabled={saving}
+                    onClick={() => void handleSaveEditPrompt()}
+                  >
+                    {saving ? "保存中…" : "保存提示词"}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {editingAsset ? (
         <StoryboardAssetImageEditor

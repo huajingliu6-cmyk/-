@@ -30,7 +30,9 @@ async function getNavigation() {
   const user = session.user;
   const systemRole = getSystemRole(user);
 
-  const withoutAdmin = AUTH_NAV_ITEMS.filter((item) => item.id !== "admin");
+  const withoutAdmin = AUTH_NAV_ITEMS.filter(
+    (item) => item.id !== "admin" && item.id !== "admin-materials",
+  );
 
   // Admins do not need membership lookups to decide nav — avoid 503 wiping the shell.
   if (systemRole === "SYSTEM_ADMIN") {

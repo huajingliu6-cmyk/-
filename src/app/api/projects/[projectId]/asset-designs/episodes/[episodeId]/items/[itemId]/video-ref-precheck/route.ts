@@ -13,7 +13,6 @@ import {
   withGeneratedMediaVideoRefSafety,
 } from "@/projects/assets/episode-design/design-media-video-ref-precheck";
 import { syncDesignVideoRefSafetyToLibrary } from "@/projects/assets/episode-design/sync-design-video-ref-to-library";
-import { syncManagementToWorkspace } from "@/projects/workspace-sync/sync-management-to-workspace";
 import { guardEpisodeAssetDesignRemoteData } from "@/projects/assets/episode-design/route-remote-guard";
 
 type RouteContext = {
@@ -134,7 +133,6 @@ async function post(request: Request, context: RouteContext) {
     mediaId,
     videoRefSafety,
   });
-  await syncManagementToWorkspace(projectId);
 
   return NextResponse.json({
     videoRefSafety,

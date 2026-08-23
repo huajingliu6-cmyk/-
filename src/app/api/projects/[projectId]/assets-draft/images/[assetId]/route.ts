@@ -34,10 +34,7 @@ type RouteContext = {
   params: Promise<{ projectId: string; assetId: string }>;
 };
 
-const CACHE_HEADERS = {
-  "Cache-Control": "private, no-store, max-age=0",
-  "X-Content-Type-Options": "nosniff",
-} as const;
+import { resolveProjectAssetImageCacheHeaders } from "@/projects/assets/asset-image-route-handlers";
 
 function notFound(message = "资产不存在"): NextResponse {
   return NextResponse.json({ error: message }, { status: 404 });
@@ -55,8 +52,9 @@ function remoteDataError(error: unknown): NextResponse | null {
  * 读权限：项目主理人，或已分配工作台资产权限的成员（便于单向同步后预览）。
  * 写操作仍仅主理人。
  */
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
   const { projectId, assetId } = await context.params;
+  const cacheHeaders = resolveProjectAssetImageCacheHeaders(request);
   const ownerGate = await requireProjectManagementProjectAccess(projectId);
   if (!ownerGate.ok) {
     const wsGate = await requireWorkspaceAssetAccess(projectId);
@@ -98,7 +96,7 @@ export async function GET(_request: Request, context: RouteContext) {
           status: 200,
           headers: {
             "Content-Type": blob.contentType || found.asset.imageMimeType || "image/png",
-            ...CACHE_HEADERS,
+            ...cacheHeaders,
           },
         });
       } catch (error) {
@@ -126,7 +124,7 @@ export async function GET(_request: Request, context: RouteContext) {
         status: 200,
         headers: {
           "Content-Type": mimeType,
-          ...CACHE_HEADERS,
+          ...cacheHeaders,
         },
       });
     } catch {
@@ -140,7 +138,7 @@ export async function GET(_request: Request, context: RouteContext) {
       if (!blob) return NextResponse.json({ error: "暂无参考图" }, { status: 404 });
       return new NextResponse(new Uint8Array(blob.body), {
         status: 200,
-        headers: { "Content-Type": blob.contentType, ...CACHE_HEADERS },
+        headers: { "Content-Type": blob.contentType, ...cacheHeaders },
       });
     } catch (error) {
       return remoteDataError(error) ?? NextResponse.json({ error: "读取图片失败" }, { status: 500 });
@@ -164,7 +162,7 @@ export async function GET(_request: Request, context: RouteContext) {
       status: 200,
       headers: {
         "Content-Type": mimeType,
-        ...CACHE_HEADERS,
+        ...cacheHeaders,
       },
     });
   } catch {

@@ -8,7 +8,6 @@ import {
   upsertEpisodeRecord,
 } from "@/projects/assets/episode-design/store";
 import { updateDesignMediaVoice } from "@/projects/assets/episode-design/update-media-voice";
-import { syncManagementToWorkspace } from "@/projects/workspace-sync/sync-management-to-workspace";
 import { guardEpisodeAssetDesignRemoteData } from "@/projects/assets/episode-design/route-remote-guard";
 import { isRemoteProjectAssetDataConflict } from "@/projects/assets/remote-project-asset-data";
 
@@ -119,7 +118,6 @@ async function patch(request: Request, context: RouteContext) {
     const nextStore = upsertEpisodeRecord(store, nextRecord);
     try {
       await saveEpisodeAssetDesignStore(nextStore);
-      await syncManagementToWorkspace(projectId);
       const item = nextRecord.items.find(
         (candidate) => candidate.id === itemId,
       );

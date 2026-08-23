@@ -10,6 +10,8 @@ function readSrc(relativePath: string): string {
 
 describe("asset library three-pane workspace contracts", () => {
   const detail = readSrc("src/projects/assets/CharacterDetail.tsx");
+  const sceneDetail = readSrc("src/projects/assets/SceneDetail.tsx");
+  const propDetail = readSrc("src/projects/assets/PropDetail.tsx");
   const list = readSrc("src/projects/assets/CharacterList.tsx");
   const scene = readSrc("src/projects/assets/SceneManager.tsx");
   const prop = readSrc("src/projects/assets/PropManager.tsx");
@@ -37,7 +39,7 @@ describe("asset library three-pane workspace contracts", () => {
     expect(css).toContain(".asset-library-preview");
     expect(css).toContain(".asset-library-controls");
     expect(css).toContain(".asset-library-preview__overlay-actions");
-    expect(css).toContain(".character-preview__voice");
+    expect(css).toContain(".character-voice-bar");
     expect(css).toContain(".asset-library-preview__media");
     expect(css).toContain("object-position: center top");
     expect(css).toContain("grid-template-rows: auto auto");
@@ -52,34 +54,102 @@ describe("asset library three-pane workspace contracts", () => {
     expect(css).toContain(".asset-image-upload__select");
   });
 
-  it("character detail is mid-preview + right controls with compact fields", () => {
+  it("character detail is image + prompt split without detail form", () => {
     expect(detail).toContain("AssetDetailLayout");
-    expect(detail).toContain("AssetBasicInfo");
-    expect(detail).toContain("compact");
+    expect(detail).toContain("showControls={false}");
+    expect(detail).not.toContain("AssetBasicInfo");
+    expect(detail).not.toContain('label: "定位"');
+    expect(detail).not.toContain('label: "年龄"');
     expect(detail).toContain("AssetDetailImage");
     expect(detail).toContain("fill");
-    expect(detail).toContain('label: "定位"');
-    expect(detail).not.toContain('label: "性别"');
-    expect(detail).toContain('label: "年龄"');
     expect(detail).toContain("character-hero-image");
-    expect(detail).toContain("character-preview__voice");
+    expect(detail).toContain("character-voice-bar");
     expect(detail).toContain("VoiceSelector");
     expect(detail).toContain("VoicePreviewButton");
-    expect(detail).toContain("previewOverlayActions=");
-    expect(detail).toContain("previewContent=");
-    expect(detail).toContain("voice={voicePanel}");
+    expect(detail).toContain("character-prompt-split");
+    expect(detail).toContain("LibraryAssetPromptPanel");
+    expect(detail).toContain("onCurrentMediaChange");
+    expect(detail).toContain("character-history-trigger");
+    expect(detail).toContain("character-history-popover");
+    expect(detail).not.toContain("character-generation-history");
+    expect(detail).toContain("character-look-add");
+    expect(detail).toContain("LibraryCharacterLookEditor");
+    expect(detail).not.toContain("CreateCharacterLookDialog");
+    expect(detail).toContain("确认使用");
+    expect(detail).toContain("新增人物造型");
+    expect(detail).not.toContain("设为主造型");
+    expect(detail).toContain("设为主图");
+    expect(detail).not.toContain("替换形象");
+    expect(detail).toContain("character-history-popover__delete");
+    expect(detail).not.toContain("character-history-more-");
+    expect(detail).toContain("LibraryCharacterLookEditor");
+    expect(detail).not.toContain("previewContent=");
     expect(detail).not.toContain("imageActions=");
-    expect(detail).toContain(
-      'footer={note ? <p className="amw-note">{note}</p> : null}',
-    );
     expect(detail).not.toMatch(/amw-btn-primary[\s\S]{0,200}>\s*保存\s*</);
     expect(detail).not.toContain("视觉设定");
+    expect(detailLayout).toContain("showControls");
     expect(voiceSelector).toContain("menuPortal");
-    expect(css).toContain(".asset-controls__basic-grid");
-    expect(css).toMatch(/object-fit:\s*contain/);
-    expect(css).toContain(".asset-controls__notes-textarea");
-    expect(css).toContain("grid-template-rows: auto auto auto minmax(0, 1fr) auto");
-    expect(css).toContain('data-image-tone="light"');
+    expect(css).toContain(".character-prompt-split");
+    expect(css).toMatch(
+      /\.character-prompt-split\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*3fr\)\s*minmax\(280px,\s*2fr\)/,
+    );
+    expect(css).toContain(".character-prompt-split__left");
+    expect(css).toContain(".character-prompt-split__right");
+    expect(css).toContain(".character-media-stage");
+    expect(css).toMatch(
+      /\.character-media-stage\s*\{[\s\S]*?aspect-ratio:\s*16\s*\/\s*9/,
+    );
+    expect(css).toContain(".character-voice-bar");
+    expect(css).not.toContain(".character-prompt-split__ops");
+    expect(css).not.toContain(".character-prompt-split__image");
+    expect(detail).toContain("character-prompt-split__left");
+    expect(detail).toContain("character-prompt-split__right");
+    expect(detail).toContain("character-media-stage");
+    expect(detail).toContain("hideMediaToolbar");
+    expect(detail).toContain("音色设置");
+    expect(detail).toContain("恢复继承");
+    expect(detail).not.toContain("character-prompt-split__ops");
+    expect(detail).not.toContain("character-prompt-split__image");
+    expect(detail).not.toContain("character-missing-primary");
+    expect(detail).toContain("character-look-lightbox");
+    expect(detail).toContain("设为主图");
+    expect(css).toContain(".ead-prompt-embedded");
+    expect(css).toContain(".prompt-panel");
+    expect(css).toMatch(
+      /\.prompt-panel__editor textarea\s*\{[\s\S]*?overflow:\s*auto/,
+    );
+    expect(css).toMatch(
+      /\.prompt-panel__editor textarea\s*\{[\s\S]*?scrollbar-gutter:\s*stable/,
+    );
+    expect(css).toContain("overflow-anchor: none");
+    expect(css).toMatch(
+      /\.prompt-panel \.amw-btn:hover:not\(:disabled\)[\s\S]*?transform:\s*none/,
+    );
+    const focusRule = css.match(
+      /\.character-detail \.amw-textarea:focus\s*\{[^}]*\}/,
+    )?.[0] ?? "";
+    expect(focusRule).toContain("box-shadow");
+    expect(focusRule).not.toContain("transform");
+    expect(css).toMatch(/grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/);
+    expect(css).not.toMatch(/clamp\(160px,\s*18cqw,\s*240px\)/);
+    expect(css).not.toContain(".character-generation-history {");
+    expect(css).toContain(".character-history-popover");
+    expect(css).toContain(".character-history-trigger");
+    expect(css).toContain(".character-look-add-wrap");
+    expect(css).toContain(".character-look-add-card");
+    expect(css).toContain(".character-create-look-dialog");
+    expect(css).toContain(".prompt-panel");
+    expect(css).toContain("minmax(0, 1fr)");
+    expect(css).toContain(".character-image-tools");
+    expect(css).toContain("character-looks__grid");
+    expect(css).toContain(".character-looks-board");
+    expect(css).not.toContain("character-looks__pager");
+    expect(css).not.toMatch(/max-height:\s*min\(36vh,\s*320px\)/);
+    expect(css).toMatch(/max-height:\s*min\(48vh,\s*560px\)/);
+    expect(css).toContain("character-look-lightbox");
+    expect(detail).toContain("hidePromptSectionLabel");
+    expect(detail).toContain("promptContextLabel={promptContextLabel}");
+    expect(detail).toMatch(/\btoggle\b/);
   });
 
   it("character list is compact sidebar rows", () => {
@@ -90,34 +160,52 @@ describe("asset library three-pane workspace contracts", () => {
     expect(css).toMatch(/flex:\s*0\s*0\s*48px|width:\s*48px/);
   });
 
-  it("scene and prop reuse mid+right layout without voice", () => {
+  it("scene and prop reuse character-like prompt split without voice", () => {
+    expect(scene).toContain("SceneDetail");
+    expect(prop).toContain("PropDetail");
+    expect(scene).not.toContain("LibraryAssetPromptModal");
+    expect(prop).not.toContain("LibraryAssetPromptModal");
+    expect(sceneDetail).toContain("showControls={false}");
+    expect(propDetail).toContain("showControls={false}");
+    expect(sceneDetail).toContain("character-prompt-split");
+    expect(propDetail).toContain("character-prompt-split");
+    expect(sceneDetail).toContain("LibraryAssetPromptPanel");
+    expect(propDetail).toContain("LibraryAssetPromptPanel");
+    expect(sceneDetail).toContain("variantEditorOpen ? undefined : syncGeneratedPreview");
+    expect(propDetail).toContain("variantEditorOpen ? undefined : syncGeneratedPreview");
+    expect(sceneDetail).toContain("heroMediaId");
+    expect(propDetail).toContain("heroMediaId");
+    expect(sceneDetail).toContain("LibraryAssetMediaGrid");
+    expect(propDetail).toContain("LibraryAssetMediaGrid");
+    expect(sceneDetail).toContain("LibraryAssetMediaLightbox");
+    expect(propDetail).toContain("LibraryAssetMediaLightbox");
+    expect(sceneDetail).toContain("LibraryAssetImageEditor");
+    expect(propDetail).toContain("LibraryAssetImageEditor");
+    expect(sceneDetail).toContain("openVariantEditor");
+    expect(propDetail).toContain("openVariantEditor");
+    expect(sceneDetail).toContain("主场景");
+    expect(propDetail).toContain("主道具");
+    expect(sceneDetail).toContain('sectionTitle="场景编辑"');
+    expect(propDetail).toContain('sectionTitle="道具编辑"');
+    expect(sceneDetail).toContain("新增场景编辑");
+    expect(propDetail).toContain("新增道具编辑");
+    expect(sceneDetail).not.toContain("新增场景版本");
+    expect(propDetail).not.toContain("新增道具版本");
+    expect(sceneDetail).not.toContain("VoiceSelector");
+    expect(propDetail).not.toContain("VoiceSelector");
+    expect(sceneDetail).not.toContain("AssetBasicInfo");
+    expect(propDetail).not.toContain("AssetBasicInfo");
+    expect(sceneDetail).not.toContain("asset-detail-meta");
+    expect(propDetail).not.toContain("asset-detail-meta");
     expect(scene).toContain("AssetLibraryLayout");
-    expect(scene).toContain("AssetDetailLayout");
-    expect(scene).toContain("AssetBasicInfo");
-    expect(scene).toContain("AssetDetailImage");
-    expect(scene).toContain("preview=");
-    expect(scene).toContain("compact");
-    expect(scene).toContain("previewOverlayActions=");
-    expect(scene).not.toContain("VoiceSelector");
-    expect(scene).not.toContain('label: "性别"');
-    expect(scene).not.toContain('label: "年龄"');
-    expect(scene).toContain(
-      'footer={note ? <p className="amw-note">{note}</p> : null}',
-    );
-    expect(scene).not.toContain("handleSave");
-    expect(scene).not.toContain("useChipBounce");
     expect(prop).toContain("AssetLibraryLayout");
-    expect(prop).toContain("AssetDetailLayout");
-    expect(prop).toContain("preview=");
-    expect(prop).toContain("previewOverlayActions=");
-    expect(prop).not.toContain("VoiceSelector");
-    expect(prop).not.toContain('label: "性别"');
-    expect(prop).not.toContain('label: "年龄"');
-    expect(prop).toContain(
-      'footer={note ? <p className="amw-note">{note}</p> : null}',
-    );
+    expect(scene).not.toContain("previewOverlayActions=");
+    expect(prop).not.toContain("previewOverlayActions=");
+    expect(scene).not.toContain("handleSave");
     expect(prop).not.toContain("handleSave");
-    expect(prop).not.toContain("useChipBounce");
+    expect(css).toContain(".scene-detail--prompt-split");
+    expect(css).toContain(".prop-detail--prompt-split");
+    expect(css).toContain(".asset-detail-meta");
   });
 
   it("voice selector prefers local library and has no system placeholders", () => {

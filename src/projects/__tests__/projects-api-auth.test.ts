@@ -24,6 +24,15 @@ vi.mock("@/auth/require-user", () => ({
   requireSessionUser: vi.fn(),
 }));
 
+vi.mock("@/enterprise/access", () => ({
+  requireEnterpriseAccess: vi.fn(),
+}));
+
+vi.mock("@/enterprise/store", () => ({
+  assignEnterpriseProjects: vi.fn(),
+  listEnterpriseProjectIdsForUser: vi.fn(async () => []),
+}));
+
 vi.mock("@/projects/project-access", async () => {
   const actual = await vi.importActual<typeof import("@/projects/project-access")>(
     "@/projects/project-access",
@@ -46,6 +55,8 @@ vi.mock("@/persistence/config", async () => {
 });
 
 import { requireSessionUser } from "@/auth/require-user";
+import { requireEnterpriseAccess } from "@/enterprise/access";
+import { assignEnterpriseProjects } from "@/enterprise/store";
 import { getPersistenceDriver } from "@/persistence/config";
 import {
   createProjectRecord,
@@ -58,6 +69,8 @@ describe("GET/POST /api/projects auth gates", () => {
     vi.mocked(requireSessionUser).mockReset();
     vi.mocked(listProjectListItems).mockReset();
     vi.mocked(createProjectRecord).mockReset();
+    vi.mocked(requireEnterpriseAccess).mockReset();
+    vi.mocked(assignEnterpriseProjects).mockReset();
     vi.mocked(getPersistenceDriver).mockReturnValue("file");
   });
 
@@ -121,6 +134,7 @@ describe("GET/POST /api/projects auth gates", () => {
           creationSource: "story",
           projectMode: "canvas",
           passwordEnabled: false,
+          approvalEnabled: true,
           visualStyle: "live_action_cinematic",
         }),
       }),
@@ -128,8 +142,67 @@ describe("GET/POST /api/projects auth gates", () => {
     expect(res.status).toBe(201);
     expect(createProjectRecord).toHaveBeenCalledWith(
       memberUser.id,
-      expect.objectContaining({ name: "x" }),
+      expect.objectContaining({ name: "x", approvalEnabled: false }),
     );
+  });
+
+  it("creates and attaches an enterprise project with enterprise approval", async () => {
+    vi.mocked(requireSessionUser).mockResolvedValue({
+      ok: true,
+      user: memberUser,
+    });
+    vi.mocked(requireEnterpriseAccess).mockResolvedValue({
+      ok: true,
+      user: memberUser,
+      enterprise: { id: "ent_1", projectIds: ["p_existing"] },
+      member: { userId: memberUser.id, enterpriseRole: "ADMIN" },
+    } as never);
+    vi.mocked(createProjectRecord).mockResolvedValue({
+      projectId: "p_enterprise",
+      rootFolderId: "p_enterprise",
+      name: "企业项目",
+      ownerId: memberUser.id,
+      creationSource: "story",
+      projectMode: "canvas",
+      status: "draft",
+      highlights: "",
+      visualStyle: "live_action_cinematic",
+      approvalEnabled: true,
+      passwordEnabled: false,
+      createdAt: "t",
+      updatedAt: "t",
+    });
+
+    const res = await POST(
+      new Request("http://localhost/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "企业项目",
+          creationSource: "story",
+          projectMode: "canvas",
+          passwordEnabled: false,
+          approvalEnabled: true,
+          visualStyle: "live_action_cinematic",
+          enterpriseId: "ent_1",
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(requireEnterpriseAccess).toHaveBeenCalledWith(
+      "ent_1",
+      "projects.assign",
+    );
+    expect(createProjectRecord).toHaveBeenCalledWith(
+      memberUser.id,
+      expect.objectContaining({ approvalEnabled: true }),
+    );
+    expect(assignEnterpriseProjects).toHaveBeenCalledWith({
+      enterpriseId: "ent_1",
+      projectIds: ["p_existing", "p_enterprise"],
+      actorUserId: memberUser.id,
+    });
   });
 
   it("rejects client-supplied ownerId", async () => {

@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { requireProjectManagementProjectAccess } from "@/auth/require-access";
 import { getProjectRecord } from "@/projects/project-access";
-import { scriptDraftContentChanged } from "@/projects/script/script-content-fingerprint";
 import {
   loadScriptDraft,
   saveScriptDraft,
 } from "@/projects/script/script-draft-store";
 import { confirmScriptSplit } from "@/projects/script/script-split-confirm";
+import { attachScriptDownstreamSync } from "@/projects/script/script-auto-split";
+import { afterScriptSplitConfirmed } from "@/projects/assets/extraction/after-confirm";
 import type { ProposedEpisode } from "@/projects/script/script-split-types";
-import { synchronizeScriptDraftDownstream } from "@/projects/script/script-draft-downstream";
 import { guardScriptDraftRemoteData } from "@/projects/script/route-remote-guard";
 
 type RouteContext = {
@@ -56,7 +56,6 @@ async function confirmSplit(request: Request, context: RouteContext) {
   if (!project) {
     return NextResponse.json({ error: "项目不存在" }, { status: 404 });
   }
-
   let body: unknown;
   try {
     body = await request.json();
@@ -123,21 +122,35 @@ async function confirmSplit(request: Request, context: RouteContext) {
   }
 
   if (result.idempotent) {
-    return NextResponse.json({ draft: result.draft, idempotent: true });
+    const extraction = await afterScriptSplitConfirmed({
+      projectId,
+      sourceFingerprint,
+    });
+    return NextResponse.json({
+      draft: result.draft,
+      idempotent: true,
+      extractionAction: extraction.action,
+      downstreamSync: await attachScriptDownstreamSync(projectId),
+    });
   }
 
-  const contentChanged = scriptDraftContentChanged(draft, result.draft);
   const saved = await saveScriptDraft(result.draft);
-
-  await synchronizeScriptDraftDownstream({
+  const extraction = await afterScriptSplitConfirmed({
     projectId,
-    contentChanged,
-    syncWhenUnchanged: true,
+    sourceFingerprint,
   });
 
-  return NextResponse.json({ draft: saved, idempotent: false });
+  return NextResponse.json({
+    draft: saved,
+    idempotent: false,
+    extractionAction: extraction.action,
+    downstreamSync: await attachScriptDownstreamSync(projectId),
+  });
 }
 
-export function POST(request: Request, context: RouteContext) {
+export function POST(
+  request: Request,
+  context: RouteContext,
+) {
   return guardScriptDraftRemoteData(() => confirmSplit(request, context));
-}
+};

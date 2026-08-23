@@ -44,6 +44,7 @@ import "@/projects/create-project-wizard.css";
 
 type Props = {
   open: boolean;
+  enterpriseId?: string | null;
   onClose: () => void;
   /** 校验通过并创建成功后的类型安全下一步回调 */
   onAdvance: (payload: CreateProjectAdvancePayload) => void;
@@ -79,6 +80,7 @@ function resetFormState() {
 
 export function CreateProjectWizardDialog({
   open,
+  enterpriseId = null,
   onClose,
   onAdvance,
   returnFocusRef,
@@ -292,7 +294,8 @@ export function CreateProjectWizardDialog({
           projectMode: state.projectMode,
           highlights: state.highlights,
           visualStyle: state.visualStyle,
-          approvalEnabled: state.approvalEnabled,
+          approvalEnabled: enterpriseId ? state.approvalEnabled : false,
+          enterpriseId,
           passwordEnabled: state.passwordEnabled,
           projectPassword: state.passwordEnabled
             ? state.projectPassword
@@ -775,27 +778,29 @@ export function CreateProjectWizardDialog({
                       </div>
                     </div>
 
-                    <div className="cpw-field cpw-field--stagger-4">
-                      <label className="cpw-check cpw-approval-option">
-                        <input
-                          type="checkbox"
-                          checked={state.approvalEnabled}
-                          onChange={(event) =>
-                            setState((current) => ({
-                              ...current,
-                              approvalEnabled: event.target.checked,
-                            }))
-                          }
-                        />
-                        <span>
-                          <strong>审批系统</strong>
-                          <small>若勾选则加入项目的审批系统</small>
-                        </span>
-                      </label>
-                      <p className="cpw-approval-hint">
-                        默认关闭；关闭后所有协作者共享一致的创作权限。
-                      </p>
-                    </div>
+                    {enterpriseId ? (
+                      <div className="cpw-field cpw-field--stagger-4">
+                        <label className="cpw-check cpw-approval-option">
+                          <input
+                            type="checkbox"
+                            checked={state.approvalEnabled}
+                            onChange={(event) =>
+                              setState((current) => ({
+                                ...current,
+                                approvalEnabled: event.target.checked,
+                              }))
+                            }
+                          />
+                          <span>
+                            <strong>审批系统</strong>
+                            <small>若勾选则加入项目的审批系统</small>
+                          </span>
+                        </label>
+                        <p className="cpw-approval-hint">
+                          默认关闭；关闭后所有协作者共享一致的创作权限。
+                        </p>
+                      </div>
+                    ) : null}
 
                     <div className="cpw-field cpw-field--stagger-4">
                       <div className="cpw-label-row">

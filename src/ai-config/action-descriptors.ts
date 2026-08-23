@@ -38,14 +38,37 @@ export const AI_ACTION_DESCRIPTORS: readonly AiActionDescriptor[] = [
       "src/projects/story/__tests__/script-outline-route.test.ts",
   },
   {
-    capabilityId: "asset.episode-design.generate",
-    surface: "AssetDesignWorkspace / script-asset-extraction",
-    component: "EpisodeAssetDesignWorkspace",
-    serverRoute: "POST /api/projects/[projectId]/text-generations",
-    resolverEntry:
-      "resolveCapabilityForOutputKind(script_asset_design|episode_asset_design)",
+    capabilityId: "asset.roster.extract",
+    surface: "AssetManagementWorkspace / asset-extraction roster",
+    component: "AssetManagementWorkspace",
+    serverRoute:
+      "POST /api/projects/[projectId]/asset-extraction/tasks (roster phase)",
+    resolverEntry: "resolveExtractionTextProvider(phase: roster)",
     providerAdapter: "MockTextProvider | HttpCompatibleTextProvider",
     active: true,
+    testModule:
+      "src/projects/assets/extraction/__tests__/asset-extraction-ai-capabilities.test.ts",
+  },
+  {
+    capabilityId: "asset.detail.extract",
+    surface: "AssetManagementWorkspace / asset-extraction detail",
+    component: "AssetManagementWorkspace",
+    serverRoute:
+      "POST /api/projects/[projectId]/asset-extraction/tasks (detail phase)",
+    resolverEntry: "resolveExtractionTextProvider(phase: detail)",
+    providerAdapter: "MockTextProvider | HttpCompatibleTextProvider",
+    active: true,
+    testModule:
+      "src/projects/assets/extraction/__tests__/asset-extraction-ai-capabilities.test.ts",
+  },
+  {
+    capabilityId: "asset.episode-design.generate",
+    surface: "Legacy / text-generations (deprecated)",
+    component: "EpisodeAssetDesignWorkspace",
+    serverRoute: "POST /api/projects/[projectId]/text-generations (blocked)",
+    resolverEntry: "legacy read-only",
+    providerAdapter: "deprecated",
+    active: false,
     testModule:
       "src/projects/assets/__tests__/episode-asset-design-generate-route.test.ts",
   },

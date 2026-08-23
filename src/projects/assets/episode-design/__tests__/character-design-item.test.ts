@@ -253,6 +253,11 @@ describe("character voice binding persistence", () => {
             prompt: "角色图",
             generatedAt: "2026-08-01T00:00:00.000Z",
             mimeType: "image/webp",
+            videoRefSafety: {
+              status: "ok",
+              checkedAt: "2026-08-01T00:00:00.000Z",
+              modelId: "sd2-real-person-cert",
+            },
           },
         ],
         status: "completed",

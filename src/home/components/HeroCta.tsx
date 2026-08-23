@@ -1,9 +1,10 @@
 "use client";
 
-import { type AnimationEvent, useRef, useState } from "react";
+import { type AnimationEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthUser } from "@/shell/useAuthUser";
 import { openHomeLoginPanel } from "@/home/lib/open-login-panel";
+import { APP_POST_LOGIN_PATH } from "@/shell/nav";
 
 function prefersReducedMotion(): boolean {
   if (typeof window === "undefined") return false;
@@ -13,20 +14,18 @@ function prefersReducedMotion(): boolean {
 /**
  * Hero 主 CTA（始终显示）
  * 点击：回弹 + 打开右上角登录卡片（可重复）
- * 登录成功后进入应用门户壳层 /app
+ * 登录成功后进入项目管理
  */
 export function HeroCta() {
   const router = useRouter();
   const auth = useAuthUser();
-  const pendingActionRef = useRef<null | (() => void)>(null);
   const [isBouncing, setIsBouncing] = useState(false);
 
   const playBounceThen = (action: () => void) => {
+    action();
     if (prefersReducedMotion()) {
-      action();
       return;
     }
-    pendingActionRef.current = action;
     setIsBouncing(false);
     requestAnimationFrame(() => setIsBouncing(true));
   };
@@ -34,10 +33,10 @@ export function HeroCta() {
   const onStartClick = () => {
     playBounceThen(() => {
       if (auth.status === "authenticated") {
-        router.push("/app");
+        router.push(APP_POST_LOGIN_PATH);
         return;
       }
-      openHomeLoginPanel({ next: "/app" });
+      openHomeLoginPanel({ next: APP_POST_LOGIN_PATH });
     });
   };
 
@@ -45,9 +44,6 @@ export function HeroCta() {
     if (!event.animationName.includes("home-cta-bounce")) return;
     if (!isBouncing) return;
     setIsBouncing(false);
-    const action = pendingActionRef.current;
-    pendingActionRef.current = null;
-    action?.();
   };
 
   return (

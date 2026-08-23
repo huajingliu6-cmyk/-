@@ -1,7 +1,5 @@
 import 'server-only';
 
-import { runProjectAssetTransaction } from "@/projects/assets/remote-transaction-client";
-
 import { randomUUID } from 'crypto';
 import {
   loadRemoteNotificationsDocument,
@@ -10,6 +8,7 @@ import {
 import { normalizeNotificationsFile } from '@/notifications/store';
 import type { AppNotification, NotificationsFile } from '@/notifications/types';
 import { isRemoteRevisionConflict } from '@/persistence/remote-data-client';
+import { runProjectAssetTransaction } from '@/projects/assets/remote-transaction-client';
 import {
   assetApprovalsRemoteIdentity,
   loadAssetApprovalsRemoteDocument,
@@ -197,6 +196,14 @@ async function approveRemoteAttempt(input: {
       workspaceAssets,
       workspaceDesigns,
     });
+    if (!transformed.ok) {
+      return {
+        ok: false,
+        code: transformed.code,
+        message: transformed.message,
+        status: transformed.code === 'VIDEO_REF_REQUIRED' ? 422 : 400,
+      };
+    }
     managementAssets = transformed.managementAssets;
     managementDesigns = transformed.managementDesigns;
     workspaceAssets = transformed.workspaceAssets;

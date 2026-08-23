@@ -24,3 +24,11 @@ export function workspaceAssetImagesDir(projectId: string): string {
 export function workspaceAssetAudioDir(projectId: string): string {
   return path.join(workspaceDir(projectId), "asset-audio");
 }
+
+export function workspaceMergeBasePath(projectId: string): string {
+  return path.join(workspaceDir(projectId), "merge-base.json");
+}
+
+export function workspaceMediaSyncLedgerPath(projectId: string): string {
+  return path.join(workspaceDir(projectId), "media-sync-ledger.json");
+}

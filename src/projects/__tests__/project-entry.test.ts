@@ -55,7 +55,7 @@ describe("personal project entry", () => {
     ).toBe("assets");
   });
 
-  it("opens storyboard after full-script assets are confirmed", () => {
+  it("opens storyboard after extracted assets are active", () => {
     expect(
       resolveProjectEntryStage({
         creationSource: "script-upload",
@@ -63,11 +63,8 @@ describe("personal project entry", () => {
           sourceText: "第一集",
           episodes: [{ id: "ep_1" }],
         },
-        assetStore: {
-          records: [
-            { episodeId: "__full_script__", status: "confirmed" },
-          ],
-        },
+        assetStore: { records: [] },
+        hasActiveVersion: true,
       }),
     ).toBe("storyboard");
   });
@@ -102,7 +99,7 @@ describe("personal project entry", () => {
 
   it("builds management routes for every stage", () => {
     expect(projectEntryPath("p 1", "assets")).toBe(
-      "/app/projects/p%201/assets/design",
+      "/app/projects/p%201/assets/library",
     );
     expect(projectEntryPath("p_1", "storyboard")).toBe(
       "/app/projects/p_1/storyboard",

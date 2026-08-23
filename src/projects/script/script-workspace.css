@@ -322,6 +322,18 @@
   animation: scs-fade-in 0.35s ease both;
 }
 
+.scs-file-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.scs-file-card__head .scs-file-name {
+  flex: 1;
+  min-width: 0;
+}
+
 .scs-file-name {
   font-size: 13px;
   font-weight: 600;
@@ -1529,4 +1541,36 @@
   display: none;
   width: 0;
   height: 0;
+}
+
+.script-extract-prompt {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(7, 8, 17, 0.55);
+}
+
+.script-extract-prompt__card {
+  width: min(420px, calc(100vw - 32px));
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(16, 18, 32, 0.98);
+  padding: 22px;
+  color: #fff;
+}
+
+.script-extract-prompt__card p {
+  margin: 8px 0 16px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 13px;
+}
+
+.script-extract-prompt__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
 }

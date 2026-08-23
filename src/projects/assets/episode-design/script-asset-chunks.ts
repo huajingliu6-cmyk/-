@@ -10,6 +10,8 @@ export type ScriptAssetChunk = {
   label: string;
   /** Provider brief for this chunk only. */
   brief: string;
+  /** Raw script text in this chunk (without extract-task wrapping). */
+  body?: string;
   visibleChars: number;
   episodeIds?: string[];
 };
@@ -130,6 +132,7 @@ export function buildScriptAssetChunks(input: {
         chunkId: `eps_${buf[0]!.episodeNumber}_${buf[buf.length - 1]!.episodeNumber}`,
         label,
         brief: wrapChunkBrief(label, body),
+        body,
         visibleChars: countVisibleChars(body),
         episodeIds: buf.map((e) => e.id),
       });
@@ -155,6 +158,7 @@ export function buildScriptAssetChunks(input: {
             chunkId: `ep_${ep.episodeNumber}_p${idx + 1}`,
             label,
             brief: wrapChunkBrief(label, part),
+            body: part,
             visibleChars: countVisibleChars(part),
             episodeIds: [ep.id],
           });
@@ -185,6 +189,7 @@ export function buildScriptAssetChunks(input: {
           body,
           "</完整剧本>",
         ].join("\n"),
+        body,
         visibleChars: countVisibleChars(body),
       },
     ];
@@ -195,6 +200,7 @@ export function buildScriptAssetChunks(input: {
       chunkId: `src_${idx + 1}`,
       label,
       brief: wrapChunkBrief(label, part),
+      body: part,
       visibleChars: countVisibleChars(part),
     };
   });

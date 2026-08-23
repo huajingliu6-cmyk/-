@@ -133,6 +133,19 @@ describe("audio client helpers (frontend contract)", () => {
     await expect(deleteProjectAssetAudio("p1", "audio_1")).resolves.toBeUndefined();
   });
 
+  it("deleteProjectAssetAudio hard uses ?hard=1", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, hard: true }), { status: 200 }),
+    );
+    await deleteProjectAssetAudio("p1", "audio_1", { hard: true });
+    expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[0]).toBe(
+      "/api/projects/p1/assets-draft/audio/audio_1?hard=1",
+    );
+    expect(
+      (vi.mocked(globalThis.fetch).mock.calls[0]?.[1] as RequestInit)?.headers,
+    ).toMatchObject({ "X-Hard-Delete": "1" });
+  });
+
   it("upload failure surfaces status for UI busy recovery", async () => {
     vi.mocked(globalThis.fetch).mockResolvedValue(
       new Response(JSON.stringify({ error: "仅支持 MP3 / WAV / OGG 音频" }), {

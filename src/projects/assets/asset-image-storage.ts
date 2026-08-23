@@ -2,16 +2,14 @@ import { promises as fs } from "fs";
 import path from "path";
 import { isRemoteDataOnly } from "@/persistence/remote-data-client";
 import { projectRootDir } from "@/projects/project-storage";
-import {
-  loadAssetBundleDraft,
-  saveAssetBundleDraft,
-  type AssetBundleDraft,
-} from "@/projects/assets/asset-bundle-store";
+import type { AssetBundleDraft } from "@/projects/assets/asset-bundle-store";
 import type {
   CharacterAsset,
   PropAsset,
   SceneAsset,
 } from "@/projects/assets/types";
+import { resolveCharacterPrimaryMediaId } from "@/projects/assets/character-media-state";
+import { setCharacterMediaVideoRefSafety } from "@/projects/assets/character-media-video-ref";
 import { type ProjectAssetImageMime } from "@/projects/assets/asset-image-constants";
 import {
   deleteRemoteAssetImage,
@@ -19,6 +17,12 @@ import {
   imageStorageKey,
   putRemoteAssetImage,
 } from "@/projects/assets/remote-asset-blob-store";
+import {
+  loadAssetBundleForMutation,
+  loadAssetBundleForScope,
+  saveAssetBundleForScope,
+  type AssetBundleStoreScope,
+} from "@/projects/assets/asset-bundle-scope";
 
 export {
   PROJECT_ASSET_IMAGE_MAX_BYTES,
@@ -311,30 +315,44 @@ export async function deleteProjectAssetImageFile(
  * Patch only imageFileName / imageMimeType for one imageable asset.
  * Leaves name/description/other fields untouched.
  * Clears videoRefSafety so a new precheck is required after image change.
+ * For characters, also clears the primary mediaVideoRefSafety entry so load-time
+ * migrate cannot revive a stale top-level badge.
  */
 export async function patchImageableAssetImageMeta(params: {
   projectId: string;
   assetId: string;
   imageFileName: string | null;
   imageMimeType: string | null;
+  store?: AssetBundleStoreScope;
 }): Promise<"ok" | "not_found"> {
-  const draft = await loadAssetBundleDraft(params.projectId);
+  const scope = params.store ?? "management";
+  const draft = await loadAssetBundleForScope(params.projectId, scope);
   if (!draft) return "not_found";
   const found = findImageableAssetInDraft(draft, params.assetId);
   if (!found) return "not_found";
 
   const apply = <T extends CharacterAsset | SceneAsset | PropAsset>(
     item: T,
-  ): T =>
-    item.id === params.assetId
-      ? {
-          ...item,
-          imageFileName: params.imageFileName,
-          imageMimeType: params.imageMimeType,
-          imageObjectUrl: null,
-          videoRefSafety: null,
-        }
-      : item;
+  ): T => {
+    if (item.id !== params.assetId) return item;
+    const next = {
+      ...item,
+      imageFileName: params.imageFileName,
+      imageMimeType: params.imageMimeType,
+      imageObjectUrl: null,
+      videoRefSafety: null,
+    };
+    if (found.kind === "character" && "voiceId" in next) {
+      const character = next as CharacterAsset;
+      const mediaId =
+        resolveCharacterPrimaryMediaId(character) || character.id;
+      return {
+        ...setCharacterMediaVideoRefSafety(character, mediaId, null),
+        videoRefSafety: null,
+      } as T;
+    }
+    return next as T;
+  };
 
   const next = {
     projectId: draft.projectId,
@@ -347,29 +365,50 @@ export async function patchImageableAssetImageMeta(params: {
     audios: draft.audios,
   };
 
-  await saveAssetBundleDraft(next);
+  await saveAssetBundleForScope({ scope, previous: draft, next });
   return "ok";
 }
 
 /**
  * Persist video reference safety precheck result for one imageable asset.
+ * For characters, optional `mediaId` writes `mediaVideoRefSafety[mediaId]`
+ * (and mirrors top-level when that media is primary). When omitted on a
+ * character, uses the current primary media id.
  */
 export async function patchImageableAssetVideoRefSafety(params: {
   projectId: string;
   assetId: string;
   videoRefSafety: import("@/projects/assets/types").VideoRefSafety | null;
+  mediaId?: string;
+  store?: AssetBundleStoreScope;
 }): Promise<"ok" | "not_found"> {
-  const draft = await loadAssetBundleDraft(params.projectId);
+  const scope = params.store ?? "management";
+  const draft =
+    scope === "workspace"
+      ? await loadAssetBundleForMutation(params.projectId, scope)
+      : await loadAssetBundleForScope(params.projectId, scope);
   if (!draft) return "not_found";
   const found = findImageableAssetInDraft(draft, params.assetId);
   if (!found) return "not_found";
 
   const apply = <T extends CharacterAsset | SceneAsset | PropAsset>(
     item: T,
-  ): T =>
-    item.id === params.assetId
-      ? { ...item, videoRefSafety: params.videoRefSafety }
-      : item;
+  ): T => {
+    if (item.id !== params.assetId) return item;
+    if (found.kind === "character" && "voiceId" in item) {
+      const character = item as CharacterAsset;
+      const mediaId =
+        params.mediaId?.trim() ||
+        resolveCharacterPrimaryMediaId(character) ||
+        character.id;
+      return setCharacterMediaVideoRefSafety(
+        character,
+        mediaId,
+        params.videoRefSafety,
+      ) as T;
+    }
+    return { ...item, videoRefSafety: params.videoRefSafety };
+  };
 
   const next = {
     projectId: draft.projectId,
@@ -382,7 +421,7 @@ export async function patchImageableAssetVideoRefSafety(params: {
     audios: draft.audios,
   };
 
-  await saveAssetBundleDraft(next);
+  await saveAssetBundleForScope({ scope, previous: draft, next });
   return "ok";
 }
 

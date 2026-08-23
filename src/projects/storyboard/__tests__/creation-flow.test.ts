@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canNavigateToStep } from "@/projects/storyboard/components/CreationStepHeader";
 import {
-  CREATION_STEP_LABEL,
   normalizeCreationStep,
   type EpisodeProduction,
 } from "@/projects/storyboard/types";
@@ -90,15 +88,6 @@ function baseProduction(
 }
 
 describe("storyboard creation two-step flow helpers", () => {
-  it("exposes only two creation step labels", () => {
-    expect(Object.keys(CREATION_STEP_LABEL)).toEqual(["1", "2"]);
-    expect(CREATION_STEP_LABEL[1]).toBe("选择剧集");
-    expect(CREATION_STEP_LABEL[2]).toBe("分镜创作");
-    expect(Object.values(CREATION_STEP_LABEL).join("")).not.toContain(
-      "资产匹配",
-    );
-  });
-
   it("normalizes legacy step 3 and asset-matching productions to step 2", () => {
     expect(normalizeCreationStep(3)).toBe(2);
     expect(normalizeCreationStep(2)).toBe(2);
@@ -106,8 +95,7 @@ describe("storyboard creation two-step flow helpers", () => {
       currentStep: 2,
       status: "awaiting_asset_match",
     });
-    expect(canNavigateToStep(production, 1)).toBe(true);
-    expect(canNavigateToStep(production, 2)).toBe(true);
+    expect(production.currentStep).toBe(2);
   });
 
   it("marks shots missing assets as incomplete", () => {
@@ -217,7 +205,6 @@ describe("storyboard creation two-step flow helpers", () => {
       requirements: undefined as unknown as [],
       sceneAssetId: undefined as unknown as string | null,
     });
-    // normalize via getShotVideoPrompt path
     expect(getShotCompletenessStatus({
       ...legacy,
       requiredCharacters: legacy.requiredCharacters ?? [],

@@ -35,6 +35,12 @@ describe("ai capability registry", () => {
       listActiveAiCapabilities().some(
         (c) => c.id === "asset.episode-design.generate",
       ),
+    ).toBe(false);
+    expect(
+      listActiveAiCapabilities().some((c) => c.id === "asset.roster.extract"),
+    ).toBe(true);
+    expect(
+      listActiveAiCapabilities().some((c) => c.id === "asset.detail.extract"),
     ).toBe(true);
   });
 
@@ -62,6 +68,12 @@ describe("ai capability registry", () => {
     );
     expect(outputKindToCapabilityId("episode_asset_design")).toBe(
       "asset.episode-design.generate",
+    );
+    expect(outputKindToCapabilityId("asset_roster_extract")).toBe(
+      "asset.roster.extract",
+    );
+    expect(outputKindToCapabilityId("asset_detail_extract")).toBe(
+      "asset.detail.extract",
     );
     expect(outputKindToCapabilityId("script_split")).toBe(
       "script.split.generate",

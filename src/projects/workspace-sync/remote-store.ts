@@ -74,7 +74,16 @@ export const saveWorkspaceSnapshotRemote = <T>(projectId: string, value: T) => s
 export const loadWorkspaceAssetsRemoteValue = (projectId: string) => loadRemoteValue("assets", projectId);
 export const loadWorkspaceAssetsRemoteDocument = (projectId: string) => loadRemoteDocument("assets", projectId);
 export const workspaceAssetsRemoteIdentity = (projectId: string) => ({ namespace: "workspace-assets", key: projectId });
-export const saveWorkspaceAssetsRemote = <T>(projectId: string, value: T) => saveRemoteValue("assets", projectId, value);
+export const saveWorkspaceAssetsRemote = <T>(
+  projectId: string,
+  value: T,
+  expectedRevision?: number,
+) => {
+  if (expectedRevision === undefined) {
+    throw new Error("ASSET_REVISION_REQUIRED");
+  }
+  return saveRemoteValue("assets", projectId, value, expectedRevision);
+};
 export const loadWorkspaceEpisodeDesignsRemoteValue = (projectId: string) => loadRemoteValue("episode-designs", projectId);
 export const loadWorkspaceEpisodeDesignsRemoteDocument = (projectId: string) => loadRemoteDocument("episode-designs", projectId);
 export const workspaceEpisodeDesignsRemoteIdentity = (projectId: string) => ({ namespace: "workspace-episode-asset-designs", key: projectId });
