@@ -33,6 +33,7 @@ describe("workspace permission route wiring", () => {
     expect(source).not.toContain("wb-stage");
     expect(layout).toContain('mode="workspace"');
     expect(nav).toContain('project-stage-nav--${mode}');
+    expect(nav).toContain("一栈式Flow");
     expect(nav).toContain('label: "项目资产"');
     expect(nav).toContain('label: "分镜创作"');
     expect(source).not.toContain("前往项目管理");

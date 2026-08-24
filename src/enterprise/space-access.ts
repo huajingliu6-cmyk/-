@@ -1,7 +1,6 @@
 import type { ActiveSpace } from "@/enterprise/client-space";
 
 const ENTERPRISE_ONLY_PATHS = [
-  "/app/enterprise-assets",
   "/app/workspace",
   "/app/team",
 ] as const;

@@ -4,15 +4,14 @@ import { useState } from "react";
 import { Plus, X } from "lucide-react";
 import { getProjectAssetImageUrl } from "@/projects/assets/asset-image-url";
 import type { AssetImageApiContext } from "@/projects/assets/asset-image-url";
+import { LibraryAssetEditingPlaceholder } from "@/projects/assets/library-asset-editing-slot";
+import type { LibraryAssetMediaGridItem } from "@/projects/assets/library-asset-media-variants";
 import {
   buildProjectAssetMediaDragPayload,
   projectAssetMediaDragProps,
 } from "@/projects/assets/project-asset-media-drag";
 
-export type LibraryAssetMediaGridItem = {
-  mediaId: string;
-  label: string;
-};
+export type { LibraryAssetMediaGridItem };
 
 const VARIANTS_PER_PAGE = 4;
 const BOARD_SLOTS = [0, 1, 2, 3] as const;
@@ -31,13 +30,12 @@ type Props = {
   canEdit: boolean;
   busy?: boolean;
   heroMediaId: string | null;
-  lightboxMediaId: string | null;
+  activeVariantSlotId: string | null;
   onSelectMain: () => void;
   onAdd: () => void;
-  onOpenVariant: (mediaId: string) => void;
-  onRenameVariant: (mediaId: string, label: string, previousLabel: string) => void;
-  onDeleteVariant: (mediaId: string) => void;
-  /** Enables dragging grid images into prompt reference slots. */
+  onOpenVariant: (slotId: string) => void;
+  onRenameVariant: (slotId: string, label: string, previousLabel: string) => void;
+  onDeleteVariant: (slotId: string) => void;
   dragAssetName?: string;
 };
 
@@ -55,7 +53,7 @@ export function LibraryAssetMediaGrid({
   canEdit,
   busy = false,
   heroMediaId,
-  lightboxMediaId,
+  activeVariantSlotId,
   onSelectMain,
   onAdd,
   onOpenVariant,
@@ -65,7 +63,7 @@ export function LibraryAssetMediaGrid({
 }: Props) {
   const [variantPage, setVariantPage] = useState(0);
   const mainActive =
-    !lightboxMediaId &&
+    !activeVariantSlotId &&
     Boolean(primaryMediaId) &&
     (heroMediaId === primaryMediaId || !heroMediaId);
   const totalPages = Math.max(1, Math.ceil(variants.length / VARIANTS_PER_PAGE));
@@ -138,25 +136,27 @@ export function LibraryAssetMediaGrid({
                 />
               );
             }
+            const isEditing = variant.isEditing || !variant.mediaId;
             return (
               <div
-                key={variant.mediaId}
+                key={variant.slotId}
                 className={`character-look-card-slot character-look-card ${slotClass}${
-                  lightboxMediaId === variant.mediaId ? " is-active" : ""
-                }`}
-                data-testid={`${testIdPrefix}-look-card-${variant.mediaId}`}
+                  activeVariantSlotId === variant.slotId ? " is-active" : ""
+                }${isEditing ? " character-look-card--editing" : ""}`}
+                data-testid={`${testIdPrefix}-look-card-${variant.slotId}`}
                 data-kind="variant"
+                data-editing={isEditing ? "1" : "0"}
               >
                 {canEdit ? (
                   <button
                     type="button"
                     className="character-look-card__delete-icon"
-                    data-testid={`${testIdPrefix}-look-delete-${variant.mediaId}`}
+                    data-testid={`${testIdPrefix}-look-delete-${variant.slotId}`}
                     aria-label={`删除${sectionTitle} ${variant.label}`}
                     disabled={busy}
                     onClick={(event) => {
                       event.stopPropagation();
-                      onDeleteVariant(variant.mediaId);
+                      onDeleteVariant(variant.slotId);
                     }}
                   >
                     <X size={14} aria-hidden />
@@ -164,40 +164,51 @@ export function LibraryAssetMediaGrid({
                 ) : null}
                 <button
                   type="button"
-                  className="character-look-card__media"
-                  onClick={() => onOpenVariant(variant.mediaId)}
+                  className={`character-look-card__media${
+                    isEditing ? " character-look-card__media--editing" : ""
+                  }`}
+                  onClick={() => onOpenVariant(variant.slotId)}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    className="project-asset-media-drag-source"
-                    src={getProjectAssetImageUrl(projectId, variant.mediaId, {
-                      revision: variant.mediaId,
-                      context,
-                    })}
-                    alt=""
-                    {...projectAssetMediaDragProps(
-                      buildProjectAssetMediaDragPayload({
-                        projectId,
+                  {isEditing ? (
+                    <LibraryAssetEditingPlaceholder />
+                  ) : variant.mediaId ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      className="project-asset-media-drag-source"
+                      src={getProjectAssetImageUrl(projectId, variant.mediaId, {
+                        revision: variant.mediaId,
                         context,
-                        mediaId: variant.mediaId,
-                        label: `${dragAssetName} · ${variant.label}`.trim(),
-                      }),
-                    )}
-                  />
-                  <span className="character-look-card__badge">{variantBadge}</span>
+                      })}
+                      alt=""
+                      {...projectAssetMediaDragProps(
+                        buildProjectAssetMediaDragPayload({
+                          projectId,
+                          context,
+                          mediaId: variant.mediaId,
+                          label: `${dragAssetName} · ${variant.label}`.trim(),
+                        }),
+                      )}
+                    />
+                  ) : (
+                    <span className="character-look-card__empty">空</span>
+                  )}
+                  <span className="character-look-card__badge">
+                    {isEditing ? "编辑中" : variantBadge}
+                  </span>
                 </button>
                 {canEdit ? (
                   <input
                     className="character-look-card__name-input"
-                    data-testid={`${testIdPrefix}-look-name-input-${variant.mediaId}`}
+                    data-testid={`${testIdPrefix}-look-name-input-${variant.slotId}`}
                     defaultValue={variant.label}
-                    key={`${variant.mediaId}:${variant.label}`}
+                    key={`${variant.slotId}:${variant.label}`}
                     aria-label={`${sectionTitle}名称`}
                     onClick={(event) => event.stopPropagation()}
                     onMouseDown={(event) => event.stopPropagation()}
+                    onFocus={() => onOpenVariant(variant.slotId)}
                     onBlur={(event) => {
                       onRenameVariant(
-                        variant.mediaId,
+                        variant.slotId,
                         event.currentTarget.value,
                         variant.label,
                       );

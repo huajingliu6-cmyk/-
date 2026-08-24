@@ -25,6 +25,7 @@ import type {
   CharacterAppearance,
   CharacterAsset,
   ProjectAssetBundle,
+  LibraryVariantDraft,
   PropAsset,
   SceneAsset,
   VideoRefSafety,
@@ -202,6 +203,21 @@ function parseMediaVariantLabels(
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+function parseVariantDrafts(raw: unknown): LibraryVariantDraft[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: LibraryVariantDraft[] = [];
+  for (const item of raw) {
+    if (!isRecord(item)) continue;
+    const id = typeof item.id === "string" ? item.id.trim() : "";
+    const label = typeof item.label === "string" ? item.label.trim() : "";
+    if (!id || !label) continue;
+    const promptText =
+      typeof item.promptText === "string" ? item.promptText : undefined;
+    out.push({ id, label, ...(promptText !== undefined ? { promptText } : {}) });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 function optionalImageMeta(raw: Record<string, unknown>): {
   approvedMediaIds?: string[];
   primaryMediaId?: string | null;
@@ -209,6 +225,7 @@ function optionalImageMeta(raw: Record<string, unknown>): {
   videoRefSafety?: VideoRefSafety | null;
   mediaVideoRefSafety?: Record<string, VideoRefSafety>;
   mediaVariantLabels?: Record<string, string>;
+  variantDrafts?: LibraryVariantDraft[];
 } {
   const approvedMediaIds = parseApprovedMediaIds(raw.approvedMediaIds);
   const primaryMediaId =
@@ -223,6 +240,7 @@ function optionalImageMeta(raw: Record<string, unknown>): {
     raw.mediaVideoRefSafety,
   );
   const mediaVariantLabels = parseMediaVariantLabels(raw.mediaVariantLabels);
+  const variantDrafts = parseVariantDrafts(raw.variantDrafts);
   return {
     ...(approvedMediaIds ? { approvedMediaIds } : {}),
     ...(primaryMediaId !== undefined ? { primaryMediaId } : {}),
@@ -230,6 +248,7 @@ function optionalImageMeta(raw: Record<string, unknown>): {
     ...(videoRefSafety !== undefined ? { videoRefSafety } : {}),
     ...(mediaVideoRefSafety ? { mediaVideoRefSafety } : {}),
     ...(mediaVariantLabels ? { mediaVariantLabels } : {}),
+    ...(variantDrafts ? { variantDrafts } : {}),
   };
 }
 

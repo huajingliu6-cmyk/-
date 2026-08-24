@@ -65,13 +65,37 @@
   overflow: hidden;
 }
 
+.project-stage-nav-shell {
+  width: min(1480px, calc(100% - 64px));
+  margin: 0 auto;
+  padding: 8px 0 0;
+}
+
+.project-stage-nav__brand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.project-stage-nav__brand-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(196, 181, 253, 0.92);
+}
+
+.project-stage-nav__brand-hint {
+  font-size: 12px;
+  color: rgba(244, 241, 255, 0.42);
+}
+
 .project-stage-nav {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
-  width: min(1480px, calc(100% - 64px));
-  margin: 0 auto;
-  padding: 8px 0 0;
 }
 
 .project-stage-nav--workspace {
@@ -83,6 +107,7 @@
   min-height: 34px;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   border: 1px solid rgba(167, 139, 250, 0.2);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.035);
@@ -91,6 +116,17 @@
   font-weight: 650;
   text-decoration: none;
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.project-stage-nav__step {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgba(196, 181, 253, 0.72);
+}
+
+.project-stage-nav__link.is-active .project-stage-nav__step {
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .project-stage-nav__link:hover,

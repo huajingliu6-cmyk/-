@@ -17,6 +17,7 @@ export const ASSET_EXTRACTION_MISSING_HINT =
 export type AssetExtractionTaskStatus =
   | "discovering_roster"
   | "merging_roster"
+  | "awaiting_roster_selection"
   | "extracting_details"
   | "retrying_failed_once"
   | "saving"
@@ -42,6 +43,7 @@ export type AssetExtractionStage =
 export type AssetExtractionProgressPhase =
   | "discovering_roster"
   | "merging_roster"
+  | "awaiting_roster_selection"
   | "extracting_details"
   | "retrying_failed_once"
   | "saving"
@@ -184,6 +186,8 @@ export type AssetExtractionTask = {
   roster?: AssetRosterItem[];
   detailItems?: AssetDetailTaskItem[];
   failedAssetQueue?: string[];
+  /** Episode extraction: user-confirmed roster keys before detail phase. */
+  selectedAssetKeys?: string[];
   rosterCompletedChunkIds?: string[];
   /** Persisted progress snapshot for overlay / refresh recovery. */
   progress?: AssetExtractionProgress;
@@ -208,6 +212,7 @@ export type PublicAssetExtractionTask = {
   createdAt: string;
   updatedAt: string;
   progress: AssetExtractionProgress;
+  roster?: AssetRosterItem[];
 };
 
 export type AssetExtractionVersion = {

@@ -134,7 +134,8 @@ export async function submitVideoGeneration(params: {
   capabilityId?:
     | "video.storyboard-shot.generate"
     | "video.storyboard-episode.generate"
-    | "video.workflow-node.generate";
+    | "video.workflow-node.generate"
+    | "video.personal.generate";
   /**
    * 服务端白名单映射后的模型 ID（如 Seedance 变体）；覆盖 runtime 默认模型。
    * 不得由客户端任意字符串直通。

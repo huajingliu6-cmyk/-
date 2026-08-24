@@ -1,0 +1,162 @@
+.app-sidebar {
+  --app-sidebar-w: 232px;
+  display: flex;
+  width: var(--app-sidebar-w);
+  flex: 0 0 var(--app-sidebar-w);
+  flex-direction: column;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)),
+    rgba(8, 10, 18, 0.96);
+  transition:
+    transform 0.24s ease,
+    width 0.24s ease,
+    flex-basis 0.24s ease,
+    opacity 0.2s ease;
+}
+
+.app-sidebar.is-collapsed {
+  width: 0;
+  flex: 0 0 0;
+  overflow: hidden;
+  border-right-color: transparent;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app-sidebar__brand {
+  padding: 22px 16px 18px 20px;
+}
+
+.app-sidebar__brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.app-sidebar__collapse {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.app-sidebar__collapse:hover {
+  border-color: rgba(124, 58, 237, 0.45);
+  color: #fff;
+}
+
+.app-sidebar-rail {
+  position: fixed;
+  top: 50%;
+  left: 0;
+  z-index: 40;
+  display: flex;
+  width: 34px;
+  min-height: 88px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgba(124, 58, 237, 0.45);
+  border-left: 0;
+  border-radius: 0 12px 12px 0;
+  padding: 10px 6px;
+  background:
+    linear-gradient(180deg, rgba(124, 58, 237, 0.28), rgba(99, 102, 241, 0.18)),
+    rgba(8, 10, 18, 0.96);
+  color: #fff;
+  box-shadow: 4px 0 24px rgba(99, 102, 241, 0.18);
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+
+.app-sidebar-rail:hover {
+  width: 38px;
+  background:
+    linear-gradient(180deg, rgba(124, 58, 237, 0.38), rgba(99, 102, 241, 0.24)),
+    rgba(8, 10, 18, 0.98);
+}
+
+.app-sidebar-rail__label {
+  writing-mode: vertical-rl;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+
+.app-sidebar__logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.app-sidebar__logo-mark {
+  flex: 0 0 auto;
+}
+
+.app-sidebar__logo-name {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.app-sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 20px;
+}
+
+.app-sidebar__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 0 12px;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 14px;
+  text-align: left;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+button.app-sidebar__item {
+  background: transparent;
+}
+
+.app-sidebar__item:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.app-sidebar__item.is-active {
+  border-color: rgba(124, 58, 237, 0.35);
+  background: rgba(124, 58, 237, 0.14);
+  color: #fff;
+}
+
+.shell-app--sidebar-hub {
+  --shell-header-h: 0px;
+  flex-direction: row;
+}
+
+.shell-app--sidebar-hub .shell-outlet {
+  min-width: 0;
+}
+
+.shell-app--sidebar-hub .shell-outlet--enter {
+  animation: none;
+}

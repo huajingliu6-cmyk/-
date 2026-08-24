@@ -7,17 +7,30 @@ export type ShellNavItem = {
 /** 登录后应用壳层根路径（空白门户） */
 export const APP_SHELL_ROOT = "/app";
 
+/** 个人素材库 */
+export const APP_PERSONAL_ASSETS_PATH = "/app/personal-assets";
+
+/** 素材市场 */
+export const APP_ASSET_MARKET_PATH = "/app/asset-market";
+
 /** 平台工作台（最近项目与进度总览，不是画布） */
 export const APP_WORKBENCH_PATH = "/app/workspace";
 
-/** 项目管理列表 */
+/** 项目管理列表（一栈式 Flow 入口） */
 export const APP_PROJECTS_PATH = "/app/projects";
+
+export function isOneStackFlowPath(pathname: string): boolean {
+  return (
+    pathname === APP_PROJECTS_PATH ||
+    pathname.startsWith(`${APP_PROJECTS_PATH}/`)
+  );
+}
 
 /**
  * 登录/注册成功后的默认落地页。
  * 不用空白门户 /app，避免「登录成功却像没进去」。
  */
-export const APP_POST_LOGIN_PATH = APP_PROJECTS_PATH;
+export const APP_POST_LOGIN_PATH = APP_SHELL_ROOT;
 
 /** 视频制作画布（React Flow / WorkflowEditor） */
 export const WORKFLOW_EDITOR_PATH = "/workflow";
@@ -27,19 +40,19 @@ export const APP_ADMIN_PATH = "/app/admin";
 
 /** 登录后业务导航 → /app 子路由（完整列表；实际展示由权限过滤） */
 export const AUTH_NAV_ITEMS: ShellNavItem[] = [
-  { id: "projects", label: "项目管理", href: APP_PROJECTS_PATH },
+  { id: "projects", label: "一栈式Flow", href: APP_PROJECTS_PATH },
   {
-    id: "enterprise-assets",
-    label: "企业素材库",
-    href: "/app/enterprise-assets",
+    id: "asset-market",
+    label: "素材市场",
+    href: APP_ASSET_MARKET_PATH,
   },
   { id: "workspace", label: "工作台", href: APP_WORKBENCH_PATH },
-  { id: "materials", label: "素材引擎", href: "/app/materials" },
+  { id: "personal-assets", label: "个人素材", href: APP_PERSONAL_ASSETS_PATH },
   { id: "guide", label: "创作指引", href: "/app/guide" },
   { id: "team", label: "团队管理", href: "/app/team" },
   {
     id: "admin-materials",
-    label: "管理素材",
+    label: "素材市场管理",
     href: "/app/admin/materials",
   },
   { id: "admin", label: "系统管理", href: APP_ADMIN_PATH },

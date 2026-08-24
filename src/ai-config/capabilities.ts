@@ -29,6 +29,7 @@ export type AiCapabilityId =
   | "video.storyboard-shot.generate"
   | "video.storyboard-episode.generate"
   | "video.workflow-node.generate"
+  | "video.personal.generate"
   | "video.reference-image.precheck";
 
 /** Maps to GenerationApiId slots (model profiles). */
@@ -358,6 +359,23 @@ export const AI_CAPABILITIES: readonly AiCapabilityDefinition[] = [
     route: "/workflow",
     buttonText: "确认生成",
     allowedRoles: ["SYSTEM_ADMIN", "PROJECT_OWNER"],
+    requiresCredits: true,
+    supportsStreaming: false,
+    supportsCancel: true,
+    paidRisk: "paid",
+    defaultProfileSlot: "video-shot",
+    classification: "AI_REQUIRED",
+  },
+  {
+    id: "video.personal.generate",
+    label: "个人 AI 生视频",
+    description: "个人中心 · AI 生视频工作台",
+    modality: "video",
+    status: "active",
+    surface: "PersonalVideoWorkspace",
+    route: "/app",
+    buttonText: "开始生成",
+    allowedRoles: ["SYSTEM_ADMIN", "PROJECT_OWNER", "CARD_ENGINEER"],
     requiresCredits: true,
     supportsStreaming: false,
     supportsCancel: true,

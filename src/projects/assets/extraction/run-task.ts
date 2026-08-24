@@ -382,6 +382,23 @@ export async function runAssetExtractionTask(
         progress: liveProgress,
       });
 
+      if (startTask.scope === "episode") {
+        const awaitingProgress: AssetExtractionProgress = {
+          ...liveProgress,
+          phase: "awaiting_roster_selection",
+          estimatedProgress: 15,
+        };
+        await patchTask(projectId, taskId, {
+          status: "awaiting_roster_selection",
+          stage: "merging_roster",
+          roster,
+          rosterChunksTotal: chunks.length,
+          estimatedProgress: 15,
+          progress: awaitingProgress,
+        });
+        return;
+      }
+
       const detailItems = detailItemsFromRoster(roster, task.detailItems);
       liveProgress = {
         ...liveProgress,

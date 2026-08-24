@@ -18,6 +18,7 @@ export function stageFromProgressPhase(
   phase: AssetExtractionProgressPhase,
 ): AssetExtractionStage {
   if (phase === "completed") return "complete";
+  if (phase === "awaiting_roster_selection") return "merging_roster";
   return phase;
 }
 
@@ -29,6 +30,8 @@ export function subtitleForProgressPhase(
       return "正在扫描剧本中的角色资产";
     case "merging_roster":
       return "正在整理角色资产名单";
+    case "awaiting_roster_selection":
+      return "请选择需要设计的资产";
     case "extracting_details":
       return "正在生成角色外观详情";
     case "retrying_failed_once":
@@ -56,6 +59,8 @@ export function footerLinesForProgress(
     lines.push("正在扫描剧本分块并发现资产名单");
   } else if (progress.phase === "merging_roster") {
     lines.push("正在合并别名并去重资产名单");
+  } else if (progress.phase === "awaiting_roster_selection") {
+    lines.push("勾选资产后确认，系统将开始设计对话");
   } else if (progress.phase === "saving") {
     lines.push("正在将结果写入资产库");
   }

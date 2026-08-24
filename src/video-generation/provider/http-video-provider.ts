@@ -462,6 +462,7 @@ export class HttpVideoProvider implements VideoProvider {
       model,
       content,
       resolution: toArkResolution(input.input.resolution),
+      ...(input.input.aspectRatio ? { ratio: input.input.aspectRatio } : {}),
       duration,
       ...(typeof input.input.seed === "number" ? { seed: input.input.seed } : {}),
     };

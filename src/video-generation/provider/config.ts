@@ -116,7 +116,8 @@ export async function resolveVideoProviderRuntimeConfig(
     capabilityId?:
       | "video.storyboard-shot.generate"
       | "video.storyboard-episode.generate"
-      | "video.workflow-node.generate";
+      | "video.workflow-node.generate"
+      | "video.personal.generate";
   },
 ): Promise<VideoProviderRuntimeConfig> {
   const envConfig = getVideoProviderRuntimeConfig(env);

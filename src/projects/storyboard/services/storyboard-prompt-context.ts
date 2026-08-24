@@ -1,5 +1,6 @@
 import type { MatchableAssets } from "@/projects/storyboard/services/asset-match";
 import type { StoryboardPromptContext } from "@/projects/storyboard/services/storyboard-prompt-llm";
+import { stripScriptMetaForStoryboard } from "@/projects/storyboard/services/storyboard-prompt-content-policy";
 import { buildProjectVisualStyleDirective } from "@/projects/project-visual-style";
 
 /** Build LLM context from confirmed script + project library for task-rule prompts. */
@@ -24,7 +25,7 @@ export function buildStoryboardPromptContext(input: {
     undefined;
 
   return {
-    scriptText: input.scriptText?.trim() || "",
+    scriptText: stripScriptMetaForStoryboard(input.scriptText?.trim() || ""),
     aspectRatio: input.aspectRatio?.trim() || "9:16",
     characters: assets?.characters.map((c) => ({ name: c.name })) ?? [],
     scenes:

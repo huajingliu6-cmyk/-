@@ -1,0 +1,43 @@
+.workflow-entry {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.workflow-entry h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.workflow-entry p {
+  margin: 0;
+  max-width: 420px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.workflow-entry__hint {
+  font-size: 12px;
+}
+
+.workflow-entry__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+.workflow-shell {
+  display: flex;
+  min-height: 100%;
+  height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+}

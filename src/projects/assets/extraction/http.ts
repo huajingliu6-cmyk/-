@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { applyCandidateVersion } from "@/projects/assets/extraction/apply-candidate";
+import { confirmEpisodeRosterSelection } from "@/projects/assets/extraction/confirm-roster";
 import { getAssetExtractionSnapshot } from "@/projects/assets/extraction/snapshot";
 import { startAssetExtractionTask } from "@/projects/assets/extraction/start-task";
 import { toPublicExtractionTask } from "@/projects/assets/extraction/public-task";

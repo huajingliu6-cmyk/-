@@ -4,6 +4,7 @@ import { AiConfigError } from "@/ai-config/errors";
 import { buildImmutableOutputContract } from "@/ai-config/output-contracts";
 import { getEffectivePublishedRule } from "@/ai-config/task-rules-store";
 import { regenerateVideoPromptForShot } from "@/projects/storyboard/services/storyboard-generate";
+import { sanitizeStoryboardVideoPromptText } from "@/projects/storyboard/services/storyboard-prompt-content-policy";
 import { matchStoryboardPrompts } from "@/projects/storyboard/services/match-storyboard-prompts";
 import {
   parseBracketShotBlocks,
@@ -138,13 +139,14 @@ function applyPromptMap(
           if (shot.promptLocked || shot.locked) return shot;
           const fromLlm = prompts.get(shot.id)?.trim();
           if (!fromLlm && !fillMissing) return shot;
-          const next =
+          const nextRaw =
             fromLlm ||
             regenerateVideoPromptForShot(
               shot,
               sceneTitle,
               `${saltPrefix}:${shot.id}`,
             );
+          const next = sanitizeStoryboardVideoPromptText(nextRaw);
           const durationFromPrompt = parseDurationSecondsFromVideoPrompt(next);
           return {
             ...shot,
@@ -681,11 +683,13 @@ export async function regenerateShotVideoPromptWithLlm(input: {
     );
   }
 
+  const sanitizedPrompt = sanitizeStoryboardVideoPromptText(prompt);
+
   await maybeSaveJob({
     projectId: input.projectId,
     userId: input.userId,
     brief: userPrompt,
-    content: prompt,
+    content: sanitizedPrompt,
     modelKey: resolved.profile.id,
     displayModelName: resolved.profile.label || resolved.profile.model,
     providerModelId,
@@ -693,5 +697,5 @@ export async function regenerateShotVideoPromptWithLlm(input: {
     taskRuleVersion,
   });
 
-  return prompt;
+  return sanitizedPrompt;
 }

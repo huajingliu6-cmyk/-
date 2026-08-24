@@ -23,6 +23,7 @@ import {
   readProjectAssetImageMeta,
 } from "@/projects/assets/asset-image-storage";
 import { resolveAssetImageStorageKey } from "@/projects/assets/asset-image-url";
+import { readMaterialMedia } from "@/materials/media-store";
 import { isLikelyRealPersonForVideoRef } from "@/video-generation/ark-image-safety-precheck";
 import type {
   GenerationAssetReference,
@@ -172,6 +173,29 @@ export async function readProjectDraftImageAsDataUrl(
   return bufferToImageDataUrl(buffer, preferredMime);
 }
 
+function parseMaterialMediaUrl(url: string): string | null {
+  const pathOnly = (() => {
+    try {
+      if (/^https?:\/\//i.test(url)) return new URL(url).pathname;
+    } catch {
+      /* ignore */
+    }
+    return url.split("?")[0] ?? url;
+  })();
+  const match = pathOnly.match(/\/api\/materials\/media\/([^/]+)$/);
+  return match?.[1] ? decodeURIComponent(match[1]!) : null;
+}
+
+async function readMaterialMediaAsDataUrl(
+  mediaId: string,
+): Promise<{ dataUrl: string; mimeType: string }> {
+  const media = await readMaterialMedia(mediaId);
+  if (!media) {
+    throw new Error(`素材图片不存在：${mediaId}`);
+  }
+  return bufferToImageDataUrl(media.body, media.mime);
+}
+
 async function resolveImageUrl(
   ref: GenerationAssetReference,
   projectId: string,
@@ -186,6 +210,12 @@ async function resolveImageUrl(
       draftFromUrl.projectId,
       draftFromUrl.assetOrMediaId,
     );
+    return dataUrl;
+  }
+
+  const materialMediaId = parseMaterialMediaUrl(ref.sourceUrl);
+  if (materialMediaId) {
+    const { dataUrl } = await readMaterialMediaAsDataUrl(materialMediaId);
     return dataUrl;
   }
 

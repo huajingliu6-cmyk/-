@@ -154,6 +154,14 @@ export type SceneAsset = {
   approvalProvenance?: AssetApprovalProvenance | null;
   videoRefSafety?: VideoRefSafety | null;
   mediaVariantLabels?: Record<string, string>;
+  /** Inline variant drafts (no media yet) kept until first image is saved. */
+  variantDrafts?: LibraryVariantDraft[];
+};
+
+export type LibraryVariantDraft = {
+  id: string;
+  label: string;
+  promptText?: string;
 };
 
 export type PropAsset = {
@@ -172,6 +180,7 @@ export type PropAsset = {
   approvalProvenance?: AssetApprovalProvenance | null;
   videoRefSafety?: VideoRefSafety | null;
   mediaVariantLabels?: Record<string, string>;
+  variantDrafts?: LibraryVariantDraft[];
 };
 
 export type AudioAssetKind = "music" | "sfx" | "narration" | "voice";

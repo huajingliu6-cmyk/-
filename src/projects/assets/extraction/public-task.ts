@@ -49,5 +49,8 @@ export function toPublicExtractionTask(
           estimatedProgress: 100,
         }
       : progress,
+    ...(task.status === "awaiting_roster_selection" && (task.roster?.length ?? 0) > 0
+      ? { roster: task.roster }
+      : {}),
   };
 }

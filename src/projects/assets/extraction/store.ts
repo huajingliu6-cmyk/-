@@ -124,6 +124,7 @@ function normalizeTaskStatus(raw: string): AssetExtractionTaskStatus {
   if (
     raw === "discovering_roster" ||
     raw === "merging_roster" ||
+    raw === "awaiting_roster_selection" ||
     raw === "extracting_details" ||
     raw === "retrying_failed_once" ||
     raw === "saving" ||
@@ -151,6 +152,7 @@ function normalizeTaskStage(
   }
   if (raw === "discovering") return "discovering_roster";
   if (raw === "retrying_failed") return "retrying_failed_once";
+  if (status === "awaiting_roster_selection") return "merging_roster";
   if (status === "merging_roster") return "merging_roster";
   if (status === "extracting_details") return "extracting_details";
   if (status === "retrying_failed_once") return "retrying_failed_once";
@@ -165,6 +167,7 @@ function parseProgress(raw: unknown): AssetExtractionProgress | undefined {
   const phase: AssetExtractionProgress["phase"] =
     phaseRaw === "discovering_roster" ||
     phaseRaw === "merging_roster" ||
+    phaseRaw === "awaiting_roster_selection" ||
     phaseRaw === "extracting_details" ||
     phaseRaw === "retrying_failed_once" ||
     phaseRaw === "saving" ||
@@ -256,6 +259,11 @@ function parseTask(raw: unknown): AssetExtractionTask | null {
     failedAssetQueue: Array.isArray(raw.failedAssetQueue)
       ? raw.failedAssetQueue.filter((item): item is string => typeof item === "string")
       : [],
+    selectedAssetKeys: Array.isArray(raw.selectedAssetKeys)
+      ? raw.selectedAssetKeys.filter(
+          (item): item is string => typeof item === "string" && item.trim().length > 0,
+        )
+      : undefined,
     rosterCompletedChunkIds: Array.isArray(raw.rosterCompletedChunkIds)
       ? raw.rosterCompletedChunkIds.filter(
           (item): item is string => typeof item === "string",

@@ -131,8 +131,10 @@ describe("HttpVideoProvider SD2 dialect", () => {
         const parsed = JSON.parse(String(init?.body ?? "{}")) as {
           content: Array<{ image_url?: { url?: string } }>;
           model: string;
+          ratio?: string;
         };
         expect(parsed.model).toBe("doubao-seedance-2.0");
+        expect(parsed.ratio).toBe("16:9");
         expect(parsed.content.some((c) => c.image_url?.url === "asset://asset_rp_1")).toBe(
           true,
         );

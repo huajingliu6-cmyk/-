@@ -15,16 +15,18 @@ import {
   type LibraryPromptAsset,
 } from "@/projects/assets/library-asset-prompt";
 import {
+  addLibraryVariantDraft,
+  buildLibraryVariantGridItems,
   collectLibraryAssetVariantMediaIds,
+  findLibraryVariantDraft,
+  removeLibraryVariantDraft,
   resolveLibraryAssetPrimaryMediaId,
-  resolveLibraryVariantLabel,
+  updateLibraryVariantDraftLabel,
+  updateLibraryVariantDraftPrompt,
   withLibraryVariantLabel,
   withoutLibraryVariantMedia,
 } from "@/projects/assets/library-asset-media-variants";
-import { LibraryAssetImageEditor } from "@/projects/assets/LibraryAssetImageEditor";
-import type { LibraryAssetImageSaveResult } from "@/projects/assets/LibraryAssetImageEditor";
 import { LibraryAssetMediaGrid } from "@/projects/assets/LibraryAssetMediaGrid";
-import { buildSceneVariantPromptPrefill } from "@/projects/assets/library-asset-variant-prefill";
 import { LibraryAssetMediaLightbox } from "@/projects/assets/LibraryAssetMediaLightbox";
 import { LibraryAssetPromptPanel } from "@/projects/assets/LibraryAssetPromptModal";
 import { parseResponseJson } from "@/projects/assets/parse-response-json";
@@ -77,9 +79,9 @@ export function SceneDetail({
     string | null
   >(null);
   const [mediaBusy, setMediaBusy] = useState(false);
-  const [variantEditorOpen, setVariantEditorOpen] = useState(false);
-  const [variantEditorSession, setVariantEditorSession] = useState(0);
-  const [variantEditorPrefill, setVariantEditorPrefill] = useState("");
+  const [activeVariantSlotId, setActiveVariantSlotId] = useState<string | null>(
+    null,
+  );
   const [promptDirty, setPromptDirty] = useState(false);
   const [pendingVariantAction, setPendingVariantAction] = useState<
     (() => void) | null
@@ -106,9 +108,8 @@ export function SceneDetail({
 
   useEffect(() => {
     setHeroMediaId(null);
-    setLightboxMediaId(null);
+    setActiveVariantSlotId(null);
     setDeleteConfirmMediaId(null);
-    setVariantEditorOpen(false);
   }, [scene?.id]);
 
   const designItem = scene
@@ -136,14 +137,15 @@ export function SceneDetail({
 
   const variantItems = useMemo(
     () =>
-      variantMediaIds.map((mediaId, index) => ({
-        mediaId,
-        label: scene
-          ? resolveLibraryVariantLabel(scene, mediaId, index + 1, "scene")
-          : mediaId,
-      })),
+      scene
+        ? buildLibraryVariantGridItems(scene, variantMediaIds, "scene")
+        : [],
     [scene, variantMediaIds],
   );
+
+  const activeDraft = scene
+    ? findLibraryVariantDraft(scene, activeVariantSlotId)
+    : null;
 
   const effectiveHeroMediaId =
     heroMediaId ?? primaryMediaId ?? scene?.imageFileName ?? null;
@@ -249,61 +251,59 @@ export function SceneDetail({
     ],
   );
 
-  const existingMediaIds = useMemo(() => {
-    const merged = [
-      ...(scene?.approvedMediaIds ?? []),
-      ...variantMediaIds,
-      ...(primaryMediaId ? [primaryMediaId] : []),
-    ];
-    return merged.filter(
-      (id, index) => id && merged.indexOf(id) === index,
-    );
-  }, [primaryMediaId, scene?.approvedMediaIds, variantMediaIds]);
-
-  const openVariantEditor = () => {
+  const addDraftVariant = () => {
     if (!scene || !canEdit || mediaBusy) return;
-    setVariantEditorPrefill(buildSceneVariantPromptPrefill(scene));
-    setVariantEditorSession((key) => key + 1);
-    setVariantEditorOpen(true);
-  };
-
-  const handleVariantEditorSaved = (result: LibraryAssetImageSaveResult) => {
-    if (!scene) return;
-    applySavedMedia({
-      approvedMediaIds: result.approvedMediaIds,
-      primaryMediaId: result.primaryMediaId,
-      mediaId: result.mediaId,
-    });
-    setHeroMediaId(result.mediaId);
-    onImageRevision?.(scene.id, imageRevision + 1);
-    setVariantEditorOpen(false);
-      onStatus?.("已保存场景编辑。");
-    void onPersist();
+    const { asset: next, draft } = addLibraryVariantDraft(scene, "scene");
+    onChange(next);
+    setActiveVariantSlotId(draft.id);
+    setHeroMediaId(null);
+    setLightboxMediaId(null);
   };
 
   const syncGeneratedPreview = useCallback(
-    (mediaId: string | null) => {
-      if (!scene || !mediaId || variantEditorOpen) return;
+    async (mediaId: string | null) => {
+      if (!scene || !mediaId) return;
+      const draft = findLibraryVariantDraft(scene, activeVariantSlotId);
       setHeroMediaId(mediaId);
       onImageRevision?.(scene.id, imageRevision + 1);
-      void persistMediaToLibrary(mediaId, false).catch((error) => {
+      try {
+        await persistMediaToLibrary(mediaId, false);
+        if (draft) {
+          const withoutDraft = removeLibraryVariantDraft(scene, draft.id);
+          const index = variantMediaIds.length + 1;
+          onChange(
+            withLibraryVariantLabel(
+              withoutDraft,
+              mediaId,
+              draft.label,
+              "scene",
+              index,
+            ),
+          );
+          setActiveVariantSlotId(mediaId);
+          await onPersist();
+        }
+      } catch (error) {
         onStatus?.(
           error instanceof Error ? error.message : "保存场景编辑失败",
         );
-      });
+      }
     },
     [
+      activeVariantSlotId,
       imageRevision,
+      onChange,
       onImageRevision,
+      onPersist,
       onStatus,
       persistMediaToLibrary,
       scene,
-      variantEditorOpen,
+      variantMediaIds.length,
     ],
   );
 
   const handleDesignItemChange = (item: EpisodeAssetDesignItem) => {
-    syncGeneratedPreview(item.generatedMedia?.currentId?.trim() || null);
+    void syncGeneratedPreview(item.generatedMedia?.currentId?.trim() || null);
     onDesignItemChange?.(item);
   };
 
@@ -318,18 +318,20 @@ export function SceneDetail({
     }
   };
 
-  const deleteVariant = async (mediaId: string) => {
+  const deleteVariant = async (slotId: string) => {
     if (!scene || !canEdit) return;
     setMediaBusy(true);
     try {
-      const next = withoutLibraryVariantMedia(scene, mediaId);
+      const next = withoutLibraryVariantMedia(scene, slotId);
       onChange(next);
       await onPersist();
-      if (heroMediaId === mediaId || primaryMediaId === mediaId) {
+      if (
+        heroMediaId === slotId ||
+        primaryMediaId === slotId ||
+        activeVariantSlotId === slotId
+      ) {
         setHeroMediaId(resolveLibraryAssetPrimaryMediaId(next));
-      }
-      if (lightboxMediaId === mediaId) {
-        setLightboxMediaId(null);
+        setActiveVariantSlotId(null);
       }
       setDeleteConfirmMediaId(null);
       onStatus?.("已删除场景编辑。");
@@ -337,6 +339,15 @@ export function SceneDetail({
       setMediaBusy(false);
     }
   };
+
+  const variantPromptScopeKey = activeDraft
+    ? `draft:${activeDraft.id}`
+    : activeVariantSlotId
+      ? `variant:${activeVariantSlotId}`
+      : "primary";
+  const variantPromptScopeText = activeDraft
+    ? activeDraft.promptText ?? ""
+    : null;
 
   if (!scene) {
     return (
@@ -429,58 +440,83 @@ export function SceneDetail({
                 canEdit={canEdit}
                 busy={mediaBusy}
                 heroMediaId={effectiveHeroMediaId}
-                lightboxMediaId={lightboxMediaId}
+                activeVariantSlotId={activeVariantSlotId}
                 dragAssetName={scene.name || "场景"}
                 onSelectMain={() => {
                   runWithPromptGuard(() => {
+                    setActiveVariantSlotId(null);
                     setLightboxMediaId(null);
                     setHeroMediaId(primaryMediaId);
                   });
                 }}
                 onAdd={() => {
-                  void onPersist().then(() => openVariantEditor());
+                  runWithPromptGuard(() => addDraftVariant());
                 }}
-                onOpenVariant={(mediaId) => {
+                onOpenVariant={(slotId) => {
                   runWithPromptGuard(() => {
-                    setLightboxMediaId(mediaId);
-                    setHeroMediaId(mediaId);
+                    const draft = findLibraryVariantDraft(scene, slotId);
+                    setActiveVariantSlotId(slotId);
+                    if (draft) {
+                      setHeroMediaId(null);
+                      setLightboxMediaId(null);
+                      return;
+                    }
+                    setLightboxMediaId(slotId);
+                    setHeroMediaId(slotId);
                   });
                 }}
-                onRenameVariant={(mediaId, label, previousLabel) => {
+                onRenameVariant={(slotId, label, previousLabel) => {
                   const trimmed = label.trim();
                   if (!trimmed || trimmed === previousLabel.trim()) return;
-                  const index = variantMediaIds.indexOf(mediaId);
+                  if (findLibraryVariantDraft(scene, slotId)) {
+                    onChange(updateLibraryVariantDraftLabel(scene, slotId, trimmed));
+                    return;
+                  }
+                  const index = variantMediaIds.indexOf(slotId);
                   onChange(
                     withLibraryVariantLabel(
                       scene,
-                      mediaId,
+                      slotId,
                       trimmed,
                       "scene",
                       index >= 0 ? index + 1 : 1,
                     ),
                   );
                 }}
-                onDeleteVariant={(mediaId) => setDeleteConfirmMediaId(mediaId)}
+                onDeleteVariant={(slotId) => setDeleteConfirmMediaId(slotId)}
               />
             </div>
 
             <div className="character-prompt-split__right">
               <div className="character-prompt-split__prompt">
                 <LibraryAssetPromptPanel
-                  key={scene.id}
+                  key={`${scene.id}:${variantPromptScopeKey}`}
                   projectId={projectId}
                   context={context}
                   episodeId={designEpisodeId}
                   kind="scene"
                   asset={scene as LibraryPromptAsset}
-                  designItem={designItem}
+                  designItem={activeDraft ? null : designItem}
                   onItemChange={handleDesignItemChange}
-                  onCurrentMediaChange={
-                    variantEditorOpen ? undefined : syncGeneratedPreview
-                  }
+                  onCurrentMediaChange={syncGeneratedPreview}
                   hideMediaToolbar
                   hidePromptSectionLabel
                   promptContextLabel="场景提示词"
+                  promptScopeKey={variantPromptScopeKey}
+                  promptScopeText={variantPromptScopeText}
+                  onPromptScopePersist={
+                    activeDraft
+                      ? (text) => {
+                          onChange(
+                            updateLibraryVariantDraftPrompt(
+                              scene,
+                              activeDraft.id,
+                              text,
+                            ),
+                          );
+                        }
+                      : undefined
+                  }
                   onPromptDirtyChange={handlePromptDirtyChange}
                   promptFlushRef={promptFlushRef}
                   onStatus={onStatus}
@@ -538,23 +574,6 @@ export function SceneDetail({
             </button>
           </div>
         </div>
-      ) : null}
-
-      {variantEditorOpen ? (
-        <LibraryAssetImageEditor
-          key={`scene-variant-editor:${scene.id}:session:${variantEditorSession}`}
-          projectId={projectId}
-          context={context}
-          assetId={scene.id}
-          assetKind="scene"
-          assetName={scene.name || "未命名场景"}
-          initialMediaId={primaryMediaId}
-          existingMediaIds={existingMediaIds}
-          initialPrompt={variantEditorPrefill}
-          setPrimaryOnSave={false}
-          onClose={() => setVariantEditorOpen(false)}
-          onSaved={handleVariantEditorSaved}
-        />
       ) : null}
 
       <UnsavedPromptDialog

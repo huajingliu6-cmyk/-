@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { AuthenticatedHeader } from "@/shell/AuthenticatedHeader";
 import { GenerationBusyGuard } from "@/shell/GenerationBusyGuard";
 import { useAuthUser } from "@/shell/useAuthUser";
-import { APP_POST_LOGIN_PATH } from "@/shell/nav";
+import { APP_ASSET_MARKET_PATH, APP_PERSONAL_ASSETS_PATH, APP_POST_LOGIN_PATH, APP_SHELL_ROOT, isOneStackFlowPath } from "@/shell/nav";
 import {
   ACTIVE_ENTERPRISE_EVENT,
   readActiveSpace,
@@ -46,6 +46,13 @@ export function AuthenticatedAppShell({
   const [activeSpace, setActiveSpace] = useState<ActiveSpace>(() => readActiveSpace());
   const isAdminConsole =
     pathname === "/app/admin" || pathname.startsWith("/app/admin/");
+  const isSidebarHub =
+    pathname === APP_SHELL_ROOT ||
+    pathname === `${APP_SHELL_ROOT}/` ||
+    pathname === APP_PERSONAL_ASSETS_PATH ||
+    pathname === APP_ASSET_MARKET_PATH;
+  const isOneStackFlow = isOneStackFlowPath(pathname);
+  const hideTopChrome = isAdminConsole || isSidebarHub || isOneStackFlow;
 
   useEffect(() => {
     const onSpaceChanged = (event: Event) => {
@@ -85,11 +92,17 @@ export function AuthenticatedAppShell({
   }
 
   return (
-    <div className="shell-app flex h-full min-h-full flex-col overflow-hidden bg-[#070811]">
+    <div
+      className={`shell-app flex h-full min-h-full flex-col overflow-hidden bg-[#070811]${
+        isSidebarHub ? " shell-app--sidebar-hub" : ""
+      }`}
+    >
       {auth.status === "authenticated" ? (
         <>
-          {isAdminConsole ? null : <AuthenticatedHeader user={auth.user} />}
-          {isAdminConsole ? null : <GenerationBusyGuard />}
+          {hideTopChrome ? null : (
+            <AuthenticatedHeader user={auth.user} />
+          )}
+          {hideTopChrome ? null : <GenerationBusyGuard />}
         </>
       ) : (
         <ShellHeaderPlaceholder />

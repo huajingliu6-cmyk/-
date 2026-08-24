@@ -8,8 +8,7 @@ export const HOME_NAV_ITEMS: HomeNavItem[] = [
   { id: "home", label: "首页", href: "/" },
   // TODO: 项目管理路由尚未落地
   { id: "projects", label: "项目管理" },
-  // TODO: 企业素材库路由尚未落地
-  { id: "enterprise-assets", label: "企业素材库" },
+  { id: "asset-market", label: "素材市场", href: "/app/asset-market" },
   { id: "workspace", label: "工作台", href: "/app/workspace" },
   // TODO: 作品展示独立页尚未落地（首屏底部条作为临时展示）
   { id: "showcase", label: "作品展示", href: "#home-showcase" },

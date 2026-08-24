@@ -195,4 +195,15 @@ export const AI_ACTION_DESCRIPTORS: readonly AiActionDescriptor[] = [
     active: true,
     testModule: "src/ai-config/__tests__/video-paid-gate-routes.test.ts",
   },
+  {
+    capabilityId: "video.personal.generate",
+    surface: "PersonalVideoWorkspace",
+    component: "PersonalVideoWorkspace",
+    serverRoute: "POST /api/personal/video-generations",
+    resolverEntry:
+      "resolveVideoProviderRuntimeConfig(video.personal.generate)",
+    providerAdapter: "Mock | Http | AliyunWan27",
+    active: true,
+    testModule: "src/personal/__tests__/personal-image-hub.test.ts",
+  },
 ] as const;

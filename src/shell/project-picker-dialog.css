@@ -1,0 +1,140 @@
+.project-picker-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.project-picker-dialog__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(4, 6, 16, 0.72);
+  cursor: pointer;
+}
+
+.project-picker-dialog__panel {
+  position: relative;
+  width: min(520px, 100%);
+  max-height: min(70vh, 640px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background: #0d101c;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.project-picker-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 20px 12px;
+}
+
+.project-picker-dialog__header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.project-picker-dialog__header p {
+  margin: 6px 0 0;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 13px;
+}
+
+.project-picker-dialog__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  cursor: pointer;
+}
+
+.project-picker-dialog__error {
+  margin: 0 20px 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(127, 29, 29, 0.22);
+  color: #fecaca;
+  font-size: 13px;
+}
+
+.project-picker-dialog__body {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 0 20px 20px;
+}
+
+.project-picker-dialog__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 160px;
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.project-picker-dialog__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-picker-dialog__item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-picker-dialog__item:hover:not(:disabled) {
+  border-color: rgba(124, 58, 237, 0.4);
+  background: rgba(124, 58, 237, 0.1);
+}
+
+.project-picker-dialog__item strong {
+  grid-column: 1;
+}
+
+.project-picker-dialog__item span {
+  grid-column: 1;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
+}
+
+.project-picker-dialog__spin {
+  animation: project-picker-spin 0.9s linear infinite;
+}
+
+@keyframes project-picker-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.project-picker-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 20px 20px;
+}

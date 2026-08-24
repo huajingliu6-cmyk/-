@@ -1,7 +1,12 @@
 import type { ActiveSpace } from "@/enterprise/client-space";
 import { AUTH_NAV_ITEMS, type ShellNavItem } from "@/shell/nav";
 
-const PERSONAL_NAV_IDS = new Set(["projects", "materials", "guide"]);
+const PERSONAL_NAV_IDS = new Set([
+  "projects",
+  "guide",
+  "asset-market",
+  "personal-assets",
+]);
 const PLATFORM_ADMIN_NAV_IDS = new Set(["admin", "admin-materials"]);
 
 export function navigationForSpace(

@@ -92,16 +92,14 @@ describe("look / design generation progress and admit removal", () => {
     expect(look).toContain('action: "add-look"');
     expect(look).not.toContain('action: "set-primary"');
     expect(look).not.toContain("setPrimary: true");
-    expect(detail).toContain(
+    expect(detail).not.toContain(
       "key={`character-look-editor:${character.id}:session:${lookEditorSessionKey}`}",
     );
     expect(detail).not.toContain("activeMediaId ??");
     expect(detail).toContain("bumpRevision: false");
     expect(detail).toContain("findAppearanceOwningMedia");
-    expect(detail).toContain("lookEditorOpen || activeAppearanceId");
-    expect(detail).toContain("if (lookEditorOpen) return");
-    expect(detail).toContain("wasCreatingNewLook");
-    expect(detail).toContain("造型已生成并写入造型库。");
+    expect(detail).toContain("createCharacterAppearance");
+    expect(detail).toContain("LibraryAssetEditingPlaceholder");
     expect(detail).toContain("character-look-lightbox");
     expect(detail).toContain("promote-look-to-main");
     expect(detail).toContain("delete-main-history");
@@ -179,7 +177,7 @@ describe("look / design generation progress and admit removal", () => {
     expect(detail).toContain("DesignGenerationOverlay");
     expect(detail).toContain("mainGenerationProgress");
     expect(detail).toContain("onGenerationProgress=");
-    expect(detail).toContain("mainGenerationProgress && !lookEditorOpen");
+    expect(detail).toContain("mainGenerationProgress && !activeAppearanceId");
     const prompt = read("src/projects/assets/LibraryAssetPromptModal.tsx");
     expect(prompt).toContain("onGenerationProgress={onGenerationProgress}");
     expect(css).toContain(".character-media-stage .ead-generation-overlay");

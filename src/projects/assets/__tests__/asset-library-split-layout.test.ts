@@ -64,8 +64,16 @@ describe("asset library three-pane workspace contracts", () => {
     expect(detail).toContain("fill");
     expect(detail).toContain("character-hero-image");
     expect(detail).toContain("character-voice-bar");
-    expect(detail).toContain("VoiceSelector");
-    expect(detail).toContain("VoicePreviewButton");
+    expect(detail).toContain("character-voice-upload");
+    expect(detail).toContain("character-voice-select");
+    expect(detail).toContain("character-voice-generate");
+    const voiceBarSection =
+      detail.match(
+        /data-testid="character-voice-card"[\s\S]*?<\/section>/,
+      )?.[0] ?? "";
+    expect(voiceBarSection).not.toContain("VoicePreviewButton");
+    expect(voiceBarSection).not.toContain("VoiceSelector");
+    expect(voiceBarSection).not.toContain("voice-preview");
     expect(detail).toContain("character-prompt-split");
     expect(detail).toContain("LibraryAssetPromptPanel");
     expect(detail).toContain("onCurrentMediaChange");
@@ -73,8 +81,10 @@ describe("asset library three-pane workspace contracts", () => {
     expect(detail).toContain("character-history-popover");
     expect(detail).not.toContain("character-generation-history");
     expect(detail).toContain("character-look-add");
-    expect(detail).toContain("LibraryCharacterLookEditor");
+    expect(detail).toContain("createCharacterAppearance");
+    expect(detail).toContain("LibraryAssetEditingPlaceholder");
     expect(detail).not.toContain("CreateCharacterLookDialog");
+    expect(detail).not.toContain("LibraryCharacterLookEditor");
     expect(detail).toContain("确认使用");
     expect(detail).toContain("新增人物造型");
     expect(detail).not.toContain("设为主造型");
@@ -82,7 +92,7 @@ describe("asset library three-pane workspace contracts", () => {
     expect(detail).not.toContain("替换形象");
     expect(detail).toContain("character-history-popover__delete");
     expect(detail).not.toContain("character-history-more-");
-    expect(detail).toContain("LibraryCharacterLookEditor");
+    expect(detail).not.toContain("LibraryCharacterLookEditor");
     expect(detail).not.toContain("previewContent=");
     expect(detail).not.toContain("imageActions=");
     expect(detail).not.toMatch(/amw-btn-primary[\s\S]{0,200}>\s*保存\s*</);
@@ -137,6 +147,11 @@ describe("asset library three-pane workspace contracts", () => {
     expect(css).toContain(".character-history-trigger");
     expect(css).toContain(".character-look-add-wrap");
     expect(css).toContain(".character-look-add-card");
+    expect(css).toContain(".character-look-card__media--add");
+    expect(css).toMatch(
+      /\.character-look-card__media--add\s*\{[\s\S]*?justify-content:\s*center/,
+    );
+    expect(css).toContain(".character-voice-bar__actions");
     expect(css).toContain(".character-create-look-dialog");
     expect(css).toContain(".prompt-panel");
     expect(css).toContain("minmax(0, 1fr)");
@@ -171,18 +186,22 @@ describe("asset library three-pane workspace contracts", () => {
     expect(propDetail).toContain("character-prompt-split");
     expect(sceneDetail).toContain("LibraryAssetPromptPanel");
     expect(propDetail).toContain("LibraryAssetPromptPanel");
-    expect(sceneDetail).toContain("variantEditorOpen ? undefined : syncGeneratedPreview");
-    expect(propDetail).toContain("variantEditorOpen ? undefined : syncGeneratedPreview");
+    expect(sceneDetail).toContain("onCurrentMediaChange={syncGeneratedPreview}");
+    expect(propDetail).toContain("onCurrentMediaChange={syncGeneratedPreview}");
     expect(sceneDetail).toContain("heroMediaId");
     expect(propDetail).toContain("heroMediaId");
     expect(sceneDetail).toContain("LibraryAssetMediaGrid");
     expect(propDetail).toContain("LibraryAssetMediaGrid");
     expect(sceneDetail).toContain("LibraryAssetMediaLightbox");
     expect(propDetail).toContain("LibraryAssetMediaLightbox");
-    expect(sceneDetail).toContain("LibraryAssetImageEditor");
-    expect(propDetail).toContain("LibraryAssetImageEditor");
-    expect(sceneDetail).toContain("openVariantEditor");
-    expect(propDetail).toContain("openVariantEditor");
+    expect(sceneDetail).toContain("addDraftVariant");
+    expect(propDetail).toContain("addDraftVariant");
+    expect(sceneDetail).toContain("addLibraryVariantDraft");
+    expect(propDetail).toContain("addLibraryVariantDraft");
+    expect(sceneDetail).toContain("activeVariantSlotId");
+    expect(propDetail).toContain("activeVariantSlotId");
+    expect(sceneDetail).not.toContain("LibraryAssetImageEditor");
+    expect(propDetail).not.toContain("LibraryAssetImageEditor");
     expect(sceneDetail).toContain("主场景");
     expect(propDetail).toContain("主道具");
     expect(sceneDetail).toContain('sectionTitle="场景编辑"');

@@ -7,14 +7,8 @@ import {
   readProjectAssetImageMeta,
 } from "@/projects/assets/asset-image-storage";
 import { getRemoteAssetImage } from "@/projects/assets/remote-asset-blob-store";
-import {
-  sd2CertFailedSafety,
-  sd2CertOkSafety,
-  sd2CertRejectedSafety,
-} from "@/video-generation/sd2-cert-safety";
-import { materializeSd2AssetRef } from "@/video-generation/provider/sd2-platform-client";
-import { resolveSd2PlatformCredentials } from "@/video-generation/provider/sd2-platform-config";
-import { isSd2RealPersonCertError } from "@/video-generation/user-facing-error";
+import { precheckImageDataUrlWithSd2Cert } from "@/video-generation/sd2-image-video-ref-precheck";
+import { sd2CertFailedSafety } from "@/video-generation/sd2-cert-safety";
 
 export {
   formatDesignVideoRefSafetyNotice,
@@ -57,18 +51,6 @@ export function getDesignMediaVideoRefSafety(
   return null;
 }
 
-function errorCode(error: unknown): string {
-  if (
-    error &&
-    typeof error === "object" &&
-    "code" in error &&
-    typeof (error as { code?: unknown }).code === "string"
-  ) {
-    return (error as { code: string }).code;
-  }
-  return "";
-}
-
 /**
  * 设计素材「人物校验」：走移动 SD2 真人认证上传线路。
  * - active → ok（绿盾，可锁定）
@@ -86,11 +68,6 @@ export async function precheckDesignGeneratedMedia(params: {
   const mediaId = params.mediaId.trim();
   if (!mediaId) {
     return sd2CertFailedSafety("无效的图片标识");
-  }
-
-  const creds = await resolveSd2PlatformCredentials();
-  if ("error" in creds) {
-    return sd2CertFailedSafety(creds.error);
   }
 
   let dataUrl: string;
@@ -113,43 +90,9 @@ export async function precheckDesignGeneratedMedia(params: {
     }
   }
 
-  try {
-    await materializeSd2AssetRef({
-      apiUrl: creds.apiUrl,
-      apiKey: creds.apiKey,
-      sourceUrl: dataUrl,
-      realPerson: true,
-      label: params.label?.trim() || mediaId,
-      fetchImpl: params.fetchImpl ?? fetch,
-    });
-    return sd2CertOkSafety();
-  } catch (error) {
-    const code = errorCode(error);
-    const message =
-      error instanceof Error ? error.message : "人物校验失败";
-
-    if (
-      code === "SD2_REAL_PERSON_CERT_FAILED" ||
-      code === "SD2_REAL_PERSON_CERT_BLOCKED" ||
-      isSd2RealPersonCertError(code) ||
-      isSd2RealPersonCertError(message)
-    ) {
-      if (
-        /超时|TIMEOUT/i.test(message) ||
-        code === "SD2_REAL_PERSON_CERT_TIMEOUT"
-      ) {
-        return sd2CertFailedSafety("SD 真人素材认证超时，请稍后重试");
-      }
-      return sd2CertRejectedSafety(
-        message.replace(/^真人素材/, "").trim() ||
-          "平台未通过真人素材认证",
-      );
-    }
-
-    if (code === "SD2_REAL_PERSON_CERT_TIMEOUT") {
-      return sd2CertFailedSafety("SD 真人素材认证超时，请稍后重试");
-    }
-
-    return sd2CertFailedSafety(message.slice(0, 200));
-  }
+  return precheckImageDataUrlWithSd2Cert({
+    dataUrl,
+    label: params.label?.trim() || mediaId,
+    fetchImpl: params.fetchImpl,
+  });
 }

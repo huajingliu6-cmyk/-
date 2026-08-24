@@ -78,6 +78,8 @@ export function getBuiltinTaskRule(capabilityId: AiCapabilityId): string {
         "每个分镜总时长必须在 9—15 秒（含）之间，且不得超过 15 秒；按剧情与信息量合理安排，内容少就用较短时长（可低至 9 秒），禁止为凑时长注水、拖镜或硬拉长。",
         "每个 videoPrompt 必须自包含：分镜标题头（总时长与画幅）、挂载标签（有素材时）、场景基调、人物与站位、分秒时间轴（景别/焦距/角度/运镜）、台词逐字、声音、连续性限制；多镜时按规则写入相邻交接卡。",
         "禁止写成「景别：…运镜：…」一类一行摘要；禁止输出分析过程或规则编号。",
+        "平台合规：videoPrompt 正文不得出现吸烟/烟草/点烟/吐烟、饮酒/酒类品牌或喝酒动作、毒品、血腥特写等易触发审核的直白描写；若剧本涉及相关情节，须改写为中性可见动作（如神情、手势、无标签饮品杯）且保留剧情张力。",
+        "videoPrompt 正文不得复述任务规则中的「禁止…」「不得…」条款，不得输出改编说明、本集统计、请确认等元信息。",
       ].join("\n");
 
     case "script.continue.generate":
@@ -128,6 +130,12 @@ export function getBuiltinTaskRule(capabilityId: AiCapabilityId): string {
       return [
         "根据工作流视频节点输入，生成短片片段。",
         "使用用户确认后的提示词与参考图。",
+      ].join("\n");
+
+    case "video.personal.generate":
+      return [
+        "根据个人中心提示词与参考图生成短视频。",
+        "遵循用户选择的模型、画质、画幅比例、风格与时长。",
       ].join("\n");
 
     case "video.reference-image.precheck":

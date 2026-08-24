@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Plus, Search, X } from "lucide-react";
 import { canCreateProject } from "@/auth/capabilities";
 import { getSystemRole } from "@/auth/roles";
 import { useAuthUser } from "@/shell/useAuthUser";
-import { projectWorkbenchPath } from "@/shell/nav";
+import { projectWorkbenchPath, APP_PROJECTS_PATH } from "@/shell/nav";
 import { CreateProjectWizardDialog } from "@/projects/components/CreateProjectWizardDialog";
 import {
   WorkbenchProjectContextMenu,
@@ -29,7 +29,7 @@ import {
 import type { WorkflowProjectSummary } from "@/workflow/lib/workflow-storage";
 import "./projects.css";
 
-type StatusFilter = "all" | WorkflowProjectSummary["status"];
+type StatusFilter = "all" | "in_progress" | "completed";
 
 const STATUS_LABEL: Record<WorkflowProjectSummary["status"], string> = {
   draft: "草稿",
@@ -40,10 +40,8 @@ const STATUS_LABEL: Record<WorkflowProjectSummary["status"], string> = {
 
 const FILTERS: Array<{ id: StatusFilter; label: string }> = [
   { id: "all", label: "全部" },
-  { id: "draft", label: "草稿" },
-  { id: "generating", label: "生成中" },
+  { id: "in_progress", label: "进行中" },
   { id: "completed", label: "已完成" },
-  { id: "failed", label: "失败" },
 ];
 
 function coverGradient(projectId: string): string {
@@ -67,6 +65,7 @@ function formatTime(iso: string): string {
 
 export default function ProjectsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const auth = useAuthUser();
   const newBtnRef = useRef<HTMLButtonElement>(null);
   const [projects, setProjects] = useState<WorkflowProjectSummary[]>([]);
@@ -144,6 +143,12 @@ export default function ProjectsPage() {
   }, [query]);
 
   useEffect(() => {
+    if (searchParams.get("denied") !== "one-stack-flow") return;
+    setNote("你无权访问该项目的创作流程，请选择其他项目或新建项目。");
+    router.replace(APP_PROJECTS_PATH);
+  }, [router, searchParams]);
+
+  useEffect(() => {
     let cancelled = false;
     const boot = window.setTimeout(() => {
       if (cancelled) return;
@@ -169,7 +174,12 @@ export default function ProjectsPage() {
 
   const filtered = useMemo(() => {
     return projects.filter((p) => {
-      if (filter !== "all" && p.status !== filter) return false;
+      if (filter === "in_progress") {
+        return p.status === "draft" || p.status === "generating";
+      }
+      if (filter === "completed") {
+        return p.status === "completed";
+      }
       if (!debouncedQuery) return true;
       const q = debouncedQuery.toLowerCase();
       return (
@@ -299,8 +309,8 @@ export default function ProjectsPage() {
       <div className="pm-inner">
         <div className="pm-hero">
           <div>
-            <h1>项目管理</h1>
-            <p>管理项目、查看生成进度并继续上次创作。</p>
+            <h1>一栈式Flow</h1>
+            <p>管理项目、查看创作进度并继续上次创作。</p>
           </div>
           <button
             ref={newBtnRef}

@@ -126,6 +126,13 @@ describe("character history / look UI contracts", () => {
     expect(detail).toContain('data-testid="character-looks-grid"');
     expect(detail).toContain("character-look-add");
     expect(detail).toContain("openCreateLookEditor");
+    const openCreateLookEditorBlock = detail.slice(
+      detail.indexOf("const openCreateLookEditor"),
+      detail.indexOf("const uploadToActiveLook"),
+    );
+    expect(openCreateLookEditorBlock).not.toContain("onSave");
+    expect(openCreateLookEditorBlock).toContain('promptOverride: ""');
+    expect(openCreateLookEditorBlock).toContain("setLookPage(nextPage)");
     expect(detail).not.toContain("character-looks-overflow");
     expect(detail).not.toContain("character-look-select-main");
     expect(css).toContain(".character-looks-board");
@@ -141,7 +148,8 @@ describe("character history / look UI contracts", () => {
     expect(detail).toContain("setPreviewMediaId");
     expect(detail).toContain("openAppearanceLightbox");
     expect(detail).toContain("selectMainSlot");
-    expect(detail).toContain("mainPromptScopeText");
+    expect(detail).toContain("appearancePromptScopeText");
+    expect(detail).toContain("activeAppearance.currentMediaId?.trim()");
     expect(detail).toContain("handleHistoryItemAction");
     expect(detail).toContain("historyPopoverTitle");
     const selectLook = detail.slice(
@@ -162,11 +170,13 @@ describe("character history / look UI contracts", () => {
     expect(detail).toContain("音色设置");
     expect(detail).toContain("character-voice-context");
     expect(detail).toContain("voiceBadgeText");
-    expect(detail).toContain("已绑定");
-    expect(detail).toContain("确认绑定");
-    expect(detail).toContain("voiceBoundCurrent");
+    expect(detail).toContain("上传音色");
+    expect(detail).toContain("选择音色");
+    expect(detail).toContain("生成音色");
+    expect(detail).toContain("character-voice-upload");
+    expect(detail).not.toContain('data-testid="character-voice-bind"');
     expect(detail).not.toContain("character-voice-meta");
-    expect(css).toContain(".character-voice-bar__bind.is-bound");
+    expect(css).toContain(".character-voice-bar__action");
     expect(detail).not.toContain("本图音色");
     expect(detail).not.toContain("mediaVoices");
     expect(detail).toContain("character-media-stage");
@@ -174,7 +184,6 @@ describe("character history / look UI contracts", () => {
     expect(detail).not.toContain("character-prompt-split__ops");
     expect(detail).not.toContain("character-missing-primary");
     expect(detail).not.toContain("暂无主形象");
-    expect(detail).toMatch(/\btoggle\b/);
     expect(voiceButton).toContain("voice-preview-toggle");
   });
 
@@ -209,10 +218,13 @@ describe("character history / look UI contracts", () => {
     expect(lookEditor).toContain("setCurrentLookMediaId(primary)");
   });
 
-  it("empty hero exposes real upload/generate CTAs", () => {
+  it("empty hero exposes upload CTA and prompt hint", () => {
     expect(detail).toContain("character-empty-hero");
+    expect(detail).toContain("character-empty-hero-hint");
     expect(detail).toContain("上传主形象");
-    expect(detail).toContain("生成主形象");
+    expect(detail).toContain("请在右侧填写主形象素材提示词后生成。");
+    expect(detail).not.toContain("生成主形象");
+    expect(detail).not.toContain("character-main-generate");
     expect(detail).not.toContain("暂无主形象");
     expect(detail).not.toContain("character-missing-primary");
   });
@@ -228,8 +240,8 @@ describe("character history / look UI contracts", () => {
     expect(detail).toContain("character-history-popover__confirm");
     expect(detail).toContain("character-history-confirm");
     expect(detail).not.toContain("character-history-confirm-menu");
-    expect(detail).toContain("character-look-editor:");
-    expect(detail).toContain("lookEditorSessionKey");
+    expect(detail).toContain("createCharacterAppearance");
+    expect(detail).toContain("LibraryAssetEditingPlaceholder");
     expect(detail).not.toMatch(/await\s+\w+\.json\(\)/);
   });
 });

@@ -1,0 +1,40 @@
+.personal-hub-shell {
+  --hub-content-max: 1280px;
+  display: flex;
+  min-height: 100%;
+  width: 100%;
+  position: relative;
+}
+
+.personal-hub-shell__main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  transition: margin 0.24s ease;
+}
+
+.personal-hub-shell--sidebar-collapsed .personal-hub-shell__main {
+  align-items: center;
+}
+
+.personal-hub-shell--sidebar-collapsed .personal-hub-shell__panel,
+.personal-hub-shell--sidebar-collapsed .personal-image-workspace,
+.personal-hub-shell--sidebar-collapsed .personal-video-workspace,
+.personal-hub-shell--sidebar-collapsed .personal-assets-page,
+.personal-hub-shell--sidebar-collapsed .workflow-shell {
+  width: min(100%, var(--hub-content-max));
+  margin-inline: auto;
+}
+
+.personal-hub-shell__panel {
+  display: flex;
+  min-height: 100%;
+  flex: 1;
+  flex-direction: column;
+}
+
+.personal-hub-shell__panel[hidden] {
+  display: none;
+}

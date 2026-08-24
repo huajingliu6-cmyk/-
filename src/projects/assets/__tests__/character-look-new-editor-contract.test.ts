@@ -83,13 +83,12 @@ describe("新增人物造型 editor contract", () => {
     expect(look).not.toMatch(
       /finally\s*\{[\s\S]*setGenerationProgress\(null\)/,
     );
-    expect(detail).toContain(
+    expect(detail).not.toContain(
       "key={`character-look-editor:${character.id}:session:${lookEditorSessionKey}`}",
     );
     expect(detail).not.toContain("activeMediaId ?? \"new\"");
-    expect(detail).toContain("wasCreatingNewLook");
-    expect(detail).toContain("造型已生成并写入造型库。");
-    expect(detail).toContain("lookEditorOpen ? undefined : syncPromptMedia");
+    expect(detail).toContain("createCharacterAppearance");
+    expect(detail).toContain("onCurrentMediaChange={syncPromptMedia}");
     expect(panel).toContain(
       "generateBusy && generationProgress ? (",
     );
@@ -119,12 +118,6 @@ describe("新增人物造型 editor contract", () => {
     expect(look).toContain("ownedJobIdsRef");
     expect(look).toContain("claimJobForSession");
     expect(look).toContain("!ownedJobIdsRef.current.has(job.id)");
-    expect(look).toContain(
-      "// Never paint that into a look editor that did not start this job id.",
-    );
-    expect(look).toContain(
-      "Do not claim refreshLatest() — it may still be a prior main-image job.",
-    );
     expect(look).toContain("canRetryOwned");
     expect(look).toContain(
       "const [currentLookMediaId, setCurrentLookMediaId] = useState<string | null>(\n    null,",

@@ -23,7 +23,7 @@ describe("post-login session handoff", () => {
     const nav = readSrc("src/shell/nav.ts");
     const login = readSrc("src/home/components/HeaderLoginPanel.tsx");
     const hero = readSrc("src/home/components/HeroCta.tsx");
-    expect(nav).toContain("APP_POST_LOGIN_PATH = APP_PROJECTS_PATH");
+    expect(nav).toContain("APP_POST_LOGIN_PATH = APP_SHELL_ROOT");
     expect(login).toContain("APP_POST_LOGIN_PATH");
     expect(login).not.toMatch(/:\s*"\/app";/);
     expect(hero).toContain("APP_POST_LOGIN_PATH");

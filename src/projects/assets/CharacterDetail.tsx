@@ -34,6 +34,7 @@ import {
 } from "@/projects/assets/character-media-state";
 import {
   ensureCharacterAppearances,
+  createCharacterAppearance,
   findAppearanceOwningMedia,
   isAppearanceMedia,
   listCharacterAppearances,
@@ -42,10 +43,7 @@ import {
   type ActiveVisualContext,
 } from "@/projects/assets/character-appearance-state";
 import { isCharacterMediaSd2Certified } from "@/projects/assets/character-media-video-ref";
-import {
-  LibraryCharacterLookEditor,
-  type CharacterLookSaveResult,
-} from "@/projects/assets/LibraryCharacterLookEditor";
+import { LibraryAssetEditingPlaceholder } from "@/projects/assets/library-asset-editing-slot";
 import { LibraryAssetPromptPanel } from "@/projects/assets/LibraryAssetPromptModal";
 import {
   DesignGenerationOverlay,
@@ -164,12 +162,6 @@ export function CharacterDetail({
     );
   };
   const [previewMediaId, setPreviewMediaId] = useState<string | null>(null);
-  const [lookEditorOpen, setLookEditorOpen] = useState(false);
-  const [lookEditorAppearanceId, setLookEditorAppearanceId] = useState<
-    string | null
-  >(null);
-  const [lookEditorSessionKey, setLookEditorSessionKey] = useState(0);
-  const [lookEditorPrefill, setLookEditorPrefill] = useState("");
   const [mainGenerationProgress, setMainGenerationProgress] =
     useState<AssetGenerationProgress | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -790,10 +782,24 @@ export function CharacterDetail({
     setActionError("");
     lastStatusToastRef.current = null;
     setMainGenerationProgress(null);
-    setLookEditorAppearanceId(null);
-    setLookEditorPrefill(buildLookPromptPrefill(character));
-    setLookEditorSessionKey((key) => key + 1);
-    setLookEditorOpen(true);
+    const { asset: next, appearance } = createCharacterAppearance({
+      asset: ensured,
+      promptOverride: "",
+      currentMediaId: null,
+    });
+    const nextAppearances = next.appearances ?? [];
+    const nextPage = Math.max(
+      0,
+      Math.ceil(nextAppearances.length / LOOKS_PER_PAGE) - 1,
+    );
+    setLookPage(nextPage);
+    applyCharacter(next, {
+      appearanceId: appearance.id,
+      bumpRevision: false,
+      previewId: null,
+    });
+    selectAppearanceForPrompt(appearance);
+    setLookLightbox(null);
   };
 
   const uploadToActiveLook = async (file: File) => {
@@ -1099,8 +1105,6 @@ export function CharacterDetail({
 
   const syncPromptMedia = (mediaId: string | null) => {
     if (!mediaId) return;
-    // Look editor owns look results — never write them into 主形象历史.
-    if (lookEditorOpen) return;
 
     const isLookMedia =
       isAppearanceMedia(ensured, mediaId) && mediaId !== primaryMediaId;
@@ -1163,37 +1167,6 @@ export function CharacterDetail({
         setActionError("");
       }
     })();
-  };
-
-  const saveLook = (result: CharacterLookSaveResult) => {
-    const wasCreatingNewLook = !lookEditorAppearanceId;
-    const resolvedAppearanceId =
-      result.appearanceId ??
-      lookEditorAppearanceId ??
-      findAppearanceOwningMedia(result.character, result.mediaId)?.id ??
-      null;
-    // Keep hero on primary; surface the new look in the looks grid + lightbox.
-    applyCharacter(result.character, {
-      previewId: resolveCharacterPrimaryMediaId(result.character),
-      appearanceId: null,
-      bumpRevision: false,
-    });
-    if (resolvedAppearanceId) {
-      setLookEditorAppearanceId(resolvedAppearanceId);
-      setPromptVoiceScope({
-        scope: "appearance",
-        appearanceId: resolvedAppearanceId,
-      });
-      setLookLightbox({
-        appearanceId: resolvedAppearanceId,
-        mediaId: result.mediaId,
-      });
-    }
-    if (wasCreatingNewLook && resolvedAppearanceId) {
-      setLookEditorOpen(false);
-      setLookEditorAppearanceId(null);
-      onPreviewStatus?.("造型已生成并写入造型库。");
-    }
   };
 
   const downloadActiveImage = () => {
@@ -1294,8 +1267,10 @@ export function CharacterDetail({
     ? `appearance:${activeAppearanceId}`
     : "primary";
   const appearancePromptScopeText = activeAppearance
-    ? activeAppearance.promptOverride?.trim() ||
-      buildLookPromptPrefill(character)
+    ? activeAppearance.currentMediaId?.trim()
+      ? activeAppearance.promptOverride?.trim() ||
+        buildLookPromptPrefill(character)
+      : activeAppearance.promptOverride?.trim() ?? ""
     : null;
   const designItem = findLibraryDesignItem(
     character as LibraryPromptAsset,
@@ -1409,6 +1384,12 @@ export function CharacterDetail({
                     className="character-media-stage__empty-actions"
                     data-testid="character-empty-hero"
                   >
+                    <p
+                      className="character-media-stage__empty-hint"
+                      data-testid="character-empty-hero-hint"
+                    >
+                      请在右侧填写主形象素材提示词后生成。
+                    </p>
                     <button
                       type="button"
                       className="amw-btn amw-btn-primary"
@@ -1418,23 +1399,10 @@ export function CharacterDetail({
                     >
                       {mainUploadBusy ? "处理中…" : "上传主形象"}
                     </button>
-                    <button
-                      type="button"
-                      className="amw-btn"
-                      data-testid="character-main-generate"
-                      onClick={() => {
-                        setPromptVoiceScope({ scope: "primary", appearanceId: null });
-                        onPreviewStatus?.(
-                          "请在右侧填写主形象素材提示词后生成。",
-                        );
-                      }}
-                    >
-                      生成主形象
-                    </button>
                   </div>
                 ) : null}
 
-                {mainGenerationProgress && !lookEditorOpen ? (
+                {mainGenerationProgress && !activeAppearanceId ? (
                   <DesignGenerationOverlay progress={mainGenerationProgress} />
                 ) : null}
 
@@ -1687,6 +1655,7 @@ export function CharacterDetail({
                         );
                       }
                       const mediaId = appearance.currentMediaId;
+                      const isEditing = !mediaId;
                       const certified = mediaId
                         ? isCharacterMediaSd2Certified(ensured, mediaId)
                         : false;
@@ -1697,10 +1666,11 @@ export function CharacterDetail({
                             activeAppearanceId === appearance.id
                               ? " is-active"
                               : ""
-                          }`}
+                          }${isEditing ? " character-look-card--editing" : ""}`}
                           data-testid={`character-look-card-${appearance.id}`}
                           data-kind="look"
                           data-certified={certified ? "1" : "0"}
+                          data-editing={isEditing ? "1" : "0"}
                         >
                           {canEdit ? (
                             <button
@@ -1719,7 +1689,9 @@ export function CharacterDetail({
                           ) : null}
                           <button
                             type="button"
-                            className="character-look-card__media"
+                            className={`character-look-card__media${
+                              isEditing ? " character-look-card__media--editing" : ""
+                            }`}
                             onClick={(event) => {
                               event.stopPropagation();
                               selectLookAppearance(appearance);
@@ -1729,7 +1701,9 @@ export function CharacterDetail({
                               openAppearanceLightbox(appearance);
                             }}
                           >
-                            {mediaId ? (
+                            {isEditing ? (
+                              <LibraryAssetEditingPlaceholder />
+                            ) : mediaId ? (
                               // eslint-disable-next-line @next/next/no-img-element
                               <img
                                 className="project-asset-media-drag-source"
@@ -1752,7 +1726,7 @@ export function CharacterDetail({
                               <span className="character-look-card__empty">空</span>
                             )}
                             <span className="character-look-card__badge">
-                              {certified ? "已认证" : "造型"}
+                              {isEditing ? "编辑中" : certified ? "已认证" : "造型"}
                             </span>
                           </button>
                           {canEdit ? (
@@ -1809,7 +1783,7 @@ export function CharacterDetail({
                         disabled={!canEdit || historyBusy}
                         aria-label="新增人物造型"
                         title="新增人物造型"
-                        onClick={openCreateLookEditor}
+                        onClick={() => runWithPromptGuard(openCreateLookEditor)}
                       >
                         <span className="character-look-card__media character-look-card__media--add">
                           <Plus size={22} aria-hidden />
@@ -1908,9 +1882,7 @@ export function CharacterDetail({
                   asset={character as LibraryPromptAsset}
                   designItem={designItem}
                   onItemChange={onDesignItemChange}
-                  onCurrentMediaChange={
-                    lookEditorOpen ? undefined : syncPromptMedia
-                  }
+                  onCurrentMediaChange={syncPromptMedia}
                   hideMediaToolbar
                   hidePromptSectionLabel
                   promptContextLabel={promptContextLabel}
@@ -1948,69 +1920,33 @@ export function CharacterDetail({
                     {voiceBadgeText}
                   </span>
                 </div>
-                <div className="character-voice-bar__controls">
-                  <div className="character-voice-bar__selector">
-                    <VoiceSelector
-                      label="音色选择"
-                      labelHidden
-                      value={displayedVoiceId}
-                      disabled={!canEdit}
-                      projectId={projectId}
-                      canEdit={canEdit}
-                      projectVoices={projectVoices}
-                      audios={audios}
-                      onAudiosChange={onAudiosChange}
-                      onPersistAudios={onPersistAudios}
-                      onVoiceHardDeleted={onVoiceHardDeleted}
-                      onStatus={onPreviewStatus}
-                      onChange={(voice) => {
-                        if (!voice) {
-                          setPendingVoice(null);
-                          return;
-                        }
-                        // Selecting the already-bound voice clears dirty state.
-                        if (voice.id === scopedVoice.voiceId) {
-                          setPendingVoice(null);
-                          return;
-                        }
-                        setPendingVoice(voice);
-                      }}
-                    />
-                  </div>
-                  <VoicePreviewButton
-                    projectId={projectId}
-                    voiceId={displayedVoiceId}
-                    audios={audios}
-                    disabled={!displayedVoiceId}
-                    onStatus={onPreviewStatus}
-                    toggle
-                  />
-                  {activeAppearanceId && !scopedVoice.inheritsDefault ? (
-                    <button
-                      type="button"
-                      className="amw-btn character-voice-bar__restore"
-                      data-testid="character-voice-restore-inherit"
-                      disabled={!canEdit}
-                      onClick={() => void clearVoiceOverride()}
-                    >
-                      恢复继承
-                    </button>
-                  ) : null}
+                <div className="character-voice-bar__controls character-voice-bar__actions">
                   <button
                     type="button"
-                    className={`amw-btn character-voice-bar__bind${
-                      voiceBoundCurrent ? " is-bound" : " amw-btn-primary"
-                    }`}
-                    data-testid="character-voice-bind"
-                    disabled={!canEdit || !displayedVoiceId || voiceBoundCurrent}
-                    title={
-                      voiceBoundCurrent
-                        ? "当前音色已绑定"
-                        : "将当前选择的音色写入角色并保存"
-                    }
-                    onClick={() => void bindScopedVoice()}
+                    className="amw-btn character-voice-bar__action"
+                    data-testid="character-voice-upload"
+                    disabled={!canEdit}
+                    title="上传音色（即将开放）"
                   >
-                    {voiceBoundCurrent ? "已绑定" : "确认绑定"}
+                    上传音色
+                  </button>
+                  <button
+                    type="button"
+                    className="amw-btn character-voice-bar__action"
+                    data-testid="character-voice-select"
+                    disabled={!canEdit}
+                    title="选择音色（即将开放）"
+                  >
+                    选择音色
+                  </button>
+                  <button
+                    type="button"
+                    className="amw-btn amw-btn-primary character-voice-bar__action character-voice-bar__action--generate"
+                    data-testid="character-voice-generate"
+                    disabled={!canEdit}
+                    title="生成音色（即将开放）"
+                  >
+                    生成音色
                   </button>
                 </div>
               </section>
@@ -2403,36 +2339,6 @@ export function CharacterDetail({
             </button>
           </div>
         </div>
-      ) : null}
-
-      {lookEditorOpen ? (
-        <LibraryCharacterLookEditor
-          key={`character-look-editor:${character.id}:session:${lookEditorSessionKey}`}
-          projectId={projectId}
-          context={context}
-          characterId={character.id}
-          characterName={character.name || "未命名角色"}
-          primaryMediaId={primaryMediaId}
-          existingMediaIds={
-            lookEditorAppearanceId
-              ? appearances.find((item) => item.id === lookEditorAppearanceId)
-                  ?.mediaHistory ?? []
-              : []
-          }
-          appearanceId={lookEditorAppearanceId}
-          initialLookName={
-            lookEditorAppearanceId
-              ? appearances.find((item) => item.id === lookEditorAppearanceId)
-                  ?.name ?? ""
-              : ""
-          }
-          initialPrompt={lookEditorPrefill}
-          onClose={() => {
-            setLookEditorOpen(false);
-            setLookEditorAppearanceId(null);
-          }}
-          onSaved={saveLook}
-        />
       ) : null}
 
       <UnsavedPromptDialog

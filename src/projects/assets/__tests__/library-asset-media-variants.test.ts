@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  addLibraryVariantDraft,
+  buildLibraryVariantGridItems,
   collectLibraryAssetVariantMediaIds,
   defaultLibraryVariantLabel,
+  removeLibraryVariantDraft,
   resolveLibraryAssetPrimaryMediaId,
   withoutLibraryVariantMedia,
 } from "@/projects/assets/library-asset-media-variants";
@@ -68,5 +71,25 @@ describe("library asset media variants", () => {
     );
     expect(next.approvedMediaIds).toEqual(["scene_1", "gen_b"]);
     expect(next.mediaVariantLabels).toEqual({ gen_b: "雨夜版" });
+  });
+
+  it("adds and removes inline variant drafts", () => {
+    const created = addLibraryVariantDraft(scene(), "scene");
+    expect(created.draft.label).toContain("场景版本");
+    expect(created.asset.variantDrafts).toHaveLength(1);
+    expect(
+      buildLibraryVariantGridItems(created.asset, ["gen_a"], "scene"),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ slotId: "gen_a", isEditing: false }),
+        expect.objectContaining({
+          slotId: created.draft.id,
+          mediaId: null,
+          isEditing: true,
+        }),
+      ]),
+    );
+    const removed = removeLibraryVariantDraft(created.asset, created.draft.id);
+    expect(removed.variantDrafts).toBeUndefined();
   });
 });
