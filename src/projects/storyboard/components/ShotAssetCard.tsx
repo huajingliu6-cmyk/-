@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AssetMediaSelectLightbox } from "@/projects/storyboard/components/AssetMediaSelectLightbox";
+import { MediaHistoryStrip } from "@/projects/ui/MediaHistoryStrip";
 import {
   resolvePickerThumbUrl,
   type PickerAsset,
@@ -134,38 +135,27 @@ export function ShotAssetCard({
         ) : null}
       </div>
       {hasHistory ? (
-        <div
-          className="sbw-asset-card__history"
-          data-testid={`shot-media-history-${asset.id}`}
-        >
-          {asset.mediaOptions!.map((opt) => {
-            const active =
-              opt.mediaId ===
-              (selectedMediaId ||
-                asset.mediaOptions!.find((m) => m.isPrimary)?.mediaId ||
-                asset.mediaOptions![0]?.mediaId);
-            return (
-              <button
-                key={opt.mediaId}
-                type="button"
-                className={`sbw-asset-card__history-thumb${
-                  active ? " is-active" : ""
-                }`}
-                disabled={disabled || !onSelectMedia}
-                title={
-                  opt.isPrimary ? `${opt.mediaId}（主图）` : opt.mediaId
-                }
-                onClick={() => {
-                  setBroken(false);
-                  onSelectMedia?.(opt.mediaId);
-                }}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={opt.thumbUrl} alt="" />
-              </button>
-            );
-          })}
-        </div>
+        <MediaHistoryStrip
+          items={asset.mediaOptions!.map((opt) => ({
+            id: opt.mediaId,
+            thumbUrl: opt.thumbUrl,
+            title: opt.isPrimary ? `${opt.mediaId}（主图）` : opt.mediaId,
+            isPrimary: opt.isPrimary,
+          }))}
+          activeId={
+            selectedMediaId ||
+            asset.mediaOptions!.find((m) => m.isPrimary)?.mediaId ||
+            asset.mediaOptions![0]?.mediaId ||
+            null
+          }
+          disabled={disabled || !onSelectMedia}
+          testId={`shot-media-history-${asset.id}`}
+          className="sbw-asset-card__history-strip"
+          onSelect={(mediaId) => {
+            setBroken(false);
+            onSelectMedia?.(mediaId);
+          }}
+        />
       ) : null}
       <AssetMediaSelectLightbox
         open={lightboxOpen}

@@ -89,6 +89,7 @@ export async function listProjectSummariesRemote(): Promise<
       status: "draft" as const,
       generationProgress: null,
       visualStyle: parseProjectVisualStyleId(project.visualStyle),
+      projectMode: project.projectMode === "full-stack" ? "full-stack" : "canvas",
     }));
 }
 

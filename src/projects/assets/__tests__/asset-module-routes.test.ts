@@ -130,6 +130,9 @@ describe("asset module management routes", () => {
     );
     expect(workspace).toContain("EpisodeAssetDesignWorkspace");
     expect(workspace).toContain("headless");
+    expect(workspace).toContain("EpisodeExtractionPromotePanel");
+    expect(workspace).toContain("onExtractionReviewReady");
+    expect(workspace).toContain("refreshEpisodeDesignView");
     expect(workspace).not.toContain("onExtractionRequestConsumed={handleExtractionRequestConsumed}");
     expect(workspace).not.toContain("`asset-extract-${projectId}-${safeRandomUUID()}`");
     expect(workspace).not.toContain("asset-library-extraction-panel");
@@ -138,13 +141,23 @@ describe("asset module management routes", () => {
     );
     expect(toolbar).toContain("GlassSelect");
     expect(toolbar).toContain("提取本集资产");
+    expect(toolbar).toContain("showExtractButton");
+    expect(toolbar).toContain('data-testid="ead-extract-episode"');
+    expect(toolbar).toContain('data-testid="ead-episode-select"');
+    expect(toolbar.indexOf("ead-episode-select")).toBeLessThan(
+      toolbar.indexOf("ead-extract-episode"),
+    );
     expect(toolbar).not.toContain("全剧本提取");
     expect(toolbar).not.toContain("一键提取资产");
     expect(toolbar).not.toContain("已入库");
-    expect(toolbar).toContain("查看单集资产");
-    expect(toolbar).toContain("trailing");
-    expect(toolbar).toContain("asset-extraction-toolbar__trailing");
-    expect(toolbar).not.toContain("当前资产");
+    expect(toolbar).not.toContain("asset-extract-episode-select");
+    expect(toolbar).not.toContain("extractEpisodeOptions");
+    expect(workspace).toContain("showEpisodeExtractButton");
+    expect(workspace).toContain("viewEpisodeId !== null");
+    expect(workspace).not.toContain("extractEpisodeOptions");
+    expect(workspace).not.toContain("onExtractEpisodeChange");
+    expect(workspace).not.toContain("episodePickerOpen");
+    expect(workspace).not.toContain("asset-episode-picker");
     expect(workspace).toContain("trailing={");
     expect(workspace).toContain("showApprovalUi={approvalEnabled}");
     expect(workspace).toContain("submitApprovalRequestId={submitApprovalRequestId}");
@@ -193,7 +206,7 @@ describe("asset module management routes", () => {
     expect(source).toContain("提取本集资产");
     expect(source).not.toContain("ead-extract-all");
     expect(source).not.toContain("一键提取");
-    expect(source).toContain("按集补提取");
+    expect(source).not.toContain('data-testid="ead-extract"');
     expect(source).toContain("ead-episode-select");
     expect(source).not.toContain("ead-ep-list");
     expect(source).toContain("SubmitApprovalModal");

@@ -25,7 +25,7 @@ describe("workbench vs canvas route wiring", () => {
     expect(page).toContain("requireVideoCanvasAccess");
     expect(page).toContain("WorkflowCanvasClient");
     expect(page).not.toContain("DEMO_PROJECT_ID");
-    expect(page).toContain("workflow-forbidden");
+    expect(page).toContain("WorkflowForbiddenPanel");
     expect(client).toContain("WorkflowEditor");
     expect(client).toContain("视频制作画布");
   });
@@ -38,13 +38,16 @@ describe("workbench vs canvas route wiring", () => {
       path.join("src", "app", "app", "projects", "[projectId]", "layout.tsx"),
     );
     const nav = readSrc("src/projects/workbench/ProjectStageNav.tsx");
+    const links = readSrc("src/projects/workbench/ProjectStageNavLinks.tsx");
     expect(source).toContain("项目工作台");
     expect(source).toContain("ProjectMembersPanel");
     expect(source).not.toContain("wb-stage");
     expect(layout).toContain('mode="management"');
-    expect(nav).toContain('label: "剧本创作"');
-    expect(nav).toContain('label: "项目资产"');
-    expect(nav).toContain('label: "分镜创作"');
+    expect(links).toContain('label: "剧本创作"');
+    expect(links).toContain('label: "项目资产"');
+    expect(links).toContain('label: "分镜创作"');
+    expect(nav).toContain("ProjectStageNavLinks");
+    expect(nav).toContain("useProjectFlowHeader");
     expect(nav).not.toContain('label: "视频制作"');
     expect(source).not.toContain("WorkflowEditor");
   });
@@ -58,7 +61,7 @@ describe("workbench vs canvas route wiring", () => {
   });
 
   it("projects list opens management project path, not canvas", () => {
-    const source = readSrc("src/app/app/projects/page.tsx");
+    const source = readSrc("src/projects/ui/ProjectFlowListPage.tsx");
     expect(source).toContain("projectWorkbenchPath");
     expect(source).not.toContain("/app/workspace?projectId");
     expect(source).not.toContain("/workflow?projectId");
@@ -73,14 +76,14 @@ describe("workbench vs canvas route wiring", () => {
     expect(source).not.toContain("amw-head__start");
   });
 
-  it("storyboard entry uses the shared route loading card", () => {
+  it("storyboard entry uses skeleton shell and nav loading timeout", () => {
     const workspace = readSrc("src/projects/storyboard/StoryboardCreationWorkspace.tsx");
-    const nav = readSrc("src/projects/workbench/ProjectStageNav.tsx");
-    expect(workspace).toContain("RouteLoadingOverlay");
-    expect(workspace).toContain('title="正在进入分镜创作"');
-    expect(workspace).not.toContain("加载分镜创作工作台");
+    const nav = readSrc("src/projects/workbench/ProjectStageNavLinks.tsx");
+    expect(workspace).toContain("storyboard-workspace-skeleton");
+    expect(workspace).not.toContain('title="正在进入分镜创作"');
     expect(nav).toContain('stage.id === "storyboard"');
-    expect(nav).toContain('pendingNavigation?.stageId === "storyboard"');
+    expect(nav).toContain("storyboard-nav-timeout-actions");
+    expect(nav).toContain("navTimedOut");
   });
 
   it("create wizard canvas shortcut opens project management path", () => {

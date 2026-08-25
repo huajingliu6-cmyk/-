@@ -75,7 +75,7 @@ export function ProjectPickerDialog({
     if (checkingId) return;
     setError(null);
     if (!checkVideoAccess) {
-      writeCurrentProjectId(project.projectId);
+      writeCurrentProjectId(project.projectId, "canvas");
       onSelect(project);
       return;
     }
@@ -92,7 +92,7 @@ export function ProjectPickerDialog({
         });
         throw new Error(data?.error || "无权访问该项目的视频画布");
       }
-      writeCurrentProjectId(project.projectId);
+      writeCurrentProjectId(project.projectId, "canvas");
       onSelect(project);
     } catch (selectError) {
       setError(

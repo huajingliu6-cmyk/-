@@ -5,7 +5,7 @@ import { detectExtractionConflicts } from "@/projects/assets/extraction/conflict
 import { extractedAssetsToDto } from "@/projects/assets/extraction/from-dto";
 import { materializeActiveVersionToBundle, mergedAssetsForVersion } from "@/projects/assets/extraction/materialize";
 import { persistEpisodeExtractToDesignRecord } from "@/projects/assets/extraction/persist-episode-design";
-import { mergeExtractedAssets } from "@/projects/assets/extraction/merge";
+import { mergeExtractedAssets, mergeSupplementAssets } from "@/projects/assets/extraction/merge";
 import {
   ASSET_DETAIL_BATCH_SIZE,
   ASSET_DETAIL_CONCURRENCY,
@@ -33,6 +33,11 @@ import {
   loadAssetExtractionStore,
   mutateAssetExtractionStore,
 } from "@/projects/assets/extraction/store";
+import {
+  claimAssetExtractionRunnerLease,
+  releaseAssetExtractionRunnerLease,
+  renewAssetExtractionRunnerLease,
+} from "@/projects/assets/extraction/runner-lease";
 import { resolveExtractionTextProvider } from "@/projects/assets/extraction/resolve-provider";
 import { loadScriptDraft } from "@/projects/script/script-draft-store";
 import {
@@ -45,8 +50,6 @@ import {
   type AssetRosterItem,
   type ExtractedAsset,
 } from "@/projects/assets/extraction/types";
-
-const running = new Set<string>();
 
 async function patchTask(
   projectId: string,
@@ -159,13 +162,20 @@ function upsertVersionAssets(input: {
   };
 }
 
+const running = new Set<string>();
+
+export type DispatchAssetExtractionRunnerOptions = {
+  runnerId?: string;
+};
+
 export function dispatchAssetExtractionRunner(
   taskId: string,
   projectId: string,
+  options?: DispatchAssetExtractionRunnerOptions,
 ): void {
   if (running.has(taskId)) return;
   running.add(taskId);
-  void runAssetExtractionTask(taskId, projectId).finally(() => {
+  void runAssetExtractionTask(taskId, projectId, options).finally(() => {
     running.delete(taskId);
   });
 }
@@ -173,10 +183,58 @@ export function dispatchAssetExtractionRunner(
 export async function runAssetExtractionTask(
   taskId: string,
   projectId: string,
+  options?: DispatchAssetExtractionRunnerOptions,
 ): Promise<void> {
   const initial = await loadAssetExtractionStore(projectId);
   const startTask = currentTask(initial, taskId);
   if (!startTask) return;
+  if (!isLiveExtractionStatus(startTask.status)) return;
+
+  const claimed = await claimAssetExtractionRunnerLease({
+    projectId,
+    taskId,
+    runnerId: options?.runnerId?.trim() || undefined,
+  });
+  if (!claimed.ok) {
+    console.info(
+      JSON.stringify({
+        event: "ASSET_EXTRACTION_RUNNER_SKIPPED",
+        projectId,
+        taskId,
+        reason: claimed.reason,
+      }),
+    );
+    return;
+  }
+  const runnerId = claimed.runnerId;
+
+  const heartbeat = async () => {
+    const ok = await renewAssetExtractionRunnerLease({ projectId, taskId, runnerId });
+    if (!ok) {
+      throw new Error("ASSET_EXTRACTION_RUNNER_LOST");
+    }
+  };
+
+  try {
+    await runAssetExtractionTaskBody({
+      taskId,
+      projectId,
+      startTask: currentTask(await loadAssetExtractionStore(projectId), taskId) ?? claimed.task,
+      heartbeat,
+    });
+  } finally {
+    await releaseAssetExtractionRunnerLease({ projectId, taskId, runnerId });
+  }
+}
+
+async function runAssetExtractionTaskBody(input: {
+  taskId: string;
+  projectId: string;
+  startTask: AssetExtractionTask;
+  heartbeat: () => Promise<void>;
+}): Promise<void> {
+  const { taskId, projectId, heartbeat } = input;
+  const startTask = input.startTask;
   if (!isLiveExtractionStatus(startTask.status)) return;
 
   try {
@@ -599,7 +657,9 @@ export async function runAssetExtractionTask(
         episodes: episodesForScope,
         batchSize: ASSET_DETAIL_BATCH_SIZE,
         concurrency: ASSET_DETAIL_CONCURRENCY,
+        onHeartbeat: heartbeat,
         onBatchStart: async (info) => {
+          await heartbeat();
           snapshot = await mutateAssetExtractionStore(projectId, (store) => {
             const current = currentTask(store, taskId);
             if (!current) return store;
@@ -649,7 +709,10 @@ export async function runAssetExtractionTask(
             };
           });
         },
-        onBatchSettled: (outcomes) => persistOutcomes(outcomes, stage),
+        onBatchSettled: async (outcomes) => {
+          await heartbeat();
+          await persistOutcomes(outcomes, stage);
+        },
       });
       task = currentTask(snapshot, taskId)!;
       detailItems = task.detailItems ?? detailItems;
@@ -759,17 +822,26 @@ export async function runAssetExtractionTask(
     snapshot = await mutateAssetExtractionStore(projectId, (store) => {
       const current = currentTask(store, taskId);
       if (!current) return store;
-      const completedAssets = (store.results.find(
+      const priorResult = store.results.find(
         (result) =>
           result.versionId === versionId &&
           result.scope === current.scope &&
           result.episodeId === current.episodeId,
-      )?.assets ?? []).filter((asset) =>
+      );
+      const selectedKeys = new Set(detailItems.map((item) => item.assetKey));
+      const thisRunCompleted = (priorResult?.assets ?? []).filter((asset) =>
         detailItems.some(
           (item) =>
             item.status === "completed" && item.assetKey === asset.identity,
         ),
       );
+      const preservedPrior = (priorResult?.assets ?? []).filter(
+        (asset) => !selectedKeys.has(asset.identity),
+      );
+      const completedAssets = mergeSupplementAssets({
+        activeAssets: preservedPrior,
+        selectedExtractedAssets: thisRunCompleted,
+      });
       const without = store.results.filter(
         (result) =>
           !(
@@ -866,12 +938,57 @@ export async function runAssetExtractionTask(
           generationId: startTask.id,
         });
       }
+      const { runEpisodeExtractionDownstream } = await import(
+        "@/projects/storyboard/services/episode-extraction-downstream"
+      );
+      void runEpisodeExtractionDownstream({
+        projectId,
+        episodeId: startTask.episodeId,
+        actorUserId: startTask.actorUserId,
+      }).catch((error) => {
+        console.error("[storyboard] downstream-pipeline-error", {
+          projectId,
+          episodeId: startTask.episodeId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    } else if (startTask.scope === "all") {
+      const { runProjectExtractionDownstream } = await import(
+        "@/projects/storyboard/services/episode-extraction-downstream"
+      );
+      void runProjectExtractionDownstream({
+        projectId,
+        actorUserId: startTask.actorUserId,
+      }).catch((error) => {
+        console.error("[storyboard] project-downstream-error", {
+          projectId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
     }
   } catch (error) {
-    await patchTask(projectId, taskId, {
-      status: "failed",
-      errorMessage:
-        error instanceof Error ? error.message : "资产提取失败",
+    const message =
+      error instanceof Error ? error.message : "资产提取失败";
+    if (message === "ASSET_EXTRACTION_RUNNER_LOST") {
+      return;
+    }
+    await mutateAssetExtractionStore(projectId, (store) => {
+      const task = currentTask(store, taskId);
+      if (!task || !isLiveExtractionStatus(task.status)) return store;
+      return {
+        ...store,
+        tasks: store.tasks.map((item) =>
+          item.id === taskId
+            ? {
+                ...item,
+                status: "failed" as const,
+                errorMessage: message,
+                revision: item.revision + 1,
+                updatedAt: new Date().toISOString(),
+              }
+            : item,
+        ),
+      };
     });
   }
 }

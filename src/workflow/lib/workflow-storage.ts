@@ -33,6 +33,7 @@ export type WorkflowProjectSummary = {
   generationProgress: number | null;
   /** Canonical project visual style id; null for legacy projects. */
   visualStyle?: import("@/projects/project-visual-style").ProjectVisualStyleId | null;
+  projectMode?: import("@/projects/types").ProjectMode;
 };
 
 /**

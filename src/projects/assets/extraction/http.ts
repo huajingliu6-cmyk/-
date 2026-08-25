@@ -15,6 +15,7 @@ export async function handleGetAssetExtraction(projectId: string) {
 export async function handleStartAssetExtraction(
   projectId: string,
   body: unknown,
+  actorUserId?: string | null,
 ) {
   const raw =
     typeof body === "object" && body !== null && !Array.isArray(body)
@@ -49,6 +50,7 @@ export async function handleStartAssetExtraction(
       scope,
       episodeId: scope === "episode" ? episodeId : null,
       modelKey,
+      actorUserId,
     });
     return NextResponse.json({
       task: toPublicExtractionTask(started.task),
@@ -64,6 +66,70 @@ export async function handleStartAssetExtraction(
     }
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+export async function handleConfirmEpisodeRosterSelection(
+  projectId: string,
+  taskId: string,
+  body: unknown,
+) {
+  const raw =
+    typeof body === "object" && body !== null && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : {};
+  const selectedAssetKeys = Array.isArray(raw.selectedAssetKeys)
+    ? raw.selectedAssetKeys
+        .filter((key): key is string => typeof key === "string")
+        .map((key) => key.trim())
+        .filter(Boolean)
+    : [];
+
+  const result = await confirmEpisodeRosterSelection({
+    projectId,
+    taskId: taskId.trim(),
+    selectedAssetKeys,
+  });
+  if (!result.ok) {
+    const status =
+      result.code === "TASK_NOT_FOUND"
+        ? 404
+        : result.code === "ASSET_EXTRACTION_IN_PROGRESS"
+          ? 409
+          : 400;
+    return NextResponse.json(
+      { error: result.message, code: result.code },
+      { status },
+    );
+  }
+
+  return NextResponse.json({
+    ok: true,
+    task: toPublicExtractionTask(result.task),
+  });
+}
+
+export async function handleCancelAssetExtraction(
+  projectId: string,
+  taskId: string,
+) {
+  const { cancelAssetExtractionTask } = await import(
+    "@/projects/assets/extraction/cancel-task"
+  );
+  const result = await cancelAssetExtractionTask({
+    projectId,
+    taskId: taskId.trim(),
+  });
+  if (!result.ok) {
+    const status = result.code === "TASK_NOT_FOUND" ? 404 : 409;
+    return NextResponse.json(
+      { error: result.message, code: result.code },
+      { status },
+    );
+  }
+  return NextResponse.json({
+    ok: true,
+    task: toPublicExtractionTask(result.task),
+  });
 }
 
 export async function handleApplyExtractionCandidate(

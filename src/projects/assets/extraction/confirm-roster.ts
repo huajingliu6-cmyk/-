@@ -1,9 +1,13 @@
 import { dispatchAssetExtractionRunner } from "@/projects/assets/extraction/run-task";
 import { detailItemsFromRoster } from "@/projects/assets/extraction/pipeline/details";
 import { computeExtractionProgress } from "@/projects/assets/extraction/pipeline/progress";
+import { annotateRosterForSelection } from "@/projects/assets/extraction/roster-selection";
+import { mergedActiveAssets } from "@/projects/assets/extraction/materialize";
+import { loadAssetBundleDraft } from "@/projects/assets/asset-bundle-store";
 import {
   getLatestTask,
   mutateAssetExtractionStore,
+  loadAssetExtractionStore,
 } from "@/projects/assets/extraction/store";
 import type {
   AssetExtractionProgress,
@@ -44,28 +48,83 @@ export async function confirmEpisodeRosterSelection(input: {
     };
   }
 
+  const store = await loadAssetExtractionStore(input.projectId);
+  const taskBefore = store.tasks.find((item) => item.id === input.taskId);
+  if (!taskBefore) {
+    return { ok: false, code: "TASK_NOT_FOUND", message: "提取任务不存在" };
+  }
+  if (taskBefore.status !== "awaiting_roster_selection") {
+    return {
+      ok: false,
+      code: "INVALID_TASK_STATUS",
+      message: "当前任务不在待选择状态",
+    };
+  }
+  if (taskBefore.scope !== "episode" || !taskBefore.episodeId) {
+    return {
+      ok: false,
+      code: "INVALID_TASK_SCOPE",
+      message: "仅单集提取支持资产名单选择",
+    };
+  }
+
+  const roster = taskBefore.roster ?? [];
+  const invalid = selected.filter(
+    (key) => !roster.some((item) => item.assetKey === key),
+  );
+  if (invalid.length > 0) {
+    return {
+      ok: false,
+      code: "INVALID_SELECTION",
+      message: "所选资产不在提取名单中",
+    };
+  }
+
+  const libraryBundle = await loadAssetBundleDraft(input.projectId);
+  const annotated = annotateRosterForSelection(roster, {
+    extractedAssets: mergedActiveAssets(store),
+    libraryBundle,
+  });
+  const existingSelected = selected.filter((key) => {
+    const row = annotated.find((item) => item.assetKey === key);
+    return row?.matchStatus === "existing";
+  });
+  if (existingSelected.length > 0) {
+    const names = existingSelected
+      .map(
+        (key) =>
+          annotated.find((item) => item.assetKey === key)?.name ?? key,
+      )
+      .join("、");
+    return {
+      ok: false,
+      code: "EXISTING_ASSET_SELECTED",
+      message: `以下资产已存在于资产库，不能重复设计：${names}`,
+    };
+  }
+
   let confirmedTask: AssetExtractionTask | undefined;
-  const saved = await mutateAssetExtractionStore(input.projectId, (store) => {
-    const task = store.tasks.find((item) => item.id === input.taskId) ?? null;
+  const saved = await mutateAssetExtractionStore(input.projectId, (nextStore) => {
+    const task = nextStore.tasks.find((item) => item.id === input.taskId) ?? null;
     if (!task) {
-      return store;
+      return nextStore;
     }
     if (task.status !== "awaiting_roster_selection") {
-      return store;
+      return nextStore;
     }
     if (task.scope !== "episode" || !task.episodeId) {
-      return store;
+      return nextStore;
     }
-    const roster = task.roster ?? [];
-    const filtered = filterRosterByKeys(roster, selected);
+    const currentRoster = task.roster ?? [];
+    const filtered = filterRosterByKeys(currentRoster, selected);
     if (filtered.length === 0) {
-      return store;
+      return nextStore;
     }
-    const invalid = selected.filter(
-      (key) => !roster.some((item) => item.assetKey === key),
+    const stillInvalid = selected.filter(
+      (key) => !currentRoster.some((item) => item.assetKey === key),
     );
-    if (invalid.length > 0) {
-      return store;
+    if (stillInvalid.length > 0) {
+      return nextStore;
     }
 
     const detailItems = detailItemsFromRoster(filtered, task.detailItems);
@@ -82,7 +141,7 @@ export async function confirmEpisodeRosterSelection(input: {
       roster: {
         scannedChunks: rosterChunksTotal,
         totalChunks: rosterChunksTotal,
-        discoveredCount: roster.length,
+        discoveredCount: currentRoster.length,
       },
       details: {
         totalAssets: filtered.length,
@@ -109,8 +168,8 @@ export async function confirmEpisodeRosterSelection(input: {
     };
     confirmedTask = updated;
     return {
-      ...store,
-      tasks: store.tasks.map((item) =>
+      ...nextStore,
+      tasks: nextStore.tasks.map((item) =>
         item.id === task.id ? updated : item,
       ),
     };
@@ -127,15 +186,6 @@ export async function confirmEpisodeRosterSelection(input: {
         ok: false,
         code: "INVALID_TASK_STATUS",
         message: "当前任务不在待选择状态",
-      };
-    }
-    const roster = task.roster ?? [];
-    const filtered = filterRosterByKeys(roster, selected);
-    if (filtered.length === 0) {
-      return {
-        ok: false,
-        code: "INVALID_SELECTION",
-        message: "所选资产不在提取名单中",
       };
     }
     if (latest && isLiveExtractionStatus(latest.status) && latest.id !== task.id) {

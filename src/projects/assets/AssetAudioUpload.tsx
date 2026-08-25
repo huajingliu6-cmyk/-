@@ -8,6 +8,10 @@ import {
   uploadProjectAssetAudio,
   validateProjectAssetAudioFileClient,
 } from "@/projects/assets/upload-asset-audio";
+import {
+  readVoiceAudioDurationSeconds,
+  validateVoiceAudioDurationSeconds,
+} from "@/projects/assets/voice-audio-validation";
 
 export type AssetAudioValue = {
   fileName: string | null;
@@ -31,6 +35,8 @@ type Props = {
   onRevisionChange?: (next: number) => void;
   /** Optional duration callback after client metadata read (UI only). */
   onDurationRead?: (durationLabel: string) => void;
+  /** Voice uploads enforce 4-6s and 10MB limits. */
+  variant?: "default" | "voice";
   showPlayer?: boolean;
 };
 
@@ -77,6 +83,7 @@ export function AssetAudioUpload({
   onRevisionChange,
   onDurationRead,
   showPlayer = true,
+  variant = "default",
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
@@ -101,7 +108,9 @@ export function AssetAudioUpload({
     setError("");
     if (!file || disabled) return;
 
-    const validationError = validateProjectAssetAudioFileClient(file);
+    const validationError = validateProjectAssetAudioFileClient(file, {
+      variant,
+    });
     if (validationError) {
       setError(validationError);
       return;
@@ -115,13 +124,35 @@ export function AssetAudioUpload({
     const blobUrl = URL.createObjectURL(file);
     const gen = ++uploadGenRef.current;
 
-    void readAudioDuration(blobUrl).then((label) => {
-      if (gen === uploadGenRef.current && label) {
+    void (async () => {
+      const label = await readAudioDuration(blobUrl);
+      if (gen !== uploadGenRef.current) return;
+
+      if (variant === "voice") {
+        const seconds = await readVoiceAudioDurationSeconds(file);
+        const durationError = validateVoiceAudioDurationSeconds(seconds);
+        if (durationError) {
+          URL.revokeObjectURL(blobUrl);
+          setError(durationError);
+          return;
+        }
+      }
+
+      if (label) {
         onDurationRead?.(label);
       }
-    });
 
-    // Create-dialog mode: keep File until parent persists the asset, then uploads.
+      proceedWithFile(file, blobUrl, gen, previousDurable, previousBlob);
+    })();
+  };
+
+  const proceedWithFile = (
+    file: File,
+    blobUrl: string,
+    gen: number,
+    previousDurable: { fileName: string | null; mimeType: string | null },
+    previousBlob: string | null,
+  ) => {
     if (!projectId || !assetId) {
       revokeIfBlob(previousBlob);
       onChange({

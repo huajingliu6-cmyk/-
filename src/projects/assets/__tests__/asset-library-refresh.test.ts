@@ -34,10 +34,13 @@ describe("asset library refresh after extraction", () => {
   const workspace = readSrc("src/projects/assets/AssetManagementWorkspace.tsx");
   const design = readSrc("src/projects/assets/EpisodeAssetDesignWorkspace.tsx");
 
-  it("awaits refreshAssetDraft from onExtractionComplete", () => {
-    expect(workspace).toContain("onExtractionComplete={async () => {");
+  it("refreshes asset draft when extraction completes", () => {
+    expect(workspace).toContain("const handleExtractionComplete = useCallback(async () => {");
     expect(workspace).toContain("await refreshAssetDraft()");
-    expect(design).toContain("await onExtractionComplete?.()");
+    expect(workspace).toContain("onExtractionComplete={handleExtractionComplete}");
+    expect(workspace).toContain("else if (wasLive) {");
+    expect(workspace).toContain("void handleExtractionComplete()");
+    expect(design).toContain("void onExtractionComplete?.()");
   });
 
   it("guards draft fetch generation against stale overwrites", () => {
@@ -67,11 +70,16 @@ describe("asset library refresh after extraction", () => {
     );
   });
 
-  it("shows approval pending note instead of pretending formal library updated", () => {
+  it("refreshes empty library when active extraction version already exists", () => {
+    expect(workspace).toContain("if (!hydrated || !hasActiveVersion) return");
     expect(workspace).toContain(
-      "资产已提取，等待审批后进入正式资产库。",
+      "characters.length + scenes.length + props.length > 0",
     );
+  });
+
+  it("surfaces workspace approval controls without faking library refresh", () => {
     expect(workspace).toContain("approvalEnabled");
+    expect(workspace).toContain("showApprovalUi={approvalEnabled}");
   });
 
   it("clears mock seed data when initial assets-draft GET fails", () => {

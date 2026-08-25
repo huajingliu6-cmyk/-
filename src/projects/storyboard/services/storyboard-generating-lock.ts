@@ -1,5 +1,5 @@
 /** Whole-episode prompt generation can take several minutes for large shot lists. */
-export const STORYBOARD_GENERATING_STALE_MS = 5 * 60 * 1000;
+export const STORYBOARD_GENERATING_STALE_MS = 10 * 60 * 1000;
 
 /**
  * Returns true when another generate request should be rejected with 409.

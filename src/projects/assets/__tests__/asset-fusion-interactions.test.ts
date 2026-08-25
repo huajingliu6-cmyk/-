@@ -33,7 +33,7 @@ describe("unified asset management interactions", () => {
   const css = readSrc("src/projects/assets/asset-workspace.css");
 
   it("shows episode assets from a direct toolbar dropdown", () => {
-    expect(toolbar).toContain("查看单集资产");
+    expect(toolbar).toContain("查看剧集资产");
     expect(toolbar).toContain("asset-view-episode-assets");
     expect(toolbar).toContain("asset-episode-assets-action-select");
     expect(toolbar).toContain("viewEpisodeOptions");
@@ -42,7 +42,26 @@ describe("unified asset management interactions", () => {
     expect(toolbar).not.toContain("已提取");
     expect(workspace).toContain("ALL_EPISODES_VALUE");
     expect(workspace).toContain("viewEpisodeAssets");
+    expect(workspace).toContain("asset-designs/episodes");
     expect(workspace).not.toContain('setEpisodePickerMode("view")');
+  });
+
+  it("shows extract button beside episode selector only in single-episode view", () => {
+    expect(toolbar).toContain("showExtractButton");
+    expect(toolbar).toContain('data-testid="ead-extract-episode"');
+    expect(toolbar).toContain('data-testid="ead-episode-select"');
+    expect(toolbar).toContain("asset-episode-assets-select");
+    expect(toolbar.indexOf("ead-episode-select")).toBeLessThan(
+      toolbar.indexOf("ead-extract-episode"),
+    );
+    expect(toolbar).not.toContain("asset-extract-episode-select");
+    expect(toolbar).not.toContain("extractEpisodeOptions");
+    expect(workspace).toContain("showEpisodeExtractButton");
+    expect(workspace).toContain("viewEpisodeId !== null");
+    expect(workspace).not.toContain("extractEpisodeOptions");
+    expect(workspace).not.toContain("onExtractEpisodeChange");
+    expect(workspace).not.toContain("episodePickerOpen");
+    expect(workspace).not.toContain("asset-episode-picker");
   });
 
   it("locks the unified page while extraction is busy", () => {

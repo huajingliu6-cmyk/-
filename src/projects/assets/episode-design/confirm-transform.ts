@@ -414,6 +414,8 @@ export function transformEpisodeAssetDesignConfirmation(input: {
   fingerprint: string;
   /** Personal projects may confirm one card without closing the whole record. */
   itemId?: string;
+  /** Batch promote selected design items into the library. */
+  itemIds?: string[];
   store: ProjectEpisodeAssetDesignStore;
   bundle: ProjectAssetBundle;
   now?: string;
@@ -425,7 +427,18 @@ export function transformEpisodeAssetDesignConfirmation(input: {
   if (!record) {
     return { writeRequired: false, result: { ok: false, code: "EPISODE_DESIGN_NOT_FOUND", message: "该集资产设计记录不存在" } };
   }
-  if (!input.itemId && record.status === "confirmed" && record.confirmedRevision === input.expectedRevision && record.contentFingerprint === input.fingerprint) {
+  const itemIdFilter =
+    input.itemIds && input.itemIds.length > 0
+      ? new Set(input.itemIds)
+      : input.itemId
+        ? new Set([input.itemId])
+        : null;
+  if (
+    !itemIdFilter &&
+    record.status === "confirmed" &&
+    record.confirmedRevision === input.expectedRevision &&
+    record.contentFingerprint === input.fingerprint
+  ) {
     return {
       writeRequired: false,
       result: {
@@ -442,10 +455,26 @@ export function transformEpisodeAssetDesignConfirmation(input: {
   if (record.contentFingerprint && record.contentFingerprint !== input.fingerprint) {
     return { writeRequired: false, result: { ok: false, code: "FINGERPRINT_STALE", message: "剧集正文已变更，请重新生成资产设计" } };
   }
-  const targetItem = input.itemId
-    ? record.items.find((item) => item.id === input.itemId)
-    : null;
-  if (input.itemId && !targetItem) {
+  if (itemIdFilter) {
+    const recordItemIds = new Set(record.items.map((item) => item.id));
+    for (const id of itemIdFilter) {
+      if (!recordItemIds.has(id)) {
+        return {
+          writeRequired: false,
+          result: {
+            ok: false,
+            code: "ASSET_DESIGN_ITEM_NOT_FOUND",
+            message: "资产设计项不存在",
+          },
+        };
+      }
+    }
+  }
+  const targetItem =
+    input.itemId && !input.itemIds?.length
+      ? record.items.find((item) => item.id === input.itemId)
+      : null;
+  if (input.itemId && !input.itemIds?.length && !targetItem) {
     return {
       writeRequired: false,
       result: {
@@ -469,8 +498,31 @@ export function transformEpisodeAssetDesignConfirmation(input: {
       },
     };
   }
+  if (itemIdFilter && itemIdFilter.size > 0) {
+    const requested = record.items.filter((item) => itemIdFilter.has(item.id));
+    const allAlreadyInLibrary = requested.every(
+      (item) =>
+        item.libraryAssetId &&
+        findAssetById(input.bundle, item.assetType, item.libraryAssetId),
+    );
+    if (allAlreadyInLibrary) {
+      return {
+        writeRequired: false,
+        result: {
+          ok: true,
+          counts: { created: 0, linked: 0, ignored: 0 },
+          ...EMPTY_OK_LISTS,
+          record,
+        },
+      };
+    }
+  }
 
-  const itemsToConfirm = targetItem ? [targetItem] : record.items;
+  const itemsToConfirm = itemIdFilter
+    ? record.items.filter((item) => itemIdFilter.has(item.id))
+    : targetItem
+      ? [targetItem]
+      : record.items;
   for (const item of itemsToConfirm) {
     if (item.resolution === "pending") {
       return { writeRequired: false, result: { ok: false, code: "RESOLUTION_PENDING", message: `资产「${item.name}」尚未选择处理方式` } };
@@ -478,7 +530,7 @@ export function transformEpisodeAssetDesignConfirmation(input: {
   }
 
   // Single-item confirm: hard-fail library gates before writing.
-  if (input.itemId && targetItem) {
+  if (input.itemId && !input.itemIds?.length && targetItem) {
     if (targetItem.resolution === "create_new") {
       const gate = assertDesignItemLibraryGate(targetItem);
       if (gate) {
@@ -510,6 +562,10 @@ export function transformEpisodeAssetDesignConfirmation(input: {
   const createId = input.createId ?? randomUUID;
 
   for (const item of record.items) {
+    if (itemIdFilter && !itemIdFilter.has(item.id)) {
+      nextItems.push(item);
+      continue;
+    }
     if (targetItem && item.id !== targetItem.id) {
       nextItems.push(item);
       continue;
@@ -518,6 +574,13 @@ export function transformEpisodeAssetDesignConfirmation(input: {
       item.libraryAssetId &&
       findAssetById(bundle, item.assetType, item.libraryAssetId)
     ) {
+      if (itemIdFilter) {
+        skipped.push({
+          itemId: item.id,
+          code: "ALREADY_IN_LIBRARY",
+          message: "已入库",
+        });
+      }
       nextItems.push(item);
       continue;
     }
@@ -529,7 +592,7 @@ export function transformEpisodeAssetDesignConfirmation(input: {
     if (item.resolution === "link_existing") {
       const gate = assertLinkExistingLibraryGate(bundle, item);
       if (gate) {
-        if (input.itemId) {
+        if (input.itemId && !input.itemIds?.length) {
           return {
             writeRequired: false,
             result: { ok: false, code: gate.code, message: gate.message },
@@ -590,6 +653,7 @@ export function transformEpisodeAssetDesignConfirmation(input: {
 
   const now = input.now ?? new Date().toISOString();
   const allNonIgnoreResolved =
+    !itemIdFilter &&
     !targetItem &&
     nextItems.every((item) => itemResolvedInLibrary(bundle, item)) &&
     skipped.length === 0 &&
@@ -598,7 +662,7 @@ export function transformEpisodeAssetDesignConfirmation(input: {
   const nextRecord: EpisodeAssetDesignRecord = {
     ...record,
     items: nextItems,
-    ...(targetItem
+    ...(targetItem || itemIdFilter
       ? {}
       : allNonIgnoreResolved
         ? {

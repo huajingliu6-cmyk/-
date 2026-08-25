@@ -24,8 +24,10 @@ describe("asset extraction dedupe contracts (UI wiring)", () => {
 
   it("clears extractionRequest after headless consumption", () => {
     expect(design).toContain("onExtractionRequestConsumed?: (requestId: number) => void");
-    expect(parent).not.toContain("handleExtractionRequestConsumed");
+    expect(parent).toContain("onExtractionRequestConsumed");
+    expect(parent).toContain("setExtractionRequest(null)");
     expect(parent).toContain("requestEpisodeExtraction");
+    expect(parent).toContain("extractionRequest={extractionRequest}");
   });
 
   it("keeps headless EpisodeAssetDesignWorkspace outside the remount key", () => {
@@ -50,10 +52,11 @@ describe("asset extraction dedupe contracts (UI wiring)", () => {
     expect(surfaceBlock).not.toContain("EpisodeAssetDesignWorkspace");
   });
 
-  it("binds extract requests to the versioned extraction API", () => {
-    expect(parent).toContain("asset-extraction/tasks");
-    expect(parent).toContain('scope: "episode"');
+  it("routes episode extract through headless EpisodeAssetDesignWorkspace", () => {
+    expect(parent).toContain("extractionRequest={extractionRequest}");
+    expect(parent).toContain('mode: "selected-episode"');
     expect(design).toContain("asset-extraction/tasks");
+    expect(design).toContain('scope: "episode"');
     expect(design).not.toContain("handleExtractAll");
   });
 
@@ -70,7 +73,7 @@ describe("asset extraction dedupe contracts (UI wiring)", () => {
   });
 
   it("guards parent episode extract while already busy", () => {
-    expect(parent).toContain("if (extractionBusy) return");
+    expect(parent).toContain("if (extractionBusy || !episodeId) return");
   });
 });
 

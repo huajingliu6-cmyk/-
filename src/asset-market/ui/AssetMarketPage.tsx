@@ -103,7 +103,7 @@ export function AssetMarketPage() {
   const requestIdRef = useRef(0);
 
   useEffect(() => {
-    const stored = readCurrentProjectId();
+    const stored = readCurrentProjectId("full-stack");
     if (stored) setImportProjectId(stored);
   }, []);
 
@@ -349,7 +349,7 @@ export function AssetMarketPage() {
         );
         const data = await parseResponseJson<{ error?: string }>(response);
         if (!response.ok) throw new Error(data.error || "添加失败");
-        writeCurrentProjectId(importProjectId.trim());
+        writeCurrentProjectId(importProjectId.trim(), "full-stack");
         pushToast("已添加到项目");
       } catch (error) {
         pushToast(error instanceof Error ? error.message : "添加失败");
@@ -638,7 +638,7 @@ export function AssetMarketPage() {
                     onChange={(event) => {
                       const next = event.target.value;
                       setImportProjectId(next);
-                      if (next.trim()) writeCurrentProjectId(next.trim());
+                      if (next.trim()) writeCurrentProjectId(next.trim(), "full-stack");
                     }}
                   >
                     <option value="">选择项目</option>

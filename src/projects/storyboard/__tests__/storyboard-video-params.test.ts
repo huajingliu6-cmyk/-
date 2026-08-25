@@ -1,18 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
+  clampStoryboardClipDuration,
   clampStoryboardVideoDuration,
   estimateCreditsForStoryboardVideoOutput,
+  isValidStoryboardClipDuration,
   parseDurationSecondsFromVideoPrompt,
+  parseStoryboardClipDurationSeconds,
   parseStoryboardVideoAspectRatio,
   parseStoryboardVideoDurationSeconds,
   parseStoryboardVideoResolution,
   resolveStoryboardVideoOutputParams,
+  STORYBOARD_SHOT_DURATION_MAX,
+  STORYBOARD_SHOT_DURATION_MIN,
   STORYBOARD_VIDEO_DURATION_MAX,
   STORYBOARD_VIDEO_DURATION_MIN,
 } from "@/projects/storyboard/storyboard-video-params";
 
 describe("storyboard video output params", () => {
-  it("视频出参时长仍为 5–15 秒", () => {
+  it("通用视频出参时长仍为 5–15 秒", () => {
     expect(STORYBOARD_VIDEO_DURATION_MIN).toBe(5);
     expect(STORYBOARD_VIDEO_DURATION_MAX).toBe(15);
     expect(parseStoryboardVideoResolution("720p")).toBe("720P");
@@ -25,43 +30,60 @@ describe("storyboard video output params", () => {
     expect(clampStoryboardVideoDuration(12)).toBe(12);
   });
 
-  it("从 videoPrompt 头解析大模型给出的总时长（不向上拉长，仅封顶 15）", () => {
+  it("分镜 Clip 时长仅允许 13、14、15 秒", () => {
+    expect(isValidStoryboardClipDuration(13)).toBe(true);
+    expect(isValidStoryboardClipDuration(14)).toBe(true);
+    expect(isValidStoryboardClipDuration(15)).toBe(true);
+    expect(isValidStoryboardClipDuration(12)).toBe(false);
+    expect(isValidStoryboardClipDuration(16)).toBe(false);
+    expect(parseStoryboardClipDurationSeconds(14)).toBe(14);
+    expect(parseStoryboardClipDurationSeconds(12)).toBeNull();
+    expect(clampStoryboardClipDuration(12)).toBe(13);
+    expect(clampStoryboardClipDuration(20)).toBe(15);
+  });
+
+  it("从 videoPrompt 头解析 Clip / 分镜总时长（仅 13–15 合法）", () => {
     expect(
       parseDurationSecondsFromVideoPrompt(
-        "[分镜01｜总时长：12秒｜画幅：9:16]\n场景基调：雨夜。",
+        "【Clip 001｜场景：客厅｜镜头：001｜总时长：14秒｜节奏：紧张】\n场景基调：雨夜。",
       ),
-    ).toBe(12);
+    ).toBe(14);
     expect(
       parseDurationSecondsFromVideoPrompt(
-        "【交接卡】\n\n[分镜03｜总时长：9秒｜画幅：9:16]\n0.0—9.0秒｜近景",
+        "[分镜01｜总时长：14秒｜画幅：9:16]\n0—14秒｜中景。",
       ),
-    ).toBe(9);
+    ).toBe(14);
     expect(parseDurationSecondsFromVideoPrompt("没有时长头")).toBeNull();
     expect(
       parseDurationSecondsFromVideoPrompt(
-        "[分镜01｜总时长：3秒｜画幅：9:16]",
+        "[分镜01｜总时长：12秒｜画幅：9:16]",
       ),
-    ).toBe(3);
+    ).toBeNull();
     expect(
       parseDurationSecondsFromVideoPrompt(
-        "[分镜01｜总时长：20秒｜画幅：9:16]",
+        "[分镜01｜总时长：9秒｜画幅：9:16]",
       ),
-    ).toBe(15);
+    ).toBeNull();
+    expect(
+      parseDurationSecondsFromVideoPrompt(
+        "[分镜01｜总时长：16秒｜画幅：9:16]",
+      ),
+    ).toBeNull();
   });
 
-  it("从 body 解析并带默认值", () => {
+  it("从 body 解析分镜出站参数并带 Clip 默认值", () => {
     const parsed = resolveStoryboardVideoOutputParams(
       {
         resolution: "1080P",
         aspectRatio: "9:16",
-        durationSeconds: 12,
+        durationSeconds: 14,
       },
       3,
     );
     expect(parsed).toEqual({
       resolution: "1080P",
       aspectRatio: "9:16",
-      durationSeconds: 12,
+      durationSeconds: 14,
       modelChoice: "seedance-2.0",
       stylePreset: "",
     });
@@ -69,38 +91,44 @@ describe("storyboard video output params", () => {
     const fallback = resolveStoryboardVideoOutputParams({}, 5);
     expect(fallback.resolution).toBe("720P");
     expect(fallback.aspectRatio).toBe("9:16");
-    expect(fallback.durationSeconds).toBe(5);
+    expect(fallback.durationSeconds).toBe(STORYBOARD_SHOT_DURATION_MIN);
     expect(fallback.modelChoice).toBe("seedance-2.0");
-    expect(fallback.stylePreset).toBe("");
+
+    const invalidBody = resolveStoryboardVideoOutputParams(
+      { durationSeconds: 9 },
+      14,
+    );
+    expect(invalidBody.durationSeconds).toBe(14);
 
     const withChoice = resolveStoryboardVideoOutputParams(
       {
         videoModelChoice: "seedance-2.0-fast",
         stylePreset: "cinematic",
       },
-      8,
+      15,
     );
     expect(withChoice.modelChoice).toBe("seedance-2.0-fast");
     expect(withChoice.stylePreset).toBe("cinematic");
+    expect(withChoice.durationSeconds).toBe(15);
   });
 
   it("estimates credits from output params", () => {
     expect(
       estimateCreditsForStoryboardVideoOutput({
         resolution: "480P",
-        durationSeconds: 6,
+        durationSeconds: 13,
       }),
-    ).toBe(30);
+    ).toBe(65);
     expect(
       estimateCreditsForStoryboardVideoOutput({
         resolution: "720P",
-        durationSeconds: 6,
+        durationSeconds: 14,
       }),
-    ).toBe(60);
+    ).toBe(140);
     expect(
       estimateCreditsForStoryboardVideoOutput({
         resolution: "1080P",
-        durationSeconds: 6,
+        durationSeconds: 15,
       }),
     ).toBeNull();
   });

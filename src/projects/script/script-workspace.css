@@ -1397,6 +1397,85 @@
     margin-right: 0;
   }
 }
+.scs-grid.is-no-source {
+  grid-template-columns: minmax(220px, 0.32fr) minmax(0, 1fr);
+}
+
+.scs-upload-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 18px 14px;
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.scs-upload-dropzone.is-wizard {
+  min-height: 132px;
+  margin-top: 0;
+  padding: 22px 16px;
+  border-radius: 16px;
+}
+
+.scs-upload-dropzone.is-dragover,
+.scs-upload-dropzone:hover {
+  border-color: rgba(167, 139, 250, 0.72);
+  background: rgba(124, 58, 237, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.18);
+}
+
+.scs-upload-dropzone.has-file {
+  border-style: solid;
+  border-color: rgba(124, 58, 237, 0.45);
+}
+
+.scs-upload-dropzone__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.scs-upload-dropzone__title {
+  font-size: 14px;
+  font-weight: 650;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.scs-upload-dropzone__hint {
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.52);
+}
+
+.scs-panel--process .scs-split-status,
+.scs-panel--process .scs-split-actions,
+.scs-panel--process .scs-ui-note,
+.scs-panel--process .scs-error {
+  flex: 0 0 auto;
+}
+
+.scs-panel--process .scs-process-panel,
+.scs-panel--process > .scs-episode-list,
+.scs-panel--process > .scs-proposed-list {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .scs-upload-limit-note {
   margin-top: 12px;
   padding: 9px 11px;
@@ -1408,6 +1487,7 @@
   backdrop-filter: blur(14px) saturate(135%);
   -webkit-backdrop-filter: blur(14px) saturate(135%);
 }
+
 /* The source column owns its scroll area so expanded novel controls stay visible. */
 .scs-panel--source {
   overflow-x: hidden;
@@ -1525,6 +1605,43 @@
   cursor: not-allowed;
   opacity: 0.35;
 }
+
+.scs-file-remove--icon {
+  font-size: 0;
+}
+
+.scs-file-row--wizard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 12px 14px;
+}
+
+.scs-file-row__main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+}
+
+.scs-file-row--wizard .scs-file-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scs-file-row__size {
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
 /* Keep every script-card scrollbar on the straight side of the card. */
 .scs-panel--source::-webkit-scrollbar-track:vertical,
 .scs-episode-list::-webkit-scrollbar-track:vertical,
@@ -1543,34 +1660,74 @@
   height: 0;
 }
 
-.script-extract-prompt {
+.scs-confirm-extract-dialog {
   position: fixed;
   inset: 0;
-  z-index: 80;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(7, 8, 17, 0.55);
+  z-index: 94;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
 }
 
-.script-extract-prompt__card {
-  width: min(420px, calc(100vw - 32px));
-  border-radius: 18px;
+.scs-confirm-extract-dialog__card {
+  width: min(440px, 100%);
+  padding: 20px;
+  border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(16, 18, 32, 0.98);
-  padding: 22px;
-  color: #fff;
+  background: rgba(12, 14, 24, 0.96);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
 }
 
-.script-extract-prompt__card p {
-  margin: 8px 0 16px;
-  color: rgba(255, 255, 255, 0.62);
-  font-size: 13px;
+.scs-confirm-extract-dialog__card h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
 }
 
-.script-extract-prompt__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+.scs-confirm-extract-dialog__card p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.scs-confirm-extract-dialog__field {
   margin-top: 16px;
+}
+
+.scs-confirm-extract-dialog__label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.scs-confirm-extract-dialog__hint {
+  margin: 0;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.scs-confirm-extract-dialog__error {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #fb7185;
+}
+
+.scs-confirm-extract-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.scs-confirm-extract-model-select.gs--toolbar {
+  width: 100%;
+}
+
+.scs-confirm-extract-model-select.gs--toolbar .gs__trigger {
+  width: 100%;
 }

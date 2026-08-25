@@ -8,6 +8,8 @@ import {
   type ProjectVisualStyleId,
 } from "@/projects/project-visual-style";
 
+import type { ProjectFlowKind } from "@/projects/project-flow";
+
 export type CreateProjectFieldErrors = {
   creationSource?: string;
   name?: string;
@@ -20,6 +22,15 @@ export type CreateProjectFieldErrors = {
 /** 与后端一致的名称约束（避免前后端冲突） */
 export const PROJECT_NAME_MAX_LENGTH = 80;
 export const PROJECT_HIGHLIGHTS_MAX_LENGTH = 4000;
+
+const FLOW_KIND_MODES: Record<ProjectFlowKind, ProjectMode> = {
+  "full-stack": "full-stack",
+  canvas: "canvas",
+};
+
+export function projectModeForFlowKind(flowKind: ProjectFlowKind): ProjectMode {
+  return FLOW_KIND_MODES[flowKind];
+}
 
 export function isCreateProjectReady(input: {
   creationSource: ProjectCreationSource | null;
@@ -124,6 +135,28 @@ export function parseCreateProjectBody(
       error: "请选择项目模式",
       fieldErrors: { projectMode: "请选择项目模式" },
     };
+  }
+
+  const listFlowKind = raw.listFlowKind;
+  if (
+    listFlowKind === "full-stack" ||
+    listFlowKind === "canvas"
+  ) {
+    const expectedMode = projectModeForFlowKind(listFlowKind);
+    if (projectMode !== expectedMode) {
+      return {
+        ok: false,
+        error: "项目模式与创建入口不一致",
+        fieldErrors: {
+          projectMode:
+            listFlowKind === "full-stack"
+              ? "一栈式项目必须使用一栈式模式"
+              : "画布项目必须使用画布模式",
+        },
+      };
+    }
+  } else if (listFlowKind != null && listFlowKind !== "") {
+    return { ok: false, error: "无效的项目创建入口" };
   }
 
   const passwordEnabled = Boolean(raw.passwordEnabled);

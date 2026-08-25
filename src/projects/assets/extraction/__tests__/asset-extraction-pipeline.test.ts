@@ -299,6 +299,7 @@ describe("asset extraction pipeline units", () => {
     expect(isLiveExtractionStatus("extracting_details")).toBe(true);
     expect(isLiveExtractionStatus("retrying_failed_once")).toBe(true);
     expect(isLiveExtractionStatus("saving")).toBe(true);
+    expect(isLiveExtractionStatus("awaiting_roster_selection")).toBe(false);
   });
 });
 
@@ -322,8 +323,8 @@ describe("pipeline replacement contracts", () => {
     expect(amw).not.toContain("仅重试失败资产");
     expect(amw).not.toContain("retryFailedOnly");
     expect(amw).not.toContain("asset-extraction-failed-list");
-    expect(amw).toContain("ScriptAssetExtractPromptCard");
-    expect(amw).toContain("restartAvailable");
+    expect(amw).not.toContain("ScriptAssetExtractPromptCard");
+    expect(amw).not.toContain("是否一键提取资产");
     expect(snapshot).not.toContain("failedAssets");
     expect(snapshot).not.toContain("canRetryFailed");
     expect(types).toContain("discovering_roster");

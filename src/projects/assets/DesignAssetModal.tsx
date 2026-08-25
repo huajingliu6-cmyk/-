@@ -24,6 +24,7 @@ import {
   mergeMediaIdLists,
 } from "@/projects/assets/episode-design/generated-media-history";
 import { getProjectAssetImageUrl } from "@/projects/assets/asset-image-url";
+import { MediaHistoryStrip } from "@/projects/ui/MediaHistoryStrip";
 import {
   CompactPromptReferenceSlots,
   emptyCompactPromptReferenceSlots,
@@ -660,6 +661,7 @@ function DesignAssetModalBody({
   useEffect(() => {
     if (!formalPromptMissing) return;
     if (promptText.trim()) return;
+    if (item.designPrompt?.status === "idle") return;
     const key = designPromptAutoGenKey(item, DEFAULT_DESIGN_PROMPT_MODEL_ID);
     if (autoPromptKeyRef.current === key) return;
     autoPromptKeyRef.current = key;
@@ -1090,7 +1092,15 @@ function DesignAssetModalBody({
       ? imageEditPrompt.trim()
       : promptText.trim();
     if (!isMultiAngle && !activePrompt) {
-      setError(imageEditOpen ? "请填写二次编辑要求" : "提示词为空，无法生成");
+      const appearanceIdle =
+        hideImageEdit && item.designPrompt?.status === "idle";
+      setError(
+        imageEditOpen
+          ? "请填写二次编辑要求"
+          : appearanceIdle
+            ? "请填写造型提示词"
+            : "提示词为空，无法生成",
+      );
       return;
     }
     if ((imageEditOpen || isMultiAngle) && !referenceSlots.some(Boolean)) {
@@ -1609,53 +1619,28 @@ function DesignAssetModalBody({
   ) : null;
 
   const imageHistoryBlock = showImageHistory ? (
-    <div
-      className="ead-history-strip ead-history-strip--images"
-      data-testid="design-image-history"
-    >
-      {imageHistoryIds.length === 0 ? (
-        <p className="ead-muted">暂无图片生成历史</p>
-      ) : (
-        [...imageHistoryIds].reverse().map((id) => {
-          const active = id === currentMediaId;
-          return (
-            <button
-              key={id}
-              type="button"
-              className={
-                active ? "ead-history-thumb is-active" : "ead-history-thumb"
-              }
-              onClick={() => {
-                setPickedMediaId(id);
-                const fromHistory =
-                  item.generatedMedia?.history?.find(
-                    (h) => h.mediaId === id,
-                  )?.videoRefSafety ?? null;
-                setVideoRefSafety(fromHistory);
-                if (item.assetType === "character" && onItemPatched) {
-                  onItemPatched(
-                    item.id,
-                    withDesignCurrentMediaAndVoiceMirror(item, id),
-                  );
-                }
-              }}
-              title={id}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={getProjectAssetImageUrl(projectId, id, {
-                  revision: id,
-                })}
-                alt=""
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.opacity = "0.25";
-                }}
-              />
-            </button>
-          );
-        })
-      )}
-    </div>
+    <MediaHistoryStrip
+      forceShow
+      testId="design-image-history"
+      className="ead-design-image-history"
+      items={[...imageHistoryIds].reverse().map((id) => ({
+        id,
+        thumbUrl: getProjectAssetImageUrl(projectId, id, { revision: id }),
+        title: id,
+      }))}
+      activeId={currentMediaId}
+      disabled={generateBusy}
+      onSelect={(id) => {
+        setPickedMediaId(id);
+        const fromHistory =
+          item.generatedMedia?.history?.find((h) => h.mediaId === id)
+            ?.videoRefSafety ?? null;
+        setVideoRefSafety(fromHistory);
+        if (item.assetType === "character" && onItemPatched) {
+          onItemPatched(item.id, withDesignCurrentMediaAndVoiceMirror(item, id));
+        }
+      }}
+    />
   ) : null;
 
   return (

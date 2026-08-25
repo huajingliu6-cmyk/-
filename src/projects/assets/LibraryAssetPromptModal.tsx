@@ -9,8 +9,11 @@ import type {
 } from "@/projects/assets/episode-design/types";
 import {
   makeLibraryDesignItem,
+  parseAppearanceScopeId,
+  resolveLibraryPromptScopeItem,
   type LibraryPromptAsset,
   type LibraryPromptAssetKind,
+  type LibraryPromptScopeMedia,
 } from "@/projects/assets/library-asset-prompt";
 import type { CharacterAsset } from "@/projects/assets/types";
 
@@ -45,6 +48,7 @@ type SharedProps = {
    */
   promptScopeKey?: string | null;
   promptScopeText?: string | null;
+  promptScopeMedia?: LibraryPromptScopeMedia | null;
   /** Persist prompt edits for non-primary scopes (appearance promptOverride). */
   onPromptScopePersist?: (text: string) => void | Promise<void>;
   onPromptDirtyChange?: (dirty: boolean) => void;
@@ -88,6 +92,24 @@ function designSyncKey(designItem: EpisodeAssetDesignItem | null | undefined): s
   ].join("|");
 }
 
+function buildScopedLocalItem(
+  asset: LibraryPromptAsset,
+  kind: LibraryPromptAssetKind,
+  designItem: EpisodeAssetDesignItem | null | undefined,
+  promptScopeKey: string | null | undefined,
+  promptScopeText: string | null | undefined,
+  promptScopeMedia: LibraryPromptScopeMedia | null | undefined,
+): EpisodeAssetDesignItem {
+  if (parseAppearanceScopeId(promptScopeKey)) {
+    return resolveLibraryPromptScopeItem(asset, kind, designItem, {
+      promptScopeKey,
+      promptScopeText,
+      promptScopeMedia,
+    });
+  }
+  return makeLibraryDesignItem(asset, kind, designItem);
+}
+
 function LibraryAssetPromptSurface({
   mode,
   open = true,
@@ -107,6 +129,7 @@ function LibraryAssetPromptSurface({
   onGenerationProgress,
   promptScopeKey = null,
   promptScopeText = null,
+  promptScopeMedia = null,
   onPromptScopePersist,
   onPromptDirtyChange,
   promptFlushRef,
@@ -116,7 +139,17 @@ function LibraryAssetPromptSurface({
   onClose?: () => void;
 }) {
   const [localItem, setLocalItem] = useState<EpisodeAssetDesignItem | null>(
-    () => (asset ? makeLibraryDesignItem(asset, kind, designItem) : null),
+    () =>
+      asset
+        ? buildScopedLocalItem(
+            asset,
+            kind,
+            designItem,
+            promptScopeKey,
+            promptScopeText,
+            promptScopeMedia,
+          )
+        : null,
   );
   const localItemRef = useRef(localItem);
   const assetRef = useRef(asset);
@@ -126,6 +159,15 @@ function LibraryAssetPromptSurface({
 
   const assetKey = assetSyncKey(asset, kind);
   const designKey = designSyncKey(designItem);
+  const appearanceScopeId = parseAppearanceScopeId(promptScopeKey);
+  const scopeSyncKey = appearanceScopeId
+    ? [
+        promptScopeKey ?? "",
+        promptScopeText ?? "",
+        promptScopeMedia?.currentId ?? "",
+        (promptScopeMedia?.historyIds ?? []).join(","),
+      ].join("|")
+    : (promptScopeKey ?? "primary");
 
   useEffect(() => {
     localItemRef.current = localItem;
@@ -137,6 +179,19 @@ function LibraryAssetPromptSurface({
     const currentAsset = assetRef.current;
     if (!currentAsset) {
       setLocalItem(null);
+      return;
+    }
+    if (appearanceScopeId) {
+      setLocalItem(
+        buildScopedLocalItem(
+          currentAsset,
+          kind,
+          designItemRef.current,
+          promptScopeKey,
+          promptScopeText,
+          promptScopeMedia,
+        ),
+      );
       return;
     }
     const next = makeLibraryDesignItem(
@@ -175,10 +230,10 @@ function LibraryAssetPromptSurface({
           : next.designPrompt,
       } as EpisodeAssetDesignItem;
     });
-  }, [assetKey, designKey, kind]);
+  }, [appearanceScopeId, assetKey, designKey, kind, scopeSyncKey]);
 
   useEffect(() => {
-    if (!promptScopeKey) return;
+    if (!promptScopeKey || appearanceScopeId) return;
     setLocalItem((previous) => {
       if (!previous) return previous;
       const currentAsset = assetRef.current;
@@ -220,7 +275,7 @@ function LibraryAssetPromptSurface({
         },
       } as EpisodeAssetDesignItem;
     });
-  }, [promptScopeKey, promptScopeText, kind]);
+  }, [appearanceScopeId, promptScopeKey, promptScopeText, kind]);
 
   if (mode === "modal" && !open) return null;
   if (!asset || !localItem) return null;
@@ -240,7 +295,7 @@ function LibraryAssetPromptSurface({
 
   return (
     <DesignAssetModal
-      key={`${asset.id}:${mode}`}
+      key={`${localItem.id}:${mode}`}
       open
       item={localItem}
       projectId={projectId}
@@ -313,8 +368,7 @@ export function LibraryAssetPromptPanel({
   className,
   ...rest
 }: PanelProps) {
-  // Stable per asset — do not remount when a designItem id is linked after generate.
-  const remountKey = rest.asset?.id ?? "none";
+  const remountKey = `${rest.asset?.id ?? "none"}:${rest.promptScopeKey ?? "primary"}`;
   return (
     <div className={className} data-testid="library-asset-prompt-panel">
       <LibraryAssetPromptSurface

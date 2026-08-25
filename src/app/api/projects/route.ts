@@ -30,6 +30,11 @@ export async function GET(request: Request) {
   const pageSize = Math.min(100, Math.max(1, rawSize));
   const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
   const enterpriseId = (url.searchParams.get("enterpriseId") ?? "").trim();
+  const projectModeParam = url.searchParams.get("projectMode");
+  const projectModeFilter =
+    projectModeParam === "canvas" || projectModeParam === "full-stack"
+      ? projectModeParam
+      : null;
   let enterpriseAccess:
     | Extract<Awaited<ReturnType<typeof requireEnterpriseAccess>>, { ok: true }>
     | null = null;
@@ -94,6 +99,12 @@ export async function GET(request: Request) {
         (p) =>
           p.name.toLowerCase().includes(q) ||
           p.projectId.toLowerCase().includes(q),
+      );
+    }
+    if (projectModeFilter) {
+      filtered = filtered.filter(
+        (project) =>
+          (project.projectMode ?? "full-stack") === projectModeFilter,
       );
     }
     const total = filtered.length;

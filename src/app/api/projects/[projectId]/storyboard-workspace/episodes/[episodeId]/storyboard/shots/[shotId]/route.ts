@@ -14,9 +14,11 @@ import type {
   StoryboardShot,
 } from "@/projects/storyboard/types";
 import {
+  assignContinuousEpisodeShotNumbers,
   computeShotVideoContentHash,
   getShotVideoPrompt,
   isShotConfirmReady,
+  listFlatShots,
 } from "@/projects/storyboard/shot-completeness";
 import {
   parseSceneCharacterPlacements,
@@ -486,4 +488,88 @@ export async function PATCH(request: Request, context: RouteContext) {
     activeStoryboard: updated.activeStoryboard,
     production: updated,
   });
+}
+
+export async function DELETE(request: Request, context: RouteContext) {
+  const session = await requireSessionUser();
+  if (!session.ok) return session.response;
+  const { projectId, episodeId, shotId } = await context.params;
+
+  const loaded = await loadAuthorizedWorkspace(projectId, session.user);
+  if (!loaded.ok) return loaded.response;
+
+  const production = findProduction(loaded.context.workspace, episodeId);
+  if (!production) {
+    return NextResponse.json({ error: "分集制作不存在" }, { status: 404 });
+  }
+
+  const storyboard = production.activeStoryboard;
+  if (!storyboard) {
+    return NextResponse.json({ error: "分镜尚未生成" }, { status: 404 });
+  }
+
+  const body = await parseJsonBody(request);
+  if (body === null || !isRecord(body)) {
+    return NextResponse.json({ error: "无效请求" }, { status: 400 });
+  }
+
+  const originalShot = storyboard.scenes
+    .flatMap((scene) => scene.shots)
+    .find((shot) => shot.id === shotId);
+  if (!originalShot) {
+    return NextResponse.json({ error: "镜头不存在" }, { status: 404 });
+  }
+
+  if (
+    typeof body.revision === "number" &&
+    body.revision !== originalShot.revision
+  ) {
+    return NextResponse.json(
+      { error: "镜头已被其他人更新，请刷新后重试", code: "REVISION_CONFLICT" },
+      { status: 409 },
+    );
+  }
+
+  const flatBefore = listFlatShots(storyboard.scenes);
+  if (flatBefore.length <= 1) {
+    return NextResponse.json(
+      { error: "至少保留一个分镜", code: "LAST_SHOT" },
+      { status: 400 },
+    );
+  }
+
+  const now = new Date().toISOString();
+  const scenesWithoutShot = storyboard.scenes.map((scene) => ({
+    ...scene,
+    shots: scene.shots.filter((shot) => shot.id !== shotId),
+  }));
+
+  const nextScenes = assignContinuousEpisodeShotNumbers(scenesWithoutShot);
+  const flat = nextScenes.flatMap((scene) => scene.shots);
+  const incomplete = flat.filter((shot) => !isShotConfirmReady(shot)).length;
+  const allHavePrompt = flat.every((shot) => getShotVideoPrompt(shot).length > 0);
+
+  const nextStoryboard = {
+    ...storyboard,
+    scenes: nextScenes,
+    revision: storyboard.revision + 1,
+    updatedAt: now,
+    status: "draft" as const,
+    confirmedAt: null,
+    confirmedBy: null,
+  };
+
+  const updated = await persistProduction(loaded.context.workspace, {
+    ...production,
+    activeStoryboard: nextStoryboard,
+    status:
+      incomplete === 0 && allHavePrompt
+        ? "storyboard_review"
+        : "storyboard_incomplete",
+    revision: production.revision + 1,
+    lastEditedAt: now,
+    updatedAt: now,
+  });
+
+  return NextResponse.json({ production: updated });
 }

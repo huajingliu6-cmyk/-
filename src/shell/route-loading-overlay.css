@@ -176,3 +176,26 @@
     animation: none !important;
   }
 }
+
+.route-loading-timeout-wrap {
+  position: fixed;
+  inset: var(--shell-header-h, 68px) 0 0;
+  z-index: 1200;
+  pointer-events: none;
+}
+
+.route-loading-timeout-wrap .route-loading {
+  position: absolute;
+  inset: 0;
+}
+
+.route-loading-timeout-actions {
+  position: fixed;
+  left: 50%;
+  bottom: calc(50% - 120px);
+  transform: translateX(-50%);
+  z-index: 1201;
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+}

@@ -150,11 +150,18 @@ button.app-sidebar__item {
 
 .shell-app--sidebar-hub {
   --shell-header-h: 0px;
-  flex-direction: row;
 }
 
 .shell-app--sidebar-hub .shell-outlet {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
+}
+
+.shell-app--sidebar-hub .shell-outlet > * {
+  flex: 1;
+  min-height: 0;
 }
 
 .shell-app--sidebar-hub .shell-outlet--enter {

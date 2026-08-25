@@ -1,17 +1,17 @@
 import { ensureAssetExtractionMigrated } from "@/projects/assets/extraction/migrate";
 import {
   getActiveVersion,
-  lastSuccessfulModelKey,
   loadAssetExtractionStore,
 } from "@/projects/assets/extraction/store";
-import { startAssetExtractionTask } from "@/projects/assets/extraction/start-task";
 import type { AssetExtractionTask } from "@/projects/assets/extraction/types";
-
 export type AfterScriptConfirmAction =
-  | { action: "prompt" }
+  | { action: "auto-start"; task: AssetExtractionTask; reused: boolean }
   | { action: "noop" }
   | { action: "auto-reextract"; task: AssetExtractionTask; reused: boolean };
 
+/**
+ * 剧本确认后检查资产提取状态；不再自动启动提取（由用户在资产页手动触发）。
+ */
 export async function afterScriptSplitConfirmed(input: {
   projectId: string;
   sourceFingerprint: string;
@@ -20,20 +20,10 @@ export async function afterScriptSplitConfirmed(input: {
   const store = await loadAssetExtractionStore(input.projectId);
   const active = getActiveVersion(store);
   if (!active) {
-    return { action: "prompt" };
+    return { action: "noop" };
   }
   if (active.sourceFingerprint === input.sourceFingerprint) {
     return { action: "noop" };
   }
-  const started = await startAssetExtractionTask({
-    projectId: input.projectId,
-    sourceFingerprint: input.sourceFingerprint,
-    scope: "all",
-    modelKey: lastSuccessfulModelKey(store),
-  });
-  return {
-    action: "auto-reextract",
-    task: started.task,
-    reused: started.reused,
-  };
+  return { action: "noop" };
 }

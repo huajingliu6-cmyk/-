@@ -8,6 +8,10 @@ import {
   isAppearanceMedia,
   resolveScopedVoice,
 } from "@/projects/assets/character-appearance-state";
+import {
+  idleEmptyGeneratedMedia,
+  resolveLibraryPromptScopeItem,
+} from "@/projects/assets/library-asset-prompt";
 import type { CharacterAsset } from "@/projects/assets/types";
 
 const root = process.cwd();
@@ -44,6 +48,7 @@ function baseCharacter(overrides: Partial<CharacterAsset> = {}): CharacterAsset 
 
 describe("character history / look UI contracts", () => {
   const detail = readSrc("src/projects/assets/CharacterDetail.tsx");
+  const voiceSettings = readSrc("src/projects/assets/CharacterVoiceSettings.tsx");
   const lookEditor = readSrc(
     "src/projects/assets/LibraryCharacterLookEditor.tsx",
   );
@@ -165,17 +170,19 @@ describe("character history / look UI contracts", () => {
     expect(detail).toContain("/voice");
     expect(detail).toContain("character_default");
     expect(detail).toContain("appearance_override");
-    expect(detail).toContain("character-voice-card");
-    expect(detail).toContain("character-voice-bar");
-    expect(detail).toContain("音色设置");
-    expect(detail).toContain("character-voice-context");
+    expect(detail).toContain("CharacterVoiceSettings");
+    expect(voiceSettings).toContain("character-voice-card");
+    expect(voiceSettings).toContain("character-voice-bar");
+    expect(voiceSettings).toContain("音色设置");
+    expect(voiceSettings).toContain("character-voice-context");
     expect(detail).toContain("voiceBadgeText");
-    expect(detail).toContain("上传音色");
-    expect(detail).toContain("选择音色");
-    expect(detail).toContain("生成音色");
-    expect(detail).toContain("character-voice-upload");
-    expect(detail).not.toContain('data-testid="character-voice-bind"');
-    expect(detail).not.toContain("character-voice-meta");
+    expect(voiceSettings).toContain("上传音色");
+    expect(voiceSettings).toContain("选择音色");
+    expect(voiceSettings).toContain("生成音色");
+    expect(voiceSettings).toContain("character-voice-upload");
+    expect(voiceSettings).toContain("character-voice-status");
+    expect(voiceSettings).toContain("character-voice-bind");
+    expect(voiceSettings).toContain("character-voice-meta");
     expect(css).toContain(".character-voice-bar__action");
     expect(detail).not.toContain("本图音色");
     expect(detail).not.toContain("mediaVoices");
@@ -329,5 +336,43 @@ describe("character appearance state invariants", () => {
     expect(prompt).not.toContain(
       "item.name.trim().toLocaleLowerCase() === asset.name.trim().toLocaleLowerCase()",
     );
+  });
+
+  it("isolates new appearance prompt scope from main character prompt and media", () => {
+    const modal = readSrc("src/projects/assets/LibraryAssetPromptModal.tsx");
+    const detail = readSrc("src/projects/assets/CharacterDetail.tsx");
+    expect(modal).toContain("resolveLibraryPromptScopeItem");
+    expect(modal).toContain("promptScopeMedia");
+    expect(modal).toContain("parseAppearanceScopeId");
+    expect(detail).toContain("promptScopeMedia=");
+
+    const asset = ensureCharacterAppearances(
+      baseCharacter({
+        description: "主形象描述不应出现在新造型",
+        primaryMediaId: "main_1",
+      }),
+    );
+    const { asset: withLook, appearance } = createCharacterAppearance({
+      asset,
+      promptOverride: "",
+      currentMediaId: null,
+    });
+    const scoped = resolveLibraryPromptScopeItem(
+      withLook,
+      "character",
+      null,
+      {
+        promptScopeKey: `appearance:${appearance.id}`,
+        promptScopeText: "",
+        promptScopeMedia: {
+          currentId: null,
+          historyIds: [],
+        },
+      },
+    );
+    expect(scoped.designPrompt?.status).toBe("idle");
+    expect(scoped.designPrompt?.text).toBe("");
+    expect(scoped.generatedMedia).toEqual(idleEmptyGeneratedMedia());
+    expect(scoped.designPrompt?.text).not.toContain("主形象描述不应出现在新造型");
   });
 });

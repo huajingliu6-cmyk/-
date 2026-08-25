@@ -1,15 +1,17 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Save, Send, X } from "lucide-react";
+import { Save, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChipBounce } from "@/shell/useChipBounce";
-import { GlassSelect } from "@/shell/glass-select";
 import { AssetTabs } from "@/projects/assets/AssetTabs";
 import { AssetExtractionToolbar } from "@/projects/assets/AssetExtractionToolbar";
 import type {
   AssetExtractionEpisode,
+  AssetExtractionRequest,
+  ExtractionReviewReadyPayload,
 } from "@/projects/assets/EpisodeAssetDesignWorkspace";
+import { EpisodeExtractionPromotePanel } from "@/projects/assets/EpisodeExtractionPromotePanel";
 import type { EpisodeAssetDesignItem } from "@/projects/assets/episode-design/types";
 import { CharacterManager } from "@/projects/assets/CharacterManager";
 import { SceneManager } from "@/projects/assets/SceneManager";
@@ -17,14 +19,12 @@ import { PropManager } from "@/projects/assets/PropManager";
 import { persistAssetBundle } from "@/projects/assets/persist-asset-bundle";
 import { persistLibraryDesignItems } from "@/projects/assets/persist-library-design-items";
 import { UnsavedPromptDialog } from "@/projects/assets/UnsavedPromptDialog";
-import { ScriptAssetExtractPromptCard } from "@/projects/script/ScriptAssetExtractPromptCard";
-import { defaultAssetExtractionModelKey } from "@/projects/assets/extraction/models";
+import { useScriptDownstreamPipeline } from "@/projects/script/use-script-downstream-pipeline";
 import {
   ASSET_EXTRACTION_MISSING_HINT,
-  isCompletedExtractionStatus,
-  isLiveExtractionStatus,
+  isAwaitingRosterSelectionStatus,
+  isBlockingExtractionStatus,
 } from "@/projects/assets/extraction/types";
-import type { ExtractedAsset } from "@/projects/assets/extraction/types";
 import type {
   AssetTabId,
   AudioAsset,
@@ -85,6 +85,11 @@ export function AssetManagementWorkspace({
   backHref,
   backLabel = "返回",
 }: Props) {
+  const isWorkspace = context === "workspace";
+  const apiRoot = isWorkspace
+    ? `/api/workspace/projects/${encodeURIComponent(projectId)}`
+    : `/api/projects/${encodeURIComponent(projectId)}`;
+  const pipeline = useScriptDownstreamPipeline(projectId, apiRoot);
   const saveBounce = useChipBounce();
   const [projectName, setProjectName] = useState("");
   const [loadError, setLoadError] = useState("");
@@ -98,38 +103,30 @@ export function AssetManagementWorkspace({
   const [extractionBusy, setExtractionBusy] = useState(false);
   const approvalRequestSeq = useRef(0);
   const [submitApprovalRequestId, setSubmitApprovalRequestId] = useState(0);
-  const [episodePickerOpen, setEpisodePickerOpen] = useState(false);
   const [extractionEpisodes, setExtractionEpisodes] = useState<
     AssetExtractionEpisode[]
   >([]);
-  const [selectedExtractionEpisodeId, setSelectedExtractionEpisodeId] =
-    useState("");
   const [viewEpisodeId, setViewEpisodeId] = useState<string | null>(null);
   const [viewEpisodeAssetIds, setViewEpisodeAssetIds] = useState<
     string[] | null
   >(null);
   const [designItems, setDesignItems] = useState<EpisodeAssetDesignItem[]>([]);
   const [designEpisodeId, setDesignEpisodeId] = useState("");
-  const [extractedAssets, setExtractedAssets] = useState<ExtractedAsset[]>([]);
+  const [episodeDesignRevision, setEpisodeDesignRevision] = useState(0);
+  const [episodeFingerprint, setEpisodeFingerprint] = useState("");
+  const extractionRequestSeq = useRef(0);
+  const [extractionRequest, setExtractionRequest] =
+    useState<AssetExtractionRequest | null>(null);
+  const [promotePanelOpen, setPromotePanelOpen] = useState(false);
+  const [promotePanelPayload, setPromotePanelPayload] =
+    useState<ExtractionReviewReadyPayload | null>(null);
   const [hasActiveVersion, setHasActiveVersion] = useState(false);
   const [extractionSuccess, setExtractionSuccess] = useState(false);
   const [candidateNeedsReview, setCandidateNeedsReview] = useState(false);
-  const [restartAvailable, setRestartAvailable] = useState(false);
-  const [extractPromptAvailable, setExtractPromptAvailable] = useState(false);
-  const [extractPromptDismissed, setExtractPromptDismissed] = useState(false);
-  const [restartErrorMessage, setRestartErrorMessage] = useState<string | null>(
-    null,
-  );
-  const [restartStarting, setRestartStarting] = useState(false);
-  const [restartModelKey, setRestartModelKey] = useState(
-    defaultAssetExtractionModelKey(),
-  );
   const extractionBusyRef = useRef(false);
-  const extractionRefreshGenerationRef = useRef(0);
   const visibleTab: Exclude<AssetTabId, "audio"> =
     activeTab === "audio" ? "character" : activeTab;
 
-  const isWorkspace = context === "workspace";
   const [characters, setCharacters] = useState<CharacterAsset[]>([]);
   const [scenes, setScenes] = useState<SceneAsset[]>([]);
   const [props, setProps] = useState<PropAsset[]>([]);
@@ -144,10 +141,6 @@ export function AssetManagementWorkspace({
     null,
   );
   const [unsavedBusy, setUnsavedBusy] = useState(false);
-
-  useEffect(() => {
-    setExtractPromptDismissed(false);
-  }, [projectId]);
 
   const editAllowed = canEdit;
 
@@ -269,11 +262,7 @@ export function AssetManagementWorkspace({
     };
   }, [hydrated, isWorkspace, projectId]);
 
-  const activeExtractionEpisodeId = extractionEpisodes.some(
-    (episode) => episode.episodeId === selectedExtractionEpisodeId,
-  )
-    ? selectedExtractionEpisodeId
-    : (extractionEpisodes[0]?.episodeId ?? "");
+  const activeExtractionEpisodeId = viewEpisodeId ?? "";
   const viewEpisodeOptions = useMemo(
     () => [
       { id: ALL_EPISODES_VALUE, label: "全部剧集资产" },
@@ -285,6 +274,28 @@ export function AssetManagementWorkspace({
     [extractionEpisodes],
   );
   const viewEpisodeValue = viewEpisodeId ?? ALL_EPISODES_VALUE;
+  const showEpisodeExtractButton = viewEpisodeId !== null;
+  const extractEpisodeLabel = useMemo(() => {
+    if (!viewEpisodeId) return "提取本集资产";
+    const episode = extractionEpisodes.find(
+      (item) => item.episodeId === viewEpisodeId,
+    );
+    if (
+      episode?.designStatus === "review" ||
+      episode?.designStatus === "confirmed" ||
+      episode?.designStatus === "stale"
+    ) {
+      return "重新提取";
+    }
+    return "提取本集资产";
+  }, [extractionEpisodes, viewEpisodeId]);
+
+  useEffect(() => {
+    if (extractionEpisodes.length === 0 && viewEpisodeId) {
+      setViewEpisodeId(null);
+      setViewEpisodeAssetIds(null);
+    }
+  }, [extractionEpisodes.length, viewEpisodeId]);
 
   const pageLocked = extractionBusy;
   const scopedAssetIds = useMemo(
@@ -363,26 +374,81 @@ export function AssetManagementWorkspace({
   }, [applyDraft, isWorkspace, projectId]);
 
   const handleExtractionComplete = useCallback(async () => {
-    const generation = extractionRefreshGenerationRef.current + 1;
-    extractionRefreshGenerationRef.current = generation;
+    extractionBusyRef.current = false;
+    setExtractionBusy(false);
     try {
       await refreshAssetDraft();
-      if (generation !== extractionRefreshGenerationRef.current) return;
+      setHasActiveVersion(true);
       setExtractionSuccess(true);
-      if (approvalEnabled) {
-        setPageNote("资产已提取，等待审批后进入正式资产库。");
-      } else {
-        setPageNote("提取完成，资产列表已刷新。");
-      }
     } catch (error) {
-      if (generation !== extractionRefreshGenerationRef.current) return;
       setPageNote(
         error instanceof Error
           ? error.message
           : "提取完成，但刷新资产列表失败。",
       );
     }
-  }, [approvalEnabled, refreshAssetDraft]);
+  }, [refreshAssetDraft]);
+
+  const handleExtractionReviewReady = useCallback(
+    (payload: ExtractionReviewReadyPayload) => {
+      if (viewEpisodeId && payload.episodeId !== viewEpisodeId) return;
+      if (!viewEpisodeId) setViewEpisodeId(payload.episodeId);
+      setPromotePanelPayload(payload);
+      setPromotePanelOpen(true);
+      setEpisodeDesignRevision(payload.revision);
+      setEpisodeFingerprint(payload.fingerprint);
+      setDesignItems(payload.items);
+      setDesignEpisodeId(payload.episodeId);
+      void handleExtractionComplete();
+    },
+    [handleExtractionComplete, viewEpisodeId],
+  );
+
+  const refreshEpisodeDesignView = useCallback(
+    async (episodeId: string) => {
+      const res = await fetch(
+        `${apiRoot}/asset-designs/episodes/${encodeURIComponent(episodeId)}`,
+        { credentials: "include" },
+      );
+      if (!res.ok) {
+        throw new Error("无法加载剧集资产设计");
+      }
+      const payload = (await res.json()) as {
+        record?: {
+          revision?: number;
+          items?: EpisodeAssetDesignItem[];
+        };
+        currentFingerprint?: string;
+        episode?: { episodeNumber?: number; title?: string };
+      };
+      const items = payload.record?.items ?? [];
+      setDesignItems(items);
+      setDesignEpisodeId(episodeId);
+      setEpisodeDesignRevision(payload.record?.revision ?? 0);
+      setEpisodeFingerprint(payload.currentFingerprint ?? "");
+      const assetIds = Array.from(
+        new Set(
+          items
+            .map((item) => item.libraryAssetId?.trim())
+            .filter((id): id is string => Boolean(id)),
+        ),
+      );
+      setViewEpisodeAssetIds(assetIds.length > 0 ? assetIds : null);
+      const pendingCount = items.filter(
+        (item) =>
+          !item.libraryAssetId?.trim() &&
+          item.resolution !== "ignore",
+      ).length;
+      const episode = extractionEpisodes.find(
+        (item) => item.episodeId === episodeId,
+      );
+      setPageNote(
+        `正在查看第 ${episode?.episodeNumber ?? payload.episode?.episodeNumber ?? "-"} 集资产 · 已入库 ${assetIds.length} 项${pendingCount > 0 ? ` · 待选择 ${pendingCount} 项` : ""}`,
+      );
+      return items;
+    },
+    [apiRoot, extractionEpisodes],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -396,14 +462,9 @@ export function AssetManagementWorkspace({
       if (!res.ok || cancelled) return;
       const payload = (await res.json()) as {
         hasActiveVersion?: boolean;
-        assets?: ExtractedAsset[];
         conflicts?: unknown[];
         candidateAssets?: unknown[];
         task?: { status?: string } | null;
-        restartAvailable?: boolean;
-        restartErrorMessage?: string | null;
-        extractPromptAvailable?: boolean;
-        lastSuccessfulModelKey?: string | null;
         episodes?: Array<{
           episodeId: string;
           episodeNumber: number;
@@ -413,7 +474,6 @@ export function AssetManagementWorkspace({
       };
       if (cancelled) return;
       setHasActiveVersion(payload.hasActiveVersion === true);
-      setExtractedAssets(payload.assets ?? []);
       setCandidateNeedsReview(
         (payload.conflicts?.length ?? 0) > 0 &&
           (payload.candidateAssets?.length ?? 0) > 0,
@@ -429,19 +489,20 @@ export function AssetManagementWorkspace({
           })),
         );
       }
-      const live = isLiveExtractionStatus(payload.task?.status);
-      if (extractionBusyRef.current && !live) {
-        if (isCompletedExtractionStatus(payload.task?.status)) {
-          void handleExtractionComplete();
-        }
-      }
-      extractionBusyRef.current = live;
-      setExtractionBusy(live);
-      setRestartAvailable(payload.restartAvailable === true);
-      setExtractPromptAvailable(payload.extractPromptAvailable === true);
-      setRestartErrorMessage(payload.restartErrorMessage ?? null);
-      if (payload.lastSuccessfulModelKey) {
-        setRestartModelKey(payload.lastSuccessfulModelKey);
+      const status = payload.task?.status;
+      const blocking = isBlockingExtractionStatus(status);
+      const awaiting = isAwaitingRosterSelectionStatus(status);
+      const wasBlocking = extractionBusyRef.current;
+      if (blocking) {
+        extractionBusyRef.current = true;
+        setExtractionBusy(true);
+        // Awaiting selection is not completion — keep busy, do not refresh library yet.
+        if (awaiting) return;
+      } else if (wasBlocking) {
+        void handleExtractionComplete();
+      } else {
+        extractionBusyRef.current = false;
+        setExtractionBusy(false);
       }
     };
     void loadSnapshot();
@@ -454,98 +515,72 @@ export function AssetManagementWorkspace({
     };
   }, [handleExtractionComplete, isWorkspace, projectId]);
 
+  useEffect(() => {
+    if (!hydrated || !hasActiveVersion) return;
+    if (characters.length + scenes.length + props.length > 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await refreshAssetDraft();
+      } catch (error) {
+        if (!cancelled) {
+          setPageNote(
+            error instanceof Error
+              ? error.message
+              : "提取完成，但刷新资产列表失败。",
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    characters.length,
+    hasActiveVersion,
+    hydrated,
+    props.length,
+    refreshAssetDraft,
+    scenes.length,
+  ]);
+
   const viewEpisodeAssets = useCallback(
     async (episodeId: string) => {
       if (episodeId === ALL_EPISODES_VALUE) {
         setViewEpisodeId(null);
         setViewEpisodeAssetIds(null);
+        setDesignItems([]);
+        setDesignEpisodeId("");
         setPageNote("已显示全部剧集资产。");
         return;
       }
 
-      const episode = extractionEpisodes.find(
-        (item) => item.episodeId === episodeId,
-      );
-      const episodeAssets = extractedAssets.filter((asset) =>
-        asset.sourceEpisodeIds.includes(episodeId),
-      );
-      const assetIds = Array.from(
-        new Set(
-          episodeAssets
-            .map((asset) => asset.libraryAssetId?.trim())
-            .filter((id): id is string => Boolean(id)),
-        ),
-      );
-
       setViewEpisodeId(episodeId);
-      setViewEpisodeAssetIds(assetIds);
-      setPageNote(
-        `正在查看第 ${episode?.episodeNumber ?? "-"} 集资产 · 共 ${assetIds.length} 项`,
-      );
+      try {
+        await refreshEpisodeDesignView(episodeId);
+      } catch (error) {
+        setPageNote(
+          error instanceof Error ? error.message : "无法加载剧集资产",
+        );
+      }
     },
-    [extractedAssets, extractionEpisodes],
+    [refreshEpisodeDesignView],
   );
 
   const requestEpisodeExtraction = useCallback(
-    async (episodeId: string) => {
-      if (extractionBusy) return;
-      const apiRoot = isWorkspace
-        ? `/api/workspace/projects/${encodeURIComponent(projectId)}`
-        : `/api/projects/${encodeURIComponent(projectId)}`;
-      const res = await fetch(`${apiRoot}/asset-extraction/tasks`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scope: "episode", episodeId }),
+    (episodeId: string) => {
+      if (extractionBusy || !episodeId) return;
+      extractionRequestSeq.current += 1;
+      setExtractionRequest({
+        id: extractionRequestSeq.current,
+        mode: "selected-episode",
+        episodeId,
+        idempotencyKey: `episode-${episodeId}-${extractionRequestSeq.current}`,
       });
-      if (!res.ok) {
-        const payload = (await res.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        setPageNote(payload.error ?? "无法开始提取本集资产");
-        return;
-      }
       setExtractionBusy(true);
     },
-    [extractionBusy, isWorkspace, projectId],
+    [extractionBusy],
   );
-
-  const restartExtraction = useCallback(async () => {
-    if (extractionBusy || restartStarting) return;
-    const apiRoot = isWorkspace
-      ? `/api/workspace/projects/${encodeURIComponent(projectId)}`
-      : `/api/projects/${encodeURIComponent(projectId)}`;
-    setRestartStarting(true);
-    const res = await fetch(`${apiRoot}/asset-extraction/tasks`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scope: "all",
-        modelKey: restartModelKey,
-      }),
-    });
-    if (!res.ok) {
-      const payload = (await res.json().catch(() => ({}))) as {
-        error?: string;
-      };
-      setPageNote(payload.error ?? "无法重新开始提取");
-      setRestartStarting(false);
-      return;
-    }
-    setRestartAvailable(false);
-    setExtractPromptAvailable(false);
-    setExtractPromptDismissed(true);
-    setRestartErrorMessage(null);
-    setExtractionBusy(true);
-    setRestartStarting(false);
-  }, [
-    extractionBusy,
-    isWorkspace,
-    projectId,
-    restartModelKey,
-    restartStarting,
-  ]);
 
   const handleSavePage = useCallback(async () => {
     if (!editAllowed) {
@@ -662,11 +697,10 @@ export function AssetManagementWorkspace({
               onChange={requestTabChange}
             />
             <AssetExtractionToolbar
+              showExtractButton={showEpisodeExtractButton}
               onExtractEpisode={() => {
-                setSelectedExtractionEpisodeId(
-                  extractionEpisodes[0]?.episodeId ?? "",
-                );
-                setEpisodePickerOpen(true);
+                if (!activeExtractionEpisodeId) return;
+                requestEpisodeExtraction(activeExtractionEpisodeId);
               }}
               viewEpisodeOptions={viewEpisodeOptions}
               viewEpisodeValue={viewEpisodeValue}
@@ -674,7 +708,7 @@ export function AssetManagementWorkspace({
                 void viewEpisodeAssets(episodeId);
               }}
               extracting={pageLocked}
-              extractLabel="提取本集资产"
+              extractLabel={extractEpisodeLabel}
               trailing={
                 <>
                   {isWorkspace && approvalEnabled ? (
@@ -747,6 +781,12 @@ export function AssetManagementWorkspace({
                 : loadError
                   ? loadError
                   : pageNote}
+            </p>
+          ) : !pageNote &&
+            hydrated &&
+            pipeline.phase === "generating_storyboard" ? (
+            <p className="asset-library-toolbar__note" role="status">
+              {pipeline.message}
             </p>
           ) : null}
           {hasActiveVersion ? (
@@ -857,107 +897,38 @@ export function AssetManagementWorkspace({
           <EpisodeAssetDesignWorkspace
             projectId={projectId}
             headless
+            embeddedInLibrary
+            controlledEpisodeId={viewEpisodeId}
+            extractionRequest={extractionRequest}
             showApprovalUi={approvalEnabled}
             approvalEnabled={approvalEnabled}
             submitApprovalRequestId={submitApprovalRequestId}
-            onExtractionComplete={async () => {
-              await handleExtractionComplete();
+            onExtractionRequestConsumed={() => {
+              setExtractionRequest(null);
             }}
+            onExtractionBusyChange={setExtractionBusy}
+            onExtractionReviewReady={handleExtractionReviewReady}
+            onExtractionNote={setPageNote}
+            onExtractionComplete={handleExtractionComplete}
             onEpisodesChange={setExtractionEpisodes}
             onItemsChange={(nextItems, episodeId) => {
               setDesignItems(nextItems);
               setDesignEpisodeId(episodeId);
+              if (viewEpisodeId && episodeId === viewEpisodeId) {
+                const assetIds = Array.from(
+                  new Set(
+                    nextItems
+                      .map((item) => item.libraryAssetId?.trim())
+                      .filter((id): id is string => Boolean(id)),
+                  ),
+                );
+                setViewEpisodeAssetIds(assetIds.length > 0 ? assetIds : null);
+              }
             }}
           />
         </div>
       </div>
 
-      {episodePickerOpen ? (
-        <div
-          className="asset-episode-picker"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setEpisodePickerOpen(false);
-          }}
-        >
-          <section
-            className="asset-episode-picker__dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="asset-episode-picker-title"
-          >
-            <header className="asset-episode-picker__head">
-              <h2 id="asset-episode-picker-title">选择提取剧集</h2>
-              <button
-                type="button"
-                className="asset-episode-picker__close"
-                aria-label="关闭剧集选择"
-                title="关闭"
-                onClick={() => setEpisodePickerOpen(false)}
-              >
-                <X size={16} aria-hidden />
-              </button>
-            </header>
-            <GlassSelect
-              label="剧集"
-              menuPortal
-              placeholder={
-                extractionEpisodes.length > 0 ? "请选择剧集" : "暂无可提取剧集"
-              }
-              value={activeExtractionEpisodeId}
-              options={extractionEpisodes.map((episode) => ({
-                id: episode.episodeId,
-                label: `第 ${episode.episodeNumber} 集${
-                  episode.title ? ` · ${episode.title}` : ""
-                }`,
-              }))}
-              disabled={extractionEpisodes.length === 0}
-              onChange={setSelectedExtractionEpisodeId}
-            />
-            <footer className="asset-episode-picker__actions">
-              <button
-                type="button"
-                className="amw-btn"
-                onClick={() => setEpisodePickerOpen(false)}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="amw-btn amw-btn-primary"
-                disabled={!activeExtractionEpisodeId}
-                onClick={() => {
-                  void requestEpisodeExtraction(activeExtractionEpisodeId);
-                  setEpisodePickerOpen(false);
-                }}
-              >
-                开始提取
-              </button>
-            </footer>
-          </section>
-        </div>
-      ) : null}
-      <ScriptAssetExtractPromptCard
-        open={
-          !extractionBusy &&
-          (restartAvailable ||
-            (extractPromptAvailable && !extractPromptDismissed))
-        }
-        modelKey={restartModelKey}
-        starting={restartStarting}
-        errorMessage={restartAvailable ? restartErrorMessage : null}
-        onModelKeyChange={setRestartModelKey}
-        onSkip={() => {
-          if (restartAvailable) {
-            setRestartAvailable(false);
-            return;
-          }
-          setExtractPromptDismissed(true);
-        }}
-        onStart={() => {
-          void restartExtraction();
-        }}
-      />
       <InterruptedImageJobsDialog
         projectId={projectId}
         context={context}
@@ -967,6 +938,42 @@ export function AssetManagementWorkspace({
         onRetried={() => {
           setInterruptedOpen(false);
           setPageNote("已提交重新生成，可在对应素材查看进度。");
+        }}
+      />
+      <EpisodeExtractionPromotePanel
+        open={promotePanelOpen}
+        projectId={projectId}
+        episodeId={promotePanelPayload?.episodeId ?? viewEpisodeId ?? ""}
+        episodeNumber={
+          promotePanelPayload?.episodeNumber ??
+          extractionEpisodes.find((ep) => ep.episodeId === viewEpisodeId)
+            ?.episodeNumber ??
+          0
+        }
+        episodeTitle={promotePanelPayload?.episodeTitle}
+        items={promotePanelPayload?.items ?? designItems}
+        expectedRevision={
+          promotePanelPayload?.revision ?? episodeDesignRevision
+        }
+        fingerprint={promotePanelPayload?.fingerprint ?? episodeFingerprint}
+        approvalEnabled={approvalEnabled}
+        context={isWorkspace ? "workspace" : "management"}
+        libraryAssets={{ characters, scenes, props }}
+        onClose={() => setPromotePanelOpen(false)}
+        onCompleted={async (message) => {
+          setPageNote(message);
+          try {
+            await refreshAssetDraft();
+            if (viewEpisodeId) {
+              await refreshEpisodeDesignView(viewEpisodeId);
+            }
+          } catch (error) {
+            setPageNote(
+              error instanceof Error
+                ? error.message
+                : "入库完成，但刷新资产列表失败。",
+            );
+          }
         }}
       />
       <UnsavedPromptDialog

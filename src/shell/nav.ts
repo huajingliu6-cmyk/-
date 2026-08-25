@@ -19,11 +19,80 @@ export const APP_WORKBENCH_PATH = "/app/workspace";
 /** 项目管理列表（一栈式 Flow 入口） */
 export const APP_PROJECTS_PATH = "/app/projects";
 
+/** 无限画布项目管理列表 */
+export const APP_INFINITE_CANVAS_PATH = "/app/infinite-canvas";
+
+/** 系统管理员独立页（平台级 AI / API 配置） */
+export const APP_ADMIN_PATH = "/app/admin";
+
+export function isSidebarHubPath(pathname: string): boolean {
+  return (
+    pathname === APP_SHELL_ROOT ||
+    pathname === `${APP_SHELL_ROOT}/` ||
+    pathname === APP_PERSONAL_ASSETS_PATH ||
+    pathname === APP_ASSET_MARKET_PATH
+  );
+}
+
+export function isAdminConsolePath(pathname: string): boolean {
+  return (
+    pathname === APP_ADMIN_PATH ||
+    pathname.startsWith(`${APP_ADMIN_PATH}/`)
+  );
+}
+
+export function shellHeaderVariant(
+  pathname: string,
+): "full" | "account-only" {
+  if (isSidebarHubPath(pathname) || isAdminConsolePath(pathname)) {
+    return "account-only";
+  }
+  return "full";
+}
+
 export function isOneStackFlowPath(pathname: string): boolean {
   return (
     pathname === APP_PROJECTS_PATH ||
     pathname.startsWith(`${APP_PROJECTS_PATH}/`)
   );
+}
+
+/** 一栈式项目三阶段页面（顶栏显示项目名 + 阶段导航） */
+export function isOneStackProjectStagePath(pathname: string): boolean {
+  return /^\/app\/projects\/[^/]+\/(script|story|assets|storyboard)(?:\/|$)/.test(
+    pathname,
+  );
+}
+
+export function parseProjectFlowRoute(pathname: string): {
+  projectId: string;
+  mode: "management" | "workspace";
+} | null {
+  if (pathname === APP_PROJECTS_PATH) return null;
+
+  const managementMatch = pathname.match(/^\/app\/projects\/([^/]+)(?:\/|$)/);
+  if (managementMatch?.[1]) {
+    return {
+      projectId: decodeURIComponent(managementMatch[1]),
+      mode: "management",
+    };
+  }
+
+  const workspaceMatch = pathname.match(
+    /^\/app\/workspace\/projects\/([^/]+)(?:\/|$)/,
+  );
+  if (workspaceMatch?.[1]) {
+    return {
+      projectId: decodeURIComponent(workspaceMatch[1]),
+      mode: "workspace",
+    };
+  }
+
+  return null;
+}
+
+export function isInfiniteCanvasListPath(pathname: string): boolean {
+  return pathname === APP_INFINITE_CANVAS_PATH;
 }
 
 /**
@@ -34,9 +103,6 @@ export const APP_POST_LOGIN_PATH = APP_SHELL_ROOT;
 
 /** 视频制作画布（React Flow / WorkflowEditor） */
 export const WORKFLOW_EDITOR_PATH = "/workflow";
-
-/** 系统管理员独立页（平台级 AI / API 配置） */
-export const APP_ADMIN_PATH = "/app/admin";
 
 /** 登录后业务导航 → /app 子路由（完整列表；实际展示由权限过滤） */
 export const AUTH_NAV_ITEMS: ShellNavItem[] = [

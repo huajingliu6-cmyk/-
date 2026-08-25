@@ -32,6 +32,8 @@ describe("system admin page contracts", () => {
     expect(consoleSrc).toMatch(
       /className="ai-admin-header__actions"[\s\S]*data-testid="admin-back-to-app"/,
     );
+    expect(consoleSrc).not.toContain("ai-admin-avatar");
+    expect(consoleSrc).not.toContain('aria-label="通知"');
     expect(consoleSrc).toMatch(
       /className="ai-admin-brand"[\s\S]*aria-label="返回主界面"/,
     );

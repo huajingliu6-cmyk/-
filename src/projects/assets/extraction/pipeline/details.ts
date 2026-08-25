@@ -10,6 +10,7 @@ import {
   ASSET_DETAIL_BATCH_SIZE,
   ASSET_DETAIL_CONCURRENCY,
 } from "@/projects/assets/extraction/pipeline/constants";
+import { ASSET_EXTRACTION_POLICY } from "@/projects/assets/extraction/asset-extraction-policy";
 import { assertDetailBatchPolicy } from "@/projects/assets/extraction/asset-extraction-policy";
 import { collectProviderText, mapPool } from "@/projects/assets/extraction/pipeline/pool";
 import { batchItems } from "@/projects/assets/extraction/pipeline/progress";
@@ -207,6 +208,7 @@ export async function runAssetDetailBatches(input: {
     runningBatchIndexes: number[];
   }) => Promise<void> | void;
   onBatchSettled?: (outcomes: DetailBatchOutcome[]) => Promise<void> | void;
+  onHeartbeat?: () => Promise<void> | void;
 }): Promise<DetailBatchOutcome[]> {
   const batchSize = input.batchSize ?? ASSET_DETAIL_BATCH_SIZE;
   const concurrency = input.concurrency ?? ASSET_DETAIL_CONCURRENCY;
@@ -239,6 +241,9 @@ export async function runAssetDetailBatches(input: {
           }),
           providerModelId: input.providerModelId,
           maxOutputTokens: input.maxOutputTokens ?? 8_000,
+          timeoutMs: ASSET_EXTRACTION_POLICY.detailBatchTimeoutMs,
+          tickMs: ASSET_EXTRACTION_POLICY.runnerHeartbeatMs,
+          onTick: input.onHeartbeat,
         });
         const outcomes = collected.ok
           ? parseDetailBatchOutput({ text: collected.text, batch, batchIndex })

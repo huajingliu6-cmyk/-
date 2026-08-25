@@ -26,7 +26,6 @@ describe("script upload auto-split UI contract", () => {
     );
     expect(uploadBlock).toContain("persistImportedScriptAndAutoSplit(preview)");
     expect(uploadBlock).not.toContain("setImportPreview(preview)");
-    expect(workspace).toContain("fetchWithOperationId");
   });
 
   it("wires confirm-import through the same persist+auto-split path", () => {

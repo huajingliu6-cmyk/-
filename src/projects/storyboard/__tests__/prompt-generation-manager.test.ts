@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __resetPromptGenerationManagerForTests,
   getPromptGenerationSnapshot,
+  releaseQueuedPromptGenerationOnPageLeave,
   requestEpisodePromptGeneration,
+  syncPromptGenerationFromProduction,
   STORYBOARD_PROMPT_GEN_MAX_CONCURRENT,
 } from "@/projects/storyboard/prompt-generation-manager";
 
@@ -113,5 +115,39 @@ describe("prompt-generation-manager", () => {
     const c = getPromptGenerationSnapshot(projectId);
     expect(c).not.toBe(a);
     expect(getPromptGenerationSnapshot(projectId)).toBe(c);
+  });
+
+  it("releases queued jobs when leaving the storyboard page", () => {
+    const projectId = "proj-leave";
+    for (let i = 0; i < STORYBOARD_PROMPT_GEN_MAX_CONCURRENT; i += 1) {
+      requestEpisodePromptGeneration({
+        projectId,
+        episodeId: `ep-${i}`,
+        run: () => new Promise<void>(() => undefined),
+      });
+    }
+    requestEpisodePromptGeneration({
+      projectId,
+      episodeId: "ep-queued",
+      run: async () => undefined,
+    });
+    expect(getPromptGenerationSnapshot(projectId).queuedCount).toBe(1);
+
+    releaseQueuedPromptGenerationOnPageLeave(projectId);
+    const snap = getPromptGenerationSnapshot(projectId);
+    expect(snap.queuedCount).toBe(0);
+    expect(snap.jobs["ep-queued"]).toBeUndefined();
+  });
+
+  it("ignores stale server storyboard_generating locks", () => {
+    const projectId = "proj-stale";
+    const staleUpdatedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    syncPromptGenerationFromProduction({
+      projectId,
+      episodeId: "ep-stale",
+      productionStatus: "storyboard_generating",
+      updatedAt: staleUpdatedAt,
+    });
+    expect(getPromptGenerationSnapshot(projectId).jobs["ep-stale"]).toBeUndefined();
   });
 });

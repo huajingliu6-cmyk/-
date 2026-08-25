@@ -5,6 +5,7 @@ import type {
   ProjectStoryboardWorkspace,
   StoryboardShot,
 } from "@/projects/storyboard/types";
+import type { EpisodeDownstreamStatus } from "@/projects/storyboard/episode-downstream-state";
 import type {
   InvalidRefMediaSelection,
   InvalidRefPreview,
@@ -64,6 +65,24 @@ export async function fetchStoryboardWorkspace(
     throw new Error(await parseError(res));
   }
   return (await res.json()) as StoryboardWorkspaceResponse;
+}
+
+export async function fetchEpisodeDownstreamStatus(
+  projectId: string,
+  episodeId: string,
+): Promise<EpisodeDownstreamStatus> {
+  const res = await storyboardFetch(
+    `${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}/downstream-status`,
+    { credentials: "include" },
+  );
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  const payload = (await res.json()) as { status?: EpisodeDownstreamStatus };
+  if (!payload.status) {
+    throw new Error("下游状态响应无效");
+  }
+  return payload.status;
 }
 
 export async function patchWorkspaceActiveEpisode(
@@ -185,20 +204,64 @@ export class StoryboardGenerateInProgressError extends Error {
   }
 }
 
+export type StoryboardGenerationPollResult = {
+  generationId: string;
+  status: "queued" | "running" | "validating" | "completed" | "failed";
+  error: string | null;
+  promptsNotWritten?: boolean;
+  production: EpisodeProduction;
+};
+
+const STORYBOARD_POLL_INTERVAL_MS = 2500;
+const STORYBOARD_POLL_MAX_MS = 10 * 60 * 1000;
+
+async function pollStoryboardGeneration(input: {
+  projectId: string;
+  episodeId: string;
+  generationId: string;
+}): Promise<EpisodeProduction> {
+  const started = Date.now();
+  while (Date.now() - started < STORYBOARD_POLL_MAX_MS) {
+    const res = await storyboardFetch(
+      `${apiBase(input.projectId)}/episodes/${encodeURIComponent(input.episodeId)}/storyboard-generation/${encodeURIComponent(input.generationId)}`,
+      { credentials: "include" },
+    );
+    const data = (await res.json().catch(() => ({}))) as StoryboardGenerationPollResult;
+    if (!res.ok) {
+      throw new Error(
+        (data as { error?: string }).error ?? `轮询失败 (${res.status})`,
+      );
+    }
+    if (data.status === "completed" || data.status === "failed") {
+      return data.production;
+    }
+    await new Promise((resolve) =>
+      setTimeout(resolve, STORYBOARD_POLL_INTERVAL_MS),
+    );
+  }
+  throw new Error("任务仍在后台生成，请稍候刷新页面查看结果");
+}
+
 export async function generateStoryboard(
   projectId: string,
   episodeId: string,
   idempotencyKey: string,
 ): Promise<EpisodeProduction> {
-  const res = await storyboardFetch(
-    `${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}/storyboard/generate`,
-    {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idempotencyKey }),
-    },
-  );
+  let res: Response;
+  try {
+    res = await storyboardFetch(
+      `${apiBase(projectId)}/episodes/${encodeURIComponent(episodeId)}/storyboard/generate`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idempotencyKey }),
+      },
+    );
+  } catch {
+    return pollStoryboardGeneration({ projectId, episodeId, generationId: idempotencyKey });
+  }
+
   const data = (await res.json().catch(() => ({}))) as {
     production?: EpisodeProduction;
     error?: string;
@@ -207,7 +270,29 @@ export async function generateStoryboard(
     generatedCount?: number;
     unmatchedCount?: number;
     unmatchedShotIds?: string[];
+    generationId?: string;
+    status?: StoryboardGenerationPollResult["status"];
   };
+
+  if (res.status === 202 && data.generationId) {
+    return pollStoryboardGeneration({
+      projectId,
+      episodeId,
+      generationId: data.generationId,
+    });
+  }
+
+  if (res.status === 504 || res.status === 502 || res.status === 503) {
+    if (data.generationId) {
+      return pollStoryboardGeneration({
+        projectId,
+        episodeId,
+        generationId: data.generationId,
+      });
+    }
+    return pollStoryboardGeneration({ projectId, episodeId, generationId: idempotencyKey });
+  }
+
   if (!res.ok) {
     if (res.status === 409 && data.production) {
       throw new StoryboardGenerateInProgressError(

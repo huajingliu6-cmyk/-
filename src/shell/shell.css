@@ -1,4 +1,4 @@
-﻿/* 鍏叡椤堕儴瀵艰埅 + 鐧诲綍绌挎杞満锛堟寕鍦?shell 缁勪欢锛?*/
+/* 鍏叡椤堕儴瀵艰埅 + 鐧诲綍绌挎杞満锛堟寕鍦?shell 缁勪欢锛?*/
 
 .shell-header {
   --shell-header-h: 68px;
@@ -15,18 +15,77 @@
 }
 
 .shell-header__inner {
-  margin: 0 auto;
   display: flex;
+  width: 100%;
+  max-width: none;
   height: 100%;
-  max-width: 1400px;
   align-items: center;
   gap: 10px;
-  padding: 0 24px;
+  padding-inline: clamp(16px, 2.5vw, 32px);
 }
 
-@media (min-width: 1280px) {
-  .shell-header__inner {
-    padding: 0 32px;
+.shell-header--account-only .shell-header__inner {
+  justify-content: flex-end;
+}
+
+.shell-header__lead {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+}
+
+.shell-header__lead h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+}
+
+.shell-header__lead span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.shell-header--project-flow .shell-header__inner {
+  min-width: 0;
+}
+
+.shell-header--project-flow .shell-brand {
+  display: none;
+}
+
+.shell-project-context {
+  min-width: 0;
+  flex: 0 1 clamp(140px, 20vw, 280px);
+}
+
+.shell-project-context__name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: 0.015em;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.shell-project-context__name--placeholder {
+  color: rgba(255, 255, 255, 0.42);
+  font-weight: 500;
+}
+
+@media (max-width: 639px) {
+  .shell-project-context {
+    flex-basis: clamp(96px, 28vw, 180px);
   }
 }
 
@@ -203,10 +262,18 @@
 }
 
 .shell-credits {
-  min-width: 14.5rem;
+  min-width: 0;
+  max-width: min(18rem, 42vw);
   justify-content: flex-start;
   gap: 6px;
   font-variant-numeric: tabular-nums;
+}
+
+.shell-credits--compact {
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  padding-inline: 10px;
 }
 
 .shell-credits__sep {
@@ -324,6 +391,36 @@
 
 .shell-account--end {
   margin-left: auto;
+  margin-right: 0;
+  display: flex;
+  min-width: 0;
+  flex-shrink: 1;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.shell-account__cluster {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.shell-account--end > .appearance,
+.shell-account--end > .shell-notification,
+.shell-account__menu-btn,
+.shell-account__cluster > .shell-avatar {
+  flex-shrink: 0;
+}
+
+.shell-account--end > .space-switcher {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.shell-account__menu-btn {
+  flex-shrink: 0;
 }
 
 .space-switcher {
@@ -701,11 +798,36 @@
   font-size: 11px;
 }
 
+@media (max-width: 1023px) {
+  .shell-credits--full .shell-credits__sep,
+  .shell-credits--full .shell-credits__label--frozen,
+  .shell-credits--full .shell-credits__value--frozen {
+    display: none;
+  }
+
+  .shell-credits--full {
+    max-width: min(13rem, 36vw);
+  }
+}
+
 @media (max-width: 760px) {
   .space-switcher__trigger {
     max-width: 128px;
   }
 
+  .shell-credits--full .shell-credits__label--balance {
+    display: none;
+  }
+}
+
+@media (max-width: 639px) {
+  .shell-account--end {
+    gap: 8px;
+  }
+
+  .shell-credits--full {
+    display: none;
+  }
 }
 
 .shell-notification {
@@ -1002,6 +1124,8 @@
 .shell-avatar {
   display: flex;
   height: 40px;
+  max-width: min(12.5rem, 28vw);
+  flex-shrink: 0;
   align-items: center;
   gap: 8px;
   border-radius: 12px;
@@ -1469,6 +1593,28 @@ html.login-portal-lock body {
   color: rgba(255, 255, 255, 0.48);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.generation-busy-overlay__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.generation-busy-overlay__actions button {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.92);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.generation-busy-overlay__actions button:hover {
+  background: rgba(255, 255, 255, 0.14);
 }
 
 

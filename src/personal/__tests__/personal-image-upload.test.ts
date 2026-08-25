@@ -78,6 +78,22 @@ describe("personal reference thumbnails on HTTP LAN", () => {
     );
     expect(merged).toHaveLength(2);
   });
+
+  it("appends a second batch without replacing the first reference", () => {
+    const first = mergeReferenceFiles(
+      [],
+      [new File([new Uint8Array([1])], "first.png", { type: "image/png" })],
+      6,
+    );
+    const second = mergeReferenceFiles(
+      first,
+      [new File([new Uint8Array([2])], "second.png", { type: "image/png" })],
+      6,
+    );
+    expect(second).toHaveLength(2);
+    expect(second[0]?.file.name).toBe("first.png");
+    expect(second[1]?.file.name).toBe("second.png");
+  });
 });
 
 describe("personal image upload to personal assets", () => {

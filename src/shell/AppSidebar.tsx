@@ -87,7 +87,7 @@ export function AppSidebar({
   collapsed = false,
   onToggleCollapsed,
 }: AppSidebarProps) {
-  const { openCanvas, picker: canvasPicker } = useOpenCanvas();
+  const { openCanvas } = useOpenCanvas();
   const { openOneStackFlow } = useOpenOneStackFlow();
 
   return (
@@ -192,7 +192,6 @@ export function AppSidebar({
           })}
         </nav>
       </aside>
-      {canvasPicker}
     </>
   );
 }

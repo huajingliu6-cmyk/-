@@ -27,6 +27,11 @@ import {
 import { planAssetContentResponse } from "@/video-generation/serve-generated-video";
 import { synchronizeAssetMediaDownstream } from "@/projects/assets/asset-draft-downstream";
 import {
+  parseVoiceAudioDurationSeconds,
+  validateVoiceAudioDurationForUpload,
+} from "@/projects/assets/voice-audio-duration";
+import { VOICE_AUDIO_MAX_BYTES } from "@/projects/assets/voice-audio-constants";
+import {
   deleteRemoteAssetAudio,
   getRemoteAssetAudio,
   putRemoteAssetAudio,
@@ -241,19 +246,22 @@ export async function PUT(request: Request, context: RouteContext) {
   if (file.size <= 0) {
     return NextResponse.json({ error: "音频文件为空" }, { status: 400 });
   }
-  if (file.size > PROJECT_ASSET_AUDIO_MAX_BYTES) {
-    return NextResponse.json(
-      { error: "音频不能超过 50MB" },
-      { status: 413 },
-    );
+
+  const isVoiceAsset = found.type === "voice";
+  const maxBytes = isVoiceAsset
+    ? VOICE_AUDIO_MAX_BYTES
+    : PROJECT_ASSET_AUDIO_MAX_BYTES;
+  const maxSizeMessage = isVoiceAsset
+    ? "音色文件不能超过 10 MB。"
+    : "音频不能超过 50MB";
+
+  if (file.size > maxBytes) {
+    return NextResponse.json({ error: maxSizeMessage }, { status: 413 });
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  if (buffer.byteLength > PROJECT_ASSET_AUDIO_MAX_BYTES) {
-    return NextResponse.json(
-      { error: "音频不能超过 50MB" },
-      { status: 413 },
-    );
+  if (buffer.byteLength > maxBytes) {
+    return NextResponse.json({ error: maxSizeMessage }, { status: 413 });
   }
 
   const sniffed = sniffProjectAssetAudioMime(buffer);
@@ -289,6 +297,14 @@ export async function PUT(request: Request, context: RouteContext) {
       { error: "仅支持 MP3 / WAV / OGG 音频" },
       { status: 400 },
     );
+  }
+
+  if (isVoiceAsset) {
+    const durationSeconds = parseVoiceAudioDurationSeconds(buffer, sniffed);
+    const durationError = validateVoiceAudioDurationForUpload(durationSeconds);
+    if (durationError) {
+      return NextResponse.json({ error: durationError }, { status: 400 });
+    }
   }
 
   const displayName =

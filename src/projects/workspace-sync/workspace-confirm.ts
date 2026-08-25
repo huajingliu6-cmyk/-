@@ -42,6 +42,8 @@ async function confirmWorkspaceEpisodeAssetDesignRemote(input: {
   expectedRevision: number;
   userId: string;
   fingerprint: string;
+  itemId?: string;
+  itemIds?: string[];
 }): Promise<ConfirmWorkspaceEpisodeAssetDesignResult> {
   for (let attempt = 0; attempt < MAX_REMOTE_WRITE_ATTEMPTS; attempt += 1) {
     const detail = await getWorkspaceEpisodeAssetDesignDetail(
@@ -156,6 +158,8 @@ export async function confirmWorkspaceEpisodeAssetDesign(input: {
   expectedRevision: number;
   userId: string;
   fingerprint: string;
+  itemId?: string;
+  itemIds?: string[];
 }): Promise<ConfirmWorkspaceEpisodeAssetDesignResult> {
   if (isRemoteDataOnly()) {
     return confirmWorkspaceEpisodeAssetDesignRemote(input);

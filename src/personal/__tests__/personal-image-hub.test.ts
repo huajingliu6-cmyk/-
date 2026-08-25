@@ -9,10 +9,15 @@ function readSrc(relativePath: string): string {
 }
 
 describe("personal image hub shell", () => {
-  it("hides top header on /app and uses sidebar hub layout", () => {
+  it("shows account-only global header on sidebar hub routes", () => {
     const shell = readSrc("src/shell/AuthenticatedAppShell.tsx");
-    expect(shell).toContain("isSidebarHub");
+    const nav = readSrc("src/shell/nav.ts");
+    expect(shell).toContain("isSidebarHubPath");
+    expect(shell).toContain("shellHeaderVariant");
     expect(shell).toContain("shell-app--sidebar-hub");
+    expect(shell).toContain('variant={headerVariant}');
+    expect(nav).toContain("isSidebarHubPath");
+    expect(nav).toContain('"account-only"');
     expect(shell).not.toContain("<AppSidebar />");
   });
 

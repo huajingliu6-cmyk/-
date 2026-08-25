@@ -40,52 +40,64 @@ describe("storyboard creation UI flow contracts", () => {
     );
   });
 
-  it("uses view-script modal and soft reminder after script change", () => {
-    expect(panel).toContain("view-script-btn");
-    expect(panel).toContain("编辑剧本");
-    expect(panel).toContain("view-script-modal");
-    expect(panel).toContain("view-script-save");
-    expect(panel).toContain("confirm-script-btn");
-    expect(panel).toContain('data-testid="generate-storyboard-prompts"');
-    expect(panel).toContain('title={!scriptConfirmed ? "请先确认本集剧本"');
-    expect(panel).toContain("handleConfirmScript");
-    expect(panel).not.toContain(">剧本已确认<");
-    expect(panel).toContain("storyboard-script-preview");
-    expect(panel).toContain("canGeneratePrompts");
-    expect(panel).toContain("script-changed-reminder");
-    expect(panel).toContain("生成分镜提示词");
-    expect(panel).not.toContain("重新生成本集分镜提示词");
-    expect(panel).not.toContain("regenerate-episode-storyboard-prompts");
-    expect(panel).toContain("retry-episode-storyboard-prompts");
-    expect(panel).not.toContain("storyboard-generating-hint");
-    expect(panel).not.toContain(
-      "剧本已确认，点击「生成分镜提示词」继续。人物、道具、场景可在每个镜头中单独添加。",
+  it("exposes one-click extract on storyboard stage panel", () => {
+    const videoBtn = readSrc(
+      "src/projects/storyboard/components/ShotVideoGenerationButton.tsx",
     );
-    expect(panel).not.toContain("重新生成当前镜头提示词");
-    expect(panel).not.toContain("regenerate-shot-prompt");
-    expect(panel).toContain("createPortal");
-    expect(panel).toContain("document.body");
-    expect(panel).not.toContain("全部展开");
-    expect(panel).not.toContain("保存全部");
+    const stagePanel = readSrc(
+      "src/projects/storyboard/components/StoryboardEpisodeStagePanel.tsx",
+    );
+    const workspace = readSrc(
+      "src/projects/storyboard/StoryboardCreationWorkspace.tsx",
+    );
+    expect(panel).toContain("StoryboardEpisodeStagePanel");
+    expect(stagePanel).toContain("storyboard-extract-episode-btn");
+    expect(stagePanel).toContain("提取本集资产");
+    expect(stagePanel).toContain("storyboard-episode-label");
+    expect(workspace).toContain("handleExtractEpisode");
+    expect(workspace).toContain("asset-extraction/tasks");
+    expect(panel).toContain("storyboard-script-preview");
+    expect(panel).toContain("script-changed-reminder");
+    expect(panel).toContain('data-testid="generate-shot-storyboard-video"');
+    expect(panel).toContain("生成本分镜视频");
+    expect(videoBtn).toContain("生成本分镜视频");
+    expect(panel).not.toContain("createPortal");
     expect(panel).not.toContain(">查看剧本<");
     expect(panel).not.toContain(">修改剧本<");
-    expect(panel).not.toContain("分镜已过期。请重新生成分镜提示词后继续");
+    expect(panel).not.toContain("待确认剧本");
   });
 
-  it("uses safeRandomUUID for prompt generate idempotency on HTTP LAN", () => {
-    expect(workspace).toContain('from "@/lib/safe-random-id"');
-    expect(workspace).toContain("safeRandomUUID()");
-    expect(workspace).not.toContain("crypto.randomUUID()");
-    expect(workspace).toContain("generateStoryboard(projectId, episodeId, key)");
+  it("exposes regenerate storyboard prompts for failed downstream states", () => {
+    const stagePanel = readSrc(
+      "src/projects/storyboard/components/StoryboardEpisodeStagePanel.tsx",
+    );
+    const workspace = readSrc(
+      "src/projects/storyboard/StoryboardCreationWorkspace.tsx",
+    );
+    expect(stagePanel).toContain("regenerate-storyboard-prompts");
+    expect(stagePanel).toContain("重新生成分镜提示词");
+    expect(workspace).toContain("handleRegenerateStoryboard");
+    expect(workspace).toContain("generateStoryboard");
+    expect(workspace).toContain("shouldPollEpisodeDownstream");
   });
 
-  it("uses per-episode prompt generation without full-page busy lock", () => {
-    expect(workspace).toContain("requestEpisodePromptGeneration");
+  it("does not expose always-on manual storyboard prompt generation button", () => {
+    const stagePanel = readSrc(
+      "src/projects/storyboard/components/StoryboardEpisodeStagePanel.tsx",
+    );
+    const workspace = readSrc(
+      "src/projects/storyboard/StoryboardCreationWorkspace.tsx",
+    );
+    expect(workspace).not.toContain("requestEpisodePromptGeneration");
+    expect(stagePanel).not.toContain('data-testid="generate-storyboard-prompts"');
+    expect(workspace).not.toContain("handleGenerateStoryboard");
     expect(workspace).toContain("onOpenGlobalSettings");
     expect(panel).toContain("全局设置");
     expect(panel).toContain("storyboard-global-settings-btn");
     expect(workspace).not.toContain("返回资产管理");
-    expect(workspace).not.toContain("isGenerationBusy");
+    expect(workspace).toContain("fetchEpisodeDownstreamStatus");
+    expect(workspace).toContain("episodeDownstream");
+    expect(workspace).not.toContain("RouteLoadingOverlay");
     expect(panel).toContain("episode-prompt-gen-busy");
   });
 
@@ -176,11 +188,15 @@ describe("storyboard creation UI flow contracts", () => {
     expect(dialog).toContain('label="画质"');
     expect(dialog).toContain('label="模型"');
     expect(dialog).toContain('label="风格"');
-    expect(glassSelect).toContain("createPortal");
+    expect(dialog).toContain('menuAlign: "end"');
+    expect(glassSelect).toContain("menuAlign");
     expect(glassSelect).toContain("menuPortal");
     expect(glassSelect).toContain('position: "fixed"');
     expect(css).toMatch(
-      /\.global-settings-modal\s*\{[\s\S]*?max-height:\s*min\(720px/,
+      /\.global-settings-modal\s*\{[\s\S]*?width:\s*min\(380px/,
+    );
+    expect(css).toMatch(
+      /\.global-settings-modal-backdrop\s*\{[\s\S]*?justify-content:\s*flex-end/,
     );
     expect(css).toMatch(
       /\.global-settings-select-content\s*\{[\s\S]*?z-index:\s*2600/,
@@ -213,17 +229,22 @@ describe("storyboard creation UI flow contracts", () => {
     expect(preview).not.toContain("<h4>最新视频</h4>");
     expect(preview).toContain('title="历史分镜"');
     expect(preview).toContain("sbw-shot-preview__history-btn is-icon");
+    expect(preview).toContain("WorkspaceVideoPlayer");
+    expect(preview).toContain('data-testid="shot-video-download-btn"');
+    expect(preview).toContain('data-testid="shot-video-transport"');
+    expect(preview).toContain('data-testid="shot-video-scrub"');
+    expect(preview).toContain('data-testid="shot-video-fullscreen-btn"');
     expect(accordion).toContain("aspectRatio={videoOutputParams.aspectRatio}");
     expect(playback).toContain("WORKSPACE_TIMELINE_PAGE_SIZE = 6");
     expect(playback).toContain("sbw-playback__shot-strip is-paged");
     expect(css).toMatch(
-      /\.sbw-shot-preview__history-btn\.is-icon\s*\{[\s\S]*?position:\s*absolute/,
+      /\.sbw-shot-preview__workspace-toolbar\s*\{[\s\S]*?justify-content:\s*space-between/,
     );
     expect(css).toMatch(
-      /\.sbw-shot-workspace\s*\{[\s\S]*?grid-template-columns:\s*minmax\(228px/,
+      /\.sbw-shot-preview__workspace-frame\[data-aspect="9:16"\][\s\S]*?\.sbw-shot-preview__workspace-media[\s\S]*?aspect-ratio:\s*9\s*\/\s*16/,
     );
     expect(css).toMatch(
-      /\.sbw-shot-preview__workspace-frame\[data-aspect="9:16"\]\s*\{[\s\S]*?aspect-ratio:\s*9\s*\/\s*16/,
+      /\.sbw-shot-workspace\s*\{[\s\S]*?grid-template-columns:\s*minmax\(228px,\s*260px\)\s*minmax\(0,\s*2fr\)\s*minmax\(0,\s*1fr\)/,
     );
     expect(css).toMatch(
       /\.sbw-inner\s*\{[\s\S]*?max-width:\s*none/,
@@ -251,10 +272,13 @@ describe("storyboard creation UI flow contracts", () => {
     );
     expect(css).not.toContain(".sbw-shot-workspace__bar");
     expect(css).toMatch(
-      /\.sbw-playback__shot-strip\.is-paged\s*\{[\s\S]*?repeat\(6/,
+      /\.sbw-playback__shot-strip\.is-paged\s*\{[\s\S]*?display:\s*flex/,
     );
     expect(css).toMatch(
-      /\.sbw-shot-card\.is-workspace \.sbw-shot-card__body\s*\{[\s\S]*?min-height:\s*min\(960px/,
+      /\.sbw-shot-card\.is-workspace \.sbw-shot-card__body\s*\{[\s\S]*?min-height:\s*calc\(100svh - var\(--shell-header-h,\s*68px\) - 108px\)/,
+    );
+    expect(css).toMatch(
+      /\.sbw-shot-workspace__prompt \.sbw-pre[\s\S]*?max-height:\s*none/,
     );
     expect(accordion).toContain("workspaceTimeline");
     expect(accordion).toContain("StoryboardWorkspaceShell");
@@ -297,12 +321,15 @@ describe("storyboard creation UI flow contracts", () => {
     expect(panel).toContain("preStoryboardPrompt");
     expect(panel).toContain('data-testid="storyboard-script-preview"');
     expect(panel).toContain('data-testid="storyboard-workspace-generating"');
-    expect(panel).toContain('data-testid="storyboard-empty-timeline"');
-    expect(panel).toContain("生成分镜后将显示时间轴");
-    expect(panel).toContain('data-testid="view-script-btn"');
-    expect(panel).toContain('data-testid="confirm-script-btn"');
-    expect(panel).toContain('data-testid="generate-storyboard-prompts"');
-    expect(panel).toContain('data-testid="retry-episode-storyboard-prompts"');
+    expect(panel).toContain("StoryboardEmptyTimeline");
+    const emptyTimeline = readSrc(
+      "src/projects/storyboard/components/StoryboardEmptyTimeline.tsx",
+    );
+    expect(emptyTimeline).toContain('data-testid="storyboard-empty-timeline"');
+    expect(emptyTimeline).toContain("生成分镜后将显示时间轴");
+    expect(emptyTimeline).toContain("sbw-playback__empty-message");
+    expect(emptyTimeline).not.toContain("index === 0");
+    expect(panel).toContain('data-testid="generate-shot-storyboard-video"');
     expect(panel).not.toContain("sbw-script-stage");
     expect(css).not.toContain(".sbw-script-stage");
     expect(panel).not.toContain("<h1>分镜创作</h1>");
@@ -315,12 +342,17 @@ describe("storyboard creation UI flow contracts", () => {
       /!storyboard\s*\?\s*<div className="sbw-script-stage"/,
     );
     // Empty / generating path must not invent shots for insert API.
-    expect(panel).toMatch(
-      /data-testid="storyboard-empty-timeline"[\s\S]*?Array\.from\(\{ length: 6 \}/,
-    );
+    expect(emptyTimeline).toContain("Array.from({ length: EMPTY_SLOT_COUNT }");
+    expect(css).toContain("sbw-playback__empty-state");
+    expect(css).toContain("grid-template-columns: repeat(6, minmax(120px, 1fr))");
+    expect(css).toContain(".sbw-playback__shot-strip.is-paged .sbw-playback__shot-slot");
+    expect(css).toContain("flex: 0 0 120px");
     expect(panel).toContain("insertBlankStoryboardShot");
     expect(panel).toContain("onInsertShotAfter={handleInsertShotAfter}");
     expect(playback).toContain("WORKSPACE_TIMELINE_PAGE_SIZE = 6");
+    expect(playback).toContain("sbw-playback__insert-shot--inline");
+    expect(playback).toContain("index < clips.length - 1");
+    expect(playback).toContain('data-testid={`insert-shot-after-${clip.shot.id}`}');
   });
 
   it("supports thumbnail delete confirm and keeps at least one shot", () => {

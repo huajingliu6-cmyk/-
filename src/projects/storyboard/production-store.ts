@@ -354,11 +354,25 @@ function parseStoryboardShot(raw: unknown): StoryboardShot | null {
         : null,
     autoPromptText: asNullableString(raw.autoPromptText),
     promptNeedsReview: raw.promptNeedsReview === true,
+    storyboardPromptRuleVersion: asNullableString(raw.storyboardPromptRuleVersion),
     generatedWithPromptVersion:
       typeof raw.generatedWithPromptVersion === "number" &&
       Number.isFinite(raw.generatedWithPromptVersion)
         ? raw.generatedWithPromptVersion
         : null,
+    storyboardPromptWarnings: Array.isArray(raw.storyboardPromptWarnings)
+      ? raw.storyboardPromptWarnings
+          .map((item) => {
+            if (!isRecord(item)) return null;
+            const code = asString(item.code);
+            const message = asString(item.message);
+            if (!code || !message) return null;
+            return { code, message };
+          })
+          .filter(
+            (item): item is { code: string; message: string } => item !== null,
+          )
+      : null,
   };
 }
 
@@ -461,6 +475,27 @@ function parseEpisodeStatus(value: unknown): EpisodeProductionStatus {
 
 function parseCreationStep(value: unknown): CreationStep {
   return normalizeCreationStep(value);
+}
+
+function parseStoryboardGenerationJob(
+  raw: unknown,
+): import("@/projects/storyboard/types").StoryboardGenerationJob | null {
+  if (!isRecord(raw) || typeof raw.generationId !== "string") return null;
+  const statuses = ["queued", "running", "validating", "completed", "failed"] as const;
+  const status =
+    typeof raw.status === "string" &&
+    (statuses as readonly string[]).includes(raw.status)
+      ? (raw.status as (typeof statuses)[number])
+      : "failed";
+  const now = new Date().toISOString();
+  return {
+    generationId: raw.generationId,
+    status,
+    error: asNullableString(raw.error),
+    promptsNotWritten: raw.promptsNotWritten === true,
+    startedAt: asString(raw.startedAt, now),
+    updatedAt: asString(raw.updatedAt, now),
+  };
 }
 
 function parseVideoGenerationBatch(
@@ -568,6 +603,9 @@ function parseEpisodeProduction(
     storyboardStale: asBoolean(raw.storyboardStale),
     activeStoryboard,
     generationError: asNullableString(raw.generationError),
+    storyboardGenerationJob: parseStoryboardGenerationJob(
+      raw.storyboardGenerationJob,
+    ),
     videoGenerationBatch: parseVideoGenerationBatch(raw.videoGenerationBatch),
     promptRefresh: parsePromptRefresh(raw.promptRefresh),
     revision: Math.max(1, Math.round(asNumber(raw.revision, 1))),

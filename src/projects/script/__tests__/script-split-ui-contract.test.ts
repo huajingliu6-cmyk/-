@@ -27,24 +27,20 @@ describe("local script split UI contract", () => {
     expect(workspace).not.toContain("streamStoryGeneration");
   });
 
-  it("upload panel no longer renders a standalone 分集/已分集 button", () => {
-    expect(upload).not.toContain("onOpenSplit");
-    expect(upload).not.toContain("splitDone");
-    expect(upload).not.toContain("canSplit");
-    expect(upload).not.toContain('data-testid="script-split-start"');
-    expect(upload).not.toContain("已分集");
-    expect(upload).toContain("上传剧本文件");
-    expect(upload).toContain("处理中…");
-    expect(upload).toContain("将自动保存并创建剧集");
-    expect(upload).toContain("script-upload-remove");
-    expect(upload).toContain("onRemove");
-    expect(workspace).toContain("clearScript: true");
-    expect(workspace).toContain("replaceExisting");
-    expect(workspace).toContain("handleRemoveUploadedScript");
-    expect(workspace).not.toContain('data-testid="script-split-start"');
-    expect(workspace).not.toContain("canSplit={canSplit}");
-    expect(workspace).not.toContain("splitDone={splitDone}");
-    expect(workspace).not.toContain("onOpenSplit");
+  it("upload panel supports click and drag-drop upload", () => {
+    expect(upload).toContain("script-upload-dropzone");
+    expect(upload).toContain("onDrop");
+    expect(upload).toContain("pickFile");
+    expect(upload).toContain("点击选择或拖拽");
+  });
+
+  it("script workspace hides upload after script is imported", () => {
+    expect(workspace).toContain("is-no-source");
+    expect(workspace).toContain('aria-label="剧本读取处理"');
+    expect(workspace).toContain("embedded");
+    expect(workspace).toMatch(
+      /!sourceText\?\.trim\(\) && !sourceFile[\s\S]*ScriptUploadPanel/,
+    );
   });
 
   it("auto-split after upload does not require an extra confirm-import click", () => {
@@ -115,5 +111,15 @@ describe("local script split UI contract", () => {
     expect(processPanel).toContain("上传剧本后将自动分集并创建剧集");
     expect(workspace).toContain("正在自动生成分集方案");
     expect(workspace).toContain("剧本导入后会自动分集");
+  });
+
+  it("auto-saves edited episode text on blur or outside click", () => {
+    expect(workspace).not.toContain("保存页面");
+    expect(workspace).not.toContain("scs-head");
+    expect(workspace).toContain("dirtyRef");
+    expect(workspace).toContain("flushSave");
+    expect(workspace).toContain("pagehide");
+    expect(workspace).toContain("onPointerDownCapture");
+    expect(editor).toContain("点击其他区域将自动保存");
   });
 });

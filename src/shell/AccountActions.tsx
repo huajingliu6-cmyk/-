@@ -57,10 +57,10 @@ export function AccountActions({ user }: Props) {
     creditsState.status === "unavailable" ? "积分暂不可用" : "剩余积分";
 
   return (
-    <div className="shell-account">
+    <div className="shell-account__cluster">
       <button
         type="button"
-        className={`shell-chip shell-chip--glass shell-credits shell-credits--btn hidden sm:inline-flex ${creditsBounce.bounceClass}`}
+        className={`shell-chip shell-chip--glass shell-credits shell-credits--btn shell-credits--compact inline-flex sm:hidden ${creditsBounce.bounceClass}`}
         title={creditsLabel}
         aria-haspopup="dialog"
         aria-expanded={pointsOpen}
@@ -74,27 +74,63 @@ export function AccountActions({ user }: Props) {
         <Coins className="h-3.5 w-3.5 shrink-0 text-violet-300/90" aria-hidden />
         {creditsState.status === "loading" ? (
           <>
-            <span className="shell-credits__label">剩余积分：</span>
+            <span className="shell-credits__skeleton" aria-hidden />
+            <span className="sr-only">加载中</span>
+          </>
+        ) : creditsState.status === "ready" ? (
+          <span className="shell-credits__value">
+            {formatCreditsBalance(creditsState.balance)}
+          </span>
+        ) : (
+          <span className="shell-credits__value shell-credits__value--muted">--</span>
+        )}
+      </button>
+
+      <button
+        type="button"
+        className={`shell-chip shell-chip--glass shell-credits shell-credits--btn shell-credits--full hidden sm:inline-flex ${creditsBounce.bounceClass}`}
+        title={creditsLabel}
+        aria-haspopup="dialog"
+        aria-expanded={pointsOpen}
+        onClick={() => {
+          creditsBounce.trigger();
+          setPointsTab("history");
+          setPointsOpen(true);
+        }}
+        onAnimationEnd={creditsBounce.onAnimationEnd}
+      >
+        <Coins className="h-3.5 w-3.5 shrink-0 text-violet-300/90" aria-hidden />
+        {creditsState.status === "loading" ? (
+          <>
+            <span className="shell-credits__label shell-credits__label--balance">
+              剩余积分：
+            </span>
             <span className="shell-credits__skeleton" aria-hidden />
             <span className="sr-only">加载中</span>
           </>
         ) : creditsState.status === "ready" ? (
           <>
-            <span className="shell-credits__label">剩余积分：</span>
+            <span className="shell-credits__label shell-credits__label--balance">
+              剩余积分：
+            </span>
             <span className="shell-credits__value">
               {formatCreditsBalance(creditsState.balance)}
             </span>
             <span className="shell-credits__sep" aria-hidden>
               ·
             </span>
-            <span className="shell-credits__label">冻结：</span>
+            <span className="shell-credits__label shell-credits__label--frozen">
+              冻结：
+            </span>
             <span className="shell-credits__value shell-credits__value--frozen">
               {formatCreditsBalance(creditsState.frozen)}
             </span>
           </>
         ) : (
           <>
-            <span className="shell-credits__label">剩余积分：</span>
+            <span className="shell-credits__label shell-credits__label--balance">
+              剩余积分：
+            </span>
             <span className="shell-credits__value shell-credits__value--muted">
               --
             </span>

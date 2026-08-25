@@ -187,3 +187,64 @@ export function scriptSourceFileTypeFromFormat(
   if (format === "md") return "md";
   return "txt";
 }
+
+/** Import file then persist draft with auto-split (create-project wizard). */
+export async function uploadScriptAndAutoSplit(
+  projectId: string,
+  file: File,
+): Promise<void> {
+  const preview = await postScriptImportByFile(projectId, file);
+  const sourceImportMeta = buildSourceImportFromPreview(preview);
+  const nextSourceFile = {
+    id: `file-${preview.sha256.slice(0, 12)}`,
+    name: preview.fileName,
+    type: scriptSourceFileTypeFromFormat(preview.format),
+    size: preview.byteLength,
+    status: "uploaded" as const,
+  };
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/script-draft`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId,
+        autoSplit: true,
+        replaceExisting: false,
+        sourceFile: nextSourceFile,
+        sourceText: preview.sourceText,
+        preambleNotes: preview.preamble || null,
+        sourceImport: sourceImportMeta,
+        novelTask: {
+          id: `novel-task-${projectId}`,
+          projectId,
+          sourceFile: null,
+          status: "uploaded",
+          resultScriptId: null,
+          createdAt: new Date().toISOString(),
+        },
+        episodes: [],
+        selectedId: null,
+        listPage: 1,
+        splitConfig: {
+          mode: "by-episode-count",
+          totalEpisodes: 36,
+          charsPerEpisode: 3000,
+        },
+        novelOpen: false,
+        episodeSplit: {
+          status: "not_started",
+          sourceFingerprint: null,
+          confirmedRevision: 0,
+          proposedEpisodes: [],
+          generationId: null,
+          errorMessage: null,
+        },
+      }),
+    },
+  );
+  const payload = (await res.json()) as { error?: string };
+  if (!res.ok) {
+    throw new Error(payload.error ?? "自动分集失败");
+  }
+}

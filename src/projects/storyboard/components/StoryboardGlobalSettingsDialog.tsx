@@ -56,6 +56,7 @@ export function StoryboardGlobalSettingsDialog({
     menuPortal: true as const,
     menuSideOffset: 6,
     menuCollisionPadding: 12,
+    menuAlign: "end" as const,
     menuClassName: "global-settings-select-content",
     optionClassName: "global-settings-select-item",
     disabled: saving,

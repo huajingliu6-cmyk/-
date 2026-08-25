@@ -133,9 +133,10 @@ export function AudioCreateDialog({
             }
             tip={
               fixedType === "voice"
-                ? "支持 MP3 / WAV / OGG，最大 50MB。名称与音频文件均必填。"
+                ? "支持 MP3 / WAV / OGG，时长 4-6 秒，最大 10 MB。名称与音频文件均必填。"
                 : "支持 MP3 / WAV / OGG，最大 50MB。选择「音色」后上传，即可在角色详情中选用。"
             }
+            variant={fixedType === "voice" || draft.type === "voice" ? "voice" : "default"}
             value={{
               fileName: draft.fileName,
               objectUrl: draft.objectUrl,

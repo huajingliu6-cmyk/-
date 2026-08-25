@@ -4,8 +4,13 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AuthenticatedHeader } from "@/shell/AuthenticatedHeader";
 import { GenerationBusyGuard } from "@/shell/GenerationBusyGuard";
+import { ProjectFlowHeaderShell } from "@/shell/ProjectFlowHeaderShell";
 import { useAuthUser } from "@/shell/useAuthUser";
-import { APP_ASSET_MARKET_PATH, APP_PERSONAL_ASSETS_PATH, APP_POST_LOGIN_PATH, APP_SHELL_ROOT, isOneStackFlowPath } from "@/shell/nav";
+import {
+  APP_POST_LOGIN_PATH,
+  isSidebarHubPath,
+  shellHeaderVariant,
+} from "@/shell/nav";
 import {
   ACTIVE_ENTERPRISE_EVENT,
   readActiveSpace,
@@ -44,15 +49,8 @@ export function AuthenticatedAppShell({
   const router = useRouter();
   const pathname = usePathname();
   const [activeSpace, setActiveSpace] = useState<ActiveSpace>(() => readActiveSpace());
-  const isAdminConsole =
-    pathname === "/app/admin" || pathname.startsWith("/app/admin/");
-  const isSidebarHub =
-    pathname === APP_SHELL_ROOT ||
-    pathname === `${APP_SHELL_ROOT}/` ||
-    pathname === APP_PERSONAL_ASSETS_PATH ||
-    pathname === APP_ASSET_MARKET_PATH;
-  const isOneStackFlow = isOneStackFlowPath(pathname);
-  const hideTopChrome = isAdminConsole || isSidebarHub || isOneStackFlow;
+  const isSidebarHub = isSidebarHubPath(pathname ?? "");
+  const headerVariant = shellHeaderVariant(pathname ?? "");
 
   useEffect(() => {
     const onSpaceChanged = (event: Event) => {
@@ -82,7 +80,11 @@ export function AuthenticatedAppShell({
 
   if (auth.status === "loading") {
     return (
-      <div className="shell-app flex h-full min-h-full flex-col overflow-hidden bg-[#070811]">
+      <div
+        className={`shell-app flex h-full min-h-full flex-col overflow-hidden bg-[#070811]${
+          isSidebarHub ? " shell-app--sidebar-hub" : ""
+        }`}
+      >
         <ShellHeaderPlaceholder />
         <div className="shell-outlet relative min-h-0 flex-1 overflow-hidden">
           <p className="p-6 text-sm text-white/45">正在恢复登录状态…</p>
@@ -91,6 +93,15 @@ export function AuthenticatedAppShell({
     );
   }
 
+  const outlet = (
+    <div
+      key={pathname}
+      className="shell-outlet shell-outlet--enter relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
+    >
+      {auth.status === "authenticated" && !spaceRedirect ? children : null}
+    </div>
+  );
+
   return (
     <div
       className={`shell-app flex h-full min-h-full flex-col overflow-hidden bg-[#070811]${
@@ -98,21 +109,19 @@ export function AuthenticatedAppShell({
       }`}
     >
       {auth.status === "authenticated" ? (
-        <>
-          {hideTopChrome ? null : (
-            <AuthenticatedHeader user={auth.user} />
-          )}
-          {hideTopChrome ? null : <GenerationBusyGuard />}
-        </>
+        <ProjectFlowHeaderShell>
+          <>
+            <AuthenticatedHeader user={auth.user} variant={headerVariant} />
+            <GenerationBusyGuard />
+            {outlet}
+          </>
+        </ProjectFlowHeaderShell>
       ) : (
-        <ShellHeaderPlaceholder />
+        <>
+          <ShellHeaderPlaceholder />
+          {outlet}
+        </>
       )}
-      <div
-        key={pathname}
-        className="shell-outlet shell-outlet--enter relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
-      >
-        {auth.status === "authenticated" && !spaceRedirect ? children : null}
-      </div>
     </div>
   );
 }

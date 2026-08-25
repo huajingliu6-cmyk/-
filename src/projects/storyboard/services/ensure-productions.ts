@@ -37,6 +37,7 @@ function createEpisodeProduction(
     storyboardStale: false,
     activeStoryboard: null,
     generationError: null,
+    storyboardGenerationJob: null,
     videoGenerationBatch: null,
     revision: 1,
     lastEditedAt: now,

@@ -8,7 +8,9 @@ import {
 import { confirmScriptSplit } from "@/projects/script/script-split-confirm";
 import { attachScriptDownstreamSync } from "@/projects/script/script-auto-split";
 import { afterScriptSplitConfirmed } from "@/projects/assets/extraction/after-confirm";
-import type { ProposedEpisode } from "@/projects/script/script-split-types";
+import {
+  bootstrapEpisodeScriptsAfterSplitConfirm,
+} from "@/projects/storyboard/services/generate-storyboard-episode";import type { ProposedEpisode } from "@/projects/script/script-split-types";
 import { guardScriptDraftRemoteData } from "@/projects/script/route-remote-guard";
 
 type RouteContext = {
@@ -121,16 +123,26 @@ async function confirmSplit(request: Request, context: RouteContext) {
     );
   }
 
+  const actorId = gated.user.id;
+
   if (result.idempotent) {
     const extraction = await afterScriptSplitConfirmed({
       projectId,
       sourceFingerprint,
     });
+    await bootstrapEpisodeScriptsAfterSplitConfirm({
+      projectId,
+      userId: actorId,
+    });
+    const { resolveScriptDownstreamPipelineStatus } = await import(
+      "@/projects/script/script-downstream-pipeline"
+    );
     return NextResponse.json({
       draft: result.draft,
       idempotent: true,
       extractionAction: extraction.action,
       downstreamSync: await attachScriptDownstreamSync(projectId),
+      pipeline: await resolveScriptDownstreamPipelineStatus(projectId),
     });
   }
 
@@ -139,12 +151,20 @@ async function confirmSplit(request: Request, context: RouteContext) {
     projectId,
     sourceFingerprint,
   });
+  await bootstrapEpisodeScriptsAfterSplitConfirm({
+    projectId,
+    userId: actorId,
+  });
+  const { resolveScriptDownstreamPipelineStatus } = await import(
+    "@/projects/script/script-downstream-pipeline"
+  );
 
   return NextResponse.json({
     draft: saved,
     idempotent: false,
     extractionAction: extraction.action,
     downstreamSync: await attachScriptDownstreamSync(projectId),
+    pipeline: await resolveScriptDownstreamPipelineStatus(projectId),
   });
 }
 
@@ -153,4 +173,4 @@ export function POST(
   context: RouteContext,
 ) {
   return guardScriptDraftRemoteData(() => confirmSplit(request, context));
-};
+}

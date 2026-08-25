@@ -102,6 +102,8 @@ type Props = {
   menuSideOffset?: number;
   /** Viewport edge padding when portaled (px). Default 12. */
   menuCollisionPadding?: number;
+  /** Horizontal alignment of portaled menu relative to trigger. Default start (expand right). */
+  menuAlign?: "start" | "end";
   onOpen?: () => void;
   /** Fires when open state changes (after open / after finish close). */
   onOpenChange?: (open: boolean) => void;
@@ -145,16 +147,24 @@ function computeMenuPosition(
     sideOffset: number;
     collisionPadding: number;
     preferredMaxHeight: number;
+    align?: "start" | "end";
   },
 ): MenuPosition {
-  const { sideOffset, collisionPadding, preferredMaxHeight } = opts;
+  const { sideOffset, collisionPadding, preferredMaxHeight, align = "start" } =
+    opts;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const width = Math.min(trigger.width, vw - collisionPadding * 2);
-  const left = Math.min(
-    Math.max(trigger.left, collisionPadding),
-    vw - collisionPadding - width,
-  );
+  const left =
+    align === "end"
+      ? Math.min(
+          Math.max(trigger.right - width, collisionPadding),
+          vw - collisionPadding - width,
+        )
+      : Math.min(
+          Math.max(trigger.left, collisionPadding),
+          vw - collisionPadding - width,
+        );
 
   const spaceBelow = vh - trigger.bottom - sideOffset - collisionPadding;
   const spaceAbove = trigger.top - sideOffset - collisionPadding;
@@ -211,6 +221,7 @@ export function GlassSelect({
   menuPortal = false,
   menuSideOffset = DEFAULT_SIDE_OFFSET,
   menuCollisionPadding = DEFAULT_COLLISION_PADDING,
+  menuAlign = "start",
   onOpen,
   onOpenChange,
 }: Props) {
@@ -318,9 +329,10 @@ export function GlassSelect({
         sideOffset: menuSideOffset,
         collisionPadding: menuCollisionPadding,
         preferredMaxHeight: MENU_MAX_HEIGHT,
+        align: menuAlign,
       }),
     );
-  }, [menuCollisionPadding, menuPortal, menuSideOffset]);
+  }, [menuAlign, menuCollisionPadding, menuPortal, menuSideOffset]);
 
   useEffect(() => {
     return () => clearCloseTimer();

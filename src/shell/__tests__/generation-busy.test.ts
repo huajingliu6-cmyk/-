@@ -38,15 +38,15 @@ describe("generation-busy registry", () => {
 });
 
 describe("generation-busy wiring contracts", () => {
-  it("shell and stage nav intercept navigation while generating", () => {
+  it("shell and stage nav intercept navigation with scoped leave checks", () => {
     const back = readSrc("src/shell/GlobalBackButton.tsx");
     const nav = readSrc("src/shell/AuthenticatedNavigation.tsx");
-    const stage = readSrc("src/projects/workbench/ProjectStageNav.tsx");
+    const stage = readSrc("src/projects/workbench/ProjectStageNavLinks.tsx");
     const shell = readSrc("src/shell/AuthenticatedAppShell.tsx");
     expect(back).toContain("confirmGenerationLeaveIfNeeded");
-    expect(nav).toContain("isGenerationBusy");
+    expect(nav).toContain("shouldBlockGenerationLeave");
     expect(nav).toContain("confirmGenerationLeaveIfNeeded");
-    expect(stage).toContain("isGenerationBusy");
+    expect(stage).toContain("shouldBlockGenerationLeave");
     expect(shell).toContain("GenerationBusyGuard");
   });
 

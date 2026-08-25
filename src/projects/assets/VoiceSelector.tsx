@@ -212,6 +212,7 @@ export function VoiceSelector({
             ? `项目音色·${withFile.fileName}`
             : "项目音色",
           label: withFile.name,
+          source: "project",
         });
         onStatus?.("已上传项目音色，请确认后点击「绑定音色」。");
       } catch (err: unknown) {

@@ -5,6 +5,14 @@ export const ASSET_EXTRACTION_POLICY = {
   detailBatchSize: 5,
   detailConcurrency: 3,
   detailRetryRounds: 1,
+  /** Single detail-batch model call timeout. */
+  detailBatchTimeoutMs: 180_000,
+  /** How long a claimed runner lease remains exclusive. */
+  runnerLeaseMs: 90_000,
+  /** Heartbeat / lease renew cadence while a batch is in flight. */
+  runnerHeartbeatMs: 12_000,
+  /** UI treats a task as stalled when heartbeat is older than this. */
+  runnerStaleMs: 75_000,
 } as const;
 
 export type AssetExtractionPolicy = typeof ASSET_EXTRACTION_POLICY;

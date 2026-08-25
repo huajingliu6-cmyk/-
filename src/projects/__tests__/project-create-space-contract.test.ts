@@ -31,4 +31,9 @@ describe("project creation space contract", () => {
       "approvalEnabled: enterpriseId ? parsed.value.approvalEnabled : false",
     );
   });
+
+  it("shows project highlights only for enterprise creation", () => {
+    expect(wizard).toMatch(/\{enterpriseId \? \([\s\S]*项目要点[\s\S]*\) : null\}/);
+    expect(wizard).toContain("仅项目主理人可以修改");
+  });
 });

@@ -90,6 +90,7 @@ export const LIVE_EXTRACTION_STATUSES: AssetExtractionTaskStatus[] = [
   "retrying_failed",
 ];
 
+/** AI still running — show progress animation. */
 export function isLiveExtractionStatus(status: string | null | undefined): boolean {
   return (
     status === "discovering_roster" ||
@@ -102,6 +103,22 @@ export function isLiveExtractionStatus(status: string | null | undefined): boole
     status === "generating" ||
     status === "applying" ||
     status === "retrying_failed"
+  );
+}
+
+/** Waiting for user roster pick — not "completed", not progress animation. */
+export function isAwaitingRosterSelectionStatus(
+  status: string | null | undefined,
+): boolean {
+  return status === "awaiting_roster_selection";
+}
+
+/** Blocks starting another extract / leaving casually. */
+export function isBlockingExtractionStatus(
+  status: string | null | undefined,
+): boolean {
+  return (
+    isLiveExtractionStatus(status) || isAwaitingRosterSelectionStatus(status)
   );
 }
 
@@ -150,6 +167,16 @@ export type AssetRosterItem = {
   firstSeenOrder?: number;
 };
 
+export type RosterMatchStatus = "new" | "existing" | "possible_duplicate";
+
+/** Roster row enriched for the selection UI. */
+export type PublicAssetRosterItem = AssetRosterItem & {
+  matchStatus: RosterMatchStatus;
+  matchedAssetName: string | null;
+  selectable: boolean;
+  defaultSelected: boolean;
+};
+
 export type AssetDetailTaskItemStatus =
   | "pending"
   | "running"
@@ -183,6 +210,8 @@ export type AssetExtractionTask = {
   versionId: string | null;
   createdAt: string;
   updatedAt: string;
+  /** User who started extraction; drives post-extract auto pipeline. */
+  actorUserId?: string | null;
   roster?: AssetRosterItem[];
   detailItems?: AssetDetailTaskItem[];
   failedAssetQueue?: string[];
@@ -193,6 +222,10 @@ export type AssetExtractionTask = {
   progress?: AssetExtractionProgress;
   /** Known roster chunk total for progress recovery after refresh. */
   rosterChunksTotal?: number;
+  /** In-process / cross-restart runner lease. */
+  runnerId?: string | null;
+  runnerLeaseUntil?: string | null;
+  heartbeatAt?: string | null;
 };
 
 export type PublicAssetExtractionTask = {
@@ -212,7 +245,11 @@ export type PublicAssetExtractionTask = {
   createdAt: string;
   updatedAt: string;
   progress: AssetExtractionProgress;
-  roster?: AssetRosterItem[];
+  roster?: PublicAssetRosterItem[];
+  /** ISO heartbeat; used by UI to detect stalled runners. */
+  heartbeatAt?: string | null;
+  /** True when live status but lease/heartbeat looks abandoned. */
+  runnerStale?: boolean;
 };
 
 export type AssetExtractionVersion = {

@@ -211,8 +211,17 @@ export type ProjectAssetBundle = {
 export type VoiceOption = {
   id: string;
   name: string;
-  style: string;
   label: string;
+  style: string;
+  gender?: "male" | "female" | "neutral";
+  ageRange?: string;
+  language?: string;
+  emotion?: string;
+  tone?: string;
+  source?: "system" | "project" | "generated" | "local";
+  previewUrl?: string | null;
+  status?: "ready" | "processing" | "failed";
+  description?: string;
 };
 
 /** 后续语音合成平台适配预留 */

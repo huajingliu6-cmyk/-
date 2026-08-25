@@ -593,7 +593,7 @@ export function PersonalVideoWorkspace() {
               <textarea
                 className="personal-video-editor__prompt"
                 data-testid="personal-video-prompt"
-                placeholder="描述镜头运动、画面内容与氛围…"
+                placeholder="描述镜头运动、画面内容与氛围…（支持粘贴图片作为参考）"
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
                 onPaste={(event) => {
@@ -606,6 +606,62 @@ export function PersonalVideoWorkspace() {
                 }}
                 rows={6}
               />
+
+              <div
+                className="personal-video-editor__reference-strip personal-video-editor__references"
+                data-testid="personal-video-references"
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  multiple
+                  className="sr-only"
+                  data-testid="personal-video-reference-input"
+                  onChange={(event) => {
+                    if (event.target.files?.length) {
+                      addReferenceFiles(event.target.files);
+                    }
+                    event.target.value = "";
+                  }}
+                />
+
+                <button
+                  type="button"
+                  className="hub-btn hub-btn--upload"
+                  data-testid="personal-video-reference-btn"
+                  title="上传参考图"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <ImagePlus size={16} aria-hidden />
+                </button>
+
+                {references.map((reference) => (
+                  <div
+                    key={reference.id}
+                    className={`hub-ref-thumb hub-ref-thumb--${reference.precheckStatus}`}
+                  >
+                    <img src={reference.previewUrl} alt="参考图" />
+                    {reference.precheckStatus === "checking" ? (
+                      <span className="hub-ref-thumb__badge">
+                        <Loader2
+                          size={12}
+                          className="personal-video-spin"
+                          aria-hidden
+                        />
+                      </span>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="hub-ref-thumb__remove"
+                      aria-label="移除参考图"
+                      onClick={() => removeReference(reference.id)}
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                ))}
+              </div>
 
               {precheckNotice ? (
                 <p
@@ -621,62 +677,6 @@ export function PersonalVideoWorkspace() {
               ) : null}
 
               <div className="personal-video-editor__toolbar hub-toolbar">
-                <div
-                  className="hub-toolbar__leading personal-video-editor__references"
-                  data-testid="personal-video-references"
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    multiple
-                    className="sr-only"
-                    data-testid="personal-video-reference-input"
-                    onChange={(event) => {
-                      if (event.target.files?.length) {
-                        addReferenceFiles(event.target.files);
-                      }
-                      event.target.value = "";
-                    }}
-                  />
-
-                  <button
-                    type="button"
-                    className="hub-btn hub-btn--upload"
-                    data-testid="personal-video-reference-btn"
-                    title="上传参考图"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <ImagePlus size={16} aria-hidden />
-                  </button>
-
-                  {references.map((reference) => (
-                    <div
-                      key={reference.id}
-                      className={`hub-ref-thumb hub-ref-thumb--${reference.precheckStatus}`}
-                    >
-                      <img src={reference.previewUrl} alt="参考图" />
-                      {reference.precheckStatus === "checking" ? (
-                        <span className="hub-ref-thumb__badge">
-                          <Loader2
-                            size={12}
-                            className="personal-video-spin"
-                            aria-hidden
-                          />
-                        </span>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="hub-ref-thumb__remove"
-                        aria-label="移除参考图"
-                        onClick={() => removeReference(reference.id)}
-                      >
-                        <X size={10} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-
                 <div className="hub-toolbar__params">
                   <GlassSelect
                     label="模型"

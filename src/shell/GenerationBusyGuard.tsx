@@ -6,7 +6,8 @@ import { ConfirmLeaveDialog } from "@/shell/ConfirmLeaveDialog";
 import {
   ASSET_EXTRACTION_NAV_BLOCK_MESSAGE,
   ASSET_EXTRACTION_STAGE_LABELS,
-  isLiveExtractionStatus,
+  isAwaitingRosterSelectionStatus,
+  isBlockingExtractionStatus,
   type AssetExtractionProgress,
   type AssetExtractionProgressPhase,
   type AssetExtractionStage,
@@ -164,10 +165,17 @@ function formatStatBlocks(progress: AssetExtractionProgress): Array<{
 
 function ExtractionOverlayCard({
   overlay,
+  apiRoot,
+  onRecover,
+  onCancel,
 }: {
   overlay: NonNullable<ReturnType<typeof getAssetExtractionBusyOverlay>>;
+  apiRoot: string | null;
+  onRecover: () => void;
+  onCancel: () => void;
 }) {
   const progress = overlay.progress;
+  const recovering = Boolean(overlay.runnerStale);
   const phase: AssetExtractionProgressPhase =
     progress?.phase ??
     (overlay.stage === "complete"
@@ -177,7 +185,9 @@ function ExtractionOverlayCard({
     0,
     Math.min(100, progress?.estimatedProgress ?? overlay.estimatedProgress),
   );
-  const subtitle = subtitleForProgressPhase(phase);
+  const subtitle = recovering
+    ? "提取任务正在恢复，请稍候"
+    : subtitleForProgressPhase(phase);
   const steps = stepsForPhase(phase);
   const stats = progress
     ? formatStatBlocks(progress)
@@ -186,20 +196,23 @@ function ExtractionOverlayCard({
         { label: "已完成详情", value: "—" },
         { label: "当前处理", value: overlay.stageLabel },
       ];
-  const footers = progress
-    ? footerLinesForProgress(progress)
-    : ["结果会在完成后自动进入资产页"];
+  const footers = recovering
+    ? ["检测到提取进程中断，正在尝试恢复原任务", "请稍候，进度不会重置"]
+    : progress
+      ? footerLinesForProgress(progress)
+      : ["结果会在完成后自动进入资产页"];
 
   return (
     <div
       className="generation-busy-overlay"
       data-testid="asset-extraction-overlay"
+      data-runner-stale={recovering ? "true" : "false"}
       role="status"
       aria-live="polite"
     >
       <div className="generation-busy-overlay__card generation-busy-overlay__card--extraction">
         <header className="generation-busy-overlay__header">
-          <strong>正在提取资产</strong>
+          <strong>{recovering ? "提取任务正在恢复" : "正在提取资产"}</strong>
           <p data-testid="asset-extraction-overlay-stage">{subtitle}</p>
         </header>
 
@@ -253,6 +266,20 @@ function ExtractionOverlayCard({
           </span>
         </div>
 
+        {recovering && apiRoot && overlay.taskId ? (
+          <div
+            className="generation-busy-overlay__actions"
+            data-testid="asset-extraction-overlay-recover-actions"
+          >
+            <button type="button" onClick={onRecover}>
+              恢复任务
+            </button>
+            <button type="button" onClick={onCancel}>
+              取消任务
+            </button>
+          </div>
+        ) : null}
+
         <footer className="generation-busy-overlay__footer">
           {footers.map((line) => (
             <p key={line}>{line}</p>
@@ -277,6 +304,8 @@ export function GenerationBusyGuard() {
   const [open, setOpen] = useState(false);
   const [summary, setSummary] = useState("");
   const resolveRef = useRef<((value: false) => void) | null>(null);
+  const projectCtx = projectContextFromPath(pathname);
+  const pollRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     bindGenerationBusyUi({
@@ -313,29 +342,62 @@ export function GenerationBusyGuard() {
 
   useEffect(() => {
     const ctx = projectContextFromPath(pathname);
-    if (!ctx) return;
+    if (!ctx) {
+      pollRef.current = null;
+      return;
+    }
     const busyId = `asset-extraction-${ctx.projectId}`;
     let cancelled = false;
     let endBusy: (() => void) | null = null;
 
     const applyTask = (task: PublicAssetExtractionTask | null) => {
       if (cancelled) return;
-      if (!task || !isLiveExtractionStatus(task.status)) {
+      if (!task || !isBlockingExtractionStatus(task.status)) {
         endBusy?.();
         endBusy = null;
         return;
       }
-      const stage = task.stage as AssetExtractionStage;
+      const awaiting = isAwaitingRosterSelectionStatus(task.status);
+      const stage = (awaiting ? "merging_roster" : task.stage) as AssetExtractionStage;
       const progress = task.progress;
       const nextOverlay = {
-        stage: task.stage,
-        stageLabel: ASSET_EXTRACTION_STAGE_LABELS[stage],
-        estimatedProgress: Math.min(
-          99,
-          progress?.estimatedProgress ?? task.estimatedProgress,
-        ),
+        stage: awaiting ? "merging_roster" : task.stage,
+        stageLabel: awaiting
+          ? "请选择要设计的资产"
+          : task.runnerStale
+            ? "提取任务正在恢复"
+            : ASSET_EXTRACTION_STAGE_LABELS[stage],
+        estimatedProgress: awaiting
+          ? Math.min(15, progress?.estimatedProgress ?? task.estimatedProgress)
+          : Math.min(
+              99,
+              progress?.estimatedProgress ?? task.estimatedProgress,
+            ),
         errorMessage: task.errorMessage,
-        progress,
+        runnerStale: Boolean(task.runnerStale) && !awaiting,
+        taskId: task.id,
+        progress: awaiting
+          ? {
+              ...(progress ?? {
+                phase: "awaiting_roster_selection" as const,
+                estimatedProgress: 15,
+                roster: {
+                  scannedChunks: 1,
+                  totalChunks: 1,
+                  discoveredCount: task.roster?.length ?? 0,
+                },
+                details: {
+                  totalAssets: 0,
+                  completedAssets: 0,
+                  runningBatches: 0,
+                  completedBatches: 0,
+                  totalBatches: 0,
+                  retryRound: 0 as const,
+                },
+              }),
+              phase: "awaiting_roster_selection" as const,
+            }
+          : progress,
       };
       if (!endBusy) {
         endBusy = beginGenerationBusy(busyId, "资产提取", {
@@ -363,6 +425,7 @@ export function GenerationBusyGuard() {
         /* ignore poll errors */
       }
     };
+    pollRef.current = tick;
 
     void tick();
     const timer = window.setInterval(() => {
@@ -370,6 +433,7 @@ export function GenerationBusyGuard() {
     }, 1500);
     return () => {
       cancelled = true;
+      pollRef.current = null;
       window.clearInterval(timer);
       endBusy?.();
     };
@@ -381,9 +445,37 @@ export function GenerationBusyGuard() {
     resolveRef.current = null;
   };
 
+  const handleRecover = () => {
+    void pollRef.current?.();
+  };
+
+  const handleCancel = () => {
+    const taskId = overlay?.taskId;
+    const ctx = projectCtx;
+    if (!taskId || !ctx) return;
+    void (async () => {
+      try {
+        await fetch(
+          `${ctx.apiRoot}/asset-extraction/tasks/${encodeURIComponent(taskId)}/cancel`,
+          { method: "POST", credentials: "include" },
+        );
+      } catch {
+        /* ignore */
+      }
+      void pollRef.current?.();
+    })();
+  };
+
   return (
     <>
-      {overlay ? <ExtractionOverlayCard overlay={overlay} /> : null}
+      {overlay ? (
+        <ExtractionOverlayCard
+          overlay={overlay}
+          apiRoot={projectCtx?.apiRoot ?? null}
+          onRecover={handleRecover}
+          onCancel={handleCancel}
+        />
+      ) : null}
       <ConfirmLeaveDialog
         open={open}
         title="无法离开"

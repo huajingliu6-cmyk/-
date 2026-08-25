@@ -1,17 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import {
-  confirmScript,
   confirmStoryboard,
   fetchEpisodeProduction,
   fetchVideoGenerationPublicConfig,
   generateEpisodeVideos,
   insertBlankStoryboardShot,
   deleteStoryboardShot,
-  patchWorkingScript,
-  ScriptInvalidateRequiredError,
   StoryboardConfirmIncompleteError,
 } from "@/projects/storyboard/api-client";
 import { EpisodeVideoGenerationButton } from "@/projects/storyboard/components/EpisodeVideoGenerationButton";
@@ -19,6 +15,8 @@ import { ShotSceneRequiredDialog } from "@/projects/storyboard/components/ShotSc
 import { StoryboardShotAccordion } from "@/projects/storyboard/components/StoryboardShotAccordion";
 import { StoryboardPlaybackBar } from "@/projects/storyboard/components/StoryboardPlaybackBar";
 import { ShotVideoPreview } from "@/projects/storyboard/components/ShotVideoPreview";
+import { StoryboardEmptyTimeline } from "@/projects/storyboard/components/StoryboardEmptyTimeline";
+import { StoryboardEpisodeStagePanel } from "@/projects/storyboard/components/StoryboardEpisodeStagePanel";
 import { StoryboardWorkspaceShell } from "@/projects/storyboard/components/StoryboardWorkspaceShell";
 import { ShotAssetCard } from "@/projects/storyboard/components/ShotAssetCard";
 import type { PickerAsset } from "@/projects/storyboard/components/ProjectAssetPickerDialog";
@@ -56,7 +54,17 @@ type Props = {
   promptGenStatus?: import("@/projects/storyboard/prompt-generation-manager").EpisodePromptGenUiStatus;
   promptGenError?: string;
   promptQueueHint?: string;
-  onRequestPromptGenerate?: (opts?: { force?: boolean }) => void;
+  /** 本集下游阶段（资产 / 分镜提示词） */
+  episodeDownstream?: import("@/projects/storyboard/episode-downstream-state").EpisodeDownstreamStatus | null;
+  episodeNumber?: number;
+  episodeTitle?: string | null;
+  extractBusy?: boolean;
+  extractingAssets?: boolean;
+  onExtractEpisode?: () => void;
+  onRegenerateStoryboard?: () => void;
+  regenerateBusy?: boolean;
+  assetsHref?: string;
+  designHref?: string;
   onOpenGlobalSettings?: () => void;
   pageSaveNote?: string;
   /** Q80–Q84 invalid reference scan for current episode (and project when repaired). */
@@ -77,19 +85,22 @@ export function StoryboardProductionPanel({
   promptGenStatus = "idle",
   promptGenError,
   promptQueueHint,
-  onRequestPromptGenerate,
+  episodeDownstream = null,
+  episodeNumber = 1,
+  episodeTitle = null,
+  extractBusy = false,
+  extractingAssets = false,
+  onExtractEpisode,
+  onRegenerateStoryboard,
+  regenerateBusy = false,
+  assetsHref = "",
+  designHref,
   onOpenGlobalSettings,
   pageSaveNote,
   invalidRefScan = null,
   onOpenInvalidRefsRepair,
 }: Props) {
-  const idempotencyRef = useRef<string>(safeRandomUUID());
   const batchKeyRef = useRef<string>(safeRandomUUID());
-  const [savingScript, setSavingScript] = useState(false);
-  const [confirmingScript, setConfirmingScript] = useState(false);
-  const [scriptModalOpen, setScriptModalOpen] = useState(false);
-  const [scriptText, setScriptText] = useState(production.workingScriptText);
-  const [showInvalidateDialog, setShowInvalidateDialog] = useState(false);
   const [batchBusy, setBatchBusy] = useState(false);
   const [panelNote, setPanelNote] = useState("");
   const [insertShotBusyAfterId, setInsertShotBusyAfterId] = useState<
@@ -120,8 +131,6 @@ export function StoryboardProductionPanel({
   const storyboard = production.activeStoryboard;
   const displayScript =
     production.confirmedScriptText ?? production.workingScriptText;
-  const scriptDirty = scriptText !== production.workingScriptText;
-  const scriptConfirmed = Boolean(production.confirmedScriptText?.trim());
   const flat = useMemo(
     () => (storyboard ? listFlatShots(storyboard.scenes) : []),
     [storyboard],
@@ -137,13 +146,6 @@ export function StoryboardProductionPanel({
     [flat],
   );
   const confirmed = production.status === "storyboard_done";
-
-  const scriptSyncKey = `${production.episodeId}:${production.workingScriptRevision}:${production.workingScriptText}`;
-  const [syncedScriptKey, setSyncedScriptKey] = useState(scriptSyncKey);
-  if (!scriptModalOpen && syncedScriptKey !== scriptSyncKey) {
-    setSyncedScriptKey(scriptSyncKey);
-    setScriptText(production.workingScriptText);
-  }
 
   const validSceneIds = useMemo(
     () => new Set(assets.filter((a) => a.kind === "scene").map((a) => a.id)),
@@ -206,6 +208,12 @@ export function StoryboardProductionPanel({
             ) {
               setPanelNote(latest.generationError);
               onNote(latest.generationError);
+            } else if (
+              latest.generationError?.includes("缺少人物参考图") ||
+              latest.generationError?.includes("将使用文字描述生成")
+            ) {
+              setPanelNote(latest.generationError);
+              onNote(latest.generationError);
             } else {
               setPanelNote("分镜提示词生成完成，请完善提示词与镜头素材。");
               onNote("分镜提示词生成完成。");
@@ -214,8 +222,11 @@ export function StoryboardProductionPanel({
             latest.status === "generation_failed" &&
             latest.generationError
           ) {
-            setPanelNote(`生成失败：${latest.generationError}`);
-            onNote(latest.generationError);
+            const note = latest.generationError.includes("本次生成未写入")
+              ? latest.generationError
+              : `生成失败：${latest.generationError}`;
+            setPanelNote(note);
+            onNote(note);
           }
         }
       } catch {
@@ -279,89 +290,6 @@ export function StoryboardProductionPanel({
       el?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   }, []);
-
-  const saveScript = useCallback(
-    async (acknowledgeInvalidate: boolean) => {
-      setSavingScript(true);
-      setPanelNote("");
-      try {
-        let updated = await patchWorkingScript(
-          projectId,
-          production.episodeId,
-          scriptText,
-          { acknowledgeInvalidate },
-        );
-        const shouldReconfirm =
-          Boolean(production.confirmedScriptText) ||
-          Boolean(production.activeStoryboard) ||
-          acknowledgeInvalidate;
-        if (shouldReconfirm && updated.workingScriptText.trim()) {
-          updated = await confirmScript(projectId, production.episodeId);
-        }
-        onProductionChange(updated);
-        onScriptDraftChange?.(null);
-        setShowInvalidateDialog(false);
-        setScriptModalOpen(false);
-        setPanelNote(
-          shouldReconfirm
-            ? "剧本已保存。现有分镜提示词仍可使用；也可整集或按镜头重新生成。"
-            : "剧本已保存。",
-        );
-        onNote(
-          shouldReconfirm
-            ? "剧本已更新：建议检查提示词，可单独重生成某一镜头。"
-            : "剧本草稿已保存。",
-        );
-      } catch (error) {
-        if (error instanceof ScriptInvalidateRequiredError) {
-          setShowInvalidateDialog(true);
-          setPanelNote(error.message);
-          return;
-        }
-        const message =
-          error instanceof Error ? error.message : "保存失败，请稍后重试";
-        setPanelNote(message);
-        onNote(message);
-      } finally {
-        setSavingScript(false);
-      }
-    },
-    [
-      onNote,
-      onProductionChange,
-      onScriptDraftChange,
-      production.activeStoryboard,
-      production.confirmedScriptText,
-      production.episodeId,
-      projectId,
-      scriptText,
-    ],
-  );
-
-  const handleConfirmScript = useCallback(async () => {
-    if (!production.workingScriptText.trim()) return;
-    setConfirmingScript(true);
-    setPanelNote("");
-    try {
-      const updated = await confirmScript(projectId, production.episodeId);
-      onProductionChange(updated);
-      setPanelNote("剧本已确认，可以生成分镜提示词。");
-      onNote("剧本已确认。");
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "确认失败，请稍后重试";
-      setPanelNote(message);
-      onNote(message);
-    } finally {
-      setConfirmingScript(false);
-    }
-  }, [
-    onNote,
-    onProductionChange,
-    production.episodeId,
-    production.workingScriptText,
-    projectId,
-  ]);
 
   const handleInsertShotAfter = useCallback(
     async (shotId: string) => {
@@ -428,23 +356,6 @@ export function StoryboardProductionPanel({
       onProductionChange,
       production.episodeId,
       projectId,
-    ],
-  );
-
-  const handleGenerate = useCallback(
-    (opts?: { force?: boolean }) => {
-      if (storyboard && !production.storyboardStale && !opts?.force) {
-        if (production.status !== "generation_failed") return;
-      }
-      setFocusShotId(null);
-      setPanelNote("");
-      onRequestPromptGenerate?.(opts);
-    },
-    [
-      onRequestPromptGenerate,
-      production.status,
-      production.storyboardStale,
-      storyboard,
     ],
   );
 
@@ -728,19 +639,16 @@ export function StoryboardProductionPanel({
     batchBusy,
     `storyboard-video-batch-${projectId}-${production.episodeId}`,
     "整集视频生成提交",
+    {
+      projectId,
+      episodeId: production.episodeId,
+      kind: "storyboard-video",
+      taskStatus: "generating",
+    },
   );
-  const showGeneratePrompts =
-    !storyboard ||
-    production.status === "generation_failed" ||
-    production.storyboardStale ||
-    Boolean(
-      production.generationError?.includes("已生成") &&
-        production.generationError.includes("未匹配"),
-    );
-  const canGeneratePrompts = scriptConfirmed && showGeneratePrompts;
 
   const episodeVideoDisabledReason = !storyboard
-    ? "请先生成分镜提示词"
+    ? "请等待分镜生成完成"
     : !canGenerateVideo
       ? "当前账号无视频生成权限"
       : flat.length === 0 ||
@@ -785,14 +693,20 @@ export function StoryboardProductionPanel({
     videoDefaults?.aspectRatio ??
     (STORYBOARD_VIDEO_ASPECT_RATIO === "9:16" ? "9:16" : "16:9");
 
-  const openScriptEditor = () => {
-    setScriptText(production.workingScriptText);
-    onScriptDraftChange?.(null);
-    setScriptModalOpen(true);
-  };
-
   const preStoryboardPrompt = (
     <>
+      {episodeDownstream ? (
+        <StoryboardEpisodeStagePanel
+          episodeNumber={episodeNumber}
+          episodeTitle={episodeTitle}
+          downstream={episodeDownstream}
+          extracting={extractingAssets}
+          extractBusy={extractBusy}
+          onExtractEpisode={onExtractEpisode}
+          onRegenerateStoryboard={onRegenerateStoryboard}
+          regenerateBusy={regenerateBusy}
+        />
+      ) : null}
       <h4>{isGenerating ? "分镜提示词生成中" : "本集剧本"}</h4>
       {isGenerating ? (
         <div
@@ -810,101 +724,23 @@ export function StoryboardProductionPanel({
           {displayScript}
         </pre>
       ) : (
-        <div className="sbw-empty">
-          暂无剧本内容。请点击「编辑剧本」粘贴本集正文，保存后确认。
-        </div>
+        <div className="sbw-empty">暂无剧本内容，请先在剧本创作页上传并确认。</div>
       )}
       <div className="sbw-actions sbw-actions--wrap sbw-actions--prompt">
         <button
           type="button"
-          className="sbw-btn"
-          data-testid="view-script-btn"
-          disabled={savingScript || isGenerating}
-          onClick={openScriptEditor}
+          className="sbw-btn sbw-btn-muted"
+          data-testid="generate-shot-storyboard-video"
+          disabled
+          title="分镜生成完成后，选中镜头即可生成视频"
         >
-          编辑剧本
+          生成本分镜视频
         </button>
-        {!scriptConfirmed ? (
-          <button
-            type="button"
-            className="sbw-btn sbw-btn-primary"
-            data-testid="confirm-script-btn"
-            disabled={
-              savingScript ||
-              confirmingScript ||
-              isGenerating ||
-              !production.workingScriptText.trim()
-            }
-            onClick={() => void handleConfirmScript()}
-          >
-            {confirmingScript ? "确认中…" : "确认剧本"}
-          </button>
-        ) : null}
-        {showGeneratePrompts ? (
-          <button
-            type="button"
-            className="sbw-btn sbw-btn-primary"
-            data-testid="generate-storyboard-prompts"
-            disabled={!canGeneratePrompts || isGenerating}
-            title={!scriptConfirmed ? "请先确认本集剧本" : undefined}
-            onClick={() => {
-              idempotencyRef.current = safeRandomUUID();
-              handleGenerate({
-                force: Boolean(storyboard) || production.storyboardStale,
-              });
-            }}
-          >
-            {promptGenStatus === "queued"
-              ? "排队中…"
-              : isGenerating
-                ? "生成中（约 1–3 分钟）…"
-                : "生成分镜提示词"}
-          </button>
-        ) : null}
-        {promptGenStatus === "failed" ||
-        production.status === "generation_failed" ||
-        Boolean(
-          production.generationError?.includes("已生成") &&
-            production.generationError.includes("未匹配"),
-        ) ? (
-          <button
-            type="button"
-            className="sbw-btn"
-            data-testid="retry-episode-storyboard-prompts"
-            disabled={isGenerating}
-            onClick={() => {
-              idempotencyRef.current = safeRandomUUID();
-              handleGenerate({ force: true });
-            }}
-          >
-            重试
-          </button>
-        ) : null}
       </div>
     </>
   );
 
-  const emptyTimeline = (
-    <div
-      className="sbw-playback is-workspace-timeline"
-      data-testid="storyboard-empty-timeline"
-      aria-label="分镜时间轴"
-    >
-      <div className="sbw-playback__workspace-timeline">
-        <div className="sbw-playback__shot-strip is-paged">
-          {Array.from({ length: 6 }, (_, index) => (
-            <div key={index} className="sbw-playback__shot-slot" aria-hidden>
-              <div className="sbw-playback__shot-card is-empty">
-                <span className="sbw-playback__shot-empty">
-                  {index === 0 ? "生成分镜后将显示时间轴" : ""}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+  const emptyTimeline = <StoryboardEmptyTimeline />;
 
   return (
     <div className="sbw-panel sbw-panel--storyboard-workspace">
@@ -913,7 +749,6 @@ export function StoryboardProductionPanel({
           <p className="sbw-hint" style={{ margin: 0 }}>
             第 {production.episodeNumber} 集
             {shotCount > 0 ? ` · ${shotCount} 个分镜` : ""}
-            {scriptConfirmed ? " · 剧本已确认" : " · 待确认剧本"}
             {confirmed ? " · 分镜已确认" : ""}
           </p>
           {pageSaveNote ? (
@@ -995,6 +830,36 @@ export function StoryboardProductionPanel({
           </div>
         ) : null}
 
+        {production.status !== "generation_failed" &&
+        (production.generationError?.includes("缺少人物参考图") ||
+          production.generationError?.includes("将使用文字描述生成")) ? (
+          <div
+            className="sbw-banner is-warning"
+            data-testid="episode-prompt-gen-media-warnings"
+            aria-live="polite"
+          >
+            {production.generationError}
+            {storyboard?.scenes
+              .flatMap((scene) => scene.shots)
+              .some((shot) => (shot.storyboardPromptWarnings?.length ?? 0) > 0) ? (
+              <details className="sbw-prompt-warnings">
+                <summary>展开缺失素材</summary>
+                <ul>
+                  {storyboard.scenes
+                    .flatMap((scene) => scene.shots)
+                    .flatMap((shot) =>
+                      (shot.storyboardPromptWarnings ?? []).map((warning) => (
+                        <li key={`${shot.id}-${warning.code}-${warning.message}`}>
+                          镜头{shot.shotNumber}：{warning.message}
+                        </li>
+                      )),
+                    )}
+                </ul>
+              </details>
+            ) : null}
+          </div>
+        ) : null}
+
         {promptGenStatus === "failed" && promptGenError ? (
           <div className="sbw-banner is-error" data-testid="episode-prompt-gen-failed">
             本集提示词生成失败：{promptGenError}
@@ -1011,66 +876,6 @@ export function StoryboardProductionPanel({
               ? "本集提示词排队等待生成中…"
               : "本集分镜提示词生成中（约 1–3 分钟），可切换其它剧集继续编辑。"}
             {promptQueueHint ? ` ${promptQueueHint}` : ""}
-          </div>
-        ) : null}
-
-        {storyboard ? (
-          <div className="sbw-actions sbw-actions--wrap sbw-actions--episode-toolbar">
-            {!scriptConfirmed ? (
-              <button
-                type="button"
-                className="sbw-btn sbw-btn-primary"
-                data-testid="confirm-script-btn"
-                disabled={
-                  savingScript ||
-                  confirmingScript ||
-                  !production.workingScriptText.trim()
-                }
-                onClick={() => void handleConfirmScript()}
-              >
-                {confirmingScript ? "确认中…" : "确认剧本"}
-              </button>
-            ) : null}
-            {showGeneratePrompts ? (
-              <button
-                type="button"
-                className="sbw-btn sbw-btn-primary"
-                data-testid="generate-storyboard-prompts"
-                disabled={!canGeneratePrompts || isGenerating}
-                title={!scriptConfirmed ? "请先确认本集剧本" : undefined}
-                onClick={() => {
-                  idempotencyRef.current = safeRandomUUID();
-                  handleGenerate({
-                    force: Boolean(storyboard) || production.storyboardStale,
-                  });
-                }}
-              >
-                {promptGenStatus === "queued"
-                  ? "排队中…"
-                  : isGenerating
-                    ? "生成中（约 1–3 分钟）…"
-                    : "生成分镜提示词"}
-              </button>
-            ) : null}
-            {promptGenStatus === "failed" ||
-            production.status === "generation_failed" ||
-            Boolean(
-              production.generationError?.includes("已生成") &&
-                production.generationError.includes("未匹配"),
-            ) ? (
-              <button
-                type="button"
-                className="sbw-btn"
-                data-testid="retry-episode-storyboard-prompts"
-                disabled={isGenerating}
-                onClick={() => {
-                  idempotencyRef.current = safeRandomUUID();
-                  handleGenerate({ force: true });
-                }}
-              >
-                重试
-              </button>
-            ) : null}
           </div>
         ) : null}
 
@@ -1227,91 +1032,6 @@ export function StoryboardProductionPanel({
         }}
         onConfirm={() => void handleBatchGenerate()}
       />
-
-      {scriptModalOpen
-        ? createPortal(
-            <div
-              className="sbw-dialog"
-              role="dialog"
-              aria-modal="true"
-              data-testid="view-script-modal"
-            >
-              <div className="sbw-dialog__card sbw-dialog__card--script">
-                <h3>编辑剧本</h3>
-                <p className="sbw-hint" style={{ marginTop: 0 }}>
-                  第 {production.episodeNumber} 集 · 可直接编辑正文
-                </p>
-                <textarea
-                  className="sbw-textarea sbw-textarea--script-modal"
-                  value={scriptText}
-                  data-testid="storyboard-script-editor"
-                  onChange={(e) => {
-                    setScriptText(e.target.value);
-                    onScriptDraftChange?.(e.target.value);
-                  }}
-                  placeholder="请输入或粘贴本集剧本内容…"
-                />
-                <div className="sbw-dialog__footer">
-                  <button
-                    type="button"
-                    className="sbw-btn"
-                    disabled={savingScript}
-                    onClick={() => {
-                      setScriptText(production.workingScriptText);
-                      onScriptDraftChange?.(null);
-                      setScriptModalOpen(false);
-                      setShowInvalidateDialog(false);
-                    }}
-                  >
-                    关闭
-                  </button>
-                  <button
-                    type="button"
-                    className={`sbw-btn${scriptDirty ? " sbw-btn-primary" : ""}`}
-                    data-testid="view-script-save"
-                    disabled={!scriptDirty || savingScript || !scriptText.trim()}
-                    onClick={() => void saveScript(false)}
-                  >
-                    {savingScript ? "保存中…" : "保存"}
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
-
-      {showInvalidateDialog
-        ? createPortal(
-            <div className="sbw-dialog" role="dialog" aria-modal="true">
-              <div className="sbw-dialog__card">
-                <h3>确认保存剧本变更</h3>
-                <p>
-                  修改本集剧本后，现有分镜提示词可能不再完全适用。保存后仍可继续使用当前分镜，也可整集或按镜头重新生成提示词。
-                </p>
-                <div className="sbw-actions">
-                  <button
-                    type="button"
-                    className="sbw-btn"
-                    disabled={savingScript}
-                    onClick={() => setShowInvalidateDialog(false)}
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    className="sbw-btn sbw-btn-primary"
-                    disabled={savingScript}
-                    onClick={() => void saveScript(true)}
-                  >
-                    确认保存
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
     </div>
   );
 }

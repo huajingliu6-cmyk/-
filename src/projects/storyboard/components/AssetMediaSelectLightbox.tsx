@@ -8,6 +8,7 @@ import {
   resolvePickerThumbUrl,
   type PickerAsset,
 } from "@/projects/storyboard/components/ProjectAssetPickerDialog";
+import { MediaHistoryStrip } from "@/projects/ui/MediaHistoryStrip";
 
 type Props = {
   open: boolean;
@@ -122,30 +123,18 @@ export function AssetMediaSelectLightbox({
           )}
         </div>
         {hasHistory ? (
-          <div
-            className="sbw-media-lightbox__history"
-            data-testid="asset-media-lightbox-history"
-          >
-            {options.map((opt) => {
-              const active = opt.mediaId === previewMediaId;
-              return (
-                <button
-                  key={opt.mediaId}
-                  type="button"
-                  className={`sbw-media-lightbox__thumb${
-                    active ? " is-active" : ""
-                  }`}
-                  title={
-                    opt.isPrimary ? `${opt.mediaId}（主图）` : opt.mediaId
-                  }
-                  onClick={() => setPreviewMediaId(opt.mediaId)}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={opt.thumbUrl} alt="" />
-                </button>
-              );
-            })}
-          </div>
+          <MediaHistoryStrip
+            items={options.map((opt) => ({
+              id: opt.mediaId,
+              thumbUrl: opt.thumbUrl,
+              title: opt.isPrimary ? `${opt.mediaId}（主图）` : opt.mediaId,
+              isPrimary: opt.isPrimary,
+            }))}
+            activeId={previewMediaId}
+            testId="asset-media-lightbox-history"
+            className="sbw-media-lightbox__history-strip"
+            onSelect={setPreviewMediaId}
+          />
         ) : null}
         <div className="sbw-media-lightbox__foot">
           <button type="button" className="sbw-btn" onClick={onClose}>

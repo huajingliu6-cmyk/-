@@ -18,7 +18,7 @@ import {
 import { readProjectAssetMediaDrag } from "@/projects/assets/project-asset-media-drag";
 import { validateProjectAssetImageFileClient } from "@/projects/assets/upload-asset-image";
 
-export const LIBRARY_COMPACT_REFERENCE_SLOT_COUNT = 3;
+export const LIBRARY_COMPACT_REFERENCE_SLOT_COUNT = 6;
 
 export type CompactPromptReferenceSlot =
   | {
@@ -48,6 +48,12 @@ export type CompactPromptReferenceSlot =
       name: string;
     }
   | null;
+
+export function filledCompactPromptReferenceSlotCount(
+  slots: CompactPromptReferenceSlot[],
+): number {
+  return slots.filter(Boolean).length;
+}
 
 export function emptyCompactPromptReferenceSlots(): CompactPromptReferenceSlot[] {
   return Array.from(
@@ -118,6 +124,10 @@ export function CompactPromptReferenceSlots({
       slots.flatMap((slot) =>
         slot?.source === "system-material" ? [slot.materialId] : [],
       ),
+    [slots],
+  );
+  const filledCount = useMemo(
+    () => filledCompactPromptReferenceSlotCount(slots),
     [slots],
   );
 
@@ -364,86 +374,97 @@ export function CompactPromptReferenceSlots({
   return (
     <>
       <div
-        className="ead-reference-slots character-prompt-reference-slots"
+        className="character-prompt-reference-slots"
         data-testid="character-prompt-reference-slots"
       >
-        {slots.map((slot, index) => (
-          <div
-            key={`character-prompt-ref-${index}`}
-            className={`ead-reference-slot${slot ? " is-filled" : ""}${
-              disabled ? " is-disabled" : ""
-            }`}
-            data-testid={`character-prompt-reference-slot-${index + 1}`}
-            onDragEnter={(event) => {
-              event.preventDefault();
-            }}
-            onDragOver={(event) => {
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "copy";
-            }}
-            onDrop={(event) => handleDrop(index, event)}
-          >
-            <button
-              type="button"
-              ref={(el) => {
-                slotHitRefs.current[index] = el;
+        <div className="character-prompt-reference-slots__items">
+          {slots.map((slot, index) => (
+            <div
+              key={`character-prompt-ref-${index}`}
+              className={`ead-reference-slot${slot ? " is-filled" : ""}${
+                disabled ? " is-disabled" : ""
+              }`}
+              data-testid={`character-prompt-reference-slot-${index + 1}`}
+              onDragEnter={(event) => {
+                event.preventDefault();
               }}
-              className="ead-reference-slot__hit"
-              disabled={disabled}
-              title={
-                slot
-                  ? `替换第${index + 1}张参考图`
-                  : `上传或拖入第${index + 1}张参考图`
-              }
-              onClick={() => openSlotMenu(index)}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "copy";
+              }}
+              onDrop={(event) => handleDrop(index, event)}
             >
-              <span className="ead-reference-slot__index" aria-hidden>
-                {index + 1}
-              </span>
-              {slot ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={slot.previewUrl}
-                  alt={
-                    "name" in slot && slot.name
-                      ? slot.name
-                      : `参考图 ${index + 1}`
-                  }
-                />
-              ) : (
-                <ImagePlus
-                  className="ead-reference-slot__empty-icon"
-                  aria-hidden
-                />
-              )}
-            </button>
-            {slot ? (
               <button
                 type="button"
-                className="ead-reference-slot__remove"
-                data-testid={`character-prompt-reference-remove-${index + 1}`}
-                title={`删除第${index + 1}张参考图`}
-                disabled={disabled}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  removeSlot(index);
+                ref={(el) => {
+                  slotHitRefs.current[index] = el;
                 }}
+                className="ead-reference-slot__hit"
+                disabled={disabled}
+                title={
+                  slot
+                    ? `替换第${index + 1}张参考图`
+                    : `上传或拖入第${index + 1}张参考图`
+                }
+                onClick={() => openSlotMenu(index)}
               >
-                <X className="h-3.5 w-3.5" aria-hidden />
+                <span className="ead-reference-slot__index" aria-hidden>
+                  {index + 1}
+                </span>
+                {slot ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={slot.previewUrl}
+                    alt={
+                      "name" in slot && slot.name
+                        ? slot.name
+                        : `参考图 ${index + 1}`
+                    }
+                  />
+                ) : (
+                  <ImagePlus
+                    className="ead-reference-slot__empty-icon"
+                    aria-hidden
+                  />
+                )}
               </button>
-            ) : null}
-            <input
-              ref={(el) => {
-                fileInputRefs.current[index] = el;
-              }}
-              type="file"
-              accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
-              className="ead-reference-slot__file"
-              data-testid={`character-prompt-reference-file-${index + 1}`}
-              onChange={(event) => handleSlotUpload(index, event.target.files)}
-            />
-          </div>
-        ))}
+              {slot ? (
+                <button
+                  type="button"
+                  className="ead-reference-slot__remove"
+                  data-testid={`character-prompt-reference-remove-${index + 1}`}
+                  title={`删除第${index + 1}张参考图`}
+                  disabled={disabled}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    removeSlot(index);
+                  }}
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden />
+                </button>
+              ) : null}
+              <input
+                ref={(el) => {
+                  fileInputRefs.current[index] = el;
+                }}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                className="ead-reference-slot__file"
+                data-testid={`character-prompt-reference-file-${index + 1}`}
+                onChange={(event) =>
+                  handleSlotUpload(index, event.target.files)
+                }
+              />
+            </div>
+          ))}
+        </div>
+        <span
+          className="character-prompt-reference-slots__counter"
+          data-testid="character-prompt-reference-counter"
+          aria-live="polite"
+        >
+          {filledCount}/{LIBRARY_COMPACT_REFERENCE_SLOT_COUNT}
+        </span>
       </div>
       {slotActionMenu}
       <MaterialPickerModal

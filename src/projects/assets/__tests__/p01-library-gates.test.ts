@@ -482,4 +482,120 @@ describe("P0.1 library gates", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("IMAGE_REQUIRED");
   });
+
+  it("batch promote only processes selected itemIds", async () => {
+    const { transformEpisodeAssetDesignConfirmation } = await import(
+      "@/projects/assets/episode-design/confirm-transform"
+    );
+    const result = transformEpisodeAssetDesignConfirmation({
+      projectId: "p1",
+      episodeId: "ep1",
+      expectedRevision: 1,
+      userId: "u1",
+      fingerprint,
+      itemIds: ["i_prop"],
+      store: {
+        projectId: "p1",
+        updatedAt: new Date().toISOString(),
+        records: [
+          {
+            episodeId: "ep1",
+            episodeNumber: 1,
+            status: "review",
+            revision: 1,
+            contentFingerprint: fingerprint,
+            generationId: null,
+            items: [
+              {
+                id: "i_prop",
+                assetType: "prop",
+                name: "选中道具",
+                resolution: "create_new",
+                source: "ai",
+                draft: {
+                  description: "道具",
+                  propType: "",
+                  usage: "",
+                  usageInEpisode: "",
+                  evidence: "",
+                },
+                existingAssetId: null,
+                libraryAssetId: null,
+                note: "",
+                generatedMedia: {
+                  currentId: "gen_prop_1",
+                  historyIds: ["gen_prop_1"],
+                  history: [
+                    {
+                      mediaId: "gen_prop_1",
+                      prompt: "道具",
+                      generatedAt: new Date().toISOString(),
+                      mimeType: "image/webp",
+                    },
+                  ],
+                  status: "completed",
+                  promptFingerprint: "fp",
+                  errorMessage: null,
+                  mimeType: "image/webp",
+                  previewKind: "image",
+                },
+              },
+              {
+                id: "i_scene",
+                assetType: "scene",
+                name: "未选中场景",
+                resolution: "create_new",
+                source: "ai",
+                draft: {
+                  description: "场景",
+                  timeOfDay: "",
+                  location: "",
+                  style: "",
+                  usageInEpisode: "",
+                  evidence: "",
+                },
+                existingAssetId: null,
+                libraryAssetId: null,
+                note: "",
+                generatedMedia: {
+                  currentId: "gen_scene_1",
+                  historyIds: ["gen_scene_1"],
+                  history: [
+                    {
+                      mediaId: "gen_scene_1",
+                      prompt: "场景",
+                      generatedAt: new Date().toISOString(),
+                      mimeType: "image/webp",
+                    },
+                  ],
+                  status: "completed",
+                  promptFingerprint: "fp",
+                  errorMessage: null,
+                  mimeType: "image/webp",
+                  previewKind: "image",
+                },
+              },
+            ],
+            confirmedAt: null,
+            confirmedBy: null,
+            confirmedRevision: null,
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+      },
+      bundle: {
+        projectId: "p1",
+        characters: [],
+        scenes: [],
+        props: [],
+        audios: [],
+      },
+    });
+    expect(result.writeRequired).toBe(true);
+    if (!result.writeRequired) return;
+    expect(result.result.counts.created).toBe(1);
+    expect(result.result.record.items.find((item) => item.id === "i_prop")?.libraryAssetId).toBeTruthy();
+    expect(result.result.record.items.find((item) => item.id === "i_scene")?.libraryAssetId).toBeNull();
+    expect(result.result.record.status).toBe("review");
+  });
 });

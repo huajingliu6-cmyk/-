@@ -17,6 +17,10 @@ import {
 } from "@/projects/storyboard/shot-completeness";
 import type { MatchableAssets } from "@/projects/storyboard/services/asset-match";
 import {
+  extractCharacterNamesFromText,
+  isUsableCharacterName,
+} from "@/projects/storyboard/services/asset-match";
+import {
   autoLinkShotToLibrary,
   collectLibraryNamesInText,
 } from "@/projects/storyboard/services/shot-library-match";
@@ -174,7 +178,11 @@ function extractNamesFromSnippet(
   const scenes = new Set<string>();
 
   for (const m of assetMatches) {
-    if (m.assetType === "character" && snippet.includes(m.extractedName)) {
+    if (
+      m.assetType === "character" &&
+      isUsableCharacterName(m.extractedName) &&
+      snippet.includes(m.extractedName)
+    ) {
       characters.add(m.extractedName);
     }
     if (m.assetType === "prop" && snippet.includes(m.extractedName)) {
@@ -192,9 +200,8 @@ function extractNamesFromSnippet(
     for (const name of fromLibrary.scenes) scenes.add(name);
   }
 
-  const nameHits = snippet.match(/[\u4e00-\u9fff]{2,4}(?=出场|走来|说道|说：「|望向)/g);
-  for (const name of nameHits ?? []) {
-    characters.add(name);
+  for (const name of extractCharacterNamesFromText(snippet)) {
+    if (isUsableCharacterName(name)) characters.add(name);
   }
 
   const propLine = snippet.match(/道具[：:]\s*([^\n。]+)/)?.[1];
@@ -464,7 +471,7 @@ function buildShot(
     audioAssetIds: matchedAssetIds(assetMatches, "audio"),
     requirements,
     manuallyEdited: false,
-    promptLocked: true,
+    promptLocked: false,
     locked: false,
     confirmed: false,
     revision: 1,

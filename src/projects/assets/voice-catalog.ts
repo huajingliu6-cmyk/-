@@ -4,13 +4,14 @@ import type {
   VoiceProvider,
 } from "@/projects/assets/types";
 import { decodeLocalVoiceId, isLocalVoiceId, localVoiceDisplayName } from "@/projects/assets/local-voice-id";
+import {
+  SYSTEM_VOICE_CATALOG,
+  findSystemVoice,
+  isSystemVoiceId,
+} from "@/projects/assets/system-voice-catalog";
 
-/**
- * Legacy system placeholder catalog (no longer offered in VoiceSelector).
- * Kept empty so UI cannot pick placeholder voices; `isSystemCatalogVoiceId`
- * still rejects historically bound `voice_*` ids during video generation.
- */
-export const VOICE_CATALOG: VoiceOption[] = [];
+/** @deprecated Use SYSTEM_VOICE_CATALOG — kept for legacy imports. */
+export const VOICE_CATALOG: VoiceOption[] = SYSTEM_VOICE_CATALOG;
 
 /** 将音频管理中的「音色」资产映射为可选 VoiceOption */
 export function voiceOptionsFromAudios(audios: AudioAsset[]): VoiceOption[] {
@@ -25,6 +26,11 @@ export function voiceOptionsFromAudios(audios: AudioAsset[]): VoiceOption[] {
           ? `项目音色·${a.source}`
           : "项目音色",
       label: a.name,
+      source: "project" as const,
+      status:
+        a.status === "draft" && !a.fileName
+          ? ("processing" as const)
+          : ("ready" as const),
     }));
 }
 
@@ -35,6 +41,7 @@ export function findVoiceOption(
 ): VoiceOption | null {
   if (!voiceId) return null;
   return (
+    findSystemVoice(voiceId) ??
     localVoices.find((v) => v.id === voiceId) ??
     projectVoices.find((v) => v.id === voiceId) ??
     VOICE_CATALOG.find((v) => v.id === voiceId) ??
@@ -49,6 +56,7 @@ export function findVoiceOption(
             name,
             style: fileName ? `本地音频库·${fileName}` : "本地音频库",
             label: name,
+            source: "local" as const,
           };
         })()
       : null)
@@ -73,9 +81,11 @@ export function withSelectedLocalVoice(
   return selected ? [selected, ...localVoices] : localVoices;
 }
 
-/** 系统目录占位音色（无本地文件），视频生成阶段不可绑定真实参考音频 */
+/** Legacy `voice_*` placeholders and catalog system voices. */
 export function isSystemCatalogVoiceId(voiceId: string | null | undefined): boolean {
-  return typeof voiceId === "string" && voiceId.startsWith("voice_");
+  if (typeof voiceId !== "string") return false;
+  if (isSystemVoiceId(voiceId)) return true;
+  return voiceId.startsWith("voice_");
 }
 
 /** 配置型 VoiceProvider，预留真实平台替换 */

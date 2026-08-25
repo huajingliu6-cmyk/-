@@ -220,6 +220,25 @@
   grid-template-rows: 1fr;
 }
 
+.cpw-form-shell--immediate {
+  grid-template-rows: 1fr;
+  transition: none;
+}
+
+.cpw-form-shell--immediate .cpw-form {
+  opacity: 1;
+  transform: none;
+  filter: none;
+  animation: none;
+}
+
+.cpw-card--immediate {
+  animation: none;
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+
 .cpw-form-shell__inner {
   overflow: hidden;
   min-height: 0;
@@ -677,6 +696,31 @@
   }
 }
 
+.cpw-script-upload {
+  margin-top: 4px;
+}
+
+.cpw-field--optional-canvas {
+  margin-top: 12px;
+}
+
+.cpw-optional-canvas small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 400;
+  color: rgba(244, 241, 255, 0.45);
+}
+
+.cpw-script-upload .scs-upload-limit-note,
+.cpw-script-upload .scs-hint--req {
+  margin-top: 10px;
+}
+
+.cpw-script-upload.is-shake {
+  animation: cpw-shake 0.42s ease;
+}
+
 @media (max-width: 640px) {
   .cpw-card {
     width: calc(100vw - 24px);
@@ -709,11 +753,16 @@
   .cpw-card,
   .cpw-overlay.is-closing .cpw-card,
   .cpw-form-shell.is-open .cpw-form,
+  .cpw-form-shell--immediate .cpw-form,
+  .cpw-card--immediate,
   .cpw-source.is-bounce,
   .cpw-next.is-bounce,
   .cpw-input.is-shake,
   .cpw-modes.is-shake,
   .cpw-sources.is-shake {
+    animation: none !important;
+  }
+  .cpw-script-upload.is-shake {
     animation: none !important;
   }
 

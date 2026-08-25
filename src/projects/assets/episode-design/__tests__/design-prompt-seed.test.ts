@@ -130,6 +130,25 @@ describe("resolveFormalDesignPromptText dirty data", () => {
     ).toBe(formal);
   });
 
+  it("returns empty string for idle designPrompt without draft fallback", () => {
+    expect(
+      resolveFormalDesignPromptText(
+        characterItem({
+          designPrompt: {
+            status: "idle",
+            text: "",
+            generationId: null,
+            sourceFingerprint: null,
+            generatedAt: null,
+            updatedAt: null,
+            errorMessage: null,
+            history: [],
+          },
+        }),
+      ),
+    ).toBe("");
+  });
+
   it("uses extraction detail description when designPrompt is empty", () => {
     const detailPrompt =
       "16:9 横屏；左侧 1/3 为超高清正面面部特写；右侧 2/3 等距排布三张全身站姿 Front 正面、严格 90° Profile 侧面、Back 背面。" +
@@ -225,6 +244,8 @@ describe("DesignAssetModal formal prompt UI", () => {
     expect(modal).toContain("formalPromptMissing");
     expect(modal).toContain("autoPromptKeyRef");
     expect(modal).toContain("void autoGenerateFormalPromptRef.current()");
+    expect(modal).toContain('item.designPrompt?.status === "idle"');
+    expect(modal).toContain("请填写造型提示词");
     expect(workspace).toContain("kickOffFormalDesignPrompts");
     expect(workspace).toContain("autoGenerateMissingFormalDesignPrompts");
     expect(workspace).toContain("DEFAULT_DESIGN_PROMPT_MODEL_ID");

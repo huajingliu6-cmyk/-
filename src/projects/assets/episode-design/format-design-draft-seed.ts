@@ -197,6 +197,9 @@ export function resolveFormalDesignPromptText(
 ): string {
   const state = item.designPrompt;
   const text = state?.text?.trim() ?? "";
+  if (state?.status === "idle" && !text) {
+    return "";
+  }
   if (text) {
     if (looksLikeExtractDraftPrompt(text, item)) {
       return draftDescriptionImagePrompt(item);

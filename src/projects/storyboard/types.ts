@@ -161,8 +161,20 @@ export type StoryboardShot = {
   autoPromptText?: string | null;
   /** 手改/锁定镜头无法安全套用新提示词 */
   promptNeedsReview?: boolean;
+  /** 分镜提示词规则版本；V5-13S / V5-13S-R2 要求 Clip 13–15 秒 */
+  storyboardPromptRuleVersion?: string | null;
   /** 最近一次成功生成视频所用的提示词版本 */
   generatedWithPromptVersion?: number | null;
+  /**
+   * Soft gaps from the latest prompt generation (e.g. missing character media).
+   * Does not block completed / locked prompts.
+   */
+  storyboardPromptWarnings?: StoryboardPromptWarning[] | null;
+};
+
+export type StoryboardPromptWarning = {
+  code: string;
+  message: string;
 };
 
 export type StoryboardScene = {
@@ -225,6 +237,8 @@ export type EpisodeProduction = {
   storyboardStale: boolean;
   activeStoryboard: StoryboardDocument | null;
   generationError: string | null;
+  /** 分镜提示词异步生成任务；旧数据缺省 null */
+  storyboardGenerationJob: StoryboardGenerationJob | null;
   /** 本集视频批量生成批次（刷新可恢复）；旧数据缺省 null */
   videoGenerationBatch: EpisodeVideoGenerationBatch | null;
   revision: number;
@@ -239,6 +253,24 @@ export type EpisodeProduction = {
     reviewShotIds: string[];
     notice: string;
   } | null;
+};
+
+export type StoryboardGenerationJobStatus =
+  | "queued"
+  | "running"
+  | "validating"
+  | "completed"
+  | "failed";
+
+/** 分镜提示词异步生成任务（POST 立即返回，客户端轮询） */
+export type StoryboardGenerationJob = {
+  generationId: string;
+  status: StoryboardGenerationJobStatus;
+  error: string | null;
+  /** 校验失败时未写入新提示词 */
+  promptsNotWritten?: boolean;
+  startedAt: string;
+  updatedAt: string;
 };
 
 /** 本集一键视频生成批次元数据 */

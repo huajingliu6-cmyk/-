@@ -16,6 +16,7 @@ import {
 import { useChipBounce } from "@/shell/useChipBounce";
 import { AssetDetailImage } from "@/projects/assets/AssetDetailImage";
 import { AssetDetailLayout } from "@/projects/assets/AssetDetailLayout";
+import { CharacterVoiceSettings } from "@/projects/assets/CharacterVoiceSettings";
 import { VoiceSelector } from "@/projects/assets/VoiceSelector";
 import { VoicePreviewButton } from "@/projects/assets/VoicePreviewButton";
 import type {
@@ -427,8 +428,17 @@ export function CharacterDetail({
       : `/api/projects/${encodeURIComponent(projectId)}`;
 
   const rawPreviewCandidate = characterJustSwitched
-    ? (controlledMediaId ?? primaryMediaId ?? null)
-    : (previewMediaId ?? controlledMediaId ?? primaryMediaId ?? null);
+    ? (controlledMediaId ??
+        (activeAppearanceId
+          ? activeAppearance?.currentMediaId?.trim() || null
+          : primaryMediaId) ??
+        null)
+    : (previewMediaId ??
+        controlledMediaId ??
+        (activeAppearanceId
+          ? activeAppearance?.currentMediaId?.trim() || null
+          : primaryMediaId) ??
+        null);
   const effectivePreviewId = rawPreviewCandidate;
 
   const visualContext: ActiveVisualContext = {
@@ -649,6 +659,14 @@ export function CharacterDetail({
   const selectAppearanceForPrompt = (appearance: CharacterAppearance) => {
     setPromptVoiceScope({ scope: "appearance", appearanceId: appearance.id });
     setPendingVoice(null);
+    const mediaId = appearance.currentMediaId?.trim();
+    if (mediaId) {
+      setPreviewMediaId(mediaId);
+      onActiveMediaChange?.(mediaId);
+    } else {
+      setPreviewMediaId(null);
+      onActiveMediaChange?.(null);
+    }
   };
 
   const openAppearanceLightbox = (appearance: CharacterAppearance) => {
@@ -1888,6 +1906,14 @@ export function CharacterDetail({
                   promptContextLabel={promptContextLabel}
                   promptScopeKey={appearancePromptScopeKey}
                   promptScopeText={promptScopeText}
+                  promptScopeMedia={
+                    activeAppearance
+                      ? {
+                          currentId: activeAppearance.currentMediaId,
+                          historyIds: activeAppearance.mediaHistory,
+                        }
+                      : null
+                  }
                   onPromptScopePersist={
                     activeAppearanceId ? persistAppearancePrompt : undefined
                   }
@@ -1900,56 +1926,31 @@ export function CharacterDetail({
                 />
               </div>
 
-              <section
-                className="character-voice-bar"
-                data-testid="character-voice-card"
-                data-scope={scopedVoice.scope}
-                data-visual-context={visualContext.appearanceId ?? "main"}
-              >
-                <div className="character-voice-bar__context">
-                  <strong>音色设置</strong>
-                  <span data-testid="character-voice-context">
-                    {(character.name?.trim() || "未命名角色") +
-                      " · " +
-                      voiceObjectLabel}
-                  </span>
-                  <span
-                    className="character-voice-bar__badge"
-                    data-testid="character-voice-scope-label"
-                  >
-                    {voiceBadgeText}
-                  </span>
-                </div>
-                <div className="character-voice-bar__controls character-voice-bar__actions">
-                  <button
-                    type="button"
-                    className="amw-btn character-voice-bar__action"
-                    data-testid="character-voice-upload"
-                    disabled={!canEdit}
-                    title="上传音色（即将开放）"
-                  >
-                    上传音色
-                  </button>
-                  <button
-                    type="button"
-                    className="amw-btn character-voice-bar__action"
-                    data-testid="character-voice-select"
-                    disabled={!canEdit}
-                    title="选择音色（即将开放）"
-                  >
-                    选择音色
-                  </button>
-                  <button
-                    type="button"
-                    className="amw-btn amw-btn-primary character-voice-bar__action character-voice-bar__action--generate"
-                    data-testid="character-voice-generate"
-                    disabled={!canEdit}
-                    title="生成音色（即将开放）"
-                  >
-                    生成音色
-                  </button>
-                </div>
-              </section>
+              <CharacterVoiceSettings
+                projectId={projectId}
+                canEdit={canEdit}
+                characterId={character.id}
+                voiceScope={scopedVoice.scope}
+                visualContext={visualContext.appearanceId ?? "main"}
+                contextLabel={
+                  (character.name?.trim() || "未命名角色") +
+                  " · " +
+                  voiceObjectLabel
+                }
+                scopeLabel={voiceBadgeText}
+                displayedVoiceId={displayedVoiceId}
+                displayedVoiceName={displayedVoiceName}
+                pendingVoice={pendingVoice}
+                onPendingVoiceChange={setPendingVoice}
+                voiceBoundCurrent={voiceBoundCurrent}
+                voiceSelectionDirty={voiceSelectionDirty}
+                projectVoices={projectVoices}
+                audios={audios}
+                onAudiosChange={onAudiosChange}
+                onPersistAudios={onPersistAudios}
+                onBind={() => void bindScopedVoice()}
+                onStatus={onPreviewStatus}
+              />
 
               {actionError && lookInUseSamples.length > 0 ? (
                 <div

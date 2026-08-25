@@ -14,7 +14,8 @@ export type StoryboardResponseParser =
   | "json"
   | "markdown_json"
   | "embedded_json"
-  | "section_text";
+  | "section_text"
+  | "clips-json";
 
 export type ParseStoryboardModelResponseResult = {
   prompts: ParsedStoryboardPrompt[];

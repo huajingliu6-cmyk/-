@@ -1,6 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  claimVoicePreview,
+  releaseVoicePreview,
+} from "@/projects/assets/voice-preview-bus";
 
 /**
  * Per-button audio preview. Avoids shared-singleton races when many cards
@@ -58,6 +62,7 @@ export function useVoicePreviewPlayer() {
     }
     activeSrcRef.current = null;
     setPlaying(false);
+    releaseVoicePreview("voice-preview-player");
   }, []);
 
   useEffect(() => {
@@ -96,6 +101,7 @@ export function useVoicePreviewPlayer() {
         activeSrcRef.current = src;
         audio.src = src;
         audio.currentTime = 0;
+        claimVoicePreview("voice-preview-player", stop);
         await audio.play();
         setPlaying(true);
       } catch (err) {

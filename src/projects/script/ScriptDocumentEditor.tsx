@@ -1,6 +1,6 @@
 "use client";
 
-import { useId } from "react";
+import { useId, type RefObject } from "react";
 
 export type EditorEpisodeView = {
   id: string;
@@ -14,6 +14,8 @@ type Props = {
   splitStatus?: string;
   reviewMode?: boolean;
   disabled?: boolean;
+  textareaRef?: RefObject<HTMLTextAreaElement | null>;
+  onBlur?: () => void;
   onContentChange: (content: string) => void;
 };
 
@@ -23,6 +25,8 @@ export function ScriptDocumentEditor({
   splitStatus,
   reviewMode = false,
   disabled = false,
+  textareaRef,
+  onBlur,
   onContentChange,
 }: Props) {
   const fieldId = useId();
@@ -46,17 +50,19 @@ export function ScriptDocumentEditor({
             {episode.title}正文
           </label>
           <textarea
+            ref={textareaRef}
             id={fieldId}
             className="scs-textarea is-doc"
             value={episode.content}
             disabled={disabled}
             onChange={(e) => onContentChange(e.target.value)}
+            onBlur={() => onBlur?.()}
             placeholder="这里显示剧本内容，可以直接修改"
           />
           <p className="scs-hint">
             {reviewMode
               ? "核对后可修改正文；上传已自动创建剧集，点击下方「确认剧本」进入资产设计。"
-              : "修改后点击页头「保存页面」保存当前集文本。"}
+              : "修改后点击其他区域将自动保存当前集文本。"}
           </p>
         </div>
       )}

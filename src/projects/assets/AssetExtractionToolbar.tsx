@@ -1,13 +1,14 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Eye, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import {
   GlassSelect,
   type GlassSelectOption,
 } from "@/shell/glass-select";
 
 type Props = {
+  showExtractButton: boolean;
   onExtractEpisode: () => void;
   viewEpisodeOptions: GlassSelectOption[];
   viewEpisodeValue: string;
@@ -18,6 +19,7 @@ type Props = {
 };
 
 export function AssetExtractionToolbar({
+  showExtractButton,
   onExtractEpisode,
   viewEpisodeOptions,
   viewEpisodeValue,
@@ -26,45 +28,47 @@ export function AssetExtractionToolbar({
   extractLabel = "提取本集资产",
   trailing = null,
 }: Props) {
+  const canExtract = showExtractButton && Boolean(viewEpisodeValue);
+
   return (
     <div
       className="asset-extraction-toolbar"
       data-testid="asset-extraction-toolbar"
     >
       <div className="asset-extraction-toolbar__primary">
-        <button
-          type="button"
-          className="amw-btn amw-btn-primary"
-          disabled={extracting}
-          data-testid="asset-extract-episode"
-          onClick={onExtractEpisode}
-        >
-          <Sparkles size={16} aria-hidden />
-          {extracting ? "提取中…" : extractLabel}
-        </button>
-      </div>
-
-      <div className="asset-extraction-toolbar__trailing">
         <div
           className="asset-episode-assets-select"
-          data-testid="asset-view-episode-assets"
+          data-testid="ead-episode-select"
         >
           <GlassSelect
-            label="查看单集资产"
+            label="查看剧集资产"
             hideLabel
             menuPortal
             variant="toolbar"
             className="asset-episode-assets-action-select"
-            placeholder="查看单集资产"
+            placeholder="查看剧集资产"
             value={viewEpisodeValue}
             options={viewEpisodeOptions}
-            leadingIcon={<Eye size={16} />}
             disabled={extracting || viewEpisodeOptions.length === 0}
             onChange={onViewEpisodeAssets}
           />
         </div>
-        {trailing}
+        {showExtractButton ? (
+          <button
+            type="button"
+            className="amw-btn amw-btn-primary ead-extract-btn"
+            disabled={extracting || !canExtract}
+            aria-busy={extracting}
+            data-testid="ead-extract-episode"
+            onClick={onExtractEpisode}
+          >
+            <Sparkles size={16} aria-hidden />
+            {extracting ? "提取中…" : extractLabel}
+          </button>
+        ) : null}
       </div>
+
+      <div className="asset-extraction-toolbar__trailing">{trailing}</div>
     </div>
   );
 }

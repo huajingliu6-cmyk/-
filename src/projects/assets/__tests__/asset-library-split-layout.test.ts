@@ -10,6 +10,7 @@ function readSrc(relativePath: string): string {
 
 describe("asset library three-pane workspace contracts", () => {
   const detail = readSrc("src/projects/assets/CharacterDetail.tsx");
+  const voiceSettings = readSrc("src/projects/assets/CharacterVoiceSettings.tsx");
   const sceneDetail = readSrc("src/projects/assets/SceneDetail.tsx");
   const propDetail = readSrc("src/projects/assets/PropDetail.tsx");
   const list = readSrc("src/projects/assets/CharacterList.tsx");
@@ -40,6 +41,8 @@ describe("asset library three-pane workspace contracts", () => {
     expect(css).toContain(".asset-library-controls");
     expect(css).toContain(".asset-library-preview__overlay-actions");
     expect(css).toContain(".character-voice-bar");
+    expect(css).toContain(".voice-anchor-panel");
+    expect(css).toContain(".voice-picker-panel");
     expect(css).toContain(".asset-library-preview__media");
     expect(css).toContain("object-position: center top");
     expect(css).toContain("grid-template-rows: auto auto");
@@ -63,17 +66,19 @@ describe("asset library three-pane workspace contracts", () => {
     expect(detail).toContain("AssetDetailImage");
     expect(detail).toContain("fill");
     expect(detail).toContain("character-hero-image");
-    expect(detail).toContain("character-voice-bar");
-    expect(detail).toContain("character-voice-upload");
-    expect(detail).toContain("character-voice-select");
-    expect(detail).toContain("character-voice-generate");
+    expect(detail).toContain("CharacterVoiceSettings");
+    expect(voiceSettings).toContain("character-voice-upload");
+    expect(voiceSettings).toContain("character-voice-select");
+    expect(voiceSettings).toContain("character-voice-generate");
+    expect(voiceSettings).toContain("VoicePickerPanel");
+    expect(voiceSettings).toContain("VoiceGeneratePanel");
     const voiceBarSection =
-      detail.match(
+      voiceSettings.match(
         /data-testid="character-voice-card"[\s\S]*?<\/section>/,
       )?.[0] ?? "";
-    expect(voiceBarSection).not.toContain("VoicePreviewButton");
+    expect(voiceBarSection).toContain("VoicePreviewButton");
+    expect(voiceBarSection).toContain("character-voice-preview");
     expect(voiceBarSection).not.toContain("VoiceSelector");
-    expect(voiceBarSection).not.toContain("voice-preview");
     expect(detail).toContain("character-prompt-split");
     expect(detail).toContain("LibraryAssetPromptPanel");
     expect(detail).toContain("onCurrentMediaChange");
@@ -116,7 +121,7 @@ describe("asset library three-pane workspace contracts", () => {
     expect(detail).toContain("character-prompt-split__right");
     expect(detail).toContain("character-media-stage");
     expect(detail).toContain("hideMediaToolbar");
-    expect(detail).toContain("音色设置");
+    expect(voiceSettings).toContain("音色设置");
     expect(detail).toContain("恢复继承");
     expect(detail).not.toContain("character-prompt-split__ops");
     expect(detail).not.toContain("character-prompt-split__image");

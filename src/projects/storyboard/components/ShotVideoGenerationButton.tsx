@@ -25,8 +25,8 @@ export function ShotVideoGenerationButton({
   onClick,
   paramsSlot,
 }: Props) {
-  let label = "生成视频";
-  if (contentStale || failed || hasSucceeded) label = "再次生成";
+  let label = "生成本分镜视频";
+  if (contentStale || failed || hasSucceeded) label = "再次生成分镜视频";
 
   return (
     <div className="sbw-shot-video-actions">
@@ -40,7 +40,7 @@ export function ShotVideoGenerationButton({
           disabled={!enabled || busy}
           title={!enabled ? disabledReason || "暂不可生成" : undefined}
           onClick={onClick}
-          data-testid="shot-generate-video-btn"
+          data-testid="generate-shot-storyboard-video"
         >
           {busy ? "提交中…" : label}
         </button>

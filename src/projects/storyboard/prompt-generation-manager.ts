@@ -1,7 +1,4 @@
-/**
- * 分镜提示词按剧集异步生成：独立状态、最多 10 路并发、超出可排队。
- * 不注册全页 GenerationBusy，避免锁死剧集切换与其它编辑。
- */
+import { isStoryboardGeneratingLockActive } from "@/projects/storyboard/services/storyboard-generating-lock";
 
 export const STORYBOARD_PROMPT_GEN_MAX_CONCURRENT = 10;
 
@@ -181,6 +178,11 @@ async function startJob(projectId: string, episodeId: string): Promise<void> {
       latest.run = undefined;
     }
   } finally {
+    const latest = bucket.jobs.get(episodeId);
+    if (latest?.status === "success" || latest?.status === "failed") {
+      latest.run = undefined;
+      bucket.queue = bucket.queue.filter((id) => id !== episodeId);
+    }
     emit();
     void pumpQueue(projectId);
   }
@@ -263,13 +265,29 @@ export function syncPromptGenerationFromProduction(params: {
   episodeId: string;
   productionStatus: string;
   generationError?: string | null;
+  updatedAt?: string;
 }): void {
   const bucket = ensureBucket(params.projectId);
   const current = bucket.jobs.get(params.episodeId);
   if (current?.status === "generating" || current?.status === "queued") {
-    return;
+    if (current.run) return;
   }
+
   if (params.productionStatus === "storyboard_generating") {
+    const updatedAt = params.updatedAt ?? new Date().toISOString();
+    if (
+      !isStoryboardGeneratingLockActive({
+        status: params.productionStatus,
+        updatedAt,
+      })
+    ) {
+      if (current && !current.run) {
+        bucket.jobs.delete(params.episodeId);
+        bucket.queue = bucket.queue.filter((id) => id !== params.episodeId);
+        emit();
+      }
+      return;
+    }
     bucket.jobs.set(params.episodeId, { status: "generating" });
     emit();
     return;
@@ -292,6 +310,25 @@ export function syncPromptGenerationFromProduction(params: {
       emit();
     }
   }
+}
+
+/** 离开分镜页时释放仅排队的本地任务，避免过期 queued 占用内存。 */
+export function releaseQueuedPromptGenerationOnPageLeave(
+  projectId: string,
+): void {
+  const bucket = buckets.get(projectId);
+  if (!bucket) return;
+  let changed = false;
+  for (const [episodeId, job] of bucket.jobs) {
+    if (job.status !== "queued") continue;
+    bucket.jobs.delete(episodeId);
+    changed = true;
+  }
+  if (bucket.queue.length > 0) {
+    bucket.queue = bucket.queue.filter((id) => bucket.jobs.has(id));
+    changed = true;
+  }
+  if (changed) emit();
 }
 
 /** 测试用：清空内存状态 */

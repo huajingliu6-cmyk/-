@@ -26,7 +26,7 @@ export async function POST(request: Request, context: RouteContext) {
     body = {};
   }
   const guarded = await guardWorkspaceRemoteData(() =>
-    handleStartAssetExtraction(projectId, body),
+    handleStartAssetExtraction(projectId, body, gated.user.id),
   );
   if (guarded instanceof NextResponse) return guarded;
   return guarded;

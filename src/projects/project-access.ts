@@ -145,6 +145,7 @@ export async function listProjectListItems(): Promise<{
       status: "draft" as const,
       generationProgress: null,
       visualStyle: project.visualStyle,
+      projectMode: project.projectMode,
     }));
   return { projects };
 }

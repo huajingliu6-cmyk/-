@@ -1,7 +1,14 @@
 "use client";
 
-import { Download, History, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import {
+  Download,
+  Expand,
+  History,
+  Pause,
+  Play,
+  X,
+} from "lucide-react";
+import { useCallback, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import type { ShotVideoUiStatus } from "@/projects/storyboard/shot-video-status";
 import type { ShotGenerationSnapshot } from "@/projects/storyboard/resolve-shot-video";
@@ -66,6 +73,162 @@ function mergeHistory(
     return tb.localeCompare(ta) || b.id.localeCompare(a.id);
   });
   return assignVersionLabels(merged);
+}
+
+function formatPlaybackTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "00:00";
+  const whole = Math.floor(seconds);
+  const minutes = Math.floor(whole / 60);
+  const secs = whole % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+function WorkspaceVideoPlayer({
+  src,
+}: {
+  src: string;
+}) {
+  const frameRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const [scrubbing, setScrubbing] = useState(false);
+
+  const progressRatio =
+    duration > 0 ? Math.max(0, Math.min(1, currentTime / duration)) : 0;
+
+  const togglePlay = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) void video.play();
+    else video.pause();
+  }, []);
+
+  const seekTo = useCallback(
+    (nextTime: number) => {
+      const video = videoRef.current;
+      if (!video || !Number.isFinite(nextTime)) return;
+      const clamped = Math.max(0, Math.min(duration || 0, nextTime));
+      video.currentTime = clamped;
+      setCurrentTime(clamped);
+    },
+    [duration],
+  );
+
+  const enterFullscreen = useCallback(() => {
+    const target = frameRef.current ?? videoRef.current;
+    if (!target) return;
+    void target.requestFullscreen?.();
+  }, []);
+
+  if (failed) {
+    return (
+      <div className="sbw-shot-preview__empty is-error">
+        <p>视频加载失败</p>
+        <p className="sbw-hint">可切换其他历史版本重试</p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div
+        ref={frameRef}
+        className="sbw-shot-preview__workspace-media"
+        data-testid="shot-video-workspace-frame"
+      >
+        <video
+          ref={videoRef}
+          className="sbw-shot-preview__video"
+          src={src}
+          preload="metadata"
+          playsInline
+          onClick={togglePlay}
+          onLoadedMetadata={(event) => {
+            const nextDuration = event.currentTarget.duration;
+            setDuration(Number.isFinite(nextDuration) ? nextDuration : 0);
+          }}
+          onTimeUpdate={(event) => {
+            if (scrubbing) return;
+            setCurrentTime(event.currentTarget.currentTime);
+          }}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onEnded={() => setPlaying(false)}
+          onError={() => setFailed(true)}
+        />
+        <div className="sbw-shot-preview__workspace-overlay">
+          <span
+            className="sbw-shot-preview__workspace-timecode"
+            data-testid="shot-video-timecode"
+          >
+            {formatPlaybackTime(currentTime)} / {formatPlaybackTime(duration)}
+          </span>
+          <button
+            type="button"
+            className="sbw-shot-preview__workspace-fullscreen"
+            title="全屏播放"
+            aria-label="全屏播放"
+            data-testid="shot-video-fullscreen-btn"
+            onClick={enterFullscreen}
+          >
+            <Expand size={15} aria-hidden />
+          </button>
+        </div>
+      </div>
+
+      <div
+        className="sbw-shot-preview__workspace-transport"
+        data-testid="shot-video-transport"
+      >
+        <button
+          type="button"
+          className="sbw-shot-preview__workspace-play"
+          title={playing ? "暂停" : "播放"}
+          aria-label={playing ? "暂停" : "播放"}
+          onClick={togglePlay}
+        >
+          {playing ? (
+            <Pause size={16} aria-hidden />
+          ) : (
+            <Play size={16} fill="currentColor" aria-hidden />
+          )}
+        </button>
+        <div
+          className="sbw-shot-preview__workspace-scrub"
+          style={
+            {
+              "--sbw-shot-preview-progress": `${progressRatio * 100}%`,
+            } as CSSProperties
+          }
+        >
+          <div className="sbw-shot-preview__workspace-scrub-track" aria-hidden />
+          <div
+            className="sbw-shot-preview__workspace-scrub-fill"
+            aria-hidden
+          />
+          <input
+            type="range"
+            min={0}
+            max={duration > 0 ? duration : 0}
+            step={0.05}
+            value={Math.min(currentTime, duration || 0)}
+            disabled={duration <= 0}
+            aria-label="播放进度"
+            data-testid="shot-video-scrub"
+            onPointerDown={() => setScrubbing(true)}
+            onPointerUp={() => setScrubbing(false)}
+            onPointerCancel={() => setScrubbing(false)}
+            onChange={(event) => {
+              seekTo(Number(event.target.value));
+            }}
+          />
+        </div>
+      </div>
+    </>
+  );
 }
 
 /**
@@ -170,70 +333,85 @@ export function ShotVideoPreview({
           className="sbw-shot-preview__workspace-frame"
           data-aspect={aspectRatio === "16:9" ? "16:9" : "9:16"}
         >
-          <button
-            type="button"
-            className="sbw-btn sbw-shot-preview__history-btn is-icon"
-            onClick={() => setHistoryOpen(true)}
-            data-testid="shot-video-history-btn"
-            title="历史分镜"
-            aria-label="历史分镜"
-          >
-            <History size={15} />
-          </button>
-          {pending ? (
-            <div className="sbw-shot-preview__empty is-loading">
-              <span className="sbw-shot-preview__spinner" aria-hidden />
-              <p>视频生成中，请稍候</p>
-              <p className="sbw-hint">{STATUS_LABEL[pending.status]}</p>
-              {typeof pending.progress === "number" &&
-              Number.isFinite(pending.progress) ? (
-                <p className="sbw-hint">{Math.round(pending.progress)}%</p>
+          <div className="sbw-shot-preview__workspace-shell">
+            <div className="sbw-shot-preview__workspace-toolbar">
+              {latest ? (
+                <a
+                  className="sbw-shot-preview__workspace-download"
+                  href={latest.downloadUrl}
+                  download
+                  title="下载视频"
+                  aria-label="下载视频"
+                  data-testid="shot-video-download-btn"
+                >
+                  <Download size={15} aria-hidden />
+                  <span>下载</span>
+                </a>
+              ) : (
+                <span className="sbw-shot-preview__workspace-toolbar-spacer" />
+              )}
+              <button
+                type="button"
+                className="sbw-btn sbw-shot-preview__history-btn is-icon"
+                onClick={() => setHistoryOpen(true)}
+                data-testid="shot-video-history-btn"
+                title="历史分镜"
+                aria-label="历史分镜"
+              >
+                <History size={15} />
+              </button>
+            </div>
+
+            {pending ? (
+              <div className="sbw-shot-preview__workspace-media is-placeholder">
+                <div className="sbw-shot-preview__empty is-loading">
+                  <span className="sbw-shot-preview__spinner" aria-hidden />
+                  <p>视频生成中，请稍候</p>
+                  <p className="sbw-hint">{STATUS_LABEL[pending.status]}</p>
+                  {typeof pending.progress === "number" &&
+                  Number.isFinite(pending.progress) ? (
+                    <p className="sbw-hint">{Math.round(pending.progress)}%</p>
+                  ) : null}
+                </div>
+              </div>
+            ) : latest ? (
+              <WorkspaceVideoPlayer key={latest.videoUrl} src={latest.videoUrl} />
+            ) : status === "failed" ? (
+              <div className="sbw-shot-preview__workspace-media is-placeholder">
+                <div className="sbw-shot-preview__empty is-error">
+                  <VideoFailureCopy errorMessage={errorMessage} />
+                </div>
+              </div>
+            ) : (
+              <div className="sbw-shot-preview__workspace-media is-placeholder">
+                <div className="sbw-shot-preview__empty">
+                  <span className="sbw-shot-preview__icon" aria-hidden>
+                    ▶
+                  </span>
+                  <p>本镜头尚未生成视频</p>
+                </div>
+              </div>
+            )}
+
+            <div className="sbw-shot-preview__workspace-meta">
+              <span className="sbw-badge">{STATUS_LABEL[status]}</span>
+              {latest ? (
+                <span className="sbw-hint">
+                  {latest.versionLabel}
+                  {latest.completedAt
+                    ? ` · ${new Date(latest.completedAt).toLocaleString()}`
+                    : ""}
+                </span>
+              ) : null}
+              {contentStale || status === "stale" ? (
+                <p className="sbw-hint">当前镜头已修改，视频内容需要再次生成。</p>
+              ) : null}
+              {status === "failed" && facingError && latest ? (
+                <p className="sbw-note is-error">
+                  最近一次生成失败：{facingError.message}
+                </p>
               ) : null}
             </div>
-          ) : latest ? (
-            <>
-              <a
-                className="sbw-shot-preview__download is-icon"
-                href={latest.downloadUrl}
-                download
-                title="下载视频"
-                aria-label="下载视频"
-              >
-                <Download size={15} />
-              </a>
-              <ShotVideoMedia key={latest.videoUrl} src={latest.videoUrl} />
-            </>
-          ) : status === "failed" ? (
-            <div className="sbw-shot-preview__empty is-error">
-              <VideoFailureCopy errorMessage={errorMessage} />
-            </div>
-          ) : (
-            <div className="sbw-shot-preview__empty">
-              <span className="sbw-shot-preview__icon" aria-hidden>
-                ▶
-              </span>
-              <p>本镜头尚未生成视频</p>
-            </div>
-          )}
-
-          <div className="sbw-shot-preview__workspace-meta">
-            <span className="sbw-badge">{STATUS_LABEL[status]}</span>
-            {latest ? (
-              <span className="sbw-hint">
-                {latest.versionLabel}
-                {latest.completedAt
-                  ? ` · ${new Date(latest.completedAt).toLocaleString()}`
-                  : ""}
-              </span>
-            ) : null}
-            {contentStale || status === "stale" ? (
-              <p className="sbw-hint">当前镜头已修改，视频内容需要再次生成。</p>
-            ) : null}
-            {status === "failed" && facingError && latest ? (
-              <p className="sbw-note is-error">
-                最近一次生成失败：{facingError.message}
-              </p>
-            ) : null}
           </div>
         </div>
 

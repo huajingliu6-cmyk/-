@@ -6,12 +6,74 @@ import type {
 import type {
   CharacterDesignItem,
   EpisodeAssetDesignItem,
+  GeneratedMediaState,
   PropDesignItem,
   SceneDesignItem,
 } from "@/projects/assets/episode-design/types";
 
 export type LibraryPromptAsset = CharacterAsset | SceneAsset | PropAsset;
 export type LibraryPromptAssetKind = "character" | "scene" | "prop";
+
+export type LibraryPromptScopeMedia = {
+  currentId: string | null;
+  historyIds: string[];
+};
+
+export type LibraryPromptScopeOptions = {
+  promptScopeKey?: string | null;
+  promptScopeText?: string | null;
+  promptScopeMedia?: LibraryPromptScopeMedia | null;
+};
+
+export const IDLE_EMPTY_DESIGN_PROMPT = {
+  status: "idle" as const,
+  text: "",
+  generationId: null,
+  sourceFingerprint: null,
+  generatedAt: null,
+  updatedAt: null,
+  errorMessage: null,
+  history: [] as const,
+};
+
+export function parseAppearanceScopeId(
+  promptScopeKey: string | null | undefined,
+): string | null {
+  if (!promptScopeKey || promptScopeKey === "primary") return null;
+  const match = /^appearance:(.+)$/.exec(promptScopeKey);
+  return match?.[1]?.trim() || null;
+}
+
+export function idleEmptyGeneratedMedia(): GeneratedMediaState {
+  return {
+    currentId: null,
+    historyIds: [],
+    history: [],
+    status: "idle",
+    promptFingerprint: null,
+    errorMessage: null,
+  };
+}
+
+function appearanceScopedGeneratedMedia(
+  scopeMedia: LibraryPromptScopeMedia | null | undefined,
+): GeneratedMediaState {
+  const currentId = scopeMedia?.currentId?.trim() || null;
+  const historyIds = [
+    ...(scopeMedia?.historyIds ?? []),
+    ...(currentId ? [currentId] : []),
+  ].filter((id, index, list) => id && list.indexOf(id) === index);
+  if (!currentId && historyIds.length === 0) {
+    return idleEmptyGeneratedMedia();
+  }
+  return {
+    currentId: currentId ?? historyIds[historyIds.length - 1] ?? null,
+    historyIds,
+    status: "completed",
+    promptFingerprint: null,
+    errorMessage: null,
+  };
+}
 
 export function findLibraryDesignItem(
   asset: LibraryPromptAsset | null,
@@ -175,4 +237,48 @@ export function makeLibraryDesignItem(
     },
   };
   return item;
+}
+
+/**
+ * Appearance-scoped library prompt state — isolated from main character prompt/media.
+ * Used when promptScopeKey is `appearance:<id>`.
+ */
+export function resolveLibraryPromptScopeItem(
+  asset: LibraryPromptAsset,
+  kind: LibraryPromptAssetKind,
+  sourceItem: EpisodeAssetDesignItem | null | undefined,
+  scope: LibraryPromptScopeOptions,
+): EpisodeAssetDesignItem {
+  const appearanceId = parseAppearanceScopeId(scope.promptScopeKey);
+  if (!appearanceId) {
+    return makeLibraryDesignItem(asset, kind, sourceItem);
+  }
+
+  const base = makeLibraryDesignItem(asset, kind, sourceItem);
+  const scopeMedia = scope.promptScopeMedia;
+  const hasMedia = Boolean(
+    scopeMedia?.currentId?.trim() ||
+      (scopeMedia?.historyIds?.length ?? 0) > 0,
+  );
+  const text = scope.promptScopeText?.trim() ?? "";
+  const designPrompt =
+    !text && !hasMedia
+      ? { ...IDLE_EMPTY_DESIGN_PROMPT, history: [] }
+      : {
+          status: "ready" as const,
+          text: scope.promptScopeText ?? "",
+          generationId: null,
+          sourceFingerprint: null,
+          generatedAt: null,
+          updatedAt: text ? new Date().toISOString() : null,
+          errorMessage: null,
+          history: [],
+        };
+
+  return {
+    ...base,
+    id: `${base.id}:appearance:${appearanceId}`,
+    designPrompt,
+    generatedMedia: appearanceScopedGeneratedMedia(scopeMedia),
+  } as EpisodeAssetDesignItem;
 }

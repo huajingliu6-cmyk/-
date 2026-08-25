@@ -61,7 +61,7 @@ describe("storyboard-generate", () => {
       expect(scene.shots.length).toBeGreaterThanOrEqual(2);
       expect(scene.shots.length).toBeLessThanOrEqual(4);
       for (const shot of scene.shots) {
-        expect(shot.promptLocked).toBe(true);
+        expect(shot.promptLocked).toBe(false);
         expect(shot.locked).toBe(false);
       }
     }

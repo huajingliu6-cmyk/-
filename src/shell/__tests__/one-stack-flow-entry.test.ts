@@ -32,15 +32,41 @@ describe("one stack flow entry contracts", () => {
     expect(hook).not.toContain("/app/one-stack-flow");
   });
 
-  it("brands project stage nav as one-stack without new routes", () => {
+  it("canvas sidebar entry routes to infinite canvas project list", () => {
+    const hook = readSrc("src/shell/use-open-canvas.tsx");
+    const sidebar = readSrc("src/shell/AppSidebar.tsx");
+    expect(hook).toContain("APP_INFINITE_CANVAS_PATH");
+    expect(hook).not.toContain("ProjectPickerDialog");
+    expect(sidebar).toContain('action: "canvas"');
+  });
+
+  it("brands project stage nav with project name when header flow is unavailable", () => {
     const nav = readSrc("src/projects/workbench/ProjectStageNav.tsx");
-    expect(nav).toContain("一栈式Flow");
-    expect(nav).toContain('step: "01"');
-    expect(nav).toContain('label: "剧本创作"');
-    expect(nav).toContain('label: "项目资产"');
-    expect(nav).toContain('label: "分镜创作"');
-    expect(nav).toContain("/app/projects/");
-    expect(nav).not.toContain("/app/one-stack-flow");
+    const layout = readSrc("src/app/app/projects/[projectId]/layout.tsx");
+    const workspaceLayout = readSrc(
+      "src/app/app/workspace/projects/[projectId]/layout.tsx",
+    );
+    expect(nav).toContain("brandLabel");
+    expect(nav).toContain("if (flowHeader) {");
+    expect(nav).toContain("return null");
+    expect(layout).toContain("ProjectFlowHeaderSeed");
+    expect(layout).toContain("projectName={gated.project.name}");
+    expect(workspaceLayout).toContain("brandLabel={project?.name");
+  });
+
+  it("uses flow-specific branding and in-progress filters on project lists", () => {
+    const page = readSrc("src/projects/ui/ProjectFlowListPage.tsx");
+    const projects = readSrc("src/app/app/projects/page.tsx");
+    const infinite = readSrc("src/app/app/infinite-canvas/page.tsx");
+    expect(page).toContain("flow.projectMode");
+    expect(page).toContain("flow.title");
+    expect(projects).toContain("FULL_STACK_FLOW");
+    expect(page).toContain("requireScriptUpload={flow.kind === \"full-stack\"}");
+    expect(page).toContain("listFlowKind={flow.kind}");
+    expect(page).not.toContain("showOptionalCanvas");
+    expect(infinite).toContain("INFINITE_CANVAS_FLOW");
+    expect(page).toContain('"in_progress"');
+    expect(page).toContain("进行中");
   });
 
   it("does not ship a standalone one-stack flow page", () => {
@@ -48,22 +74,23 @@ describe("one stack flow entry contracts", () => {
     expect(() => readSrc("src/one-stack-flow/ui/OneStackFlowClient.tsx")).toThrow();
   });
 
-  it("hides top shell navigation on one-stack flow routes", () => {
+  it("shows project stage nav in the global header on project detail routes", () => {
     const shell = readSrc("src/shell/AuthenticatedAppShell.tsx");
+    const header = readSrc("src/shell/AuthenticatedHeader.tsx");
     const nav = readSrc("src/shell/nav.ts");
-    expect(shell).toContain("isOneStackFlowPath");
-    expect(shell).toContain("hideTopChrome");
+    const stage = readSrc("src/projects/workbench/ProjectStageNav.tsx");
+    const links = readSrc("src/projects/workbench/ProjectStageNavLinks.tsx");
+    expect(shell).toContain("ProjectFlowHeaderShell");
+    expect(header).toContain("ShellProjectContext");
+    expect(header).toContain("ProjectStageNavLinks");
+    expect(header).toContain('placement="header"');
+    expect(header).toContain("isOneStackFlowPath");
+    expect(header).toContain("hideGlobalNav");
+    expect(nav).toContain("parseProjectFlowRoute");
+    expect(stage).toContain("useProjectFlowHeader");
+    expect(links).toContain("01");
+    expect(links).toContain("剧本创作");
+    expect(shell).toContain('variant={headerVariant}');
     expect(nav).not.toContain('label: "素材引擎"');
-    expect(nav).toContain('label: "一栈式Flow"');
-  });
-
-  it("uses one-stack branding and in-progress filters on projects page", () => {
-    const page = readSrc("src/app/app/projects/page.tsx");
-    expect(page).toContain("<h1>一栈式Flow</h1>");
-    expect(page).toContain('"in_progress"');
-    expect(page).toContain("进行中");
-    expect(page).not.toContain('id: "draft"');
-    expect(page).not.toContain('id: "generating"');
-    expect(page).not.toContain('id: "failed"');
   });
 });

@@ -5,11 +5,12 @@ import { ChevronDown } from "lucide-react";
 import { GlassSelect } from "@/shell/glass-select";
 import type { StoryboardVideoOutputParams } from "@/projects/storyboard/storyboard-video-params";
 import {
+  STORYBOARD_SHOT_DURATION_MAX,
+  STORYBOARD_SHOT_DURATION_MIN,
   STORYBOARD_VIDEO_ASPECT_RATIOS,
-  STORYBOARD_VIDEO_DURATION_MAX,
-  STORYBOARD_VIDEO_DURATION_MIN,
   STORYBOARD_VIDEO_RESOLUTIONS,
-  clampStoryboardVideoDuration,
+  clampStoryboardClipDuration,
+  isValidStoryboardClipDuration,
 } from "@/projects/storyboard/storyboard-video-params";
 import {
   STORYBOARD_VIDEO_MODEL_CHOICES,
@@ -25,20 +26,20 @@ type Props = {
   disabled?: boolean;
 };
 
+const CLIP_DURATION_OPTIONS = [
+  STORYBOARD_SHOT_DURATION_MIN,
+  STORYBOARD_SHOT_DURATION_MIN + 1,
+  STORYBOARD_SHOT_DURATION_MAX,
+] as const;
+
 /**
  * 镜头视频出参：模型 → 画质 → 比例 → 风格 → 时长。
- * 所选值会随 generate-video 请求上送（模型为白名单 choice ID）。
+ * 分镜 Clip 时长仅 13 / 14 / 15 秒。
  */
 export function ShotVideoOutputParams({ value, onChange, disabled }: Props) {
   const durationPanelId = useId();
   const [durationOpen, setDurationOpen] = useState(false);
   const durationWrapRef = useRef<HTMLDivElement>(null);
-  const [durationDraft, setDurationDraft] = useState(String(value.durationSeconds));
-  const [syncedDuration, setSyncedDuration] = useState(value.durationSeconds);
-  if (syncedDuration !== value.durationSeconds) {
-    setSyncedDuration(value.durationSeconds);
-    setDurationDraft(String(value.durationSeconds));
-  }
 
   useEffect(() => {
     if (!durationOpen) return;
@@ -59,10 +60,10 @@ export function ShotVideoOutputParams({ value, onChange, disabled }: Props) {
     };
   }, [durationOpen]);
 
-  const commitDuration = (raw: number | string) => {
-    const n = typeof raw === "number" ? raw : Number(raw);
-    const next = clampStoryboardVideoDuration(n);
-    setDurationDraft(String(next));
+  const commitDuration = (seconds: number) => {
+    const next = isValidStoryboardClipDuration(seconds)
+      ? seconds
+      : clampStoryboardClipDuration(seconds);
     if (next !== value.durationSeconds) {
       onChange({ ...value, durationSeconds: next });
     }
@@ -175,41 +176,34 @@ export function ShotVideoOutputParams({ value, onChange, disabled }: Props) {
             role="dialog"
             aria-label="选择时长"
           >
-            <div className="sbw-shot-video-params__duration-row">
-              <input
-                type="range"
-                min={STORYBOARD_VIDEO_DURATION_MIN}
-                max={STORYBOARD_VIDEO_DURATION_MAX}
-                step={1}
-                value={value.durationSeconds}
-                disabled={disabled}
-                aria-label="时长滑条"
-                data-testid="shot-video-duration-slider"
-                onChange={(e) => commitDuration(e.target.value)}
-              />
-              <input
-                type="number"
-                min={STORYBOARD_VIDEO_DURATION_MIN}
-                max={STORYBOARD_VIDEO_DURATION_MAX}
-                step={1}
-                value={durationDraft}
-                disabled={disabled}
-                aria-label="时长秒数"
-                data-testid="shot-video-duration-input"
-                className="sbw-shot-video-params__duration-input"
-                onChange={(e) => setDurationDraft(e.target.value)}
-                onBlur={() => commitDuration(durationDraft)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    commitDuration(durationDraft);
+            <div
+              className="sbw-shot-video-params__duration-row sbw-shot-video-params__duration-options"
+              role="group"
+              aria-label="Clip 时长"
+            >
+              {CLIP_DURATION_OPTIONS.map((seconds) => (
+                <button
+                  key={seconds}
+                  type="button"
+                  className={
+                    value.durationSeconds === seconds
+                      ? "sbw-shot-video-params__duration-option is-active"
+                      : "sbw-shot-video-params__duration-option"
                   }
-                }}
-              />
-              <span className="sbw-shot-video-params__duration-unit">秒</span>
+                  disabled={disabled}
+                  data-testid={`shot-video-duration-${seconds}`}
+                  onClick={() => {
+                    commitDuration(seconds);
+                    setDurationOpen(false);
+                  }}
+                >
+                  {seconds}秒
+                </button>
+              ))}
             </div>
             <p className="sbw-shot-video-params__duration-hint">
-              {STORYBOARD_VIDEO_DURATION_MIN}–{STORYBOARD_VIDEO_DURATION_MAX} 秒
+              分镜 Clip {STORYBOARD_SHOT_DURATION_MIN}–{STORYBOARD_SHOT_DURATION_MAX}{" "}
+              秒
             </p>
           </div>
         ) : null}

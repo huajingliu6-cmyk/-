@@ -10,7 +10,7 @@ import { prefersReducedMotion } from "@/shell/login-portal";
 import { memoryFetch } from "@/shell/memory-fetch";
 import {
   confirmGenerationLeaveIfNeeded,
-  isGenerationBusy,
+  shouldBlockGenerationLeave,
 } from "@/shell/generation-busy";
 import {
   ACTIVE_ENTERPRISE_EVENT,
@@ -98,7 +98,7 @@ export function AuthenticatedNavigation({
             prefetch={false}
             className={className}
             onClick={(event) => {
-              if (isGenerationBusy()) {
+              if (shouldBlockGenerationLeave(item.href)) {
                 event.preventDefault();
                 void confirmGenerationLeaveIfNeeded(item.href);
                 return;

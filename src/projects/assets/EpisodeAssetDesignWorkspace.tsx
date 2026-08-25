@@ -34,8 +34,16 @@ import {
 import {
   notifyCreditsRefresh,
 } from "@/projects/story/story-generation-client";
-import { LIVE_EXTRACTION_STATUSES } from "@/projects/assets/extraction/types";
-import type { AssetExtractionTask } from "@/projects/assets/extraction/types";
+import type {
+  AssetExtractionTask,
+  PublicAssetExtractionTask,
+  PublicAssetRosterItem,
+} from "@/projects/assets/extraction/types";
+import {
+  isAwaitingRosterSelectionStatus,
+  isLiveExtractionStatus,
+} from "@/projects/assets/extraction/types";
+import { RosterSelectionDialog } from "@/projects/assets/extraction/RosterSelectionDialog";
 import {
   designCardApprovalUi,
   isApprovedEpisodeDesignItem,
@@ -139,6 +147,15 @@ export type AssetExtractionProgress = {
   label: string;
 };
 
+export type ExtractionReviewReadyPayload = {
+  episodeId: string;
+  episodeNumber: number;
+  episodeTitle: string;
+  items: EpisodeAssetDesignItem[];
+  revision: number;
+  fingerprint: string;
+};
+
 type PendingMediaEntry = {
   kind: "image" | "audio";
   file: File;
@@ -168,6 +185,8 @@ type Props = {
   extractionModel?: string;
   /** Run extraction logic without rendering the legacy design workspace. */
   headless?: boolean;
+  /** Parent-controlled episode selection for the unified asset library. */
+  controlledEpisodeId?: string | null;
   extractionRequest?: AssetExtractionRequest | null;
   approvalEnabled?: boolean;
   /** Open the workspace approval picker from the unified asset toolbar. */
@@ -180,6 +199,9 @@ type Props = {
     progress: AssetExtractionProgress | null,
   ) => void;
   onExtractionComplete?: () => void | Promise<void>;
+  /** Extraction finished and items are ready for user selection before library promote. */
+  onExtractionReviewReady?: (payload: ExtractionReviewReadyPayload) => void;
+  onExtractionNote?: (message: string) => void;
   /** Parent clears the request after headless consumption so remounts cannot replay it. */
   onExtractionRequestConsumed?: (requestId: number) => void;
 };
@@ -406,6 +428,7 @@ export function EpisodeAssetDesignWorkspace({
   extractRequestId = 0,
   extractionModel,
   headless = false,
+  controlledEpisodeId = null,
   extractionRequest = null,
   approvalEnabled = true,
   submitApprovalRequestId = 0,
@@ -414,6 +437,8 @@ export function EpisodeAssetDesignWorkspace({
   onExtractionBusyChange,
   onExtractionProgressChange,
   onExtractionComplete,
+  onExtractionReviewReady,
+  onExtractionNote,
   onExtractionRequestConsumed,
 }: Props) {
   const pathname = usePathname();
@@ -482,6 +507,13 @@ export function EpisodeAssetDesignWorkspace({
     canReapply?: boolean;
     canRetryChunks?: boolean;
   } | null>(null);
+  const [rosterSelectionTask, setRosterSelectionTask] =
+    useState<PublicAssetExtractionTask | null>(null);
+  const [rosterDialogOpen, setRosterDialogOpen] = useState(false);
+  const [rosterSubmitting, setRosterSubmitting] = useState(false);
+  const [rosterSubmitError, setRosterSubmitError] = useState<string | null>(
+    null,
+  );
   const [extractDiagnostics, setExtractDiagnostics] = useState<{
     extracted: number;
     repaired: number;
@@ -498,6 +530,7 @@ export function EpisodeAssetDesignWorkspace({
   const handledExternalRequestIdRef = useRef(0);
   const handledSubmitApprovalRequestIdRef = useRef(0);
   const pendingEpisodeRequestRef = useRef<AssetExtractionRequest | null>(null);
+  const reviewReadyKeyRef = useRef("");
   const [assetSummaryPanel, setAssetSummaryPanel] =
     useState<AssetSummaryPanel>(null);
   const summaryRef = useRef<HTMLDivElement | null>(null);
@@ -570,6 +603,15 @@ export function EpisodeAssetDesignWorkspace({
   }, [episodes, onEpisodesChange]);
 
   useEffect(() => {
+    if (controlledEpisodeId == null) return;
+    queueMicrotask(() => {
+      setSelectedId((prev) =>
+        prev === controlledEpisodeId ? prev : controlledEpisodeId,
+      );
+    });
+  }, [controlledEpisodeId]);
+
+  useEffect(() => {
     onItemsChange?.(items, selectedId);
   }, [items, onItemsChange, selectedId]);
 
@@ -586,13 +628,28 @@ export function EpisodeAssetDesignWorkspace({
   }, []);
 
   const applyExtractionTask = useCallback(
-    (task: AssetExtractionTask | null) => {
-      const live =
-        Boolean(task) &&
-        LIVE_EXTRACTION_STATUSES.includes(
-          task!.status as (typeof LIVE_EXTRACTION_STATUSES)[number],
-        );
-      if (!live || !task) {
+    (task: AssetExtractionTask | PublicAssetExtractionTask | null) => {
+      if (!task) {
+        setBatchExtracting(false);
+        setExtractingEpisodeIds(new Set());
+        setExtractionProgress(null);
+        return;
+      }
+
+      if (isAwaitingRosterSelectionStatus(task.status)) {
+        setBatchExtracting(false);
+        setExtractionProgress(null);
+        if (task.scope === "episode" && task.episodeId) {
+          setExtractingEpisodeIds(new Set([task.episodeId]));
+          if (selectedIdRef.current === task.episodeId) {
+            setDesignStatus("generating");
+          }
+        }
+        return;
+      }
+
+      const live = isLiveExtractionStatus(task.status);
+      if (!live) {
         setBatchExtracting(false);
         setExtractingEpisodeIds(new Set());
         setExtractionProgress(null);
@@ -614,7 +671,7 @@ export function EpisodeAssetDesignWorkspace({
         percent: Math.min(99, task.estimatedProgress),
       });
     },
-    [markEpisodeExtracting],
+    [],
   );
 
   const currentEpisodeExtracting =
@@ -977,6 +1034,24 @@ export function EpisodeAssetDesignWorkspace({
         setEpisodeContent(content);
         setContentLength(content.trim().length);
         void loadApprovalMediaFlags(episodeId);
+        if (
+          (headless || embeddedInLibrary) &&
+          payload.designStatus === "review" &&
+          payload.record.items.length > 0
+        ) {
+          const reviewKey = `${episodeId}:${payload.record.revision}:${payload.record.updatedAt ?? ""}`;
+          if (reviewReadyKeyRef.current !== reviewKey) {
+            reviewReadyKeyRef.current = reviewKey;
+            onExtractionReviewReady?.({
+              episodeId,
+              episodeNumber: payload.episode.episodeNumber,
+              episodeTitle: payload.episode.title ?? "",
+              items: payload.record.items,
+              revision: payload.record.revision,
+              fingerprint: payload.currentFingerprint,
+            });
+          }
+        }
       } catch (error) {
         setPageNote(
           error instanceof Error ? error.message : "无法加载剧集资产设计",
@@ -987,16 +1062,24 @@ export function EpisodeAssetDesignWorkspace({
     },
     [
       apiRoot,
+      embeddedInLibrary,
+      headless,
       loadApprovalMediaFlags,
       markEpisodeExtracting,
+      onExtractionReviewReady,
       projectId,
       surface,
     ],
   );
 
   useEffect(() => {
+    if (!controlledEpisodeId) return;
+    void loadDetail(controlledEpisodeId);
+  }, [controlledEpisodeId, loadDetail]);
+
+  useEffect(() => {
     let cancelled = false;
-    let sawLive = false;
+    let sawBlocking = false;
     const tick = async () => {
       try {
         const res = await fetch(`${apiRoot}/asset-extraction`, {
@@ -1004,25 +1087,48 @@ export function EpisodeAssetDesignWorkspace({
         });
         if (!res.ok || cancelled) return;
         const payload = (await res.json()) as {
-          task?: AssetExtractionTask | null;
+          task?: PublicAssetExtractionTask | null;
         };
         const task = payload.task ?? null;
-        const live =
-          Boolean(task) &&
-          LIVE_EXTRACTION_STATUSES.includes(
-            task!.status as (typeof LIVE_EXTRACTION_STATUSES)[number],
-          );
         applyExtractionTask(task);
-        if (live) {
-          sawLive = true;
+
+        if (
+          task &&
+          isAwaitingRosterSelectionStatus(task.status) &&
+          task.scope === "episode" &&
+          Array.isArray(task.roster) &&
+          task.roster.length > 0
+        ) {
+          sawBlocking = true;
+          setRosterSelectionTask(task);
+          // Auto-open for the episode that owns this roster (or current selection).
+          if (
+            !task.episodeId ||
+            task.episodeId === selectedIdRef.current ||
+            !selectedIdRef.current
+          ) {
+            setRosterDialogOpen(true);
+          }
           return;
         }
-        if (sawLive) {
-          sawLive = false;
+
+        if (task && isLiveExtractionStatus(task.status)) {
+          sawBlocking = true;
+          if (!isAwaitingRosterSelectionStatus(task.status)) {
+            setRosterDialogOpen(false);
+          }
+          return;
+        }
+
+        if (sawBlocking) {
+          sawBlocking = false;
+          setRosterSelectionTask(null);
+          setRosterDialogOpen(false);
           const selected = selectedIdRef.current;
           if (selected) void loadDetail(selected);
           void loadList();
           void loadBundle();
+          void onExtractionComplete?.();
         }
       } catch {
         /* keep polling */
@@ -1036,7 +1142,7 @@ export function EpisodeAssetDesignWorkspace({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [apiRoot, applyExtractionTask, loadBundle, loadDetail, loadList]);
+  }, [apiRoot, applyExtractionTask, loadBundle, loadDetail, loadList, onExtractionComplete]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1620,7 +1726,7 @@ export function EpisodeAssetDesignWorkspace({
         if (needsFormalPrompts) {
           await kickOffFormalDesignPrompts(record, record.episodeId);
         }
-        if (!approvalEnabled) {
+        if (!approvalEnabled && !headless && !embeddedInLibrary) {
           const synced = await finalizeExtraction({
             episodeId: record.episodeId,
             record,
@@ -1634,7 +1740,9 @@ export function EpisodeAssetDesignWorkspace({
     approvalEnabled,
     currentEpisodeExtracting,
     detail,
+    embeddedInLibrary,
     finalizeExtraction,
+    headless,
     kickOffFormalDesignPrompts,
     loadDetail,
     selectedId,
@@ -1663,6 +1771,7 @@ export function EpisodeAssetDesignWorkspace({
     markEpisodeExtracting(selectedId, true);
     setDesignStatus("generating");
     setExtractionError(null);
+    setRosterSubmitError(null);
   }, [
     activeAssetExtractionModel,
     apiRoot,
@@ -1670,6 +1779,44 @@ export function EpisodeAssetDesignWorkspace({
     markEpisodeExtracting,
     selectedId,
   ]);
+
+  const confirmRosterSelection = useCallback(
+    async (selectedAssetKeys: string[]) => {
+      const task = rosterSelectionTask;
+      if (!task?.id) return;
+      setRosterSubmitting(true);
+      setRosterSubmitError(null);
+      try {
+        const res = await fetch(
+          `${apiRoot}/asset-extraction/tasks/${encodeURIComponent(task.id)}/roster-selection`,
+          {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ selectedAssetKeys }),
+          },
+        );
+        const payload = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          task?: PublicAssetExtractionTask;
+        };
+        if (!res.ok) {
+          setRosterSubmitError(payload.error ?? "无法确认资产选择");
+          return;
+        }
+        setRosterDialogOpen(false);
+        setRosterSelectionTask(null);
+        if (payload.task) applyExtractionTask(payload.task);
+        else if (task.episodeId) markEpisodeExtracting(task.episodeId, true);
+        setDesignStatus("generating");
+      } catch {
+        setRosterSubmitError("无法确认资产选择");
+      } finally {
+        setRosterSubmitting(false);
+      }
+    },
+    [apiRoot, applyExtractionTask, markEpisodeExtracting, rosterSelectionTask],
+  );
 
   const runExtractRef = useRef(runExtract);
   useEffect(() => {
@@ -1998,9 +2145,49 @@ export function EpisodeAssetDesignWorkspace({
   useEffect(() => {
     if (!headless || !extractionRequest) return;
     if (handledExternalRequestIdRef.current === extractionRequest.id) return;
+    if (extractionRequest.mode !== "selected-episode") return;
+
+    pendingEpisodeRequestRef.current = extractionRequest;
+    if (selectedId !== extractionRequest.episodeId) {
+      setSelectedId(extractionRequest.episodeId);
+      void loadDetail(extractionRequest.episodeId);
+      return;
+    }
+    if (
+      detailLoading ||
+      detail?.record.episodeId !== extractionRequest.episodeId
+    ) {
+      return;
+    }
+
+    const contentLength =
+      detail?.episode.content?.trim().length ??
+      episodeContent.trim().length;
+    if (contentLength <= 0) {
+      handledExternalRequestIdRef.current = extractionRequest.id;
+      pendingEpisodeRequestRef.current = null;
+      onExtractionRequestConsumed?.(extractionRequest.id);
+      onExtractionNote?.("当前剧集没有有效剧本内容，无法提取资产。");
+      void onExtractionComplete?.();
+      return;
+    }
+
+    pendingEpisodeRequestRef.current = null;
     handledExternalRequestIdRef.current = extractionRequest.id;
     onExtractionRequestConsumed?.(extractionRequest.id);
-  }, [extractionRequest, headless, onExtractionRequestConsumed, projectId]);
+    queueMicrotask(() => void runExtractRef.current());
+  }, [
+    detail,
+    detailLoading,
+    episodeContent,
+    extractionRequest,
+    headless,
+    loadDetail,
+    onExtractionComplete,
+    onExtractionNote,
+    onExtractionRequestConsumed,
+    selectedId,
+  ]);
 
   useEffect(() => {
     if (
@@ -2015,22 +2202,6 @@ export function EpisodeAssetDesignWorkspace({
     handledSubmitApprovalRequestIdRef.current = submitApprovalRequestId;
     queueMicrotask(() => setSubmitApprovalOpen(true));
   }, [headless, showApprovalUi, submitApprovalRequestId, surface]);
-
-  useEffect(() => {
-    const request = pendingEpisodeRequestRef.current;
-    if (!headless || request?.mode !== "selected-episode") return;
-    if (selectedId !== request.episodeId) return;
-    if (detailLoading || detail?.record.episodeId !== request.episodeId) return;
-    if (extractionBusy) return;
-    pendingEpisodeRequestRef.current = null;
-    queueMicrotask(() => void runExtractRef.current());
-  }, [
-    detail,
-    detailLoading,
-    extractionBusy,
-    headless,
-    selectedId,
-  ]);
 
   const handleConfirmItem = useCallback(
     (itemId: string) => {
@@ -2303,6 +2474,22 @@ export function EpisodeAssetDesignWorkspace({
       ? "重新提取"
       : "提取本集资产";
 
+  const awaitingRosterForSelected =
+    Boolean(rosterSelectionTask) &&
+    isAwaitingRosterSelectionStatus(rosterSelectionTask?.status) &&
+    (!rosterSelectionTask?.episodeId ||
+      rosterSelectionTask.episodeId === selectedId);
+
+  const extractButtonLabel = awaitingRosterForSelected
+    ? "待选择资产"
+    : extractionBusy
+      ? "提取中…"
+      : extractionError
+        ? "重试提取本集资产"
+        : extractLabel;
+
+  const showEpisodeExtractButton = Boolean(selectedId);
+
   const updatedAtLabel = formatMetaTime(detail?.record.updatedAt);
   const confirmedAtLabel = formatMetaTime(detail?.record.confirmedAt);
   const selectedEpisodeTitle = detail
@@ -2448,6 +2635,25 @@ export function EpisodeAssetDesignWorkspace({
           }}
         />
       ) : null}
+      <RosterSelectionDialog
+        open={rosterDialogOpen}
+        episodeLabel={
+          rosterSelectionTask?.episodeId
+            ? episodes.find((ep) => ep.episodeId === rosterSelectionTask.episodeId)
+                ? `第${episodes.find((ep) => ep.episodeId === rosterSelectionTask.episodeId)!.episodeNumber}集`
+                : undefined
+            : selectedEpisodeTitle ?? undefined
+        }
+        roster={(rosterSelectionTask?.roster ?? []) as PublicAssetRosterItem[]}
+        submitting={rosterSubmitting}
+        error={rosterSubmitError}
+        onCancel={() => {
+          // Keep awaiting_roster_selection; only dismiss the dialog.
+          setRosterDialogOpen(false);
+          setRosterSubmitError(null);
+        }}
+        onConfirm={confirmRosterSelection}
+      />
     </>
   );
 
@@ -2469,19 +2675,6 @@ export function EpisodeAssetDesignWorkspace({
             <div className="ead-overview__copy">
               <div className="ead-overview__title-row">
                 <h2 id="ead-overview-title">资产提取</h2>
-
-                <div className="ead-overview__extract-actions">
-                  <button
-                    type="button"
-                    className="amw-btn amw-btn-primary ead-extract-btn"
-                    disabled={extractionBusy || saving || confirming || !selectedId}
-                    aria-busy={extractionBusy}
-                    onClick={() => void runExtract()}
-                    data-testid="ead-extract-episode"
-                  >
-                    {extractionBusy ? "提取中…" : "提取本集资产"}
-                  </button>
-                </div>
               </div>
             </div>
 
@@ -2572,13 +2765,41 @@ export function EpisodeAssetDesignWorkspace({
           </div>
 
           <div className="ead-episode-tool">
-            <div className="ead-episode-tool__copy">
-              <strong>
-                <span className="ead-episode-tool__eyebrow">辅助</span>
-                按集补提取
-              </strong>
-            </div>
+            {awaitingRosterForSelected && !rosterDialogOpen ? (
+              <div
+                className="roster-selection-banner"
+                data-testid="roster-selection-banner"
+              >
+                <span>本集已发现新资产名单，请选择后再继续设计。</span>
+                <button
+                  type="button"
+                  className="amw-btn amw-btn--primary"
+                  onClick={() => setRosterDialogOpen(true)}
+                  data-testid="roster-selection-reopen"
+                >
+                  选择资产
+                </button>
+              </div>
+            ) : null}
             <div className="ead-episode-tool__controls">
+              {showEpisodeExtractButton ? (
+                <button
+                  type="button"
+                  className="amw-btn amw-btn-primary ead-extract-btn"
+                  disabled={extractionBusy || saving || confirming}
+                  aria-busy={extractionBusy}
+                  onClick={() => {
+                    if (awaitingRosterForSelected) {
+                      setRosterDialogOpen(true);
+                      return;
+                    }
+                    void runExtract();
+                  }}
+                  data-testid="ead-extract-episode"
+                >
+                  {extractButtonLabel}
+                </button>
+              ) : null}
               <div className="ead-episode-select-wrap" data-testid="ead-episode-select">
                 <GlassSelect
                   className="ead-episode-glass-select"
@@ -2601,6 +2822,15 @@ export function EpisodeAssetDesignWorkspace({
               </div>
             </div>
           </div>
+          {extractionBusy ? (
+            <p
+              className="ead-background-task-note"
+              role="status"
+              data-testid="ead-extract-background-note"
+            >
+              正在提取本集资产…
+            </p>
+          ) : null}
           {episodes.length === 0 && !listLoading ? (
             <p className="ead-error">暂无剧集，请先在剧本阶段完成分集。</p>
           ) : null}
@@ -2632,19 +2862,6 @@ export function EpisodeAssetDesignWorkspace({
                       ))}
                     </ul>
                   ) : null}
-                  <div className="ead-pending-assets__error-actions">
-                    <button
-                      type="button"
-                      className="amw-btn amw-btn-primary"
-                      disabled={extractionBusy || saving || confirming}
-                      onClick={() => void runExtract()}
-                      data-testid="ead-extract-episode-retry"
-                    >
-                      {extractionBusy
-                        ? "提取中…"
-                        : "提取本集资产"}
-                    </button>
-                  </div>
                 </div>
               ) : null}
               {extractedEpisodes.length > 0 ? (
@@ -2656,7 +2873,7 @@ export function EpisodeAssetDesignWorkspace({
                       (sum, episode) => sum + episode.itemCount,
                       0,
                     )}{" "}
-                    项），可从下方「按集补提取」打开查看。
+                    项），可从上方剧集选择器打开查看。
                   </p>
                   <button
                     type="button"
@@ -2712,16 +2929,6 @@ export function EpisodeAssetDesignWorkspace({
               </div>
 
               <div className="ead-actions amw-actions">
-                <button
-                    type="button"
-                    className="amw-btn amw-btn-primary ead-extract-btn"
-                    disabled={extractionBusy || saving || confirming}
-                    aria-busy={extractionBusy}
-                    onClick={() => void runExtract()}
-                    data-testid="ead-extract"
-                  >
-                    {extractionBusy ? "提取中…" : extractLabel}
-                  </button>
                 {visiblePromptBatchProgress ? (
                   <span
                     className={`ead-prompt-progress${visiblePromptBatchProgress.active ? " is-active" : " is-complete"}`}

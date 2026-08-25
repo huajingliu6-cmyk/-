@@ -5,7 +5,19 @@
 
 import type { AssetExtractionProgress } from "@/projects/assets/extraction/types";
 
-export type GenerationBusyKind = "generic" | "asset-extraction";
+export type GenerationBusyKind =
+  | "generic"
+  | "asset-extraction"
+  | "storyboard-pipeline"
+  | "storyboard-prompt"
+  | "storyboard-video";
+
+export type GenerationTaskStatus =
+  | "queued"
+  | "generating"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 export type AssetExtractionBusyOverlay = {
   stage: string;
@@ -13,22 +25,33 @@ export type AssetExtractionBusyOverlay = {
   estimatedProgress: number;
   errorMessage?: string | null;
   progress?: AssetExtractionProgress | null;
+  /** Live task appears abandoned (no recent heartbeat). */
+  runnerStale?: boolean;
+  taskId?: string | null;
 };
 
 export type GenerationBusyEntry = {
   id: string;
   label: string;
   projectId?: string | null;
+  episodeId?: string | null;
   kind?: GenerationBusyKind;
+  taskStatus?: GenerationTaskStatus;
   overlay?: AssetExtractionBusyOverlay | null;
   leaveMessage?: string;
+  startedAt?: string;
+  updatedAt?: string;
 };
 
 export type BeginGenerationBusyOptions = {
   projectId?: string | null;
+  episodeId?: string | null;
   kind?: GenerationBusyKind;
+  taskStatus?: GenerationTaskStatus;
   overlay?: AssetExtractionBusyOverlay | null;
   leaveMessage?: string;
+  startedAt?: string;
+  updatedAt?: string;
 };
 
 const entries = new Map<string, GenerationBusyEntry>();
@@ -62,13 +85,18 @@ export function beginGenerationBusy(
   if (!key) {
     return () => undefined;
   }
+  const now = new Date().toISOString();
   entries.set(key, {
     id: key,
     label: label.trim() || "生成任务",
     projectId: options?.projectId ?? null,
+    episodeId: options?.episodeId ?? null,
     kind: options?.kind ?? "generic",
+    taskStatus: options?.taskStatus ?? "generating",
     overlay: options?.overlay ?? null,
     leaveMessage: options?.leaveMessage,
+    startedAt: options?.startedAt ?? now,
+    updatedAt: options?.updatedAt ?? now,
   });
   emit();
   return () => {
@@ -125,21 +153,56 @@ export function isHrefInsideProject(href: string, projectId: string): boolean {
   );
 }
 
+export function isStoryboardStageHref(href: string, projectId: string): boolean {
+  const path = href.split("?")[0]?.split("#")[0] ?? href;
+  const prefixes = [
+    `/app/projects/${encodeURIComponent(projectId)}/storyboard`,
+    `/app/projects/${projectId}/storyboard`,
+    `/app/workspace/projects/${encodeURIComponent(projectId)}/storyboard`,
+    `/app/workspace/projects/${projectId}/storyboard`,
+  ];
+  return prefixes.some(
+    (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+  );
+}
+
+function entryBlocksLeave(
+  entry: GenerationBusyEntry,
+  targetHref?: string,
+): boolean {
+  if (
+    entry.taskStatus === "queued" ||
+    entry.taskStatus === "completed" ||
+    entry.taskStatus === "failed" ||
+    entry.taskStatus === "cancelled"
+  ) {
+    return false;
+  }
+
+  if (targetHref && entry.projectId) {
+    if (isStoryboardStageHref(targetHref, entry.projectId)) {
+      return false;
+    }
+  }
+
+  if (entry.kind === "storyboard-prompt" || entry.kind === "storyboard-pipeline") {
+    return false;
+  }
+
+  if (entry.kind === "asset-extraction" && entry.projectId && targetHref) {
+    return isHrefInsideProject(targetHref, entry.projectId);
+  }
+
+  return true;
+}
+
 export function shouldBlockGenerationLeave(targetHref?: string): boolean {
   if (entries.size === 0) return false;
-  if (!targetHref) {
-    return [...entries.values()].some((entry) => entry.kind !== "asset-extraction")
-      ? true
-      : true;
-  }
-  for (const entry of entries.values()) {
-    if (entry.kind === "asset-extraction" && entry.projectId) {
-      if (isHrefInsideProject(targetHref, entry.projectId)) return true;
-      continue;
-    }
-    return true;
-  }
-  return false;
+  return [...entries.values()].some((entry) => entryBlocksLeave(entry, targetHref));
+}
+
+export function isBlockingGenerationBusy(targetHref?: string): boolean {
+  return shouldBlockGenerationLeave(targetHref);
 }
 
 export function bindGenerationBusyUi(next: BlockUi | null): void {
@@ -153,7 +216,11 @@ export async function confirmGenerationLeaveIfNeeded(
   const extraction = listGenerationBusyEntries().find(
     (entry) => entry.kind === "asset-extraction",
   );
+  const storyboardPipeline = listGenerationBusyEntries().find(
+    (entry) => entry.kind === "storyboard-pipeline",
+  );
   const message =
+    storyboardPipeline?.leaveMessage ||
     extraction?.leaveMessage ||
     (getGenerationBusySummary()
       ? `当前正在进行「${getGenerationBusySummary()}」。请等待完成后再进行其他操作。`

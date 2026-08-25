@@ -1,6 +1,7 @@
 import {
   APP_ADMIN_PATH,
   APP_ASSET_MARKET_PATH,
+  APP_INFINITE_CANVAS_PATH,
   APP_PROJECTS_PATH,
   APP_SHELL_ROOT,
   APP_WORKBENCH_PATH,
@@ -70,6 +71,7 @@ export function resolveBackTarget(pathname: string): BackTarget {
   // 一级模块 → 门户根
   const moduleRoots = [
     APP_PROJECTS_PATH,
+    APP_INFINITE_CANVAS_PATH,
     APP_ASSET_MARKET_PATH,
     APP_WORKBENCH_PATH,
     "/app/materials",

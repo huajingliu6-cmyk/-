@@ -6,6 +6,12 @@ import {
   getShotVideoPrompt,
   isShotConfirmReady,
 } from "@/projects/storyboard/shot-completeness";
+import {
+  isValidStoryboardClipDuration,
+  parseDurationSecondsFromVideoPrompt,
+  parseStoryboardClipDurationSeconds,
+} from "@/projects/storyboard/storyboard-video-params";
+import { isStoryboardPromptRuleExpired } from "@/projects/storyboard/services/storyboard-prompt-validation";
 import { getShotSceneReadiness } from "@/projects/storyboard/shot-video-precheck";
 import { normalizePromptImageTokensForSubmit } from "@/projects/storyboard/services/shot-prompt-mount";
 import {
@@ -166,6 +172,40 @@ export async function buildStoryboardShotVideoInput(params: {
     return { ok: false, code: "MISSING_PROMPT", message: "镜头缺少视频提示词" };
   }
 
+  if (isStoryboardPromptRuleExpired(params.shot)) {
+    return {
+      ok: false,
+      code: "STORYBOARD_PROMPT_RULE_EXPIRED",
+      message:
+        "分镜提示词规则版本已过期（需 13–15 秒 Clip），请重新生成分镜提示词后再提交视频。",
+    };
+  }
+
+  const clipDurationFromPrompt = parseDurationSecondsFromVideoPrompt(prompt);
+  const requestedDurationRaw =
+    typeof params.durationSeconds === "number" &&
+    Number.isFinite(params.durationSeconds)
+      ? params.durationSeconds
+      : clipDurationFromPrompt ?? params.shot.durationSeconds;
+  const clipDuration = parseStoryboardClipDurationSeconds(requestedDurationRaw);
+  if (clipDuration == null) {
+    return {
+      ok: false,
+      code: "INVALID_CLIP_DURATION",
+      message: "分镜 Clip 时长必须为 13、14 或 15 秒",
+    };
+  }
+  if (
+    clipDurationFromPrompt != null &&
+    clipDurationFromPrompt !== clipDuration
+  ) {
+    return {
+      ok: false,
+      code: "CLIP_DURATION_MISMATCH",
+      message: "提交时长与提示词 Clip 总时长不一致",
+    };
+  }
+
   const scenes = params.assets?.scenes ?? [];
   const validSceneIds = new Set(scenes.map((s) => s.id));
   const sceneReady = getShotSceneReadiness(params.shot, validSceneIds);
@@ -314,12 +354,7 @@ export async function buildStoryboardShotVideoInput(params: {
     nameById,
   );
 
-  const requestedDuration = Math.round(
-    typeof params.durationSeconds === "number" &&
-      Number.isFinite(params.durationSeconds)
-      ? params.durationSeconds
-      : params.shot.durationSeconds,
-  );
+  const requestedDuration = clipDuration;
   const durationSeconds = Math.max(
     capability.minDurationSeconds,
     Math.min(
@@ -327,6 +362,13 @@ export async function buildStoryboardShotVideoInput(params: {
       requestedDuration || capability.minDurationSeconds,
     ),
   );
+  if (!isValidStoryboardClipDuration(durationSeconds)) {
+    return {
+      ok: false,
+      code: "INVALID_CLIP_DURATION",
+      message: "分镜 Clip 时长必须为 13、14 或 15 秒",
+    };
+  }
 
   const input: VideoGenerationInput = {
     shotId: params.shot.id,

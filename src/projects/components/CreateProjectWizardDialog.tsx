@@ -29,17 +29,24 @@ import type {
   ProjectMode,
   ProjectPublic,
 } from "@/projects/types";
-import {
-  isCreateProjectReady,
-  validateCreateProjectForm,
-  type CreateProjectFieldErrors,
-} from "@/projects/validate-create-project";
+import type { ProjectFlowKind } from "@/projects/project-flow";
 import {
   PROJECT_VISUAL_STYLES,
   isProjectVisualStyleId,
   type ProjectVisualStyleId,
 } from "@/projects/project-visual-style";
 import { GlassSelect } from "@/shell/glass-select";
+import { ScriptUploadPanel } from "@/projects/script/ScriptUploadPanel";
+import type { ScriptSourceFile } from "@/projects/script/types";
+import {
+  uploadScriptAndAutoSplit,
+  validateScriptImportFileClient,
+} from "@/projects/script/script-txt-client";
+import type { CreateProjectFieldErrors } from "@/projects/validate-create-project";
+import {
+  isCreateProjectReady,
+  validateCreateProjectForm,
+} from "@/projects/validate-create-project";
 import "@/projects/create-project-wizard.css";
 
 type Props = {
@@ -49,6 +56,12 @@ type Props = {
   /** 校验通过并创建成功后的类型安全下一步回调 */
   onAdvance: (payload: CreateProjectAdvancePayload) => void;
   returnFocusRef?: RefObject<HTMLButtonElement | null>;
+  defaultProjectMode?: ProjectMode | null;
+  lockProjectMode?: boolean;
+  /** 一栈式 Flow：必须上传剧本后才能继续 */
+  requireScriptUpload?: boolean;
+  /** 锁定模式时，服务端校验 projectMode 与列表流程一致 */
+  listFlowKind?: ProjectFlowKind | null;
 };
 
 type Phase = "form" | "advance";
@@ -64,9 +77,16 @@ const INITIAL = {
   projectMode: null as ProjectMode | null,
 };
 
-function resetFormState() {
+function resetFormState(defaultProjectMode: ProjectMode | null = null) {
+  const isOneStack = defaultProjectMode === "full-stack";
   return {
     ...INITIAL,
+    creationSource: isOneStack
+      ? ("script-upload" as ProjectCreationSource)
+      : ("story" as ProjectCreationSource),
+    projectMode: defaultProjectMode,
+    scriptFile: null as File | null,
+    scriptFileError: "",
     fieldErrors: {} as CreateProjectFieldErrors,
     hasAttemptedSubmit: false,
     showPassword: false,
@@ -84,6 +104,10 @@ export function CreateProjectWizardDialog({
   onClose,
   onAdvance,
   returnFocusRef,
+  defaultProjectMode = null,
+  lockProjectMode = false,
+  requireScriptUpload = false,
+  listFlowKind = null,
 }: Props) {
   const router = useRouter();
   const titleId = useId();
@@ -106,7 +130,7 @@ export function CreateProjectWizardDialog({
     setPrevOpen(open);
     if (open) {
       setClosing(false);
-      setState(resetFormState());
+      setState(resetFormState(defaultProjectMode));
     }
   }
 
@@ -118,12 +142,12 @@ export function CreateProjectWizardDialog({
 
   const finishClose = useCallback(() => {
     setClosing(false);
-    setState(resetFormState());
+    setState(resetFormState(defaultProjectMode));
     onClose();
     window.setTimeout(() => {
       returnFocusRef?.current?.focus();
     }, 0);
-  }, [onClose, returnFocusRef]);
+  }, [defaultProjectMode, onClose, returnFocusRef]);
 
   const requestClose = useCallback(() => {
     if (closing || state.isSubmitting) return;
@@ -195,14 +219,19 @@ export function CreateProjectWizardDialog({
     return () => root.removeEventListener("keydown", onTab);
   }, [open, state.phase, state.passwordEnabled, state.creationSource]);
 
-  const ready = isCreateProjectReady({
-    creationSource: state.creationSource,
-    name: state.name,
-    projectMode: state.projectMode,
-    passwordEnabled: state.passwordEnabled,
-    projectPassword: state.projectPassword,
-    visualStyle: state.visualStyle,
-  });
+  const effectiveProjectMode = state.projectMode;
+  const showScriptUpload = requireScriptUpload;
+
+  const ready =
+    isCreateProjectReady({
+      creationSource: state.creationSource,
+      name: state.name,
+      projectMode: effectiveProjectMode,
+      passwordEnabled: state.passwordEnabled,
+      projectPassword: state.projectPassword,
+      visualStyle: state.visualStyle,
+    }) &&
+    (!requireScriptUpload || state.scriptFile !== null);
 
   const selectSource = (source: ProjectCreationSource) => {
     if (!prefersReducedMotion()) {
@@ -251,16 +280,26 @@ export function CreateProjectWizardDialog({
     }
     if (errors.visualStyle) {
       setState((s) => ({ ...s, shakeKey: "visualStyle" }));
+      return;
+    }
+    if (requireScriptUpload && !state.scriptFile) {
+      setState((s) => ({
+        ...s,
+        scriptFileError: "请上传剧本文件",
+        shakeKey: "scriptUpload",
+      }));
     }
   };
 
   const onNext = async () => {
     if (state.isSubmitting) return;
 
+    const projectMode = state.projectMode;
+
     const fieldErrors = validateCreateProjectForm({
       creationSource: state.creationSource,
       name: state.name,
-      projectMode: state.projectMode,
+      projectMode,
       passwordEnabled: state.passwordEnabled,
       projectPassword: state.projectPassword,
       highlights: state.highlights,
@@ -277,6 +316,15 @@ export function CreateProjectWizardDialog({
       focusFirstError(fieldErrors);
       return;
     }
+    if (requireScriptUpload && !state.scriptFile) {
+      setState((s) => ({
+        ...s,
+        hasAttemptedSubmit: true,
+        scriptFileError: "请上传剧本文件",
+        shakeKey: "scriptUpload",
+      }));
+      return;
+    }
 
     setState((s) => ({ ...s, isSubmitting: true, fieldErrors: {} }));
 
@@ -291,7 +339,7 @@ export function CreateProjectWizardDialog({
         body: JSON.stringify({
           name: state.name.trim(),
           creationSource: state.creationSource,
-          projectMode: state.projectMode,
+          projectMode,
           highlights: state.highlights,
           visualStyle: state.visualStyle,
           approvalEnabled: enterpriseId ? state.approvalEnabled : false,
@@ -301,6 +349,7 @@ export function CreateProjectWizardDialog({
             ? state.projectPassword
             : null,
           idempotencyKey: idempotencyKeyRef.current,
+          listFlowKind: lockProjectMode ? listFlowKind : undefined,
         }),
       });
       const payload = (await res.json()) as {
@@ -322,7 +371,7 @@ export function CreateProjectWizardDialog({
         return;
       }
 
-      if (!payload.project || !state.creationSource || !state.projectMode) {
+      if (!payload.project || !state.creationSource || !projectMode) {
         setState((s) => ({
           ...s,
           isSubmitting: false,
@@ -334,7 +383,7 @@ export function CreateProjectWizardDialog({
       const advancePayload = {
         project: payload.project,
         creationSource: state.creationSource,
-        projectMode: state.projectMode,
+        projectMode,
       };
 
       // 清理客户端密码
@@ -348,6 +397,27 @@ export function CreateProjectWizardDialog({
       idempotencyKeyRef.current = "";
 
       onAdvance(advancePayload);
+
+      if (state.creationSource === "script-upload" && state.scriptFile) {
+        try {
+          await uploadScriptAndAutoSplit(
+            payload.project.projectId,
+            state.scriptFile,
+          );
+        } catch (error) {
+          setState((s) => ({
+            ...s,
+            isSubmitting: false,
+            fieldErrors: {
+              name:
+                error instanceof Error
+                  ? error.message
+                  : "剧本上传或自动分集失败",
+            },
+          }));
+          return;
+        }
+      }
 
       // 创编故事 / 上传剧本：创建成功后进入对应工作台（不停留在占位 advance）
       if (state.creationSource === "story") {
@@ -380,8 +450,22 @@ export function CreateProjectWizardDialog({
 
   if (!open || typeof document === "undefined") return null;
 
-  const formOpen = state.creationSource !== null;
+  const formOpen = lockProjectMode || state.creationSource !== null;
   const errors = state.hasAttemptedSubmit ? state.fieldErrors : {};
+  const wizardScriptFile: ScriptSourceFile | null = state.scriptFile
+    ? {
+        id: "wizard-pending",
+        name: state.scriptFile.name,
+        type: state.scriptFile.name.toLowerCase().endsWith(".docx")
+          ? "docx"
+          : state.scriptFile.name.toLowerCase().endsWith(".md") ||
+              state.scriptFile.name.toLowerCase().endsWith(".markdown")
+            ? "md"
+            : "txt",
+        size: state.scriptFile.size,
+        status: "selected",
+      }
+    : null;
 
   return createPortal(
     <div
@@ -393,7 +477,7 @@ export function CreateProjectWizardDialog({
     >
       <div
         ref={cardRef}
-        className="cpw-card"
+        className={`cpw-card${lockProjectMode ? " cpw-card--immediate" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -438,20 +522,6 @@ export function CreateProjectWizardDialog({
                 </p>
               )}
               <div className="cpw-advance__actions">
-                {state.created.projectMode === "canvas" ? (
-                  <a
-                    className="cpw-next is-ready"
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      textDecoration: "none",
-                    }}
-                    href={`/app/projects/${encodeURIComponent(state.created.projectId)}`}
-                  >
-                    打开项目工作台
-                  </a>
-                ) : null}
                 <button
                   type="button"
                   className="cpw-next"
@@ -463,72 +533,128 @@ export function CreateProjectWizardDialog({
             </div>
           ) : (
             <>
-              <div
-                className={`cpw-sources${state.shakeKey === "sources" ? " is-shake" : ""}`}
-                role="radiogroup"
-                aria-label="创作起点"
-                aria-describedby={
-                  errors.creationSource ? `${titleId}-source-err` : undefined
-                }
-              >
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={state.creationSource === "story"}
-                  className={`cpw-source${
-                    state.creationSource === "story" ? " is-selected" : ""
-                  }${state.bounceSource === "story" ? " is-bounce" : ""}`}
-                  onClick={() => selectSource("story")}
-                  onKeyDown={(e) => onSourceKeyDown(e, "story")}
-                >
-                  {state.creationSource === "story" ? (
-                    <span className="cpw-source__check" aria-hidden>
-                      <Check className="h-3.5 w-3.5" />
-                    </span>
-                  ) : null}
-                  <span className="cpw-source__icon" aria-hidden>
-                    <Sparkles className="h-4 w-4" />
-                  </span>
-                  <span className="cpw-source__title">创编故事</span>
-                  <span className="cpw-source__desc">
-                    从灵感、角色和故事大纲开始创作
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={state.creationSource === "script-upload"}
-                  className={`cpw-source${
-                    state.creationSource === "script-upload"
-                      ? " is-selected"
-                      : ""
-                  }${
-                    state.bounceSource === "script-upload" ? " is-bounce" : ""
+              {showScriptUpload ? (
+                <div
+                  className={`cpw-script-upload${
+                    state.shakeKey === "scriptUpload" ? " is-shake" : ""
                   }`}
-                  onClick={() => selectSource("script-upload")}
-                  onKeyDown={(e) => onSourceKeyDown(e, "script-upload")}
+                  data-testid="cpw-script-upload"
                 >
-                  {state.creationSource === "script-upload" ? (
-                    <span className="cpw-source__check" aria-hidden>
-                      <Check className="h-3.5 w-3.5" />
+                  <div className="cpw-label-row">
+                    <div className="cpw-label">
+                      上传剧本
+                      <span className="cpw-req" aria-hidden>
+                        *
+                      </span>
+                    </div>
+                    <span className="cpw-hint">必选，创建后将自动分集</span>
+                  </div>
+                  <ScriptUploadPanel
+                    variant="dropzone"
+                    required
+                    file={wizardScriptFile}
+                    pendingFile={state.scriptFile}
+                    importing={state.isSubmitting}
+                    onScriptFile={(file) => {
+                      const error = validateScriptImportFileClient(file);
+                      if (error) {
+                        setState((s) => ({ ...s, scriptFileError: error }));
+                        return;
+                      }
+                      setState((s) => ({
+                        ...s,
+                        scriptFile: file,
+                        scriptFileError: "",
+                        fieldErrors: { ...s.fieldErrors, creationSource: undefined },
+                      }));
+                    }}
+                    onRemove={() => {
+                      setState((s) => ({
+                        ...s,
+                        scriptFile: null,
+                        scriptFileError: "",
+                      }));
+                    }}
+                    onClientError={(message) => {
+                      setState((s) => ({ ...s, scriptFileError: message }));
+                    }}
+                  />
+                  <div className="cpw-error">{state.scriptFileError}</div>
+                </div>
+              ) : null}
+
+              {!lockProjectMode ? (
+                <div
+                  className={`cpw-sources${state.shakeKey === "sources" ? " is-shake" : ""}`}
+                  role="radiogroup"
+                  aria-label="创作起点"
+                  aria-describedby={
+                    errors.creationSource ? `${titleId}-source-err` : undefined
+                  }
+                >
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={state.creationSource === "story"}
+                    className={`cpw-source${
+                      state.creationSource === "story" ? " is-selected" : ""
+                    }${state.bounceSource === "story" ? " is-bounce" : ""}`}
+                    onClick={() => selectSource("story")}
+                    onKeyDown={(e) => onSourceKeyDown(e, "story")}
+                  >
+                    {state.creationSource === "story" ? (
+                      <span className="cpw-source__check" aria-hidden>
+                        <Check className="h-3.5 w-3.5" />
+                      </span>
+                    ) : null}
+                    <span className="cpw-source__icon" aria-hidden>
+                      <Sparkles className="h-4 w-4" />
                     </span>
-                  ) : null}
-                  <span className="cpw-source__icon" aria-hidden>
-                    <FileUp className="h-4 w-4" />
-                  </span>
-                  <span className="cpw-source__title">上传剧本</span>
-                  <span className="cpw-source__desc">
-                    从已有剧本开始整理分镜和制作流程
-                  </span>
-                </button>
-              </div>
-              <div className="cpw-error" id={`${titleId}-source-err`}>
-                {errors.creationSource}
-              </div>
+                    <span className="cpw-source__title">创编故事</span>
+                    <span className="cpw-source__desc">
+                      从灵感、角色和故事大纲开始创作
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={state.creationSource === "script-upload"}
+                    className={`cpw-source${
+                      state.creationSource === "script-upload"
+                        ? " is-selected"
+                        : ""
+                    }${
+                      state.bounceSource === "script-upload" ? " is-bounce" : ""
+                    }`}
+                    onClick={() => selectSource("script-upload")}
+                    onKeyDown={(e) => onSourceKeyDown(e, "script-upload")}
+                  >
+                    {state.creationSource === "script-upload" ? (
+                      <span className="cpw-source__check" aria-hidden>
+                        <Check className="h-3.5 w-3.5" />
+                      </span>
+                    ) : null}
+                    <span className="cpw-source__icon" aria-hidden>
+                      <FileUp className="h-4 w-4" />
+                    </span>
+                    <span className="cpw-source__title">上传剧本</span>
+                    <span className="cpw-source__desc">
+                      从已有剧本开始整理分镜和制作流程
+                    </span>
+                  </button>
+                </div>
+              ) : null}
+              {!lockProjectMode ? (
+                <div className="cpw-error" id={`${titleId}-source-err`}>
+                  {errors.creationSource}
+                </div>
+              ) : null}
 
               <div
-                className={`cpw-form-shell${formOpen ? " is-open" : ""}`}
+                className={`cpw-form-shell${formOpen ? " is-open" : ""}${
+                  lockProjectMode ? " cpw-form-shell--immediate" : ""
+                }`}
                 aria-hidden={!formOpen}
               >
                 <div className="cpw-form-shell__inner">
@@ -703,6 +829,8 @@ export function CreateProjectWizardDialog({
                     </div>
 
                     <div className="cpw-field cpw-field--stagger-4">
+                      {!lockProjectMode ? (
+                        <>
                       <div className="cpw-label">
                         选择模式
                         <span className="cpw-req" aria-hidden>
@@ -776,6 +904,8 @@ export function CreateProjectWizardDialog({
                       <div className="cpw-error" id={`${titleId}-mode-err`}>
                         {errors.projectMode}
                       </div>
+                        </>
+                      ) : null}
                     </div>
 
                     {enterpriseId ? (
@@ -802,32 +932,34 @@ export function CreateProjectWizardDialog({
                       </div>
                     ) : null}
 
-                    <div className="cpw-field cpw-field--stagger-4">
-                      <div className="cpw-label-row">
-                        <label className="cpw-label" htmlFor={highlightsId}>
-                          项目要点
-                        </label>
-                        <span className="cpw-hint">
-                          可选，仅项目主理人可以修改
-                        </span>
+                    {enterpriseId ? (
+                      <div className="cpw-field cpw-field--stagger-4">
+                        <div className="cpw-label-row">
+                          <label className="cpw-label" htmlFor={highlightsId}>
+                            项目要点
+                          </label>
+                          <span className="cpw-hint">
+                            可选，仅项目主理人可以修改
+                          </span>
+                        </div>
+                        <textarea
+                          id={highlightsId}
+                          className="cpw-textarea"
+                          placeholder="填写故事方向、人物关系、制作要求或其他重要信息"
+                          value={state.highlights}
+                          rows={2}
+                          onChange={(e) =>
+                            setState((s) => ({
+                              ...s,
+                              highlights: e.target.value,
+                            }))
+                          }
+                        />
+                        <div className="cpw-error">
+                          {errors.highlights}
+                        </div>
                       </div>
-                      <textarea
-                        id={highlightsId}
-                        className="cpw-textarea"
-                        placeholder="填写故事方向、人物关系、制作要求或其他重要信息"
-                        value={state.highlights}
-                        rows={2}
-                        onChange={(e) =>
-                          setState((s) => ({
-                            ...s,
-                            highlights: e.target.value,
-                          }))
-                        }
-                      />
-                      <div className="cpw-error">
-                        {errors.highlights}
-                      </div>
-                    </div>
+                    ) : null}
                   </div>
                 </div>
               </div>

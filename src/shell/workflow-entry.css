@@ -34,9 +34,23 @@
   justify-content: center;
 }
 
+.workflow-app-shell {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: #070811;
+}
+
+.workflow-app-shell .personal-hub-shell {
+  min-height: 0;
+  flex: 1;
+}
+
 .workflow-shell {
   display: flex;
-  min-height: 100%;
+  min-height: 0;
   height: 100%;
   flex-direction: column;
   overflow: hidden;

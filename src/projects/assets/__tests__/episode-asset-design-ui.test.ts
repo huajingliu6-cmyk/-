@@ -59,7 +59,9 @@ describe("Batch G1-UI episode asset design chrome", () => {
   it("shows extract progress and locks navigation while busy", () => {
     expect(workspace).toContain("提取中…");
     expect(workspace).not.toContain("正在提取全剧本资产，通常需要 2-10 分钟");
-    expect(workspace).not.toContain('data-testid="ead-extract-all-background-note"');
+    expect(workspace).toContain('data-testid="ead-extract-background-note"');
+    expect(workspace).toContain("showEpisodeExtractButton");
+    expect(workspace).toContain("extractButtonLabel");
     expect(workspace).toContain("aria-busy={extractionBusy}");
     expect(workspace).toContain("disabled={extractionBusy");
     expect(css).toContain(".ead-extract-btn");
@@ -74,7 +76,9 @@ describe("Batch G1-UI episode asset design chrome", () => {
   it("restores extracting UI from the versioned extraction snapshot", () => {
     expect(workspace).toContain("/asset-extraction");
     expect(workspace).toContain("applyExtractionTask");
-    expect(workspace).toContain("LIVE_EXTRACTION_STATUSES");
+    expect(workspace).toContain("isLiveExtractionStatus");
+    expect(workspace).toContain("isAwaitingRosterSelectionStatus");
+    expect(workspace).toContain("RosterSelectionDialog");
     expect(workspace).not.toContain("startExtractPoll");
     expect(workspace).not.toContain("extractPollTimersRef");
     expect(workspace).not.toContain("210_000");
@@ -107,6 +111,10 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).not.toContain("大模型将自动");
     expect(workspace).toContain(">资产提取</h2>");
     expect(workspace).toContain("提取本集资产");
+    expect(workspace).toContain('data-testid="ead-extract-episode"');
+    expect(workspace).not.toContain('data-testid="ead-extract"');
+    expect(workspace).not.toContain('data-testid="ead-extract-episode-retry"');
+    expect(workspace).not.toContain("ead-overview__extract-actions");
     expect(workspace).not.toContain("一键提取基本资产");
     expect(workspace).not.toContain('data-testid="ead-extract-model"');
     expect(workspace).toContain('testId="ead-summary-extracted"');
@@ -124,8 +132,7 @@ describe("Batch G1-UI episode asset design chrome", () => {
       /ead-summary-popover[\s\S]{0,800}<img/,
     );    expect(workspace).toContain("ead-overview");
     expect(workspace).toContain("ead-episode-select");
-    expect(css).toContain("width: min(140px, 100%)");
-    expect(css).toContain("flex: 0 0 140px");
+    expect(css).toContain("max-width: min(360px, 100%)");
     expect(css).not.toContain("clamp(230px, 21vw, 280px)");
     expect(css).toContain("minmax(0, 1fr)");
     expect(css).toMatch(/\.ead-layout[\s\S]*grid-template-columns/);
@@ -151,20 +158,20 @@ describe("Batch G1-UI episode asset design chrome", () => {
     );
   });
 
-  it("keeps episode selection as a secondary omission-recovery tool", () => {
-    expect(workspace).toContain("按集补提取");
+  it("keeps episode selection beside the single extract button", () => {
     expect(workspace).toContain("pendingEpisodes");
     expect(workspace).toContain('data-testid="ead-episode-select"');
+    expect(workspace).toContain('data-testid="ead-extract-episode"');
     expect(workspace).toContain("GlassSelect");
     expect(workspace).toContain("episodeSelectGroups");
-    expect(workspace).toContain("ead-episode-tool__eyebrow");
-    expect(css).toContain("grid-template-columns: auto minmax(240px, 1fr)");
-    expect(css).toContain("width: min(140px, 100%)");
+    expect(workspace).toContain("showEpisodeExtractButton");
+    expect(workspace).toContain("ead-episode-tool__controls");
     expect(workspace).toContain("menuPortal");
     expect(workspace).not.toContain("ead-back-full-script");
     expect(workspace).not.toContain("返回全剧本资产");
     expect(workspace).not.toContain("ead-ep-list");
     expect(workspace).not.toContain("EPISODES_PER_PAGE");
+    expect(workspace).not.toContain("按集补提取");
   });
 
   it("uses the original unsplit script as the default one-call extraction flow", () => {
@@ -187,7 +194,9 @@ describe("Batch G1-UI episode asset design chrome", () => {
     expect(workspace).toContain('data-testid="ead-prompt-progress"');
     expect(workspace).toContain('data-testid="ead-page-lock"');
     expect(workspace).toContain('data-testid="ead-workflow-progress-percent"');
-    expect(workspace).toContain("LIVE_EXTRACTION_STATUSES");
+    expect(workspace).toContain("isLiveExtractionStatus");
+    expect(workspace).toContain("isAwaitingRosterSelectionStatus");
+    expect(workspace).toContain("RosterSelectionDialog");
     expect(workspace).toContain("共提取");
     expect(workspace).toContain("正在提取资产");
     expect(css).toContain("ead-progress-flow");

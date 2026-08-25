@@ -28,6 +28,7 @@ import {
   GlassSelect,
   type GlassSelectOption,
 } from "@/shell/glass-select";
+import { MediaHistoryStrip } from "@/projects/ui/MediaHistoryStrip";
 
 export const ASSET_IMAGE_EDIT_REFERENCE_SLOT_COUNT = 6;
 
@@ -629,32 +630,20 @@ export function AssetImageEditPanel({
 
   const historyBlock =
     historyUiEnabled && showHistory ? (
-    <div
-      className="ead-history-strip ead-history-strip--images"
-      data-testid="aie-image-history"
-    >
-      {historyIds.length === 0 ? (
-        <p className="ead-muted">暂无图片历史</p>
-      ) : (
-        [...historyIds].reverse().map((id) => (
-          <button
-            key={id}
-            type="button"
-            className={
-              id === currentMediaId
-                ? "ead-history-thumb is-active"
-                : "ead-history-thumb"
-            }
-            onClick={() => onSelectHistory(id)}
-            title={id}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={historyThumbUrl(id)} alt="" />
-          </button>
-        ))
-      )}
-    </div>
-  ) : null;
+      <MediaHistoryStrip
+        forceShow
+        testId="aie-image-history"
+        className="ead-design-image-history"
+        items={historyIds.map((id) => ({
+          id,
+          thumbUrl: historyThumbUrl(id),
+          title: id,
+        }))}
+        activeId={currentMediaId}
+        disabled={generateBusy}
+        onSelect={onSelectHistory}
+      />
+    ) : null;
 
   const statusBlock = (
     <>

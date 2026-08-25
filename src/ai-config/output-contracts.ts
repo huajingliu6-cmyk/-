@@ -102,7 +102,7 @@ export function buildImmutableOutputContract(
         '{"shots":[{"shotId":"与输入一致的镜头id","videoPrompt":"该镜头完整中文视频提示词"}]}',
         "Legacy alias also accepted: {\"prompts\":[{\"shotId\":\"...\",\"videoPrompt\":\"...\"}]}",
         "shots/prompts must cover every shotId from the user input exactly once; shotId must be copied verbatim; videoPrompt must be non-empty.",
-        "CRITICAL: each videoPrompt value must be the FULL shot prompt body that obeys the published task rules — including duration header (prompt design 9–15 seconds total, never exceed 15, do not pad short plots), mount tags when assets exist, scene base, standing positions, timed internal shots (size/focal/angle/move), dialogue verbatim, sound, and continuity limits.",
+        "CRITICAL: each videoPrompt value must be the FULL shot prompt body that obeys the published task rules — including duration header (each videoPrompt represents one final PromptClip with total duration 13–15 seconds, only 13/14/15 allowed; each Clip MUST contain 3–5 continuous internal timeline segments of 1–6 seconds that sum to the Clip total, prefer ≤5s per segment; timeline must start at 0 and be continuous), mount tags when assets exist, optional character blocking (do not invent), timed internal shots (size/focal/angle/move), dialogue verbatim, sound, and continuity limits.",
         "Do NOT rewrite videoPrompt into a short summary such as「景别：…运镜：…」one-liners.",
         "When two or more shots are returned, insert the required adjacent handoff card text between them by appending it to the earlier shot's videoPrompt (or prepending to the next), exactly as the task rules require.",
         "Output-format rules must NOT override or drop project visual-style constraints.",

@@ -2,6 +2,10 @@ import {
   PROJECT_ASSET_AUDIO_ACCEPT,
   PROJECT_ASSET_AUDIO_MAX_BYTES,
 } from "@/projects/assets/asset-audio-constants";
+import {
+  validateVoiceAudioFileClient,
+  validateVoiceAudioMimeAndSize,
+} from "@/projects/assets/voice-audio-validation";
 
 export type UploadProjectAssetAudioResult = {
   assetId: string;
@@ -22,7 +26,13 @@ export class ProjectAssetAudioUploadError extends Error {
 
 const ALLOWED_EXT = /\.(mp3|wav|ogg)$/i;
 
-export function validateProjectAssetAudioFileClient(file: File): string | null {
+export function validateProjectAssetAudioFileClient(
+  file: File,
+  options?: { variant?: "default" | "voice" },
+): string | null {
+  if (options?.variant === "voice") {
+    return validateVoiceAudioMimeAndSize(file);
+  }
   if (file.size <= 0) {
     return "音频文件为空";
   }

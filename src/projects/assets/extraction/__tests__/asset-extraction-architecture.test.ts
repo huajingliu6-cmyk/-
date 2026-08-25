@@ -81,28 +81,33 @@ describe("asset extraction replacement contracts", () => {
     expect(workspace).not.toContain("extractJobsRef");
     expect(workspace).not.toContain("handleCancelGenerate");
     expect(workspace).not.toContain('outputKind: "script_asset_design"');
+    expect(toolbar).toContain("提取本集资产");
+    expect(toolbar).toContain("showExtractButton");
+    expect(toolbar).toContain('data-testid="ead-extract-episode"');
+    expect(toolbar).toContain('data-testid="ead-episode-select"');
     expect(toolbar).not.toContain("全剧本提取");
     expect(toolbar).not.toContain("一键提取资产");
-    expect(toolbar).toContain("提取本集资产");
     expect(amw).not.toContain("buildMockAssetBundle");
     expect(amw).toContain("ASSET_EXTRACTION_MISSING_HINT");
+    expect(amw).toContain("showEpisodeExtractButton");
+    expect(amw).toContain("viewEpisodeId !== null");
   });
 
-  it("first confirm script only shows the extract card", () => {
+  it("confirm script does not auto-start extraction (manual stage flow)", () => {
     const script = readSrc("src/projects/script/ScriptCreationWorkspace.tsx");
-    const card = readSrc("src/projects/script/ScriptAssetExtractPromptCard.tsx");
     const amw = readSrc("src/projects/assets/AssetManagementWorkspace.tsx");
-    expect(script).toContain("applyExtractionAction");
-    expect(script).toContain("shouldPromptExtraction");
-    expect(script).toContain("ScriptAssetExtractPromptCard");
-    expect(amw).toContain("extractPromptAvailable");
-    expect(card).toContain("是否一键提取资产");
-    expect(card).toContain("开始提取资产");
-    expect(card).toContain("重新开始");
-    expect(card).toContain("script-extract-prompt-skip");
-    expect(script).not.toMatch(
-      /applyExtractionAction[\s\S]{0,200}asset-extraction\/tasks/,
+    const afterConfirm = readSrc("src/projects/assets/extraction/after-confirm.ts");
+    const confirmSplit = readSrc(
+      "src/app/api/projects/[projectId]/script-draft/confirm-split/route.ts",
     );
+    const guard = readSrc("src/projects/script/ScriptDownstreamPipelineGuard.tsx");
+    const runTask = readSrc("src/projects/assets/extraction/run-task.ts");
+    expect(script).toContain("confirm-split");
+    expect(afterConfirm).not.toContain("startAssetExtractionTask");
+    expect(afterConfirm).toContain('action: "noop"');
+    expect(runTask).toContain("runEpisodeExtractionDownstream");
+    expect(amw).toContain("useScriptDownstreamPipeline");
+    expect(guard).toContain("asset-extraction");
   });
 
   it("navigation intercepts the current project only", () => {
@@ -115,7 +120,9 @@ describe("asset extraction replacement contracts", () => {
       "资产提取尚未完成，请耐心等待。",
     );
     expect(nav).toContain("confirmGenerationLeaveIfNeeded(item.href)");
-    expect(stage).toContain("confirmGenerationLeaveIfNeeded(stage.href)");
+    expect(readSrc("src/projects/workbench/ProjectStageNavLinks.tsx")).toContain(
+      "shouldBlockGenerationLeave(stage.href)",
+    );
   });
 });
 
@@ -433,12 +440,12 @@ describe("confirm-split extraction actions", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("prompts when there is no active version", async () => {
+  it("does not auto-start extraction when there is no active version", async () => {
     const action = await afterScriptSplitConfirmed({
       projectId: "p_prompt",
       sourceFingerprint: "fp1",
     });
-    expect(action.action).toBe("prompt");
+    expect(action.action).toBe("noop");
     const store = await loadAssetExtractionStore("p_prompt");
     expect(getLiveTask(store)).toBeNull();
   });
@@ -486,14 +493,9 @@ describe("confirm-split extraction actions", () => {
       projectId: "p_auto",
       sourceFingerprint: "fp-new",
     });
-    expect(action.action).toBe("auto-reextract");
-    if (action.action !== "auto-reextract") return;
-    expect(action.task.taskKey).toBe(allAssetsTaskKey("p_auto", "fp-new"));
+    expect(action.action).toBe("noop");
     const store = await loadAssetExtractionStore("p_auto");
-    expect(store.versions.some((version) => version.status === "candidate")).toBe(
-      true,
-    );
-    expect(getActiveVersion(store)?.id).toBe("ver_active");
+    expect(getLiveTask(store)).toBeNull();
   });
 });
 
@@ -512,7 +514,7 @@ describe("generation busy project scope", () => {
     expect(isHrefInsideProject("/app/projects", "p1")).toBe(false);
     expect(isHrefInsideProject("/app", "p1")).toBe(false);
     expect(isHrefInsideProject("/app/projects/p2/assets", "p1")).toBe(false);
-    expect(shouldBlockGenerationLeave("/app/projects/p1/storyboard")).toBe(true);
+    expect(shouldBlockGenerationLeave("/app/projects/p1/storyboard")).toBe(false);
     expect(shouldBlockGenerationLeave("/app/projects")).toBe(false);
     expect(shouldBlockGenerationLeave("/app/projects/p2/script")).toBe(false);
     expect(await confirmGenerationLeaveIfNeeded("/")).toBe(true);

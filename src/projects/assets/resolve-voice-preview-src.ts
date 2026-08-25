@@ -5,6 +5,7 @@ import {
   isLocalVoiceId,
 } from "@/projects/assets/local-voice-id";
 import { isSystemCatalogVoiceId } from "@/projects/assets/voice-catalog";
+import { findSystemVoice } from "@/projects/assets/system-voice-catalog";
 
 export type ResolveVoicePreviewResult =
   | { ok: true; src: string; label: string }
@@ -30,9 +31,17 @@ export function resolveVoicePreviewSrc(params: {
   }
 
   if (isSystemCatalogVoiceId(voiceId)) {
+    const system = findSystemVoice(voiceId);
+    if (system?.previewUrl) {
+      return {
+        ok: true,
+        src: system.previewUrl,
+        label: system.name,
+      };
+    }
     return {
       ok: false,
-      message: "系统音色为占位项，请改从本地音频库选择",
+      message: "系统预览尚未接入，暂不可试听",
     };
   }
 

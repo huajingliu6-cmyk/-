@@ -27,6 +27,11 @@ describe("personal hub spec compliance (static contract)", () => {
     expect(image).toContain("PersonalImageReferenceStrip");
     expect(strip).toContain("multiple");
     expect(strip).toContain("PERSONAL_IMAGE_MAX_REFERENCES");
+    expect(strip).toContain("<label");
+    expect(strip).toContain("htmlFor={inputId}");
+    expect(strip).toContain("hub-upload-label__input");
+    expect(strip).toContain("setUploadSlot");
+    expect(strip).not.toContain("fileInputRef.current?.click()");
     expect(image).toContain("personal-image-editor__toolbar");
     expect(image).toContain("hub-btn--primary");
     expect(image).toContain("menuPortal");
@@ -48,6 +53,7 @@ describe("personal hub spec compliance (static contract)", () => {
     const precheck = readSrc("src/personal/video-generation/precheck-reference.ts");
     expect(video).toContain("personal-video-editor__column--controls");
     expect(video).toContain("personal-video-editor__column--preview");
+    expect(video).toContain("personal-video-editor__reference-strip");
     expect(video).toContain("personal-video-editor__references");
     expect(video).toContain("/api/personal/video-generations/precheck");
     expect(precheck).toContain("precheckImageBufferWithSd2Cert");

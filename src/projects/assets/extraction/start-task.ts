@@ -28,6 +28,7 @@ export type StartAssetExtractionInput = {
   scope: AssetExtractionScope;
   episodeId?: string | null;
   modelKey?: string | null;
+  actorUserId?: string | null;
 };
 
 export async function startAssetExtractionTask(
@@ -96,6 +97,7 @@ export async function startAssetExtractionTask(
       versionId,
       createdAt: now,
       updatedAt: now,
+      actorUserId: input.actorUserId?.trim() || null,
       roster: [],
       detailItems: [],
       failedAssetQueue: [],

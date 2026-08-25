@@ -79,6 +79,10 @@ describe("resolveBackTarget", () => {
       kind: "href",
       href: "/app",
     });
+    expect(resolveBackTarget("/app/infinite-canvas")).toEqual({
+      kind: "href",
+      href: "/app",
+    });
     expect(resolveBackTarget("/app/admin")).toEqual({
       kind: "href",
       href: "/app",

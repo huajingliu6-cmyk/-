@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
-  Bell,
   Cable,
   CheckCircle2,
   ClipboardCheck,
@@ -100,15 +99,10 @@ const NAV_GROUPS: Array<{
   },
 ];
 
-export function AdminConsole({ initialView = "overview", user }: AdminConsoleProps) {
+export function AdminConsole({ initialView = "overview", user: _user }: AdminConsoleProps) {
   const [view, setView] = useState<AdminView>(initialView);
   const [refreshKey, setRefreshKey] = useState(0);
   const [notice, setNotice] = useState("");
-
-  const initials = useMemo(() => {
-    const value = user.displayName || user.username || "AD";
-    return value.slice(0, 2).toUpperCase();
-  }, [user.displayName, user.username]);
 
   const selectView = useCallback((next: AdminView) => {
     setView(next);
@@ -189,12 +183,6 @@ export function AdminConsole({ initialView = "overview", user }: AdminConsolePro
             <button type="button" aria-label="刷新当前页面" onClick={refresh}>
               <RefreshCw aria-hidden />
             </button>
-            <button type="button" aria-label="通知">
-              <Bell aria-hidden />
-            </button>
-            <span className="ai-admin-avatar" aria-label={`管理员账号 ${user.displayName || user.username}`}>
-              {initials}
-            </span>
           </div>
         </header>
 

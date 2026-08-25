@@ -91,7 +91,6 @@
 .personal-image-editor__prompt-shell {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 18px;
   background: rgba(0, 0, 0, 0.28);
@@ -132,10 +131,13 @@
   gap: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   padding: 10px 12px;
+  position: relative;
+  z-index: 1;
 }
 
 .personal-image-reference-slot--add {
   flex: 0 0 auto;
+  cursor: pointer;
 }
 
 .personal-image-editor__reference-hint {

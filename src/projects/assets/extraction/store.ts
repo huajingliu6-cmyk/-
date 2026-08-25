@@ -22,7 +22,7 @@ import type {
   ExtractedAsset,
   ExtractedAssetDraft,
 } from "@/projects/assets/extraction/types";
-import { isLiveExtractionStatus } from "@/projects/assets/extraction/types";
+import { isBlockingExtractionStatus } from "@/projects/assets/extraction/types";
 import type { EpisodeAssetDesignAssetType } from "@/projects/assets/episode-design/types";
 
 function draftsDir(projectId: string): string {
@@ -276,6 +276,9 @@ function parseTask(raw: unknown): AssetExtractionTask | null {
       raw.rosterChunksTotal > 0
         ? Math.floor(raw.rosterChunksTotal)
         : undefined,
+    runnerId: asNullableString(raw.runnerId),
+    runnerLeaseUntil: asNullableString(raw.runnerLeaseUntil),
+    heartbeatAt: asNullableString(raw.heartbeatAt),
   };
 }
 
@@ -492,13 +495,27 @@ export function getLiveTask(
   store: AssetExtractionStore,
   taskKey?: string,
 ): AssetExtractionTask | null {
-  const live = store.tasks.filter((task) => isLiveExtractionStatus(task.status));
+  // Include awaiting_roster_selection so another extract cannot start mid-pick.
+  const live = store.tasks.filter((task) =>
+    isBlockingExtractionStatus(task.status),
+  );
   if (taskKey) {
     return live.find((task) => task.taskKey === taskKey) ?? null;
   }
   return (
     [...live].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null
   );
+}
+
+/** Most relevant open/recent task across episode and all-assets scopes. */
+export function getOpenOrLatestExtractionTask(
+  store: AssetExtractionStore,
+): AssetExtractionTask | null {
+  const open = store.tasks
+    .filter((task) => isBlockingExtractionStatus(task.status))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  if (open[0]) return open[0];
+  return getLatestTask(store);
 }
 
 export function getLatestTask(

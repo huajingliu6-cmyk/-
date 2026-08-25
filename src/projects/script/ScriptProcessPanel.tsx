@@ -22,6 +22,8 @@ type Props = {
   emptyHint?: string;
   onSelect: (episodeId: string) => void;
   onPageChange: (page: number) => void;
+  /** 由外层提供 panel 壳层时使用 */
+  embedded?: boolean;
 };
 
 export function ScriptProcessPanel({
@@ -32,6 +34,7 @@ export function ScriptProcessPanel({
   emptyHint = "上传剧本后将自动分集并创建剧集。",
   onSelect,
   onPageChange,
+  embedded = false,
 }: Props) {
   const prevBounce = useChipBounce();
   const nextBounce = useChipBounce();
@@ -48,9 +51,8 @@ export function ScriptProcessPanel({
     episodes.length === 0 ? 0 : (safePage - 1) * EPISODES_PER_PAGE + 1;
   const rangeEnd = Math.min(safePage * EPISODES_PER_PAGE, episodes.length);
 
-  return (
-    <section className="scs-panel scs-panel--process" aria-label="剧本读取处理">
-      <h2>剧本读取处理</h2>
+  const body = (
+    <>
       {episodes.length === 0 ? (
         <div className="scs-status-card">
           <div className="scs-status-label">分集列表</div>
@@ -140,6 +142,17 @@ export function ScriptProcessPanel({
           ) : null}
         </>
       )}
+    </>
+  );
+
+  if (embedded) {
+    return body;
+  }
+
+  return (
+    <section className="scs-panel scs-panel--process" aria-label="剧本读取处理">
+      <h2>剧本读取处理</h2>
+      {body}
     </section>
   );
 }
