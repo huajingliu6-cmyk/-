@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { persistProduction, replaceProduction } from "@/projects/storyboard/api-helpers";
 import { ensureStoryboardWorkspaceReady } from "@/projects/storyboard/services/ensure-storyboard-workspace";
 import { executeStoryboardGenerationCore } from "@/projects/storyboard/services/generate-storyboard-episode";
+import { notifyStoryboardPromptGenerating } from "@/projects/storyboard/services/storyboard-prompt-notifications";
 import type {
   EpisodeProduction,
   StoryboardGenerationJob,
@@ -125,6 +126,13 @@ export async function kickoffStoryboardGenerationAsync(input: {
     updatedAt: now,
   });
   replaceProduction(workspace, queued);
+
+  await notifyStoryboardPromptGenerating({
+    userId: input.userId,
+    projectId: input.projectId,
+    episodeId: input.episodeId,
+    generationId: input.idempotencyKey,
+  });
 
   scheduleStoryboardGenerationJob({
     projectId: input.projectId,

@@ -1,17 +1,6 @@
-import { Suspense } from "react";
-import { MaterialsAdminPage } from "@/materials/ui/MaterialsAdminPage";
-import "@/materials/materials.css";
+import { redirect } from "next/navigation";
 
+/** Legacy materials admin URL → unified system config materials view. */
 export default function MaterialsAdminRoutePage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="me-page">
-          <div className="me-loading">加载中…</div>
-        </div>
-      }
-    >
-      <MaterialsAdminPage />
-    </Suspense>
-  );
+  redirect("/app/admin?view=materials");
 }

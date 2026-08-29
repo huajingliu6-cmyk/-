@@ -80,14 +80,18 @@ describe("新增人物造型 editor contract", () => {
     expect(look).toContain("setCurrentLookMediaId(primary)");
     expect(look).toContain("hideSucceededPreview");
     expect(look).toContain("clearProgressLater(900)");
-    expect(look).not.toMatch(
+    const handleGenerate = look.slice(
+      look.indexOf("const handleGenerate = useCallback"),
+      look.indexOf("const handlePrecheck = useCallback"),
+    );
+    expect(handleGenerate).not.toMatch(
       /finally\s*\{[\s\S]*setGenerationProgress\(null\)/,
     );
     expect(detail).not.toContain(
       "key={`character-look-editor:${character.id}:session:${lookEditorSessionKey}`}",
     );
     expect(detail).not.toContain("activeMediaId ?? \"new\"");
-    expect(detail).toContain("createCharacterAppearance");
+    expect(detail).toContain("create-appearance");
     expect(detail).toContain("onCurrentMediaChange={syncPromptMedia}");
     expect(panel).toContain(
       "generateBusy && generationProgress ? (",

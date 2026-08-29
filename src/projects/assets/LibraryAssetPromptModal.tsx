@@ -8,8 +8,8 @@ import type {
   EpisodeAssetDesignItem,
 } from "@/projects/assets/episode-design/types";
 import {
+  isIsolatedLibraryPromptScope,
   makeLibraryDesignItem,
-  parseAppearanceScopeId,
   resolveLibraryPromptScopeItem,
   type LibraryPromptAsset,
   type LibraryPromptAssetKind,
@@ -100,7 +100,7 @@ function buildScopedLocalItem(
   promptScopeText: string | null | undefined,
   promptScopeMedia: LibraryPromptScopeMedia | null | undefined,
 ): EpisodeAssetDesignItem {
-  if (parseAppearanceScopeId(promptScopeKey)) {
+  if (isIsolatedLibraryPromptScope(promptScopeKey)) {
     return resolveLibraryPromptScopeItem(asset, kind, designItem, {
       promptScopeKey,
       promptScopeText,
@@ -159,8 +159,8 @@ function LibraryAssetPromptSurface({
 
   const assetKey = assetSyncKey(asset, kind);
   const designKey = designSyncKey(designItem);
-  const appearanceScopeId = parseAppearanceScopeId(promptScopeKey);
-  const scopeSyncKey = appearanceScopeId
+  const isolatedScope = isIsolatedLibraryPromptScope(promptScopeKey);
+  const scopeSyncKey = isolatedScope
     ? [
         promptScopeKey ?? "",
         promptScopeText ?? "",
@@ -181,7 +181,7 @@ function LibraryAssetPromptSurface({
       setLocalItem(null);
       return;
     }
-    if (appearanceScopeId) {
+    if (isolatedScope) {
       setLocalItem(
         buildScopedLocalItem(
           currentAsset,
@@ -230,10 +230,19 @@ function LibraryAssetPromptSurface({
           : next.designPrompt,
       } as EpisodeAssetDesignItem;
     });
-  }, [appearanceScopeId, assetKey, designKey, kind, scopeSyncKey]);
+  }, [
+    isolatedScope,
+    assetKey,
+    designKey,
+    kind,
+    promptScopeKey,
+    promptScopeMedia,
+    promptScopeText,
+    scopeSyncKey,
+  ]);
 
   useEffect(() => {
-    if (!promptScopeKey || appearanceScopeId) return;
+    if (!promptScopeKey || isolatedScope) return;
     setLocalItem((previous) => {
       if (!previous) return previous;
       const currentAsset = assetRef.current;
@@ -275,7 +284,7 @@ function LibraryAssetPromptSurface({
         },
       } as EpisodeAssetDesignItem;
     });
-  }, [appearanceScopeId, promptScopeKey, promptScopeText, kind]);
+  }, [isolatedScope, promptScopeKey, promptScopeText, kind]);
 
   if (mode === "modal" && !open) return null;
   if (!asset || !localItem) return null;

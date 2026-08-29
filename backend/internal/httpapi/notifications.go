@@ -127,7 +127,21 @@ func (handler *Notifications) mutateFile(request *http.Request, userID string, m
 }
 
 func validNotificationType(value string) bool {
-	return value == "asset_approval_submitted" || value == "asset_approval_approved" || value == "asset_approval_rejected" || value == "enterprise_join_approved" || value == "enterprise_join_rejected"
+	switch value {
+	case "asset_approval_submitted",
+		"asset_approval_approved",
+		"asset_approval_rejected",
+		"enterprise_join_approved",
+		"enterprise_join_rejected",
+		"image_generation_succeeded",
+		"image_generation_failed",
+		"storyboard_prompt_generating",
+		"storyboard_prompt_ready",
+		"storyboard_prompt_failed":
+		return true
+	default:
+		return false
+	}
 }
 
 func enterpriseNotificationType(value string) bool {

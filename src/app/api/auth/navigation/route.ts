@@ -4,6 +4,7 @@ import { getSystemRole, canAccessProjectManagementNav } from "@/auth/roles";
 import { userOwnsAnyProject } from "@/auth/effective-role";
 import {
   AUTH_NAV_ITEMS,
+  ADMIN_NAV_IDS,
   CARD_ENGINEER_NAV_IDS,
   type ShellNavItem,
 } from "@/shell/nav";
@@ -31,7 +32,9 @@ async function getNavigation() {
   const systemRole = getSystemRole(user);
 
   const withoutAdmin = AUTH_NAV_ITEMS.filter(
-    (item) => item.id !== "admin" && item.id !== "admin-materials",
+    (item) =>
+      !(ADMIN_NAV_IDS as readonly string[]).includes(item.id) &&
+      item.id !== "admin-materials",
   );
 
   // Admins do not need membership lookups to decide nav — avoid 503 wiping the shell.

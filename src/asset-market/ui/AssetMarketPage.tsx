@@ -10,8 +10,9 @@ import {
 } from "react";
 import { Loader2, RefreshCw, Search, Store, X } from "lucide-react";
 import {
-  MARKET_ASSET_CATEGORIES,
+  MARKET_BROWSE_CATEGORIES,
   MARKET_CATEGORY_LABELS,
+  type MarketBrowseCategory,
 } from "@/asset-market/constants";
 import type {
   MarketAsset,
@@ -19,6 +20,7 @@ import type {
   MarketAssetSort,
 } from "@/asset-market/types";
 import { parseResponseJson } from "@/projects/assets/parse-response-json";
+import type { VoiceOption } from "@/projects/assets/types";
 import {
   readCurrentProjectId,
   writeCurrentProjectId,
@@ -45,11 +47,12 @@ const SORT_OPTIONS: Array<{ id: MarketAssetSort; label: string }> = [
   { id: "usage", label: "使用次数" },
 ];
 
-const EMPTY_COUNTS: Record<MarketAssetCategory, number> = {
+const EMPTY_COUNTS: Record<MarketBrowseCategory, number> = {
   character: 0,
   clothing: 0,
   scene: 0,
   prop: 0,
+  voice: 0,
 };
 
 function defaultCategoryState(): CategoryState {
@@ -60,12 +63,13 @@ function defaultCategoryState(): CategoryState {
   };
 }
 
-function buildInitialCategoryState(): Record<MarketAssetCategory, CategoryState> {
+function buildInitialCategoryState(): Record<MarketBrowseCategory, CategoryState> {
   return {
     character: defaultCategoryState(),
     clothing: defaultCategoryState(),
     scene: defaultCategoryState(),
     prop: defaultCategoryState(),
+    voice: defaultCategoryState(),
   };
 }
 
@@ -77,15 +81,16 @@ export function AssetMarketPage() {
   const auth = useAuthUser();
   const { toasts, pushToast, dismiss, pause, resume } = useAppToasts();
 
-  const [category, setCategory] = useState<MarketAssetCategory>("character");
+  const [category, setCategory] = useState<MarketBrowseCategory>("character");
   const categoryStateRef = useRef(buildInitialCategoryState());
   const [keyword, setKeyword] = useState("");
   const [debouncedKeyword, setDebouncedKeyword] = useState("");
   const [sort, setSort] = useState<MarketAssetSort>("latest");
   const [items, setItems] = useState<MarketAsset[]>([]);
+  const [voices, setVoices] = useState<VoiceOption[]>([]);
   const [total, setTotal] = useState(0);
   const [categoryCounts, setCategoryCounts] =
-    useState<Record<MarketAssetCategory, number>>(EMPTY_COUNTS);
+    useState<Record<MarketBrowseCategory, number>>(EMPTY_COUNTS);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -119,6 +124,52 @@ export function AssetMarketPage() {
       signal?: AbortSignal;
       requestId: number;
     }) => {
+      if (category === "voice") {
+        const response = await fetch("/api/voices/catalog", {
+          cache: "no-store",
+          signal: input.signal,
+          credentials: "include",
+        });
+        const data = await parseResponseJson<{
+          voices?: VoiceOption[];
+          error?: string;
+        }>(response);
+        if (input.signal?.aborted || input.requestId !== requestIdRef.current) {
+          return;
+        }
+        if (!response.ok) {
+          throw new Error(data.error || "加载失败");
+        }
+        const keywordLower = debouncedKeyword.trim().toLowerCase();
+        const list = (data.voices ?? []).filter((voice) => {
+          if (!keywordLower) return true;
+          const haystack = [
+            voice.name,
+            voice.label,
+            voice.style,
+            voice.gender,
+            voice.ageRange,
+            voice.language,
+            voice.emotion,
+            voice.description,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          return haystack.includes(keywordLower);
+        });
+        setVoices(list);
+        setItems([]);
+        setNextCursor(null);
+        setTotal(list.length);
+        setCategoryCounts((current) => ({
+          ...current,
+          voice: list.length,
+        }));
+        setLoadError(null);
+        return;
+      }
+
       const params = new URLSearchParams();
       params.set("category", category);
       params.set("sort", sort);
@@ -146,12 +197,18 @@ export function AssetMarketPage() {
         throw new Error(data.error || "加载失败");
       }
 
+      setVoices([]);
       setItems((current) =>
         input.reset ? (data.items ?? []) : [...current, ...(data.items ?? [])],
       );
       setNextCursor(data.nextCursor ?? null);
       setTotal(data.total ?? 0);
-      if (data.categoryCounts) setCategoryCounts(data.categoryCounts);
+      if (data.categoryCounts) {
+        setCategoryCounts((current) => ({
+          ...current,
+          ...data.categoryCounts,
+        }));
+      }
       setLoadError(null);
     },
     [category, debouncedKeyword, sort],
@@ -260,7 +317,7 @@ export function AssetMarketPage() {
   }, [loadPage, loading, loadingMore, nextCursor, pushToast]);
 
   const switchCategory = useCallback(
-    (next: MarketAssetCategory) => {
+    (next: MarketBrowseCategory) => {
       if (next === category) return;
       const scrollTop = gridScrollRef.current?.scrollTop ?? 0;
       categoryStateRef.current[category] = {
@@ -409,7 +466,7 @@ export function AssetMarketPage() {
       </header>
 
       <nav className="asset-market-page__categories" aria-label="素材分类">
-        {MARKET_ASSET_CATEGORIES.map((entry) => (
+        {MARKET_BROWSE_CATEGORIES.map((entry) => (
           <button
             key={entry}
             type="button"
@@ -463,6 +520,73 @@ export function AssetMarketPage() {
                 重试
               </button>
             </div>
+          ) : category === "voice" ? (
+            voices.length === 0 ? (
+              <div className="asset-market-page__empty">
+                <p>暂无可用系统音色</p>
+              </div>
+            ) : (
+              <div
+                className="asset-market-page__grid"
+                data-testid="asset-market-voice-grid"
+              >
+                {voices.map((voice) => (
+                  <article
+                    key={voice.id}
+                    className="asset-market-card asset-market-card--voice"
+                    data-testid="asset-market-voice-card"
+                  >
+                    <div className="asset-market-card__body">
+                      <h3 className="asset-market-card__title">{voice.name}</h3>
+                      <p className="asset-market-card__meta">
+                        {[
+                          voice.gender === "female"
+                            ? "女"
+                            : voice.gender === "male"
+                              ? "男"
+                              : "中性",
+                          voice.ageRange,
+                          voice.language,
+                          voice.emotion,
+                          voice.style,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                      {voice.description ? (
+                        <p className="asset-market-card__meta">
+                          {voice.description}
+                        </p>
+                      ) : null}
+                      {voice.previewUrl ? (
+                        <audio
+                          controls
+                          preload="none"
+                          src={voice.previewUrl}
+                          data-testid="asset-market-voice-preview"
+                        >
+                          <track kind="captions" />
+                        </audio>
+                      ) : (
+                        <p className="asset-market-card__meta">暂无试听</p>
+                      )}
+                      <button
+                        type="button"
+                        className="hub-btn hub-btn--glass asset-market-card__add"
+                        data-testid="asset-market-voice-select"
+                        onClick={() =>
+                          pushToast(
+                            `已选择系统音色「${voice.name}」，请在项目角色设置中绑定`,
+                          )
+                        }
+                      >
+                        选择 / 绑定
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )
           ) : items.length === 0 ? (
             <div className="asset-market-page__empty">
               <p>暂无可用素材</p>

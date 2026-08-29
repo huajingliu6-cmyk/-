@@ -25,6 +25,8 @@ describe("storyboard video output params", () => {
     expect(parseStoryboardVideoAspectRatio("9:16")).toBe("9:16");
     expect(parseStoryboardVideoAspectRatio("1:1")).toBeNull();
     expect(parseStoryboardVideoDurationSeconds(7.4)).toBe(7);
+    expect(parseStoryboardVideoDurationSeconds(3)).toBeNull();
+    expect(parseStoryboardVideoDurationSeconds(20)).toBeNull();
     expect(clampStoryboardVideoDuration(3)).toBe(5);
     expect(clampStoryboardVideoDuration(20)).toBe(15);
     expect(clampStoryboardVideoDuration(12)).toBe(12);
@@ -71,7 +73,7 @@ describe("storyboard video output params", () => {
     ).toBeNull();
   });
 
-  it("从 body 解析分镜出站参数并带 Clip 默认值", () => {
+  it("从 body 解析分镜出站参数并允许 5–15 秒时长", () => {
     const parsed = resolveStoryboardVideoOutputParams(
       {
         resolution: "1080P",
@@ -91,14 +93,20 @@ describe("storyboard video output params", () => {
     const fallback = resolveStoryboardVideoOutputParams({}, 5);
     expect(fallback.resolution).toBe("720P");
     expect(fallback.aspectRatio).toBe("9:16");
-    expect(fallback.durationSeconds).toBe(STORYBOARD_SHOT_DURATION_MIN);
+    expect(fallback.durationSeconds).toBe(5);
     expect(fallback.modelChoice).toBe("seedance-2.0");
 
-    const invalidBody = resolveStoryboardVideoOutputParams(
+    const midRange = resolveStoryboardVideoOutputParams(
       { durationSeconds: 9 },
       14,
     );
-    expect(invalidBody.durationSeconds).toBe(14);
+    expect(midRange.durationSeconds).toBe(9);
+
+    const invalidBody = resolveStoryboardVideoOutputParams(
+      { durationSeconds: 20 },
+      8,
+    );
+    expect(invalidBody.durationSeconds).toBe(8);
 
     const withChoice = resolveStoryboardVideoOutputParams(
       {

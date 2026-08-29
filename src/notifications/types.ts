@@ -7,7 +7,10 @@ export type NotificationType =
   | "enterprise_join_approved"
   | "enterprise_join_rejected"
   | "image_generation_succeeded"
-  | "image_generation_failed";
+  | "image_generation_failed"
+  | "storyboard_prompt_generating"
+  | "storyboard_prompt_ready"
+  | "storyboard_prompt_failed";
 
 export type AppNotification = {
   id: string;

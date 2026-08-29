@@ -28,7 +28,7 @@ import {
   collectPreviousVideoHistoryIds,
   uniqueGenerationIds,
 } from "@/projects/storyboard/video-history-ids";
-import { STORYBOARD_VIDEO_DURATION_MIN } from "@/projects/storyboard/storyboard-video-params";
+import { STORYBOARD_SHOT_DURATION_MIN } from "@/projects/storyboard/storyboard-video-params";
 
 export type GenerateStructuredStoryboardInput = {
   scriptText: string;
@@ -70,58 +70,100 @@ function splitScriptBlocks(scriptText: string): string[] {
   }
 
   if (blocks.length === 0) return [trimmed];
-  if (blocks.length === 1 && blocks[0]!.length > 120) {
-    const sentences = blocks[0]!
-      .split(/(?<=[。！？!?])\s*/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (sentences.length >= 2) {
-      const mid = Math.ceil(sentences.length / 2);
-      return [sentences.slice(0, mid).join(""), sentences.slice(mid).join("")];
-    }
-  }
   return blocks;
 }
 
-function clampSceneCount(blocks: string[]): string[] {
-  if (blocks.length <= 1) {
-    const text = blocks[0] ?? "";
-    const half = Math.max(1, Math.floor(text.length / 2));
-    if (text.length > 40) {
-      return [text.slice(0, half).trim(), text.slice(half).trim()].filter(Boolean);
+const SCENE_META_SPEAKER =
+  /^(场景|内景|外景|INT|EXT|时间|地点|人物|角色|出场人物)/i;
+
+/**
+ * Extract spoken dialogue from a shot source snippet.
+ * Supports: 人物：台词 / 人物: 台词 / 人物：「台词」 / 人物说：“台词” / multi-line.
+ * Never invents dialogue; returns "" only when no dialogue is present.
+ */
+export function extractShotDialogue(snippet: string): string {
+  const text = snippet.replace(/\r\n/g, "\n").trim();
+  if (!text) return "";
+
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const parts: string[] = [];
+
+  const takeLineDialogue = (line: string): string | null => {
+    const sayQuoted = line.match(
+      /^(.+?)(?:说|道)[：:]\s*[「『“"](.+?)[」』”"]\s*$/,
+    );
+    if (sayQuoted?.[2]?.trim() && !SCENE_META_SPEAKER.test(sayQuoted[1]!.trim())) {
+      return sayQuoted[2].trim();
     }
-    return blocks.length > 0 ? blocks : ["（场景一）", "（场景二）"];
+    const colonQuoted = line.match(
+      /^(.+?)[：:]\s*[「『“"](.+?)[」』”"]\s*$/,
+    );
+    if (
+      colonQuoted?.[2]?.trim() &&
+      !SCENE_META_SPEAKER.test(colonQuoted[1]!.trim())
+    ) {
+      return colonQuoted[2].trim();
+    }
+    const colonPlain = line.match(/^(.+?)[：:]\s*(.+)$/);
+    if (
+      colonPlain?.[2]?.trim() &&
+      !SCENE_META_SPEAKER.test(colonPlain[1]!.trim())
+    ) {
+      const body = colonPlain[2].trim().replace(/^[「『“"]|[」』”"]$/g, "");
+      return body.trim() || null;
+    }
+    return null;
+  };
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    const headerOnly = line.match(/^(.+?)[：:]\s*$/);
+    if (
+      headerOnly?.[1] &&
+      !SCENE_META_SPEAKER.test(headerOnly[1].trim()) &&
+      i + 1 < lines.length
+    ) {
+      const next = lines[i + 1]!;
+      const nested = takeLineDialogue(`${headerOnly[1]}：${next}`);
+      if (nested) {
+        parts.push(nested);
+        i += 1;
+        continue;
+      }
+      // Multi-line continuous dialogue under a speaker header.
+      const bodyLines: string[] = [];
+      let j = i + 1;
+      while (j < lines.length) {
+        const cand = lines[j]!;
+        if (/^.+?[：:]/.test(cand) && takeLineDialogue(cand)) break;
+        bodyLines.push(cand.replace(/^[「『“"]|[」』”"]$/g, "").trim());
+        j += 1;
+      }
+      if (bodyLines.length > 0) {
+        parts.push(bodyLines.filter(Boolean).join("\n"));
+        i = j - 1;
+        continue;
+      }
+    }
+
+    const hit = takeLineDialogue(line);
+    if (hit) parts.push(hit);
   }
-  if (blocks.length <= 4) return blocks;
-  const merged: string[] = [];
-  const groupSize = Math.ceil(blocks.length / 4);
-  for (let i = 0; i < blocks.length; i += groupSize) {
-    merged.push(blocks.slice(i, i + groupSize).join("\n\n"));
-  }
-  return merged.slice(0, 4);
+
+  if (parts.length > 0) return parts.join("\n");
+
+  // Legacy single-quote fallback (no speaker): keep quoted text if present.
+  const legacy = text.match(/「([^」]+)」/)?.[1]?.trim();
+  return legacy ?? "";
 }
 
-function splitShots(sceneText: string): string[] {
-  const lines = sceneText
-    .split(/\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (lines.length >= 2) {
-    return lines.slice(0, 4);
-  }
-  const sentences = sceneText
-    .split(/(?<=[。！？!?])\s*/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (sentences.length >= 2) {
-    return sentences.slice(0, 4);
-  }
-  const chunkSize = Math.max(1, Math.ceil(sceneText.length / 3));
-  const chunks: string[] = [];
-  for (let i = 0; i < sceneText.length && chunks.length < 4; i += chunkSize) {
-    chunks.push(sceneText.slice(i, i + chunkSize).trim());
-  }
-  return chunks.filter(Boolean).length > 0 ? chunks.filter(Boolean) : [sceneText];
+/**
+ * One scene → one shot. Platform does not invent intra-scene shot boundaries;
+ * the model owns shot differentiation inside videoPrompt.
+ */
+export function splitShots(sceneText: string): string[] {
+  const normalized = sceneText.replace(/\r\n/g, "\n").trim();
+  return [normalized || sceneText];
 }
 
 function parseSceneMeta(block: string): Pick<
@@ -148,7 +190,7 @@ function parseSceneMeta(block: string): Pick<
   };
 }
 
-function matchedAssetIds(
+export function matchedAssetIds(
   matches: AssetMatchItem[],
   assetType: AssetMatchItem["assetType"],
 ): string[] {
@@ -163,7 +205,7 @@ function matchedAssetIds(
     .filter((id, index, list) => list.indexOf(id) === index);
 }
 
-function extractNamesFromSnippet(
+export function extractNamesFromSnippet(
   snippet: string,
   sceneLocation: string,
   assetMatches: AssetMatchItem[],
@@ -325,7 +367,7 @@ export function regenerateVideoPromptForShot(
   });
 }
 
-function linkRequirementsToMatches(
+export function linkRequirementsToMatches(
   requirements: ShotAssetRequirement[],
   assetMatches: AssetMatchItem[],
 ): {
@@ -367,8 +409,8 @@ function linkRequirementsToMatches(
 }
 
 /**
- * 结构化分镜占位时长。真实时长以大模型 videoPrompt 头「总时长：N秒」为准，
- * 在 fillShotVideoPromptsWithLlm / 单镜重生成时回写到 shot.durationSeconds。
+ * 结构化分镜默认 Clip 时长（元数据字段，与 videoPrompt 正文无关）。
+ * 产品分镜 Clip 为 13–15 秒；新建镜头写入明确默认值 13，禁止静默回退为 5。
  */
 function buildShot(
   snippet: string,
@@ -378,17 +420,15 @@ function buildShot(
   sceneMeta: Pick<StoryboardScene, "title" | "location">,
   libraryAssets?: MatchableAssets | null,
 ): StoryboardShot {
-  const dialogue =
-    snippet.match(/「([^」]+)」/)?.[1] ??
-    snippet.match(/(?:说|道)[：:]\s*(.+)/)?.[1]?.trim() ??
-    "";
+  const sourceScriptText = snippet.trim();
+  const dialogue = extractShotDialogue(sourceScriptText);
   const shotSize = shotNumber === 1 ? "全景" : "中景";
   const cameraAngle = "平视";
   const cameraMovement = shotNumber === 1 ? "缓慢推进" : "固定";
   const composition = "主体居中，留出环境信息";
-  const durationSeconds = STORYBOARD_VIDEO_DURATION_MIN;
+  const durationSeconds = STORYBOARD_SHOT_DURATION_MIN;
   const names = extractNamesFromSnippet(
-    snippet,
+    sourceScriptText,
     sceneMeta.location,
     assetMatches,
     libraryAssets,
@@ -426,7 +466,7 @@ function buildShot(
       : matchedAssetIds(assetMatches, "prop").slice(0, 2);
 
   const videoPrompt = buildVideoPrompt({
-    snippet,
+    snippet: sourceScriptText,
     shotNumber,
     shotSize,
     cameraAngle,
@@ -449,9 +489,11 @@ function buildShot(
     cameraAngle,
     cameraMovement,
     composition,
-    visualDescription: snippet.slice(0, 120) || "画面待补充",
-    actionDescription: snippet.slice(0, 80) || "动作待补充",
+    // Display summaries may truncate; sourceScriptText keeps full original.
+    visualDescription: sourceScriptText.slice(0, 120) || "画面待补充",
+    actionDescription: sourceScriptText.slice(0, 80) || "动作待补充",
     dialogue,
+    sourceScriptText,
     soundEffect: "",
     music: "",
     shotSummary,
@@ -477,6 +519,7 @@ function buildShot(
     revision: 1,
     order,
     promptRegenJobId: null,
+    promptOrigin: "auto",
   };
 
   if (libraryAssets) {
@@ -494,18 +537,9 @@ function buildScene(
   libraryAssets?: MatchableAssets | null,
 ): StoryboardScene {
   const meta = parseSceneMeta(block);
+  // One scene → one shot; model decides internal shot breakdown in the prompt.
   const shotSnippets = splitShots(block);
-  const shotCount = Math.min(4, Math.max(2, shotSnippets.length));
-  const snippets =
-    shotSnippets.length >= shotCount
-      ? shotSnippets.slice(0, shotCount)
-      : [
-          ...shotSnippets,
-          ...Array.from(
-            { length: shotCount - shotSnippets.length },
-            (_, i) => `${meta.title} — 镜头 ${shotSnippets.length + i + 1}`,
-          ),
-        ];
+  const snippets = shotSnippets.length > 0 ? shotSnippets : [block];
 
   const characterAssetIds = matchedAssetIds(assetMatches, "character");
   const sceneAssetIds = matchedAssetIds(assetMatches, "scene");
@@ -535,18 +569,8 @@ export function generateStructuredStoryboard(
   input: GenerateStructuredStoryboardInput,
 ): StoryboardDocument {
   const now = new Date().toISOString();
-  const blocks = clampSceneCount(splitScriptBlocks(input.scriptText));
-  const sceneCount = Math.min(4, Math.max(2, blocks.length));
-  const sceneBlocks =
-    blocks.length >= sceneCount
-      ? blocks.slice(0, sceneCount)
-      : [
-          ...blocks,
-          ...Array.from(
-            { length: sceneCount - blocks.length },
-            (_, i) => `场景 ${blocks.length + i + 1}`,
-          ),
-        ];
+  // Keep script scene/paragraph blocks as-is — no forced 2–4 scene clamp/merge.
+  const sceneBlocks = splitScriptBlocks(input.scriptText);
 
   void input.userId;
 
@@ -600,9 +624,9 @@ export function mergePreserveLockedShots(
   }
   const previousHistory = collectPreviousVideoHistoryIds(previous);
 
-  const mergedScenes = generated.scenes.map((scene) => ({
+  const mergedScenes: StoryboardScene[] = generated.scenes.map((scene) => ({
     ...scene,
-    shots: scene.shots.map((shot, index) => {
+    shots: scene.shots.map((shot, index): StoryboardShot => {
       const key = `${scene.sceneNumber}:${index}`;
       const preserved = previousByKey.get(key);
       if (!preserved) return shot;
@@ -628,7 +652,7 @@ export function mergePreserveLockedShots(
           : shot.videoContentStale,
       };
 
-      if (preserved.locked || preserved.promptLocked) {
+      if (preserved.locked) {
         return {
           ...preserved,
           ...videoCarry,
@@ -638,20 +662,56 @@ export function mergePreserveLockedShots(
         };
       }
 
-      if (preserved.manuallyEdited) {
+      // Manual prompt lock: keep user-edited prompt body, refresh source text from regen.
+      // Never keep an empty locked prompt over freshly generated content.
+      if (preserved.promptOrigin === "manual" && preserved.promptLocked) {
+        const preservedPrompt =
+          preserved.videoPrompt?.trim() || preserved.promptDraft?.trim() || "";
+        const generatedPrompt =
+          shot.videoPrompt?.trim() || shot.promptDraft?.trim() || "";
+        const keepPrompt = preservedPrompt || generatedPrompt;
         return {
           ...shot,
           ...videoCarry,
-          shotSummary: preserved.shotSummary || shot.shotSummary,
-          videoPrompt: preserved.videoPrompt || preserved.promptDraft,
-          promptDraft: preserved.promptDraft || preserved.videoPrompt,
+          id: preserved.id,
+          videoPrompt: keepPrompt,
+          promptDraft: keepPrompt,
+          promptLocked: Boolean(preservedPrompt),
+          promptOrigin: preservedPrompt ? ("manual" as const) : ("auto" as const),
+          manuallyEdited: Boolean(preservedPrompt),
+          storyboardPromptRuleVersion: preservedPrompt
+            ? preserved.storyboardPromptRuleVersion
+            : shot.storyboardPromptRuleVersion,
           characterAssetIds: preserved.characterAssetIds,
           propAssetIds: preserved.propAssetIds,
           sceneAssetId: preserved.sceneAssetId,
           sceneAssetIds: preserved.sceneAssetIds,
           requirements: preserved.requirements,
-          manuallyEdited: true,
-          promptLocked: preserved.promptLocked,
+          order: shot.order,
+          revision: preserved.revision + 1,
+          videoContentStale: true,
+        };
+      }
+
+      if (preserved.manuallyEdited) {
+        const preservedPrompt =
+          preserved.videoPrompt?.trim() || preserved.promptDraft?.trim() || "";
+        const generatedPrompt =
+          shot.videoPrompt?.trim() || shot.promptDraft?.trim() || "";
+        const keepPrompt = preservedPrompt || generatedPrompt;
+        return {
+          ...shot,
+          ...videoCarry,
+          shotSummary: preserved.shotSummary || shot.shotSummary,
+          videoPrompt: keepPrompt,
+          promptDraft: keepPrompt,
+          characterAssetIds: preserved.characterAssetIds,
+          propAssetIds: preserved.propAssetIds,
+          sceneAssetId: preserved.sceneAssetId,
+          sceneAssetIds: preserved.sceneAssetIds,
+          requirements: preserved.requirements,
+          manuallyEdited: Boolean(preservedPrompt),
+          promptLocked: preserved.promptLocked && Boolean(preservedPrompt),
           locked: preserved.locked,
           order: shot.order,
           revision: preserved.revision + 1,

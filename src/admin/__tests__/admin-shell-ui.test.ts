@@ -12,10 +12,10 @@ function readSrc(relativePath: string): string {
 }
 
 describe("system admin page contracts", () => {
-  it("exposes 系统管理 in top nav for the admin item", () => {
+  it("exposes API 配置 in top nav for the admin item", () => {
     const item = AUTH_NAV_ITEMS.find((nav) => nav.id === "admin");
-    expect(item?.label).toBe("系统管理");
-    expect(item?.href).toBe("/app/admin");
+    expect(item?.label).toBe("API 配置");
+    expect(item?.href).toBe("/app/admin?view=api");
   });
 
   it("keeps a stable back-to-app entry in AdminConsole for every view", () => {
@@ -56,7 +56,14 @@ describe("system admin page contracts", () => {
     expect(consoleSrc).not.toContain('| "rules"');
     expect(consoleSrc).not.toContain("CapabilityRulesTab");
     expect(consoleSrc).not.toContain("FileCog");
-    expect(consoleSrc).toContain("ModelConnectionsView onNavigate={selectView}");
+    expect(consoleSrc).not.toContain("运行概览");
+    expect(consoleSrc).not.toContain("生成记录");
+    expect(consoleSrc).not.toContain("素材审批");
+    expect(consoleSrc).toContain("admin-primary-api");
+    expect(consoleSrc).toContain("admin-primary-materials");
+    expect(consoleSrc).toContain("ModelConnectionsView");
+    expect(consoleSrc).toContain("CapabilityRoutingView");
+    expect(consoleSrc).toContain("MaterialsAdminPage");
 
     expect(connections).toContain("关联任务规则");
     expect(connections).toContain('embedded');
@@ -85,8 +92,9 @@ describe("system admin page contracts", () => {
     expect(ruleCard).toContain("恢复内置");
     expect(readSrc("src/auth/ai-admin/RuleHistoryDrawer.tsx")).toContain("回滚");
 
-    expect(resolveAdminInitialView("rules")).toBe("connections");
-    expect(resolveAdminInitialView("connections")).toBe("connections");
+    expect(resolveAdminInitialView("rules")).toBe("api");
+    expect(resolveAdminInitialView("connections")).toBe("api");
+    expect(resolveAdminInitialView("materials")).toBe("materials");
     expect(capabilitiesPage).toContain('redirect("/app/admin?view=connections")');
     expect(capabilitiesPage).not.toContain("CapabilityRulesTab");
   });
@@ -101,9 +109,9 @@ describe("system admin page contracts", () => {
     expect(layout).not.toContain("SystemAdminShell");
     expect(layout).toContain("return children");
     expect(menu).not.toContain("ApiManagePanel");
-    expect(menu).toContain("系统管理");
+    expect(menu).toContain("系统配置");
     expect(menu).toContain("/app/admin");
-    expect(navRoute).toContain('item.id !== "admin"');
+    expect(navRoute).toContain("ADMIN_NAV_IDS");
   });
 
   it("keeps left-nav sections without a standalone capabilities/rules entry", () => {

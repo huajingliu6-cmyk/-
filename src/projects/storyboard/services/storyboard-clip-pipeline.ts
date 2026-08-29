@@ -1,3 +1,7 @@
+/**
+ * @deprecated SHOT_ID_PROMPT_V1 no longer uses structured Clip parsing/render.
+ * Kept for legacy unit tests only — production generation uses parse + match.
+ */
 import type { MatchableAssets } from "@/projects/storyboard/services/asset-match";
 import { parseStoryboardClipsModelResponse } from "@/projects/storyboard/services/storyboard-clip-parser";
 import {
@@ -34,6 +38,8 @@ export type ClipPipelineResult =
       prompts: Map<string, string>;
       clips: StoryboardStructuredClip[];
       warnings: StoryboardClipWarning[];
+      /** Present when model omitted some expected shotIds (caller may retry). */
+      missingShotIds?: string[];
     }
   | {
       ok: false;
@@ -142,7 +148,10 @@ export function processStoryboardClipsResponse(input: {
         sceneTitle: target.sceneTitle,
         aspectRatio: input.aspectRatio,
         canonicalMountLine,
-        includeMaterialHint: needsCharacterBinding && !canonicalMountLine,
+        includeMaterialHint:
+          needsCharacterBinding &&
+          (!canonicalMountLine ||
+            canonicalMountLine.includes("未生成形象")),
       }),
     );
 
@@ -193,7 +202,14 @@ export function processStoryboardClipsResponse(input: {
     partitionClipValidationIssues(issues);
   allWarnings.push(...softFromIssues);
 
-  if (hardIssues.length > 0) {
+  const missingOnly = hardIssues.filter(
+    (issue) => issue.code === "MISSING_SHOT_CLIP",
+  );
+  const otherHard = hardIssues.filter(
+    (issue) => issue.code !== "MISSING_SHOT_CLIP",
+  );
+
+  if (otherHard.length > 0) {
     return {
       ok: false,
       issues: hardIssues,
@@ -201,10 +217,18 @@ export function processStoryboardClipsResponse(input: {
     };
   }
 
-  if (prompts.size !== expectedIds.size) {
-    const missingIssues = [...expectedIds]
-      .filter((shotId) => !prompts.has(shotId))
-      .map((shotId) => {
+  const missingShotIds = [
+    ...new Set([
+      ...missingOnly.map((issue) => issue.shotId),
+      ...[...expectedIds].filter((shotId) => !prompts.has(shotId)),
+    ]),
+  ];
+
+  // Missing clips alone: return partial prompts so the caller can retry those shotIds.
+  if (missingShotIds.length > 0 && prompts.size === 0) {
+    return {
+      ok: false,
+      issues: missingShotIds.map((shotId) => {
         const target = targetById.get(shotId)!;
         return {
           shotId,
@@ -212,14 +236,26 @@ export function processStoryboardClipsResponse(input: {
           code: "MISSING_SHOT_CLIP",
           message: "模型未返回该镜头的 Clip",
         } satisfies StoryboardClipValidationIssue;
-      });
-    const combined = [...hardIssues, ...missingIssues];
-    return {
-      ok: false,
-      issues: combined,
-      error: formatClipValidationError(combined),
+      }),
+      error: formatClipValidationError(
+        missingShotIds.map((shotId) => {
+          const target = targetById.get(shotId)!;
+          return {
+            shotId,
+            shotNumber: target.shot.shotNumber,
+            code: "MISSING_SHOT_CLIP",
+            message: "模型未返回该镜头的 Clip",
+          };
+        }),
+      ),
     };
   }
 
-  return { ok: true, prompts, clips, warnings: allWarnings };
+  return {
+    ok: true,
+    prompts,
+    clips,
+    warnings: allWarnings,
+    ...(missingShotIds.length > 0 ? { missingShotIds } : {}),
+  };
 }

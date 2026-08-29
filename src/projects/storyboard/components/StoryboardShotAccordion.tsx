@@ -1530,6 +1530,7 @@ export function StoryboardShotAccordion({
                       onClick={handleRequestGenerate}
                       paramsSlot={
                         <ShotVideoOutputParams
+                          mode="duration"
                           value={videoOutputParams}
                           onChange={setVideoOutputParams}
                           disabled={videoBusy}
@@ -1783,6 +1784,7 @@ export function StoryboardShotAccordion({
                 onClick={handleRequestGenerate}
                 paramsSlot={
                   <ShotVideoOutputParams
+                    mode="duration"
                     value={videoOutputParams}
                     onChange={setVideoOutputParams}
                     disabled={videoBusy}

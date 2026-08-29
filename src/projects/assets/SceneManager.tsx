@@ -267,8 +267,17 @@ export function SceneManager({
             onImageRevision={(assetId, next) =>
               setImageRevisions((prev) => ({ ...prev, [assetId]: next }))
             }
-            onPersist={async () => {
-              await onPersist(scenes);
+            onPersist={async (nextScene) => {
+              const list = nextScene
+                ? scenes.map((item) => {
+                    const withStatus = {
+                      ...nextScene,
+                      status: deriveSceneStatus(nextScene),
+                    };
+                    return item.id === withStatus.id ? withStatus : item;
+                  })
+                : scenes;
+              await onPersist(list);
             }}
             designItems={designItems}
             designEpisodeId={designEpisodeId}

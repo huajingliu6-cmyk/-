@@ -23,7 +23,9 @@ describe("script downstream pipeline contracts", () => {
     expect(guard).toContain("pipeline.extractingAssets");
     expect(guard).not.toContain("storyboard-pipeline");
     expect(storyboard).toContain("storyboard-pipeline-banner");
-    expect(storyboard).not.toContain('data-testid="storyboard-workspace-generating"');
+    expect(storyboard).toContain("storyboard-pipeline-banner-dismiss");
+    expect(storyboard).toContain("关闭提示");
+    expect(storyboard).toContain('pipeline.phase === "ready"');
     expect(stageNav).toContain("shouldBlockGenerationLeave(stage.href)");
   });
 });

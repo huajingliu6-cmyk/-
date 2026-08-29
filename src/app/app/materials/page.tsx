@@ -1,17 +1,7 @@
-import { Suspense } from "react";
-import { MaterialsPage } from "@/materials/ui/MaterialsPage";
-import "@/materials/materials.css";
+import { redirect } from "next/navigation";
+import { APP_ASSET_MARKET_PATH } from "@/shell/nav";
 
+/** Legacy materials-engine URL — no longer a product surface. */
 export default function MaterialsRoutePage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="me-page">
-          <div className="me-loading">加载中…</div>
-        </div>
-      }
-    >
-      <MaterialsPage />
-    </Suspense>
-  );
+  redirect(APP_ASSET_MARKET_PATH);
 }

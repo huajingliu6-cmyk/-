@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { AuthUser } from "@/auth/types";
+import { getSystemRole } from "@/auth/roles";
 import {
   confirmGenerationLeaveIfNeeded,
   isGenerationBusy,
@@ -28,6 +29,7 @@ export function AuthUserMenu({ user: initialUser }: AuthUserMenuProps) {
   const session = useAuthSession();
   const rootRef = useRef<HTMLDivElement>(null);
   const [user, setUser] = useState(initialUser);
+  const isSystemAdmin = getSystemRole(user) === "SYSTEM_ADMIN";
   const [menuOpen, setMenuOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -201,12 +203,12 @@ export function AuthUserMenu({ user: initialUser }: AuthUserMenuProps) {
                   </div>
                   <span
                     className={
-                      user.role === "admin"
+                      isSystemAdmin
                         ? "account-dialog__role account-dialog__role--admin"
                         : "account-dialog__role"
                     }
                   >
-                    {user.role === "admin" ? "管理员" : "普通用户"}
+                    {isSystemAdmin ? "管理员" : "普通用户"}
                   </span>
                   <dl className="account-dialog__meta">
                     <div>
@@ -218,7 +220,7 @@ export function AuthUserMenu({ user: initialUser }: AuthUserMenuProps) {
                       <dd>{new Date(user.createdAt).toLocaleString()}</dd>
                     </div>
                   </dl>
-                  {user.role === "admin" && (
+                  {isSystemAdmin && (
                     <button
                       type="button"
                       className="account-dialog__button account-dialog__button--secondary account-dialog__api-button"
@@ -228,7 +230,7 @@ export function AuthUserMenu({ user: initialUser }: AuthUserMenuProps) {
                       }}
                     >
                       <Shield aria-hidden />
-                      {"系统管理"}
+                      {"系统配置"}
                     </button>
                   )}
                 </aside>
@@ -356,7 +358,7 @@ export function AuthUserMenu({ user: initialUser }: AuthUserMenuProps) {
               setAccountOpen(false);
             }}
           >
-            {user.role === "admin" && (
+            {isSystemAdmin && (
               <Shield className="h-3 w-3 shrink-0 text-amber-300" />
             )}
             <span className="truncate">
@@ -396,7 +398,7 @@ export function AuthUserMenu({ user: initialUser }: AuthUserMenuProps) {
               <UserRound className="h-3.5 w-3.5 text-zinc-400" />
               账户与个人信息
             </button>
-            {user.role === "admin" && (
+            {isSystemAdmin && (
               <button
                 type="button"
                 className="flex w-full items-center gap-2 border-t border-zinc-800 px-3 py-2.5 text-left text-xs text-amber-100 hover:bg-zinc-900"
@@ -406,7 +408,7 @@ export function AuthUserMenu({ user: initialUser }: AuthUserMenuProps) {
                 }}
               >
                 <Shield className="h-3.5 w-3.5 text-amber-300" />
-                系统管理
+                系统配置
               </button>
             )}
           </div>

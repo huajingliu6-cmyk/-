@@ -9,6 +9,8 @@ export type MountableAsset = {
   name: string;
   /** 有参考图时才写成图片标记；否则退回「图N（名）」纯文本 */
   imageUrl?: string | null;
+  /** The asset name came from the shot but has no generated project image yet. */
+  missing?: boolean;
   /** 仅人物：紧跟人物挂载项显示的对应音色。 */
   voiceLabel?: string | null;
 };
@@ -62,10 +64,11 @@ export function mountEntryFor(asset: MountableAsset): string | null {
     asset.kind === "character" && asset.voiceLabel?.trim()
       ? `｜@音色-${asset.voiceLabel.trim()}`
       : "";
+  const missingLabel = asset.missing ? "（未生成形象）" : "";
   if (imageToken) {
-    return `@${kind}${imageToken}-${name}${voiceEntry}`;
+    return `@${kind}${imageToken}-${name}${missingLabel}${voiceEntry}`;
   }
-  return `@${kind}-${name}${voiceEntry}`;
+  return `@${kind}-${name}${missingLabel}${voiceEntry}`;
 }
 
 /** 挂载行顺序：人物 → 场景 → 道具（任务规则） */

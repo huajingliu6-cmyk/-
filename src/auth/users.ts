@@ -275,6 +275,12 @@ export async function grantSystemAdminByUsername(
   if (normalizeStoredRole(current.role) === "admin") {
     return { user: toPublic(current), alreadyAdmin: true };
   }
+  const adminCount = file.users.filter(
+    (u) => normalizeStoredRole(u.role) === "admin",
+  ).length;
+  if (adminCount >= 1) {
+    throw new Error("系统管理员全局只允许存在 1 个，禁止创建第二个系统管理员");
+  }
   const next: StoredUser = {
     ...current,
     role: "admin",

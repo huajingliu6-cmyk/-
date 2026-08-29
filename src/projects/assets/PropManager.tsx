@@ -266,8 +266,17 @@ export function PropManager({
             onImageRevision={(assetId, next) =>
               setImageRevisions((prev) => ({ ...prev, [assetId]: next }))
             }
-            onPersist={async () => {
-              await onPersist(propItems);
+            onPersist={async (nextProp) => {
+              const list = nextProp
+                ? propItems.map((item) => {
+                    const withStatus = {
+                      ...nextProp,
+                      status: derivePropStatus(nextProp),
+                    };
+                    return item.id === withStatus.id ? withStatus : item;
+                  })
+                : propItems;
+              await onPersist(list);
             }}
             designItems={designItems}
             designEpisodeId={designEpisodeId}

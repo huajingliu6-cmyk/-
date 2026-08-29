@@ -1,3 +1,139 @@
+.ai-admin-top-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 12px 16px;
+}
+
+.ai-admin-top-tab {
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--admin-muted);
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ai-admin-top-tab:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--admin-text);
+}
+
+.ai-admin-top-tab.is-active {
+  background: rgba(213, 240, 76, 0.14);
+  color: var(--admin-primary);
+}
+
+.ai-admin-api-view {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.ai-admin-primary-tabs {
+  display: none;
+}
+
+.ai-admin-nav__hint {
+  margin: 0;
+  padding: 0 4px;
+  color: var(--admin-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.ai-admin-materials-view {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.ai-admin-voices {
+  border-top: 1px solid var(--admin-border);
+  padding: 20px 4px 8px;
+}
+
+.ai-admin-voices__form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ai-admin-voices__form input,
+.ai-admin-voices__form select {
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+  background: var(--admin-control);
+  color: var(--admin-text);
+  padding: 8px 10px;
+}
+
+.ai-admin-voices__upload {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--admin-muted);
+}
+
+.ai-admin-voices__error {
+  color: var(--admin-red);
+  font-size: 13px;
+}
+
+.ai-admin-voices__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-admin-voices__list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--admin-border);
+  border-radius: 12px;
+  background: var(--admin-panel);
+}
+
+.ai-admin-voices__list strong {
+  display: block;
+}
+
+.ai-admin-voices__list small,
+.ai-admin-voices__list p {
+  color: var(--admin-muted);
+  font-size: 12px;
+}
+
+.ai-admin-voices__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.ai-admin-voices__actions button {
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+  background: var(--admin-control);
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.ai-admin-voices__actions audio {
+  max-width: 220px;
+}
+
 .ai-admin-console {
   --admin-bg: var(--ui-bg, #090b10);
   --admin-sidebar: #0d1118;

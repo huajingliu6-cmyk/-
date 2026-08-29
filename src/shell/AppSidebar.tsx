@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronLeft, Film, GitBranch, Images, LayoutGrid, Sparkles, Store } from "lucide-react";
+import { ChevronLeft, Film, GitBranch, Images, LayoutGrid, Settings2, Sparkles, Store } from "lucide-react";
 import { MascotMark } from "@/workflow/components/BrandMark";
 import {
+  APP_ADMIN_PATH,
   APP_ASSET_MARKET_PATH,
   APP_PERSONAL_ASSETS_PATH,
   APP_SHELL_ROOT,
@@ -11,6 +12,8 @@ import {
 import { personalHubHref } from "@/personal/ui/personal-hub-nav";
 import { useOpenCanvas } from "@/shell/use-open-canvas";
 import { useOpenOneStackFlow } from "@/shell/use-open-one-stack-flow";
+import { useAuthUser } from "@/shell/useAuthUser";
+import { getSystemRole } from "@/auth/roles";
 import "@/shell/app-sidebar.css";
 
 export type AppSidebarView = "personal-image" | "personal-video";
@@ -20,7 +23,8 @@ export type AppSidebarActiveId =
   | "personal-assets"
   | "asset-market"
   | "canvas"
-  | "one-stack-flow";
+  | "one-stack-flow"
+  | "system-config";
 
 type AppSidebarProps = {
   activeId?: AppSidebarActiveId;
@@ -36,6 +40,7 @@ const NAV_ITEMS: Array<{
   testId: string;
   href?: string;
   action?: "canvas" | "one-stack-flow";
+  adminOnly?: boolean;
 }> = [
   {
     id: "personal-image",
@@ -79,6 +84,14 @@ const NAV_ITEMS: Array<{
     testId: "app-sidebar-one-stack-flow",
     action: "one-stack-flow",
   },
+  {
+    id: "system-config",
+    label: "系统配置",
+    icon: Settings2,
+    testId: "app-sidebar-system-config",
+    href: APP_ADMIN_PATH,
+    adminOnly: true,
+  },
 ];
 
 export function AppSidebar({
@@ -89,6 +102,12 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const { openCanvas } = useOpenCanvas();
   const { openOneStackFlow } = useOpenOneStackFlow();
+  const auth = useAuthUser();
+  const isSystemAdmin =
+    auth.status === "authenticated" &&
+    getSystemRole(auth.user) === "SYSTEM_ADMIN";
+
+  const items = NAV_ITEMS.filter((item) => !item.adminOnly || isSystemAdmin);
 
   return (
     <>
@@ -123,7 +142,7 @@ export function AppSidebar({
         </div>
 
         <nav className="app-sidebar__nav">
-          {NAV_ITEMS.map((item) => {
+          {items.map((item) => {
             const Icon = item.icon;
             const className = `app-sidebar__item${
               activeId === item.id ? " is-active" : ""

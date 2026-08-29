@@ -1,7 +1,4 @@
 import {
-  STORYBOARD_INTERNAL_SHOT_COUNT_MAX,
-  STORYBOARD_INTERNAL_SHOT_COUNT_MIN,
-  STORYBOARD_INTERNAL_SHOT_DURATION_MAX,
   STORYBOARD_SHOT_DURATION_MAX,
   STORYBOARD_SHOT_DURATION_MIN,
   isValidStoryboardClipDuration,
@@ -12,7 +9,6 @@ import {
 } from "@/projects/storyboard/services/storyboard-clip-mount";
 import type { MatchableAssets } from "@/projects/storyboard/services/asset-match";
 import type {
-  StoryboardClipSegment,
   StoryboardClipValidationIssue,
   StoryboardClipWarning,
   StoryboardStructuredClip,
@@ -21,19 +17,12 @@ import { partitionClipValidationIssues } from "@/projects/storyboard/services/st
 import type { StoryboardShot } from "@/projects/storyboard/types";
 
 const EPSILON = 0.05;
-const MIN_SEGMENT_SECONDS = 1;
-const MIN_SEGMENTS = STORYBOARD_INTERNAL_SHOT_COUNT_MIN;
-const MAX_SEGMENTS = STORYBOARD_INTERNAL_SHOT_COUNT_MAX;
 
 function normalizeDialogue(text: string): string {
   return text
     .replace(/\s+/g, "")
-    .replace(/[「」""''‘’]/g, "")
+    .replace(/[「」""''‘’']/g, "")
     .trim();
-}
-
-function segmentDuration(seg: StoryboardClipSegment): number {
-  return seg.end - seg.start;
 }
 
 function validateSegmentTimeline(
@@ -53,21 +42,8 @@ function validateSegmentTimeline(
     return issues;
   }
 
-  if (segments.length < MIN_SEGMENTS) {
-    issues.push({
-      ...base,
-      code: "TOO_FEW_INTERNAL_SHOTS",
-      message: `Clip 内部镜头数量为 ${segments.length} 个（建议 ${MIN_SEGMENTS}–${MAX_SEGMENTS} 个）`,
-    });
-  }
-
-  if (segments.length > MAX_SEGMENTS) {
-    issues.push({
-      ...base,
-      code: "TOO_MANY_INTERNAL_SHOTS",
-      message: `Clip 内部镜头数量为 ${segments.length} 个（建议最多 ${MAX_SEGMENTS} 个）`,
-    });
-  }
+  // No platform min/max internal-shot count or per-segment duration caps.
+  // Shot differentiation inside the prompt is owned by the model.
 
   if (Math.abs(segments[0]!.start) > EPSILON) {
     issues.push({
@@ -79,21 +55,6 @@ function validateSegmentTimeline(
 
   for (let i = 0; i < segments.length; i += 1) {
     const seg = segments[i]!;
-    const dur = segmentDuration(seg);
-    if (dur < MIN_SEGMENT_SECONDS - EPSILON) {
-      issues.push({
-        ...base,
-        code: "INTERNAL_SHOT_TOO_SHORT",
-        message: `内部镜头 ${i + 1} 时长为 ${dur.toFixed(1)} 秒，单段至少 ${MIN_SEGMENT_SECONDS} 秒`,
-      });
-    }
-    if (dur > STORYBOARD_INTERNAL_SHOT_DURATION_MAX + EPSILON) {
-      issues.push({
-        ...base,
-        code: "INTERNAL_SHOT_DURATION_EXCEEDED",
-        message: `内部镜头 ${i + 1} 时长为 ${dur.toFixed(1)} 秒，单段最多 ${STORYBOARD_INTERNAL_SHOT_DURATION_MAX} 秒`,
-      });
-    }
     if (i > 0) {
       const prev = segments[i - 1]!;
       if (Math.abs(seg.start - prev.end) > EPSILON) {

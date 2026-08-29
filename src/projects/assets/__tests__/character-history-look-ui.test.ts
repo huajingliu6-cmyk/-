@@ -137,7 +137,11 @@ describe("character history / look UI contracts", () => {
     );
     expect(openCreateLookEditorBlock).not.toContain("onSave");
     expect(openCreateLookEditorBlock).toContain('promptOverride: ""');
+    expect(openCreateLookEditorBlock).toContain('create-appearance');
     expect(openCreateLookEditorBlock).toContain("setLookPage(nextPage)");
+    expect(openCreateLookEditorBlock).not.toContain("createCharacterAppearance");
+    expect(detail).toContain("activeAppearanceId && !isLookMedia");
+    expect(detail).toContain("character-empty-look-hero");
     expect(detail).not.toContain("character-looks-overflow");
     expect(detail).not.toContain("character-look-select-main");
     expect(css).toContain(".character-looks-board");
@@ -157,6 +161,10 @@ describe("character history / look UI contracts", () => {
     expect(detail).toContain("activeAppearance.currentMediaId?.trim()");
     expect(detail).toContain("handleHistoryItemAction");
     expect(detail).toContain("historyPopoverTitle");
+    expect(detail).toContain("character-main-board-select");
+    expect(detail).toContain("emptyUnusedLook");
+    expect(detail).toContain("applyMain");
+    expect(detail).toContain("点击此处可返回主形象");
     const selectLook = detail.slice(
       detail.indexOf("const selectLookAppearance"),
       detail.indexOf("const uploadCandidate"),
@@ -247,7 +255,7 @@ describe("character history / look UI contracts", () => {
     expect(detail).toContain("character-history-popover__confirm");
     expect(detail).toContain("character-history-confirm");
     expect(detail).not.toContain("character-history-confirm-menu");
-    expect(detail).toContain("createCharacterAppearance");
+    expect(detail).toContain("create-appearance");
     expect(detail).toContain("LibraryAssetEditingPlaceholder");
     expect(detail).not.toMatch(/await\s+\w+\.json\(\)/);
   });
@@ -343,7 +351,7 @@ describe("character appearance state invariants", () => {
     const detail = readSrc("src/projects/assets/CharacterDetail.tsx");
     expect(modal).toContain("resolveLibraryPromptScopeItem");
     expect(modal).toContain("promptScopeMedia");
-    expect(modal).toContain("parseAppearanceScopeId");
+    expect(modal).toContain("isIsolatedLibraryPromptScope");
     expect(detail).toContain("promptScopeMedia=");
 
     const asset = ensureCharacterAppearances(

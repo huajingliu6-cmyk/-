@@ -3337,7 +3337,7 @@ export function EpisodeAssetDesignWorkspace({
         }}
         onGenerationProgress={(itemId, progress) => {
           setAssetGenerationProgress((prev) => {
-            if (!progress) {
+            if (!progress || progress.stage === "failed") {
               const next = { ...prev };
               delete next[itemId];
               return next;

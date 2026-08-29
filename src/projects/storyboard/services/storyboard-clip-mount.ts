@@ -145,6 +145,19 @@ export function buildCanonicalMountLine(input: {
   const assets: MountableAsset[] = [];
   const library = input.libraryAssets;
   const mediaByAsset = input.shot.assetMediaIds ?? {};
+  const mountedCharacterNames = new Set<string>();
+
+  const addMissingCharacter = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed || mountedCharacterNames.has(trimmed)) return;
+    mountedCharacterNames.add(trimmed);
+    assets.push({
+      id: `missing-character:${trimmed}`,
+      kind: "character",
+      name: trimmed,
+      missing: true,
+    });
+  };
 
   for (const assetId of input.shot.characterAssetIds ?? []) {
     const character = library?.characters.find((c) => c.id === assetId);
@@ -165,6 +178,39 @@ export function buildCanonicalMountLine(input: {
       imageUrl: mediaMarker,
       voiceLabel: character.voiceName,
     });
+    mountedCharacterNames.add(character.name.trim());
+  }
+
+  // Resolve generated/extracted characters by shot name as well as by id.
+  // Unresolved names remain visible in the prompt instead of disappearing.
+  for (const requiredName of input.shot.requiredCharacters ?? []) {
+    const name = requiredName.trim();
+    if (!name || mountedCharacterNames.has(name)) continue;
+    const character = library?.characters.find((c) => c.name.trim() === name);
+    if (!character) {
+      addMissingCharacter(name);
+      continue;
+    }
+    const selected = mediaByAsset[character.id] ?? null;
+    if (!characterHasUsableMedia(character, selected)) {
+      addMissingCharacter(character.name);
+      continue;
+    }
+    const mediaMarker = resolveMediaMarker(
+      selected,
+      character.primaryMediaId,
+      character.approvedMediaIds,
+      character.imageFileName,
+      character.imageObjectUrl,
+    );
+    assets.push({
+      id: character.id,
+      kind: "character",
+      name: character.name,
+      imageUrl: mediaMarker,
+      voiceLabel: character.voiceName,
+    });
+    mountedCharacterNames.add(character.name.trim());
   }
 
   const sceneId = input.shot.sceneAssetId;

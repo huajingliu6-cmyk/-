@@ -43,6 +43,8 @@ describe("P1 image generation UI wiring", () => {
   it("notification bell routes image generation notes", () => {
     const bell = read("src/shell/NotificationBell.tsx");
     expect(bell).toContain("image_generation_succeeded");
+    expect(bell).toContain("storyboard_prompt_ready");
+    expect(bell).toContain("storyboard_prompt_generating");
     expect(bell).toContain("image_generation_failed");
     expect(bell).toContain("imageJobId");
   });

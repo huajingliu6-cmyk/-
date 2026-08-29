@@ -323,7 +323,7 @@ export function MaterialsAdminPage() {
       <header className="me-header">
         <h1>素材管理</h1>
         <div className="me-header-actions">
-          <Link href="/app/materials" className="me-btn">
+          <Link href="/app/asset-market" className="me-btn">
             返回浏览
           </Link>
           <button

@@ -32,7 +32,11 @@ describe("look / design generation progress and admit removal", () => {
     expect(look).toContain('stage: "saving"');
     expect(look).toContain('stage: "completed"');
     expect(look).toContain("clearProgressLater(900)");
-    expect(look).not.toMatch(
+    const handleGenerate = look.slice(
+      look.indexOf("const handleGenerate = useCallback"),
+      look.indexOf("const handlePrecheck = useCallback"),
+    );
+    expect(handleGenerate).not.toMatch(
       /finally\s*\{[\s\S]*setGenerationProgress\(null\)/,
     );
   });
@@ -98,7 +102,7 @@ describe("look / design generation progress and admit removal", () => {
     expect(detail).not.toContain("activeMediaId ??");
     expect(detail).toContain("bumpRevision: false");
     expect(detail).toContain("findAppearanceOwningMedia");
-    expect(detail).toContain("createCharacterAppearance");
+    expect(detail).toContain("create-appearance");
     expect(detail).toContain("LibraryAssetEditingPlaceholder");
     expect(detail).toContain("character-look-lightbox");
     expect(detail).toContain("promote-look-to-main");
@@ -121,6 +125,11 @@ describe("look / design generation progress and admit removal", () => {
     expect(designModal).toContain('data-testid="design-image-preview"');
     expect(designModal).toContain('message: "正在生成图片"');
     expect(designModal).toContain("scheduleProgressClear(900)");
+    expect(designModal).toContain("clearProgressNow");
+    expect(designModal).toContain("onGenerationProgressRef.current?.(item.id, null)");
+    expect(designModal).toContain("sessionStartedJobIdsRef");
+    expect(designModal).toContain("scopedEmpty");
+    expect(designModal).toContain("claimSessionJob");
   });
 
   it("episode workspace does not loadDetail on asset generated", () => {
@@ -158,7 +167,9 @@ describe("look / design generation progress and admit removal", () => {
 
   it("keeps library prompt panel mounted across designItem link after generate", () => {
     const promptModal = read("src/projects/assets/LibraryAssetPromptModal.tsx");
-    expect(promptModal).toContain('const remountKey = rest.asset?.id ?? "none"');
+    expect(promptModal).toContain(
+      'const remountKey = `${rest.asset?.id ?? "none"}:${rest.promptScopeKey ?? "primary"}`',
+    );
     expect(promptModal).not.toContain('designItem?.id ?? ""');
     expect(promptModal).toContain("assetSyncKey");
     expect(promptModal).toContain("without remounting DesignAssetModal");
@@ -173,11 +184,15 @@ describe("look / design generation progress and admit removal", () => {
     expect(taskPanel).toContain("hero owns the preview");
   });
 
-  it("character detail hero shows main-image DesignGenerationOverlay via onGenerationProgress", () => {
+  it("character detail hero shows DesignGenerationOverlay via onGenerationProgress for main and looks", () => {
     expect(detail).toContain("DesignGenerationOverlay");
     expect(detail).toContain("mainGenerationProgress");
-    expect(detail).toContain("onGenerationProgress=");
-    expect(detail).toContain("mainGenerationProgress && !activeAppearanceId");
+    expect(detail).toContain("handleGenerationProgress");
+    expect(detail).toContain("onGenerationProgress={handleGenerationProgress}");
+    expect(detail).toContain("{mainGenerationProgress ? (");
+    expect(detail).not.toContain(
+      "mainGenerationProgress && !activeAppearanceId",
+    );
     const prompt = read("src/projects/assets/LibraryAssetPromptModal.tsx");
     expect(prompt).toContain("onGenerationProgress={onGenerationProgress}");
     expect(css).toContain(".character-media-stage .ead-generation-overlay");

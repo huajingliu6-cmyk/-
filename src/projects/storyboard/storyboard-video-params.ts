@@ -37,24 +37,58 @@ export const STORYBOARD_INTERNAL_SHOT_COUNT_MIN = 3;
 export const STORYBOARD_INTERNAL_SHOT_COUNT_MAX = 5;
 
 /**
- * 分镜提示词规则版本；重新生成通过校验后写入 shot。
- * R2：内部 3–5 段、单段最长 6 秒、人物站位可选。
+ * Duration policy:
+ * - shot.durationSeconds is the only duration source for UI / video submit.
+ * - Never parse duration from videoPrompt body for generation params.
+ * - New shots default to 13s; user may choose 13/14/15.
+ * - Historical 5s values are preserved as-is (see parseShotDurationSeconds).
+ *   Call migrateLegacyFiveSecondShotDurations() for a one-shot upgrade to 13.
  */
-export const STORYBOARD_PROMPT_RULE_VERSION = "V5-13S-R2";
-/** 可直接用于视频提交的兼容规则版本（规则放宽，旧版仍合法） */
+export function migrateLegacyFiveSecondShotDurations(
+  storyboard: import("@/projects/storyboard/types").StoryboardDocument,
+): import("@/projects/storyboard/types").StoryboardDocument {
+  return {
+    ...storyboard,
+    scenes: storyboard.scenes.map((scene) => ({
+      ...scene,
+      shots: scene.shots.map((shot) =>
+        shot.durationSeconds === 5
+          ? { ...shot, durationSeconds: STORYBOARD_SHOT_DURATION_MIN }
+          : shot,
+      ),
+    })),
+  };
+}
+
+/**
+ * 分镜提示词协议版本：JSON 层 shotId → videoPrompt；
+ * 正文内容由管理员已发布规则（或内置 fallback）指导，系统不重写正文。
+ */
+export const STORYBOARD_PROMPT_RULE_VERSION = "SHOT_ID_PROMPT_V1";
+/** 任意已写入版本（含历史 V5）均可用于视频提交；空版本也视为可用 */
 export const STORYBOARD_PROMPT_RULE_COMPATIBLE_VERSIONS = [
+  "SHOT_ID_PROMPT_V1",
   "V5-13S",
   "V5-13S-R2",
 ] as const;
 
-export function isCompatibleStoryboardPromptRuleVersion(
-  version: string | null | undefined,
-): boolean {
-  if (!version?.trim()) return false;
-  return (STORYBOARD_PROMPT_RULE_COMPATIBLE_VERSIONS as readonly string[]).includes(
-    version.trim(),
+/**
+ * Sum of shot.durationSeconds across a storyboard — UI timeline / playback source of truth.
+ * Never derived from videoPrompt body text.
+ */
+export function sumStoryboardDurationSeconds(
+  shots: Array<{ durationSeconds: number }>,
+): number {
+  return shots.reduce(
+    (sum, shot) =>
+      sum +
+      (Number.isFinite(shot.durationSeconds) && shot.durationSeconds > 0
+        ? shot.durationSeconds
+        : 0),
+    0,
   );
 }
+
 /**
  * 仅用于反馈给大模型的分镜提示词时长要求（任务规则），与通用视频滑条无关。
  */
@@ -126,16 +160,13 @@ export function defaultStoryboardVideoOutputParams(
   projectDefaults?: StoryboardVideoDefaults | null,
 ): StoryboardVideoOutputParams {
   const raw = Math.round(
-    shotDurationSeconds ?? STORYBOARD_SHOT_DURATION_MIN,
+    shotDurationSeconds ?? STORYBOARD_VIDEO_DURATION_MAX,
   );
   const defaults = projectDefaults ?? defaultStoryboardVideoDefaults();
-  const durationSeconds = isValidStoryboardClipDuration(raw)
-    ? raw
-    : clampStoryboardClipDuration(raw);
   return {
     resolution: defaults.resolution,
     aspectRatio: defaults.aspectRatio,
-    durationSeconds,
+    durationSeconds: clampStoryboardVideoDuration(raw),
     modelChoice: defaults.modelChoice,
     stylePreset: defaults.stylePreset,
   };
@@ -200,7 +231,7 @@ export function parseStoryboardClipDurationSeconds(
   return isValidStoryboardClipDuration(rounded) ? rounded : null;
 }
 
-/** @deprecated 通用 5–15 秒；分镜提交请用 parseStoryboardClipDurationSeconds */
+/** 生成视频出参时长：钳制到 5–15 秒；非法输入返回 null */
 export function parseStoryboardVideoDurationSeconds(
   value: unknown,
 ): number | null {
@@ -211,7 +242,14 @@ export function parseStoryboardVideoDurationSeconds(
         ? Number(value)
         : NaN;
   if (!Number.isFinite(n)) return null;
-  return clampStoryboardVideoDuration(n);
+  const rounded = Math.round(n);
+  if (
+    rounded < STORYBOARD_VIDEO_DURATION_MIN ||
+    rounded > STORYBOARD_VIDEO_DURATION_MAX
+  ) {
+    return null;
+  }
+  return rounded;
 }
 
 const CLIP_HEADER_DURATION_RE =
@@ -257,7 +295,7 @@ export function resolveStoryboardVideoOutputParams(
     aspectRatio:
       parseStoryboardVideoAspectRatio(body.aspectRatio) ?? defaults.aspectRatio,
     durationSeconds:
-      parseStoryboardClipDurationSeconds(body.durationSeconds) ??
+      parseStoryboardVideoDurationSeconds(body.durationSeconds) ??
       defaults.durationSeconds,
     modelChoice:
       parseStoryboardVideoModelChoice(body.videoModelChoice) ??

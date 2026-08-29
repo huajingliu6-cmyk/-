@@ -44,6 +44,24 @@ export function parseAppearanceScopeId(
   return match?.[1]?.trim() || null;
 }
 
+export function parseVariantDraftScopeId(
+  promptScopeKey: string | null | undefined,
+): string | null {
+  if (!promptScopeKey || promptScopeKey === "primary") return null;
+  const match = /^draft:(.+)$/.exec(promptScopeKey);
+  return match?.[1]?.trim() || null;
+}
+
+/** Appearance or unpublished variant-draft scopes — isolated from the primary prompt. */
+export function isIsolatedLibraryPromptScope(
+  promptScopeKey: string | null | undefined,
+): boolean {
+  return Boolean(
+    parseAppearanceScopeId(promptScopeKey) ||
+      parseVariantDraftScopeId(promptScopeKey),
+  );
+}
+
 export function idleEmptyGeneratedMedia(): GeneratedMediaState {
   return {
     currentId: null,
@@ -240,8 +258,8 @@ export function makeLibraryDesignItem(
 }
 
 /**
- * Appearance-scoped library prompt state — isolated from main character prompt/media.
- * Used when promptScopeKey is `appearance:<id>`.
+ * Isolated library prompt state for appearance / variant-draft scopes.
+ * Keeps primary asset prompt/media from leaking into empty placeholders.
  */
 export function resolveLibraryPromptScopeItem(
   asset: LibraryPromptAsset,
@@ -250,7 +268,8 @@ export function resolveLibraryPromptScopeItem(
   scope: LibraryPromptScopeOptions,
 ): EpisodeAssetDesignItem {
   const appearanceId = parseAppearanceScopeId(scope.promptScopeKey);
-  if (!appearanceId) {
+  const draftId = parseVariantDraftScopeId(scope.promptScopeKey);
+  if (!appearanceId && !draftId) {
     return makeLibraryDesignItem(asset, kind, sourceItem);
   }
 
@@ -275,9 +294,13 @@ export function resolveLibraryPromptScopeItem(
           history: [],
         };
 
+  const scopeSuffix = appearanceId
+    ? `appearance:${appearanceId}`
+    : `draft:${draftId}`;
+
   return {
     ...base,
-    id: `${base.id}:appearance:${appearanceId}`,
+    id: `${base.id}:${scopeSuffix}`,
     designPrompt,
     generatedMedia: appearanceScopedGeneratedMedia(scopeMedia),
   } as EpisodeAssetDesignItem;

@@ -28,6 +28,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { fetchShotVideoHistory } from "@/projects/storyboard/api-client";
+import { sumStoryboardDurationSeconds } from "@/projects/storyboard/storyboard-video-params";
 import type { StoryboardShot } from "@/projects/storyboard/types";
 import type { ShotVideoHistoryItem } from "@/projects/storyboard/shot-video-history";
 
@@ -165,10 +166,11 @@ export function StoryboardPlaybackBar({
     });
   }, [latestVideos, shots]);
 
-  const totalDuration = clips.reduce(
-    (sum, clip) => sum + clip.duration,
-    0,
+  const totalDuration = useMemo(
+    () => sumStoryboardDurationSeconds(shots),
+    [shots],
   );
+  // Playback total uses shot.durationSeconds — same field as card title / video params.
   const activeClip = clips[activeIndex] ?? null;
   const playableCount = clips.filter((clip) => clip.video).length;
   const progress = totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0;
@@ -391,46 +393,73 @@ export function StoryboardPlaybackBar({
               {muted ? <VolumeX size={17} /> : <Volume2 size={17} />}
             </button>
           </div>
+          {timelinePageCount > 1 ? (
+            <div
+              className="sbw-playback__page-cluster"
+              role="group"
+              aria-label="分镜翻页"
+            >
+              <button
+                type="button"
+                className="sbw-playback__page-btn sbw-playback__page-btn--inline"
+                title="上一页"
+                aria-label="上一页分镜"
+                disabled={safeTimelinePage <= 0}
+                onClick={() =>
+                  setTimelinePage((page) => Math.max(0, page - 1))
+                }
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <button
+                type="button"
+                className="sbw-playback__page-btn sbw-playback__page-btn--inline"
+                title="下一页"
+                aria-label="下一页分镜"
+                disabled={safeTimelinePage >= timelinePageCount - 1}
+                onClick={() =>
+                  setTimelinePage((page) =>
+                    Math.min(timelinePageCount - 1, page + 1),
+                  )
+                }
+              >
+                <ChevronRight size={18} />
+              </button>
+              <span className="sbw-playback__page-hint sbw-playback__page-hint--inline">
+                第 {safeTimelinePage + 1}/{timelinePageCount} 页 · 每页{" "}
+                {WORKSPACE_TIMELINE_PAGE_SIZE} 个分镜
+              </span>
+            </div>
+          ) : null}
         </div>
 
         <div className="sbw-playback__workspace-timeline">
-          {timelinePageCount > 1 ? (
-            <button
-              type="button"
-              className="sbw-playback__page-btn"
-              title="上一页"
-              aria-label="上一页分镜"
-              disabled={safeTimelinePage <= 0}
-              onClick={() =>
-                setTimelinePage((page) => Math.max(0, page - 1))
-              }
-            >
-              <ChevronLeft size={18} />
-            </button>
-          ) : null}
           <div className="sbw-playback__shot-strip is-paged" role="list">
             {timelinePageClips.map(({ clip, index }) => (
               <Fragment key={clip.shot.id}>
                 <div className="sbw-playback__shot-slot" role="listitem">
-                  <button
-                    type="button"
+                  <div
+                    role="button"
+                    tabIndex={0}
                     className={`sbw-playback__shot-card${
                       clip.shot.id === selectedShotId || index === activeIndex
                         ? " is-active"
                         : ""
                     }`}
                     onClick={() => selectClip(index)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        selectClip(index);
+                      }
+                    }}
                     aria-label={`编辑镜头 ${String(clip.shot.shotNumber).padStart(2, "0")}`}
                   >
                     <span className="sbw-playback__shot-number">
                       {String(clip.shot.shotNumber).padStart(2, "0")}
                     </span>
                     {onDeleteShot ? (
-                      <span
-                        className="sbw-playback__shot-delete"
-                        onClick={(event) => event.stopPropagation()}
-                        onKeyDown={(event) => event.stopPropagation()}
-                      >
+                      <span className="sbw-playback__shot-delete">
                         <button
                           type="button"
                           className="sbw-playback__shot-delete-btn"
@@ -448,6 +477,7 @@ export function StoryboardPlaybackBar({
                             !canDeleteShot || deleteShotBusyId !== null
                           }
                           onClick={(event) => {
+                            event.preventDefault();
                             event.stopPropagation();
                             if (!canDeleteShot || deleteShotBusyId) return;
                             setDeleteConfirmShotId(clip.shot.id);
@@ -479,7 +509,7 @@ export function StoryboardPlaybackBar({
                     <span className="sbw-playback__shot-duration">
                       {clip.duration.toFixed(1)}s
                     </span>
-                  </button>
+                  </div>
                 </div>
                 {onInsertShotAfter && index < clips.length - 1 ? (
                   <button
@@ -504,29 +534,7 @@ export function StoryboardPlaybackBar({
               </Fragment>
             ))}
           </div>
-          {timelinePageCount > 1 ? (
-            <button
-              type="button"
-              className="sbw-playback__page-btn"
-              title="下一页"
-              aria-label="下一页分镜"
-              disabled={safeTimelinePage >= timelinePageCount - 1}
-              onClick={() =>
-                setTimelinePage((page) =>
-                  Math.min(timelinePageCount - 1, page + 1),
-                )
-              }
-            >
-              <ChevronRight size={18} />
-            </button>
-          ) : null}
         </div>
-        {timelinePageCount > 1 ? (
-          <p className="sbw-playback__page-hint">
-            第 {safeTimelinePage + 1}/{timelinePageCount} 页 · 每页{" "}
-            {WORKSPACE_TIMELINE_PAGE_SIZE} 个分镜
-          </p>
-        ) : null}
       </section>
       {deleteConfirmShot && typeof document !== "undefined"
         ? createPortal(

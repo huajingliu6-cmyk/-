@@ -97,6 +97,11 @@ export type StoryboardShot = {
   visualDescription: string;
   actionDescription: string;
   dialogue: string;
+  /**
+   * 本镜头对应的完整剧本来源原文（拆分无损覆盖）。
+   * 模型输入优先使用本字段；visual/action 仅作展示摘要。
+   */
+  sourceScriptText?: string;
   soundEffect: string;
   music: string;
   /**

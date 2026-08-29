@@ -11,6 +11,10 @@ import {
 } from "@/projects/assets/asset-image-url";
 import type { EpisodeAssetDesignItem } from "@/projects/assets/episode-design/types";
 import {
+  DesignGenerationOverlay,
+  type AssetGenerationProgress,
+} from "@/projects/assets/DesignGenerationOverlay";
+import {
   findLibraryDesignItem,
   type LibraryPromptAsset,
 } from "@/projects/assets/library-asset-prompt";
@@ -26,6 +30,7 @@ import {
   withLibraryVariantLabel,
   withoutLibraryVariantMedia,
 } from "@/projects/assets/library-asset-media-variants";
+import { LibraryAssetEditingPlaceholder } from "@/projects/assets/library-asset-editing-slot";
 import { LibraryAssetMediaGrid } from "@/projects/assets/LibraryAssetMediaGrid";
 import { LibraryAssetMediaLightbox } from "@/projects/assets/LibraryAssetMediaLightbox";
 import { LibraryAssetPromptPanel } from "@/projects/assets/LibraryAssetPromptModal";
@@ -46,7 +51,7 @@ type Props = {
   imageRevision?: number;
   onChange: (next: SceneAsset) => void;
   onImageRevision?: (assetId: string, next: number) => void;
-  onPersist: () => Promise<void>;
+  onPersist: (next?: SceneAsset) => Promise<void>;
   designItems?: EpisodeAssetDesignItem[];
   designEpisodeId?: string;
   onDesignItemChange?: (item: EpisodeAssetDesignItem) => void;
@@ -79,6 +84,18 @@ export function SceneDetail({
     string | null
   >(null);
   const [mediaBusy, setMediaBusy] = useState(false);
+  const [generationProgress, setGenerationProgress] =
+    useState<AssetGenerationProgress | null>(null);
+  const handleGenerationProgress = useCallback(
+    (_itemId: string, progress: AssetGenerationProgress | null) => {
+      if (progress?.stage === "failed") {
+        setGenerationProgress(null);
+        return;
+      }
+      setGenerationProgress(progress);
+    },
+    [],
+  );
   const [activeVariantSlotId, setActiveVariantSlotId] = useState<string | null>(
     null,
   );
@@ -91,6 +108,11 @@ export function SceneDetail({
   const handlePromptDirtyChange = (dirty: boolean) => {
     setPromptDirty(dirty);
     onPromptDirtyChange?.(dirty);
+  };
+
+  const clearPromptDirty = () => {
+    setPromptDirty(false);
+    onPromptDirtyChange?.(false);
   };
 
   const runWithPromptGuard = (action: () => void) => {
@@ -147,11 +169,14 @@ export function SceneDetail({
     ? findLibraryVariantDraft(scene, activeVariantSlotId)
     : null;
 
-  const effectiveHeroMediaId =
-    heroMediaId ?? primaryMediaId ?? scene?.imageFileName ?? null;
+  // Empty editing drafts must not fall back to the primary image in the hero.
+  const effectiveHeroMediaId = activeDraft
+    ? heroMediaId
+    : (heroMediaId ?? primaryMediaId ?? scene?.imageFileName ?? null);
 
   const previewSrc = useMemo(() => {
     if (!scene) return null;
+    if (activeDraft && !effectiveHeroMediaId) return null;
     if (effectiveHeroMediaId) {
       return getProjectAssetImageUrl(projectId, effectiveHeroMediaId, {
         revision: effectiveHeroMediaId,
@@ -162,7 +187,14 @@ export function SceneDetail({
       revision: imageRevision,
       context,
     });
-  }, [context, effectiveHeroMediaId, imageRevision, projectId, scene]);
+  }, [
+    activeDraft,
+    context,
+    effectiveHeroMediaId,
+    imageRevision,
+    projectId,
+    scene,
+  ]);
 
   const heroDragPayload = useMemo(
     () =>
@@ -182,9 +214,9 @@ export function SceneDetail({
       approvedMediaIds?: string[];
       primaryMediaId?: string | null;
       mediaId?: string;
-    }) => {
-      if (!scene) return;
-      onChange({
+    }): SceneAsset | null => {
+      if (!scene) return null;
+      const next: SceneAsset = {
         ...scene,
         ...(payload.approvedMediaIds
           ? { approvedMediaIds: payload.approvedMediaIds }
@@ -198,17 +230,19 @@ export function SceneDetail({
               imageObjectUrl: null,
             }
           : {}),
-      });
+      };
+      onChange(next);
+      return next;
     },
     [onChange, scene],
   );
 
   const persistMediaToLibrary = useCallback(
-    async (mediaId: string, setPrimary = false) => {
-      if (!scene || !canEdit) return;
+    async (mediaId: string, setPrimary = false): Promise<SceneAsset | null> => {
+      if (!scene || !canEdit) return null;
       setMediaBusy(true);
       try {
-        await onPersist();
+        await onPersist(scene);
         const response = await fetch(`${apiRoot}/assets-draft/media/save`, {
           method: "POST",
           credentials: "include",
@@ -229,13 +263,14 @@ export function SceneDetail({
         if (!response.ok || !payload) {
           throw new Error(payload?.error ?? "保存场景图片失败");
         }
-        applySavedMedia({
+        const next = applySavedMedia({
           approvedMediaIds: payload.approvedMediaIds,
           primaryMediaId: payload.primaryMediaId,
           mediaId: payload.mediaId ?? mediaId,
         });
         setHeroMediaId(setPrimary ? payload.primaryMediaId ?? mediaId : mediaId);
         onImageRevision?.(scene.id, imageRevision + 1);
+        return next;
       } finally {
         setMediaBusy(false);
       }
@@ -255,6 +290,8 @@ export function SceneDetail({
     if (!scene || !canEdit || mediaBusy) return;
     const { asset: next, draft } = addLibraryVariantDraft(scene, "scene");
     onChange(next);
+    clearPromptDirty();
+    setGenerationProgress(null);
     setActiveVariantSlotId(draft.id);
     setHeroMediaId(null);
     setLightboxMediaId(null);
@@ -267,23 +304,26 @@ export function SceneDetail({
       setHeroMediaId(mediaId);
       onImageRevision?.(scene.id, imageRevision + 1);
       try {
-        await persistMediaToLibrary(mediaId, false);
-        if (draft) {
-          const withoutDraft = removeLibraryVariantDraft(scene, draft.id);
-          const index = variantMediaIds.length + 1;
-          onChange(
-            withLibraryVariantLabel(
-              withoutDraft,
-              mediaId,
-              draft.label,
-              "scene",
-              index,
-            ),
+        const saved = await persistMediaToLibrary(mediaId, false);
+        if (draft && saved) {
+          const withoutDraft = removeLibraryVariantDraft(saved, draft.id);
+          const { variantMediaIds: nextVariants } =
+            collectLibraryAssetVariantMediaIds(withoutDraft);
+          const index = Math.max(1, nextVariants.indexOf(mediaId) + 1);
+          const labeled = withLibraryVariantLabel(
+            withoutDraft,
+            mediaId,
+            draft.label,
+            "scene",
+            index,
           );
+          onChange(labeled);
           setActiveVariantSlotId(mediaId);
-          await onPersist();
+          await onPersist(labeled);
         }
+        setGenerationProgress(null);
       } catch (error) {
+        setGenerationProgress(null);
         onStatus?.(
           error instanceof Error ? error.message : "保存场景编辑失败",
         );
@@ -298,13 +338,35 @@ export function SceneDetail({
       onStatus,
       persistMediaToLibrary,
       scene,
-      variantMediaIds.length,
     ],
   );
 
   const handleDesignItemChange = (item: EpisodeAssetDesignItem) => {
-    void syncGeneratedPreview(item.generatedMedia?.currentId?.trim() || null);
     onDesignItemChange?.(item);
+  };
+
+  const selectMainSlot = () => {
+    // Brand-new empty edits have nothing to protect. Bypass the unsaved-prompt
+    // guard — clearPromptDirty() is async setState and cannot flip promptDirty
+    // before runWithPromptGuard reads it in this tick.
+    const emptyUnusedEdit =
+      Boolean(activeDraft) &&
+      !heroMediaId?.trim() &&
+      !activeDraft?.promptText?.trim();
+
+    const applyMain = () => {
+      clearPromptDirty();
+      setPendingVariantAction(null);
+      setActiveVariantSlotId(null);
+      setLightboxMediaId(null);
+      setHeroMediaId(primaryMediaId);
+    };
+
+    if (emptyUnusedEdit) {
+      applyMain();
+      return;
+    }
+    runWithPromptGuard(applyMain);
   };
 
   const promoteMedia = async (mediaId: string) => {
@@ -324,7 +386,7 @@ export function SceneDetail({
     try {
       const next = withoutLibraryVariantMedia(scene, slotId);
       onChange(next);
-      await onPersist();
+      await onPersist(next);
       if (
         heroMediaId === slotId ||
         primaryMediaId === slotId ||
@@ -378,20 +440,76 @@ export function SceneDetail({
               <div
                 className="character-media-stage character-preview-pane"
                 data-testid="scene-hero-stage"
+                onClick={() => {
+                  // Empty-edit hero has no previewSrc — still allow returning to 主图.
+                  if (activeVariantSlotId || previewSrc) {
+                    selectMainSlot();
+                  }
+                }}
+                style={
+                  previewSrc
+                    ? ({ cursor: "pointer" } as React.CSSProperties)
+                    : activeVariantSlotId
+                      ? ({ cursor: "pointer" } as React.CSSProperties)
+                      : undefined
+                }
               >
-                <div
-                  className="character-preview-pane__display project-asset-media-drag-source"
-                  {...projectAssetMediaDragProps(heroDragPayload)}
-                >
-                  <AssetDetailImage
-                    fill
-                    src={previewSrc}
-                    alt={scene.imageFileName ?? scene.name}
-                    testId="scene-detail-image"
-                    emptyIcon={<MapPinned size={36} strokeWidth={1.5} />}
-                  />
-                </div>
-                {canEdit ? (
+                {previewSrc ? (
+                  <div
+                    className="character-preview-pane__display project-asset-media-drag-source"
+                    {...projectAssetMediaDragProps(heroDragPayload)}
+                  >
+                    <AssetDetailImage
+                      fill
+                      src={previewSrc}
+                      alt={scene.imageFileName ?? scene.name}
+                      testId="scene-detail-image"
+                      emptyIcon={<MapPinned size={36} strokeWidth={1.5} />}
+                    />
+                  </div>
+                ) : canEdit && activeDraft ? (
+                  <div
+                    className="character-media-stage__empty-actions"
+                    data-testid="scene-empty-edit-hero"
+                    role="button"
+                    tabIndex={0}
+                    aria-label="返回主图"
+                    title="点击返回主图"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      selectMainSlot();
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        selectMainSlot();
+                      }
+                    }}
+                  >
+                    <LibraryAssetEditingPlaceholder />
+                    <p
+                      className="character-media-stage__empty-hint"
+                      data-testid="scene-empty-edit-hero-hint"
+                    >
+                      请在右侧填写场景编辑提示词后生成。点击此处可返回主图。
+                    </p>
+                  </div>
+                ) : (
+                  <div className="character-preview-pane__display">
+                    <AssetDetailImage
+                      fill
+                      src={previewSrc}
+                      alt={scene.imageFileName ?? scene.name}
+                      testId="scene-detail-image"
+                      emptyIcon={<MapPinned size={36} strokeWidth={1.5} />}
+                    />
+                  </div>
+                )}
+                {generationProgress ? (
+                  <DesignGenerationOverlay progress={generationProgress} />
+                ) : null}
+                {canEdit && !activeVariantSlotId ? (
                   <div className="asset-library-preview__overlay-actions">
                     <AssetImageUpload
                       id={`scene-image-${scene.id}`}
@@ -442,18 +560,13 @@ export function SceneDetail({
                 heroMediaId={effectiveHeroMediaId}
                 activeVariantSlotId={activeVariantSlotId}
                 dragAssetName={scene.name || "场景"}
-                onSelectMain={() => {
-                  runWithPromptGuard(() => {
-                    setActiveVariantSlotId(null);
-                    setLightboxMediaId(null);
-                    setHeroMediaId(primaryMediaId);
-                  });
-                }}
+                onSelectMain={selectMainSlot}
                 onAdd={() => {
                   runWithPromptGuard(() => addDraftVariant());
                 }}
                 onOpenVariant={(slotId) => {
                   runWithPromptGuard(() => {
+                    clearPromptDirty();
                     const draft = findLibraryVariantDraft(scene, slotId);
                     setActiveVariantSlotId(slotId);
                     if (draft) {
@@ -504,6 +617,16 @@ export function SceneDetail({
                   promptContextLabel="场景提示词"
                   promptScopeKey={variantPromptScopeKey}
                   promptScopeText={variantPromptScopeText}
+                  promptScopeMedia={
+                    activeDraft || activeVariantSlotId
+                      ? {
+                          currentId: effectiveHeroMediaId,
+                          historyIds: effectiveHeroMediaId
+                            ? [effectiveHeroMediaId]
+                            : [],
+                        }
+                      : null
+                  }
                   onPromptScopePersist={
                     activeDraft
                       ? (text) => {
@@ -520,6 +643,7 @@ export function SceneDetail({
                   onPromptDirtyChange={handlePromptDirtyChange}
                   promptFlushRef={promptFlushRef}
                   onStatus={onStatus}
+                  onGenerationProgress={handleGenerationProgress}
                 />
               </div>
             </div>
@@ -554,24 +678,26 @@ export function SceneDetail({
           role="alertdialog"
           aria-modal="true"
         >
-          <p>确认删除该场景编辑？删除后不可恢复。</p>
-          <div className="character-look-delete-dialog__actions">
-            <button
-              type="button"
-              className="amw-btn"
-              onClick={() => setDeleteConfirmMediaId(null)}
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              className="amw-btn amw-btn-primary"
-              data-testid="scene-variant-delete-confirm"
-              disabled={mediaBusy}
-              onClick={() => void deleteVariant(deleteConfirmMediaId)}
-            >
-              确认删除
-            </button>
+          <div className="character-look-delete-dialog__panel">
+            <p>确认删除该场景编辑？删除后不可恢复。</p>
+            <div className="character-look-delete-dialog__actions">
+              <button
+                type="button"
+                className="amw-btn"
+                onClick={() => setDeleteConfirmMediaId(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="amw-btn amw-btn-primary"
+                data-testid="scene-variant-delete-confirm"
+                disabled={mediaBusy}
+                onClick={() => void deleteVariant(deleteConfirmMediaId)}
+              >
+                确认删除
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -586,7 +712,7 @@ export function SceneDetail({
               await promptFlushRef?.current?.();
               pendingVariantAction?.();
               setPendingVariantAction(null);
-              setPromptDirty(false);
+              clearPromptDirty();
             } finally {
               setScopeUnsavedBusy(false);
             }
@@ -595,7 +721,7 @@ export function SceneDetail({
         onDiscard={() => {
           pendingVariantAction?.();
           setPendingVariantAction(null);
-          setPromptDirty(false);
+          clearPromptDirty();
         }}
         onCancel={() => setPendingVariantAction(null)}
       />

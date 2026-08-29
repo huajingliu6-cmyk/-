@@ -166,13 +166,27 @@ export async function PATCH(request: Request, context: RouteContext) {
     );
   }
 
+  const editPrompt = body.editPrompt === true;
+  const touchingPrompt =
+    typeof body.videoPrompt === "string" ||
+    typeof body.promptDraft === "string";
+
+  // Explicit modal edits may update locked prompts; revision is required.
+  if (editPrompt && touchingPrompt && typeof body.revision !== "number") {
+    return NextResponse.json(
+      { error: "编辑提示词需要提供 revision", code: "REVISION_REQUIRED" },
+      { status: 400 },
+    );
+  }
+
   if ((originalShot.locked || originalShot.promptLocked) && !unlock) {
-    const touchingPrompt =
-      typeof body.videoPrompt === "string" ||
-      typeof body.promptDraft === "string";
-    if (touchingPrompt || body.promptLocked === false) {
-      // allow unlock path only
-      if (!unlock && body.promptLocked !== false && !("unlock" in body)) {
+    if (touchingPrompt) {
+      // Same path as non-blank shots: editPrompt=true updates without unlocking.
+      if (
+        !editPrompt &&
+        body.promptLocked !== false &&
+        !("unlock" in body)
+      ) {
         return NextResponse.json({ error: "提示词已锁定" }, { status: 409 });
       }
     }
@@ -337,6 +351,12 @@ export async function PATCH(request: Request, context: RouteContext) {
         next.videoPrompt = body.promptDraft;
         next.promptDraft = body.promptDraft;
       }
+      if (editPrompt && touchingPrompt) {
+        next.promptOrigin = "manual";
+        next.promptUpdatedAt = now;
+        // Keep promptLocked; do not escalate to whole-shot lock.
+        next.promptLocked = true;
+      }
 
       if (characterAssetIds) next.characterAssetIds = characterAssetIds;
       if (propAssetIds) next.propAssetIds = propAssetIds;
@@ -388,11 +408,12 @@ export async function PATCH(request: Request, context: RouteContext) {
       }
       if (typeof body.locked === "boolean") {
         next.locked = body.locked;
+        // Whole-shot lock always implies prompt lock.
         if (body.locked) next.promptLocked = true;
       }
       if (typeof body.promptLocked === "boolean") {
+        // Prompt-only lock must not force whole-shot lock (素材/参数仍可改).
         next.promptLocked = body.promptLocked;
-        if (body.promptLocked) next.locked = true;
       }
       if (typeof body.confirmed === "boolean") {
         next.confirmed = body.confirmed;

@@ -140,6 +140,16 @@ export function NotificationBell() {
       return;
     }
     if (
+      note.type === "storyboard_prompt_generating" ||
+      note.type === "storyboard_prompt_ready" ||
+      note.type === "storyboard_prompt_failed"
+    ) {
+      router.push(
+        `/app/projects/${encodeURIComponent(note.projectId)}/storyboard`,
+      );
+      return;
+    }
+    if (
       (note.type === "enterprise_join_approved" ||
         note.type === "enterprise_join_rejected") &&
       note.enterpriseId

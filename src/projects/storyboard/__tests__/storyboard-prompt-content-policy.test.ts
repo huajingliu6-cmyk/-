@@ -25,23 +25,27 @@ describe("stripScriptMetaForStoryboard", () => {
     expect(cleaned).not.toContain("本集统计");
     expect(cleaned).not.toContain("改编说明");
     expect(cleaned).not.toContain("请确认");
-    expect(cleaned).not.toContain("抽烟");
   });
 });
 
 describe("sanitizeStoryboardVideoPromptText", () => {
-  it("rewrites smoking and alcohol depictions", () => {
+  it("preserves model body including plot words and 禁止 lines", () => {
     const raw =
-      "中景：他抽烟，端起威士忌一饮而尽。禁止完全静止画面。台词：无。";
+      "中景：他抽烟，端起威士忌一饮而尽。\n禁止完全静止画面。\n台词：无。";
     const cleaned = sanitizeStoryboardVideoPromptText(raw);
-    expect(cleaned).not.toMatch(/抽烟|威士忌|饮酒|吸烟/);
-    expect(cleaned).toContain("神情凝重");
-    expect(cleaned).toContain("透明玻璃杯");
-    expect(cleaned).not.toContain("禁止完全静止画面");
+    expect(cleaned).toContain("抽烟");
+    expect(cleaned).toContain("威士忌");
+    expect(cleaned).toContain("禁止完全静止画面");
+    expect(cleaned).toContain("\n");
   });
 
-  it("detects prohibited terms before rewrite", () => {
-    const hits = findProhibitedStoryboardPromptTerms("他点烟后喝酒。");
-    expect(hits.map((h) => h.term)).toEqual(expect.arrayContaining(["抽烟", "饮酒"]));
+  it("only trims edges and normalizes newlines", () => {
+    const raw = "\uFEFF  【总时长】14秒\r\n\r\n【声音设计】雨声  ";
+    const cleaned = sanitizeStoryboardVideoPromptText(raw);
+    expect(cleaned).toBe("【总时长】14秒\n\n【声音设计】雨声");
+  });
+
+  it("does not report prohibited terms for stored prompts", () => {
+    expect(findProhibitedStoryboardPromptTerms("他点烟后喝酒。")).toEqual([]);
   });
 });

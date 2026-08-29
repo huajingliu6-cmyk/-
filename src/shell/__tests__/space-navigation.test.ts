@@ -20,7 +20,6 @@ describe("space navigation", () => {
       "asset-market",
       "personal-assets",
       "guide",
-      "admin-materials",
       "admin",
     ]);
   });

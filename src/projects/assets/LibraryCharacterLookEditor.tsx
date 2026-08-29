@@ -416,14 +416,19 @@ export function LibraryCharacterLookEditor({
       return;
     }
     if (job.status === "failed") {
+      if (appliedJobIdRef.current === job.id) {
+        setGenerateBusy(false);
+        return;
+      }
+      appliedJobIdRef.current = job.id;
       setGenerateBusy(false);
       if (job.errorMessage) reportErrorOnce(job.errorMessage);
-      setGenerationProgress({
-        stage: "failed",
-        percent: 0,
-        message: job.errorMessage ?? "图片生成失败",
-      });
-      clearProgressLater(2200);
+      // Clear immediately — a stuck 0% failed overlay freezes the preview.
+      if (progressClearTimerRef.current != null) {
+        window.clearTimeout(progressClearTimerRef.current);
+        progressClearTimerRef.current = null;
+      }
+      setGenerationProgress(null);
       return;
     }
     if (job.status === "queued" || job.status === "running") {
@@ -812,12 +817,11 @@ export function LibraryCharacterLookEditor({
         if (result.code === "REFERENCE_IMAGE_REQUIRED") {
           setFieldErrors({ referenceImages: true });
         }
-        setGenerationProgress({
-          stage: "failed",
-          percent: 0,
-          message: result.error,
-        });
-        clearProgressLater(2200);
+        if (progressClearTimerRef.current != null) {
+          window.clearTimeout(progressClearTimerRef.current);
+          progressClearTimerRef.current = null;
+        }
+        setGenerationProgress(null);
         setGenerateBusy(false);
       } else {
         claimJobForSession(result.job?.id ?? imageJob.job?.id);
@@ -919,16 +923,15 @@ export function LibraryCharacterLookEditor({
       const message =
         caught instanceof Error ? caught.message : "生成造型失败";
       reportErrorOnce(message);
-      setGenerationProgress({
-        stage: "failed",
-        percent: 0,
-        message,
-      });
-      clearProgressLater(2200);
+      if (progressClearTimerRef.current != null) {
+        window.clearTimeout(progressClearTimerRef.current);
+        progressClearTimerRef.current = null;
+      }
+      setGenerationProgress(null);
       setGenerateBusy(false);
     } finally {
       generateInFlightRef.current = false;
-      // Do not clear generationProgress here — completed/failed timers own that.
+      // Do not clear generationProgress here — success timers own that.
     }
   }, [
     apiRoot,

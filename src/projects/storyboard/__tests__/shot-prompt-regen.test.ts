@@ -339,7 +339,26 @@ describe("shot prompt regenerate + NOT_REQUIRED", () => {
     }));
 
     // Ensure at least 2 shots for cross-shot isolation assertions
-    const flat = listFlatShots(board.scenes);
+    let flat = listFlatShots(board.scenes);
+    if (flat.length < 2) {
+      const base = flat[0]?.shot;
+      if (!base) {
+        throw new Error("generateStructuredStoryboard returned no shots");
+      }
+      const clone: StoryboardShot = {
+        ...base,
+        id: `${base.id}_b`,
+        shotNumber: (base.shotNumber || 1) + 1,
+        order: (base.order || 0) + 1,
+        videoPrompt: `${base.videoPrompt || "第二镜头"}（隔离）`,
+        promptDraft: `${base.promptDraft || "第二镜头"}（隔离）`,
+        revision: 1,
+      };
+      board.scenes = board.scenes.map((scene, index) =>
+        index === 0 ? { ...scene, shots: [...scene.shots, clone] } : scene,
+      );
+      flat = listFlatShots(board.scenes);
+    }
     expect(flat.length).toBeGreaterThanOrEqual(2);
 
     const production: EpisodeProduction = {
@@ -410,7 +429,13 @@ describe("shot prompt regenerate + NOT_REQUIRED", () => {
     expect(after.map((row) => row.shot.shotNumber)).toEqual(
       Array.from({ length: after.length }, (_, index) => index + 1),
     );
-    expect(after[1]!.shot.id).toBe(payload.shot.id);
+    const targetIndex = after.findIndex((row) => row.shot.id === target.id);
+    const insertedIndex = after.findIndex(
+      (row) => row.shot.id === payload.shot.id,
+    );
+    expect(targetIndex).toBeGreaterThanOrEqual(0);
+    expect(insertedIndex).toBe(targetIndex + 1);
+    expect(payload.shot.id).not.toBe(target.id);
     expect(payload.shot).toMatchObject({
       videoPrompt: "",
       requirements: [],
@@ -420,8 +445,35 @@ describe("shot prompt regenerate + NOT_REQUIRED", () => {
       confirmed: false,
       promptLocked: true,
       locked: false,
+      promptOrigin: "manual",
     });
     expect(payload.production.status).toBe("storyboard_incomplete");
+
+    // Blank shots use the same editPrompt path as other locked prompts.
+    const edited = await patchShot(
+      new Request("http://localhost/patch", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          videoPrompt: "新增分镜手写提示词",
+          editPrompt: true,
+          revision: payload.shot.revision,
+        }),
+      }),
+      {
+        params: Promise.resolve({
+          projectId,
+          episodeId: "ep_regen",
+          shotId: payload.shot.id,
+        }),
+      },
+    );
+    expect(edited.status).toBe(200);
+    const saved = ((await edited.json()) as { shot: StoryboardShot }).shot;
+    expect(saved.videoPrompt).toBe("新增分镜手写提示词");
+    expect(saved.promptLocked).toBe(true);
+    expect(saved.locked).toBe(false);
+    expect(saved.promptOrigin).toBe("manual");
   });
 
   it("deletes a target shot, renumbers continuously, and rejects last-shot delete", async () => {

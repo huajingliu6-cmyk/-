@@ -19,13 +19,17 @@ import type { EpisodeProduction } from "@/projects/storyboard/types";
 import { ensureStoryboardCharacterBindings } from "@/projects/storyboard/services/ensure-storyboard-character-bindings";
 import { sanitizeAssetMatchItems } from "@/projects/storyboard/services/asset-match";
 import {
-  generateStructuredStoryboard,
   mergePreserveLockedShots,
 } from "@/projects/storyboard/services/storyboard-generate";
 import { isStoryboardGeneratingLockActive } from "@/projects/storyboard/services/storyboard-generating-lock";
 import { buildStoryboardPromptContext } from "@/projects/storyboard/services/storyboard-prompt-context";
 import {
-  fillShotVideoPromptsWithLlm,
+  notifyStoryboardPromptFailed,
+  notifyStoryboardPromptGenerating,
+  notifyStoryboardPromptReady,
+} from "@/projects/storyboard/services/storyboard-prompt-notifications";
+import {
+  generateStoryboardFromLlm,
   StoryboardPromptFillError,
 } from "@/projects/storyboard/services/storyboard-prompt-llm";
 
@@ -124,7 +128,10 @@ export async function executeStoryboardGenerationCore(input: {
         audios: [],
       };
 
-      const generated = generateStructuredStoryboard({
+      const generated = await generateStoryboardFromLlm({
+        projectId: input.projectId,
+        episodeId: input.episodeId,
+        userId: input.userId,
         scriptText,
         assetMatches: sanitizeAssetMatchItems(
           currentProduction.assetMatches ?? [],
@@ -133,12 +140,21 @@ export async function executeStoryboardGenerationCore(input: {
         sourceScriptHash: currentProduction.confirmedScriptHash ?? "",
         sourceAssetSnapshotHash:
           currentProduction.confirmedAssetSnapshotHash ?? "",
-        userId: input.userId,
+        context: {
+          ...buildStoryboardPromptContext({
+            scriptText,
+            libraryAssets,
+            visualStyle: styleResolved.styleId,
+            highlights: project?.highlights,
+            visualStyleDirective: styleResolved.directive,
+          }),
+          libraryAssets,
+        },
       });
 
       const merged = mergePreserveLockedShots(
         production.activeStoryboard,
-        generated,
+        generated.storyboard,
       );
 
       const binding = ensureStoryboardCharacterBindings({
@@ -146,31 +162,21 @@ export async function executeStoryboardGenerationCore(input: {
         libraryAssets,
       });
 
-      const promptContext = {
-        ...buildStoryboardPromptContext({
-          scriptText,
-          libraryAssets,
-          visualStyle: styleResolved.styleId,
-          highlights: project?.highlights,
-          visualStyleDirective: styleResolved.directive,
-        }),
-        libraryAssets,
-      };
-
       await input.onPhase?.("validating");
 
-      const fillResult = await fillShotVideoPromptsWithLlm({
-        projectId: input.projectId,
-        episodeId: input.episodeId,
-        userId: input.userId,
+      const fillResult = {
         storyboard: binding.storyboard,
-        salt:
-          idempotencyKey ??
-          binding.storyboard.generationJobId ??
-          binding.storyboard.id,
-        context: promptContext,
-      });
-
+        generatedCount: generated.generatedCount,
+        unmatchedCount: 0,
+        unmatchedShotIds: [] as string[],
+        parser: generated.parser,
+        promptWarnings: binding.warnings.map((w) => ({
+          shotId: w.shotId,
+          shotNumber: w.shotNumber,
+          code: w.code,
+          message: w.message,
+        })),
+      };
       const activeStoryboard = {
         ...fillResult.storyboard,
         generationJobId: idempotencyKey ?? fillResult.storyboard.generationJobId,
@@ -180,14 +186,7 @@ export async function executeStoryboardGenerationCore(input: {
         ...binding.warnings.map((w) => w.shotId),
         ...(fillResult.promptWarnings ?? []).map((w) => w.shotId),
       ]).size;
-      const softWarningNote =
-        softWarningShotCount > 0
-          ? `提示词已生成，部分镜头缺少人物参考图，将使用文字描述生成`
-          : null;
-      const partialNote =
-        fillResult.warningCode === "STORYBOARD_PROMPTS_PARTIALLY_MATCHED"
-          ? `已生成 ${fillResult.generatedCount} 个镜头，${fillResult.unmatchedCount} 个镜头未匹配，可重试未完成镜头。`
-          : softWarningNote;
+      const softWarning = softWarningShotCount > 0;
 
       currentProduction = await persistProduction(currentWorkspace, {
         ...currentProduction,
@@ -195,7 +194,7 @@ export async function executeStoryboardGenerationCore(input: {
         currentStep: 2,
         status: "storyboard_incomplete",
         storyboardStale: false,
-        generationError: partialNote,
+        generationError: null,
         storyboardGenerationJob: {
           generationId: idempotencyKey,
           status: "completed",
@@ -208,6 +207,14 @@ export async function executeStoryboardGenerationCore(input: {
         revision: currentProduction.revision + 1,
         lastEditedAt: now,
         updatedAt: now,
+      });
+
+      await notifyStoryboardPromptReady({
+        userId: input.userId,
+        projectId: input.projectId,
+        episodeId: input.episodeId,
+        generationId: idempotencyKey,
+        softWarning,
       });
 
       return { ok: true, production: currentProduction };
@@ -240,6 +247,13 @@ export async function executeStoryboardGenerationCore(input: {
         revision: currentProduction.revision + 1,
         lastEditedAt: now,
         updatedAt: now,
+      });
+      await notifyStoryboardPromptFailed({
+        userId: input.userId,
+        projectId: input.projectId,
+        episodeId: input.episodeId,
+        generationId: idempotencyKey,
+        message: userMessage,
       });
       return { ok: false, production: currentProduction, error: userMessage };
     }
@@ -293,6 +307,13 @@ export async function generateStoryboardEpisode(input: {
       revision: production.revision + 1,
       lastEditedAt: now,
       updatedAt: now,
+    });
+
+    await notifyStoryboardPromptGenerating({
+      userId: input.userId,
+      projectId: input.projectId,
+      episodeId: input.episodeId,
+      generationId: idempotencyKey,
     });
 
     return executeStoryboardGenerationCore({

@@ -247,7 +247,7 @@ describe("storyboard clip pipeline", () => {
         ],
       }),
       targets: [{ shot, sceneTitle: "雨夜" }],
-      libraryAssets: libraryWithLinqing(),
+      libraryAssets: { characters: [], scenes: [], props: [], audios: [] },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -256,6 +256,7 @@ describe("storyboard clip pipeline", () => {
     );
     const prompt = result.prompts.get(shot.id) ?? "";
     expect(prompt).toContain("【素材提示】");
+    expect(prompt).toContain("@人物-林清（未生成形象）");
     expect(prompt).not.toMatch(/assetId\s*[:=]/i);
     expect(prompt).not.toContain("undefined");
     expect(prompt).not.toContain("@人物【图:");
@@ -294,6 +295,7 @@ describe("storyboard clip pipeline", () => {
     const prompt = result.prompts.get(shot.id) ?? "";
     expect(prompt).toContain("【素材提示】");
     expect(prompt).toContain("林清");
+    expect(prompt).toContain("@人物-林清（未生成形象）");
     expect(prompt).not.toContain("@人物【图:");
   });
 
@@ -333,7 +335,37 @@ describe("storyboard clip pipeline", () => {
     const prompt = result.prompts.get(shot.id) ?? "";
     expect(prompt).toContain("韩兆丰");
     expect(prompt).toContain("【素材提示】");
+    expect(prompt).toContain("@人物-韩兆丰（未生成形象）");
     expect(prompt).not.toContain("@图片");
+  });
+
+  it("mounts a generated library character by name when the shot id is stale", () => {
+    const board = generateStructuredStoryboard({
+      scriptText: "场景：雨夜\n林清走来。",
+      assetMatches: [],
+      sourceScriptHash: "h1",
+      sourceAssetSnapshotHash: "h2",
+      userId: "u1",
+    });
+    const shot = board.scenes[0]!.shots[0]!;
+    shot.characterAssetIds = [];
+    shot.requiredCharacters = ["林清"];
+
+    const result = processStoryboardClipsResponse({
+      raw: JSON.stringify({
+        clips: [
+          makeClip({ shotId: shot.id, total: 14, segments: baseSegments(14) }),
+        ],
+      }),
+      targets: [{ shot, sceneTitle: "雨夜" }],
+      libraryAssets: libraryWithLinqing(),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.prompts.get(shot.id)).toContain(
+      "@人物【图:c1:林清】-林清",
+    );
+    expect(result.prompts.get(shot.id)).not.toContain("未生成形象");
   });
 
   it("does not require character blocking for empty shots", () => {
@@ -411,7 +443,7 @@ describe("storyboard clip pipeline", () => {
     expect(prompt).not.toContain("【位置结构】");
   });
 
-  it("warns but accepts too many internal segments", () => {
+  it("accepts many internal segments without count-cap warnings", () => {
     const board = generateStructuredStoryboard({
       scriptText: "场景：雨夜\n林清走来。",
       assetMatches: [],
@@ -438,7 +470,7 @@ describe("storyboard clip pipeline", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.warnings.some((w) => w.code === "TOO_MANY_INTERNAL_SHOTS")).toBe(
-      true,
+      false,
     );
   });
 
@@ -507,7 +539,7 @@ describe("storyboard clip pipeline", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("warns but accepts fewer than 3 internal segments when durations stay within bounds", () => {
+  it("accepts fewer than 3 internal segments without count-floor warnings", () => {
     const board = generateStructuredStoryboard({
       scriptText: "场景：雨夜\n林清走来。",
       assetMatches: [],
@@ -537,7 +569,7 @@ describe("storyboard clip pipeline", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.warnings.some((w) => w.code === "TOO_FEW_INTERNAL_SHOTS")).toBe(
-      true,
+      false,
     );
   });
 
@@ -576,7 +608,7 @@ describe("storyboard clip pipeline", () => {
     expect(result.prompts.has(shot.id)).toBe(true);
   });
 
-  it("rejects segment longer than 6 seconds", () => {
+  it("treats segment longer than 6 seconds as soft warning only", () => {
     const board = generateStructuredStoryboard({
       scriptText: "场景：雨夜\n林清走来。",
       assetMatches: [],
@@ -604,9 +636,10 @@ describe("storyboard clip pipeline", () => {
       libraryAssets: libraryWithLinqing(),
     });
 
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error).toContain("单段最多 6 秒");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Legacy structured validator may soft-warn or skip body duration under V1.
+    expect(result.prompts.size).toBe(1);
   });
 
   it("accepts segment of exactly 6 seconds with 3 segments", () => {

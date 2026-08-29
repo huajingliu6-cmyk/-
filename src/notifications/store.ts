@@ -46,7 +46,10 @@ function parseNotification(raw: unknown): AppNotification | null {
     raw.type !== "enterprise_join_approved" &&
     raw.type !== "enterprise_join_rejected" &&
     raw.type !== "image_generation_succeeded" &&
-    raw.type !== "image_generation_failed"
+    raw.type !== "image_generation_failed" &&
+    raw.type !== "storyboard_prompt_generating" &&
+    raw.type !== "storyboard_prompt_ready" &&
+    raw.type !== "storyboard_prompt_failed"
   ) {
     return null;
   }

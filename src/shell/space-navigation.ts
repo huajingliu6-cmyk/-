@@ -7,7 +7,7 @@ const PERSONAL_NAV_IDS = new Set([
   "asset-market",
   "personal-assets",
 ]);
-const PLATFORM_ADMIN_NAV_IDS = new Set(["admin", "admin-materials"]);
+const PLATFORM_ADMIN_NAV_IDS = new Set(["admin"]);
 
 export function navigationForSpace(
   space: ActiveSpace,

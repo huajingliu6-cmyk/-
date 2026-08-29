@@ -1,3 +1,7 @@
+/**
+ * @deprecated Not used by SHOT_ID_PROMPT_V1 generation — model videoPrompt is saved as-is.
+ * Kept for legacy tests that still exercise structured clip rendering.
+ */
 import type { StoryboardStructuredClip } from "@/projects/storyboard/services/storyboard-clip-types";
 import type { StoryboardShot } from "@/projects/storyboard/types";
 

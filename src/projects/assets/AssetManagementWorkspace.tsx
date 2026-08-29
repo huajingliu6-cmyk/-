@@ -94,6 +94,9 @@ export function AssetManagementWorkspace({
   const [projectName, setProjectName] = useState("");
   const [loadError, setLoadError] = useState("");
   const [pageNote, setPageNote] = useState("");
+  const [dismissedPipelineNoteKey, setDismissedPipelineNoteKey] = useState<
+    string | null
+  >(null);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<AssetTabId>("character");
   const [tabKey, setTabKey] = useState(0);
@@ -784,9 +787,30 @@ export function AssetManagementWorkspace({
             </p>
           ) : !pageNote &&
             hydrated &&
-            pipeline.phase === "generating_storyboard" ? (
-            <p className="asset-library-toolbar__note" role="status">
-              {pipeline.message}
+            (pipeline.phase === "generating_storyboard" ||
+              pipeline.phase === "ready") &&
+            pipeline.message &&
+            dismissedPipelineNoteKey !==
+              `${pipeline.phase}:${pipeline.message}` ? (
+            <p
+              className="asset-library-toolbar__note asset-library-toolbar__note--dismissible"
+              role="status"
+              data-testid="asset-pipeline-note"
+            >
+              <span>{pipeline.message}</span>
+              <button
+                type="button"
+                className="asset-library-toolbar__note-dismiss"
+                aria-label="关闭提示"
+                data-testid="asset-pipeline-note-dismiss"
+                onClick={() =>
+                  setDismissedPipelineNoteKey(
+                    `${pipeline.phase}:${pipeline.message}`,
+                  )
+                }
+              >
+                ×
+              </button>
             </p>
           ) : null}
           {hasActiveVersion ? (

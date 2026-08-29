@@ -44,7 +44,14 @@ vi.mock("@/persistence/remote-data-client", () => ({
     if (path === "/v1/users/admin/grant" || path === "/v1/users/admin/revoke") {
       const user = state.users.find((candidate) => candidate.username.toLowerCase() === body.username.toLowerCase());
       if (!user) return Response.json({ error: "用户不存在" }, { status: 400 });
-      if (path.endsWith("grant")) { const alreadyAdmin = user.role === "admin"; user.role = "admin"; return Response.json({ user: publicUser(user), alreadyAdmin }); }
+      if (path.endsWith("grant")) {
+        const alreadyAdmin = user.role === "admin";
+        if (!alreadyAdmin && state.users.some((candidate) => candidate.role === "admin")) {
+          return Response.json({ error: "系统管理员全局只允许存在 1 个，禁止创建第二个系统管理员" }, { status: 400 });
+        }
+        user.role = "admin";
+        return Response.json({ user: publicUser(user), alreadyAdmin });
+      }
       if (user.role !== "admin") return Response.json({ user: publicUser(user), alreadyUser: true });
       if (state.users.filter((candidate) => candidate.role === "admin").length <= 1) return Response.json({ error: "不能撤销最后一个系统管理员" }, { status: 400 });
       user.role = "user"; return Response.json({ user: publicUser(user), alreadyUser: false });
@@ -121,7 +128,8 @@ describe("remote identity and project member directories", () => {
     await grantSystemAdminByUsername(first.username); expect(await countSystemAdmins()).toBe(1);
     await expect(revokeSystemAdminByUsername(first.username)).rejects.toThrow("不能撤销最后一个系统管理员");
     const second = await createUser({ username: "admin_two", password: "Password123" });
-    await grantSystemAdminByUsername(second.username); expect((await revokeSystemAdminByUsername(second.username)).alreadyUser).toBe(false);
+    await expect(grantSystemAdminByUsername(second.username)).rejects.toThrow(/只允许存在 1 个/);
+    expect(await countSystemAdmins()).toBe(1);
   });
   it("rejects duplicate users and direct admin creation", async () => {
     await createUser({ username: "member", password: "Password123" });

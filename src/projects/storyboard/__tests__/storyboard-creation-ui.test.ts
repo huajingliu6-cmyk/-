@@ -30,10 +30,12 @@ describe("storyboard creation UI flow contracts", () => {
 
   it("keeps the existing storyboard actions visible in the new layout", () => {
     const css = readSrc("src/projects/storyboard/storyboard-workspace.css");
-    expect(panel).toContain("onOpenGlobalSettings");
-    expect(panel).toContain("storyboard-global-settings-btn");
+    expect(panel).not.toContain("onOpenGlobalSettings");
+    expect(panel).not.toContain("storyboard-global-settings-btn");
     expect(panel).not.toContain("storyboard-save-page-btn");
-    expect(panel).toContain("EpisodeVideoGenerationButton");
+    expect(panel).not.toContain("EpisodeVideoGenerationButton");
+    expect(panel).toContain('mode="defaults"');
+    expect(panel).toContain("onVideoDefaultsChange");
     expect(panel).not.toContain(">修改剧本<");
     expect(css).toMatch(
       /\.sbw-panel--storyboard-workspace > \.sbw-panel__head\s*\{[\s\S]*?display:\s*flex/,
@@ -91,14 +93,19 @@ describe("storyboard creation UI flow contracts", () => {
     expect(workspace).not.toContain("requestEpisodePromptGeneration");
     expect(stagePanel).not.toContain('data-testid="generate-storyboard-prompts"');
     expect(workspace).not.toContain("handleGenerateStoryboard");
-    expect(workspace).toContain("onOpenGlobalSettings");
-    expect(panel).toContain("全局设置");
-    expect(panel).toContain("storyboard-global-settings-btn");
+    expect(workspace).not.toContain("onOpenGlobalSettings");
+    expect(panel).not.toContain("全局设置");
+    expect(panel).not.toContain("storyboard-global-settings-btn");
+    expect(panel).not.toContain("EpisodeVideoGenerationButton");
+    expect(panel).toContain('mode="defaults"');
+    expect(panel).toContain("onVideoDefaultsChange");
     expect(workspace).not.toContain("返回资产管理");
     expect(workspace).toContain("fetchEpisodeDownstreamStatus");
     expect(workspace).toContain("episodeDownstream");
     expect(workspace).not.toContain("RouteLoadingOverlay");
-    expect(panel).toContain("episode-prompt-gen-busy");
+    expect(panel).not.toContain("episode-prompt-gen-busy");
+    expect(panel).not.toContain("episode-prompt-gen-media-warnings");
+    expect(panel).toContain("进度请查看右上角消息通知");
   });
 
   it("places model control before quality in shot video params", () => {
@@ -130,11 +137,7 @@ describe("storyboard creation UI flow contracts", () => {
   });
 
   it("merges storyboard confirm into episode video generate dialog", () => {
-    const videoBtn = readSrc(
-      "src/projects/storyboard/components/EpisodeVideoGenerationButton.tsx",
-    );
-    expect(panel).toContain("EpisodeVideoGenerationButton");
-    expect(videoBtn).toContain("生成视频");
+    expect(panel).not.toContain("EpisodeVideoGenerationButton");
     expect(panel).not.toContain(">确认本集分镜<");
     expect(panel).not.toContain(">已确认本集分镜<");
     expect(panel).toContain("confirmStoryboard");
@@ -278,7 +281,13 @@ describe("storyboard creation UI flow contracts", () => {
       /\.sbw-shot-card\.is-workspace \.sbw-shot-card__body\s*\{[\s\S]*?min-height:\s*calc\(100svh - var\(--shell-header-h,\s*68px\) - 108px\)/,
     );
     expect(css).toMatch(
-      /\.sbw-shot-workspace__prompt \.sbw-pre[\s\S]*?max-height:\s*none/,
+      /\.sbw-shot-workspace__prompt \.sbw-prompt-editor-wrap\s*\{[\s\S]*?flex:\s*1 1 auto/,
+    );
+    expect(css).toMatch(
+      /\.sbw-shot-workspace__prompt \.sbw-prompt-editor\s*\{[\s\S]*?min-height:\s*220px/,
+    );
+    expect(css).toMatch(
+      /\.sbw-shot-workspace__prompt \.sbw-prompt-editor\s*\{[\s\S]*?max-height:\s*none/,
     );
     expect(accordion).toContain("workspaceTimeline");
     expect(accordion).toContain("StoryboardWorkspaceShell");

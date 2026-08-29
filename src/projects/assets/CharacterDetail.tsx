@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -35,7 +36,6 @@ import {
 } from "@/projects/assets/character-media-state";
 import {
   ensureCharacterAppearances,
-  createCharacterAppearance,
   findAppearanceOwningMedia,
   isAppearanceMedia,
   listCharacterAppearances,
@@ -165,6 +165,17 @@ export function CharacterDetail({
   const [previewMediaId, setPreviewMediaId] = useState<string | null>(null);
   const [mainGenerationProgress, setMainGenerationProgress] =
     useState<AssetGenerationProgress | null>(null);
+  const handleGenerationProgress = useCallback(
+    (_itemId: string, progress: AssetGenerationProgress | null) => {
+      // Failed overlays are cleared by DesignAssetModal; never paint a stuck 0%.
+      if (progress?.stage === "failed") {
+        setMainGenerationProgress(null);
+        return;
+      }
+      setMainGenerationProgress(progress);
+    },
+    [],
+  );
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyBusy, setHistoryBusy] = useState(false);
   const [historyDeleteConfirm, setHistoryDeleteConfirm] =
@@ -185,6 +196,11 @@ export function CharacterDetail({
   const handlePromptDirtyChange = (dirty: boolean) => {
     setPromptDirty(dirty);
     onPromptDirtyChange?.(dirty);
+  };
+
+  const clearPromptDirty = () => {
+    setPromptDirty(false);
+    onPromptDirtyChange?.(false);
   };
 
   const runWithPromptGuard = (action: () => void) => {
@@ -643,7 +659,17 @@ export function CharacterDetail({
   };
 
   const selectMainSlot = () => {
-    runWithPromptGuard(() => {
+    // Brand-new empty looks have nothing persisted to protect. Bypass the
+    // unsaved-prompt guard entirely — clearPromptDirty() is async setState and
+    // cannot flip promptDirty before runWithPromptGuard reads it in this tick.
+    const emptyUnusedLook =
+      Boolean(activeAppearanceId) &&
+      !activeAppearance?.currentMediaId?.trim() &&
+      !activeAppearance?.promptOverride?.trim();
+
+    const applyMain = () => {
+      clearPromptDirty();
+      setPendingScopeAction(null);
       setPromptVoiceScope({ scope: "primary", appearanceId: null });
       setPendingVoice(null);
       setLookLightbox(null);
@@ -653,7 +679,13 @@ export function CharacterDetail({
           : primaryMediaId;
       setPreviewMediaId(nextPreview);
       onActiveMediaChange?.(nextPreview);
-    });
+    };
+
+    if (emptyUnusedLook) {
+      applyMain();
+      return;
+    }
+    runWithPromptGuard(applyMain);
   };
 
   const selectAppearanceForPrompt = (appearance: CharacterAppearance) => {
@@ -677,6 +709,7 @@ export function CharacterDetail({
 
   const selectLookAppearance = (appearance: CharacterAppearance) => {
     runWithPromptGuard(() => {
+      clearPromptDirty();
       selectAppearanceForPrompt(appearance);
       const mediaId = appearance.currentMediaId?.trim();
       if (mediaId) {
@@ -797,27 +830,29 @@ export function CharacterDetail({
 
   const openCreateLookEditor = () => {
     if (!canEdit || historyBusy) return;
-    setActionError("");
-    lastStatusToastRef.current = null;
-    setMainGenerationProgress(null);
-    const { asset: next, appearance } = createCharacterAppearance({
-      asset: ensured,
-      promptOverride: "",
-      currentMediaId: null,
-    });
-    const nextAppearances = next.appearances ?? [];
-    const nextPage = Math.max(
-      0,
-      Math.ceil(nextAppearances.length / LOOKS_PER_PAGE) - 1,
-    );
-    setLookPage(nextPage);
-    applyCharacter(next, {
-      appearanceId: appearance.id,
-      bumpRevision: false,
-      previewId: null,
-    });
-    selectAppearanceForPrompt(appearance);
-    setLookLightbox(null);
+    void (async () => {
+      setActionError("");
+      lastStatusToastRef.current = null;
+      setMainGenerationProgress(null);
+      clearPromptDirty();
+      setLookLightbox(null);
+      const result = await runMediaAction("create-appearance", {
+        promptOverride: "",
+      });
+      if (!result?.character || !result.appearance) return;
+      const nextAppearances = result.character.appearances ?? [];
+      const nextPage = Math.max(
+        0,
+        Math.ceil(nextAppearances.length / LOOKS_PER_PAGE) - 1,
+      );
+      setLookPage(nextPage);
+      applyCharacter(result.character, {
+        appearanceId: result.appearance.id,
+        bumpRevision: false,
+        previewId: null,
+      });
+      selectAppearanceForPrompt(result.appearance);
+    })();
   };
 
   const uploadToActiveLook = async (file: File) => {
@@ -1127,6 +1162,13 @@ export function CharacterDetail({
     const isLookMedia =
       isAppearanceMedia(ensured, mediaId) && mediaId !== primaryMediaId;
 
+    // While a look is active, never import main/history media into the hero
+    // or auto-append it — empty looks would flash the primary collage and
+    // fire spurious append-appearance-media calls (→「无效请求」toasts).
+    if (activeAppearanceId && !isLookMedia) {
+      return;
+    }
+
     if (isLookMedia && !activeAppearanceId) {
       // Orphan look media from prompt sync — bind to owning look, never hero.
       const owning = findAppearanceOwningMedia(ensured, mediaId);
@@ -1373,7 +1415,10 @@ export function CharacterDetail({
                 className="character-media-stage character-preview-pane character-primary-preview"
                 data-testid="character-hero-stage"
                 onClick={() => {
-                  if (previewSrc) selectMainSlot();
+                  // Empty-look hero has no previewSrc — still allow returning to 主形象.
+                  if (activeAppearanceId || previewSrc) {
+                    selectMainSlot();
+                  }
                 }}
                 style={
                   previewSrc
@@ -1381,7 +1426,9 @@ export function CharacterDetail({
                         ["--preview-image" as string]: `url("${previewSrc}")`,
                         cursor: "pointer",
                       } as React.CSSProperties)
-                    : undefined
+                    : activeAppearanceId
+                      ? ({ cursor: "pointer" } as React.CSSProperties)
+                      : undefined
                 }
               >
                 {previewSrc ? (
@@ -1396,6 +1443,34 @@ export function CharacterDetail({
                       alt={character.imageFileName ?? character.name}
                       testId="character-hero-image"
                     />
+                  </div>
+                ) : canEdit && activeAppearanceId ? (
+                  <div
+                    className="character-media-stage__empty-actions"
+                    data-testid="character-empty-look-hero"
+                    role="button"
+                    tabIndex={0}
+                    aria-label="返回主形象"
+                    title="点击返回主形象"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      selectMainSlot();
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        selectMainSlot();
+                      }
+                    }}
+                  >
+                    <LibraryAssetEditingPlaceholder />
+                    <p
+                      className="character-media-stage__empty-hint"
+                      data-testid="character-empty-look-hero-hint"
+                    >
+                      请在右侧填写造型提示词后生成。点击此处可返回主形象。
+                    </p>
                   </div>
                 ) : canEdit ? (
                   <div
@@ -1420,7 +1495,7 @@ export function CharacterDetail({
                   </div>
                 ) : null}
 
-                {mainGenerationProgress && !activeAppearanceId ? (
+                {mainGenerationProgress ? (
                   <DesignGenerationOverlay progress={mainGenerationProgress} />
                 ) : null}
 
@@ -1631,6 +1706,9 @@ export function CharacterDetail({
                       <button
                         type="button"
                         className="character-look-card__media"
+                        data-testid="character-main-board-select"
+                        aria-label="选择主形象"
+                        title="选择主形象"
                         onClick={(event) => {
                           event.stopPropagation();
                           selectMainSlot();
@@ -1920,9 +1998,7 @@ export function CharacterDetail({
                   onPromptDirtyChange={handlePromptDirtyChange}
                   promptFlushRef={promptFlushRef}
                   onStatus={onPreviewStatus}
-                  onGenerationProgress={(_itemId, progress) => {
-                    setMainGenerationProgress(progress);
-                  }}
+                  onGenerationProgress={handleGenerationProgress}
                 />
               </div>
 
@@ -2352,7 +2428,7 @@ export function CharacterDetail({
               await promptFlushRef?.current?.();
               pendingScopeAction?.();
               setPendingScopeAction(null);
-              setPromptDirty(false);
+              clearPromptDirty();
             } finally {
               setScopeUnsavedBusy(false);
             }
@@ -2361,7 +2437,7 @@ export function CharacterDetail({
         onDiscard={() => {
           pendingScopeAction?.();
           setPendingScopeAction(null);
-          setPromptDirty(false);
+          clearPromptDirty();
         }}
         onCancel={() => setPendingScopeAction(null)}
       />

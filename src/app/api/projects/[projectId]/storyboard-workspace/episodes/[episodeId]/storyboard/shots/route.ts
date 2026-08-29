@@ -9,6 +9,7 @@ import {
   persistProduction,
 } from "@/projects/storyboard/api-helpers";
 import { assignContinuousEpisodeShotNumbers } from "@/projects/storyboard/shot-completeness";
+import { STORYBOARD_SHOT_DURATION_MIN } from "@/projects/storyboard/storyboard-video-params";
 import type { StoryboardShot } from "@/projects/storyboard/types";
 
 type RouteContext = {
@@ -19,7 +20,7 @@ function blankShot(): StoryboardShot {
   return {
     id: `shot_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
     shotNumber: 0,
-    durationSeconds: 4,
+    durationSeconds: STORYBOARD_SHOT_DURATION_MIN,
     shotSize: "",
     cameraAngle: "",
     cameraMovement: "",
@@ -47,8 +48,10 @@ function blankShot(): StoryboardShot {
     requirements: [],
     manuallyEdited: false,
     confirmed: false,
+    // Same as other locked prompts: editable via editPrompt, not auto-overwritten.
     promptLocked: true,
     locked: false,
+    promptOrigin: "manual",
     revision: 1,
     order: 0,
     promptRegenJobId: null,
@@ -78,17 +81,24 @@ export async function POST(request: Request, context: RouteContext) {
   }
   const afterShotId = body.afterShotId.trim();
   const now = new Date().toISOString();
-  const inserted = blankShot();
-  let found = false;
+  let insertedId: string | null = null;
   const scenes = storyboard.scenes.map((scene) => {
     const index = scene.shots.findIndex((shot) => shot.id === afterShotId);
     if (index < 0) return scene;
-    found = true;
+    const afterShot = scene.shots[index]!;
+    const following = scene.shots[index + 1];
+    const draft = blankShot();
+    // Keep stable sort position after the target until continuous renumber.
+    draft.order = following
+      ? (afterShot.order + following.order) / 2
+      : afterShot.order + 1;
+    draft.shotNumber = afterShot.shotNumber + 1;
+    insertedId = draft.id;
     const shots = [...scene.shots];
-    shots.splice(index + 1, 0, inserted);
+    shots.splice(index + 1, 0, draft);
     return { ...scene, shots };
   });
-  if (!found) {
+  if (!insertedId) {
     return NextResponse.json({ error: "镜头不存在" }, { status: 404 });
   }
 
@@ -110,6 +120,9 @@ export async function POST(request: Request, context: RouteContext) {
   const shot =
     updated.activeStoryboard?.scenes
       .flatMap((scene) => scene.shots)
-      .find((item) => item.id === inserted.id) ?? inserted;
+      .find((item) => item.id === insertedId) ?? null;
+  if (!shot) {
+    return NextResponse.json({ error: "新建分镜失败" }, { status: 500 });
+  }
   return NextResponse.json({ production: updated, shot }, { status: 201 });
 }

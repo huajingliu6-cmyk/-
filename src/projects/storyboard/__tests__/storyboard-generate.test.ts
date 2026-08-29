@@ -5,8 +5,8 @@ import {
 } from "@/projects/storyboard/services/storyboard-generate";
 import type { AssetMatchItem } from "@/projects/storyboard/types";
 import {
+  STORYBOARD_SHOT_DURATION_MIN,
   STORYBOARD_VIDEO_DURATION_MAX,
-  STORYBOARD_VIDEO_DURATION_MIN,
 } from "@/projects/storyboard/storyboard-video-params";
 
 describe("storyboard-generate", () => {
@@ -31,7 +31,7 @@ describe("storyboard-generate", () => {
     },
   ];
 
-  it("generates 2-4 mock scenes with 2-4 shots each", () => {
+  it("generates scenes covering script lines without dropping shot content", () => {
     const script = [
       "场景：雨夜街道",
       "林清缓步走来。",
@@ -56,13 +56,21 @@ describe("storyboard-generate", () => {
     expect(doc.revision).toBe(1);
     expect(doc.generationJobId?.startsWith("mock_job_")).toBe(true);
     expect(doc.scenes.length).toBeGreaterThanOrEqual(2);
-    expect(doc.scenes.length).toBeLessThanOrEqual(4);
+    // Scene count follows script headers/paragraphs — no forced 2–4 clamp.
+    expect(doc.scenes.length).toBeLessThanOrEqual(8);
+    const allSource = doc.scenes
+      .flatMap((scene) => scene.shots)
+      .map((shot) => shot.sourceScriptText || "")
+      .join("\n");
+    expect(allSource).toContain("林清缓步走来。");
+    expect(allSource).toContain("她停下，望向远处。");
+    expect(allSource).toContain("林清说：「我们到了。」");
     for (const scene of doc.scenes) {
-      expect(scene.shots.length).toBeGreaterThanOrEqual(2);
-      expect(scene.shots.length).toBeLessThanOrEqual(4);
+      expect(scene.shots.length).toBeGreaterThanOrEqual(1);
       for (const shot of scene.shots) {
         expect(shot.promptLocked).toBe(false);
         expect(shot.locked).toBe(false);
+        expect((shot.sourceScriptText || "").trim().length).toBeGreaterThan(0);
       }
     }
     expect(doc.scenes[0]?.shots[0]?.characterAssetIds).toContain("c1");
@@ -72,9 +80,7 @@ describe("storyboard-generate", () => {
 
     for (const scene of doc.scenes) {
       for (const shot of scene.shots) {
-        expect(shot.durationSeconds).toBeGreaterThanOrEqual(
-          STORYBOARD_VIDEO_DURATION_MIN,
-        );
+        expect(shot.durationSeconds).toBe(STORYBOARD_SHOT_DURATION_MIN);
         expect(shot.durationSeconds).toBeLessThanOrEqual(
           STORYBOARD_VIDEO_DURATION_MAX,
         );
@@ -101,7 +107,7 @@ describe("storyboard-generate", () => {
       sourceAssetSnapshotHash: "h2",
       userId: "user_1",
     });
-    expect(doc.scenes.length).toBeGreaterThanOrEqual(2);
+    expect(doc.scenes.length).toBeGreaterThanOrEqual(1);
     expect(doc.sourceScriptHash).toBe("h1");
   });
 

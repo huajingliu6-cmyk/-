@@ -1,304 +1,197 @@
-# InfiniteCanvas 迭代交接单
+﻿# InfiniteCanvas 迭代交接单
 
-> 生成时间：2026-08-24  
-> 分支：`feat/react-flow-migration`  
-> 最近提交：`1fed45f` — `feat: overhaul asset library, extraction, and workspace sync`  
-> **工作区有大量未提交改动（约 100+ 文件），尚未 commit**
+> 更新时间：2026-08-29  
+> 分支：`feat/react-flow-migration`（已推送 `origin`）  
+> 版本标签：`V0.46`（内部通道 web 镜像 `deploy-web:V0.46`）
+> 基线提交：见本 tag 指向的 commit  
+> 远程：`https://github.com/huajingliu6-cmyk/-.git`
 
 ---
 
 ## 1. 给新 Agent 的一句话指令
 
-> 阅读本文件；确认 Docker Desktop 已运行；执行 `.\deploy\start-lan.ps1 -ForceRecreate` 重建 web；`.\deploy\check-lan.ps1` 通过后验收。优先处理：**AI 生图多参考图只能上传一张**（见 §6）。其次验收资产库「+」新建占位、单集资产提取名单选择流程。
+> 阅读本文件；**确认 Docker Desktop 已运行**；执行 `.\deploy\start-lan.ps1 -ForceRecreate` 拉起内部通道；`.\deploy\check-lan.ps1` 通过后验收。  
+> 分镜提示词生成已改为「仅时长/完整性硬阻断」，人物/资产/站位等问题只出 warning、仍写入提示词。历史 `generationError` 不会自动消失，需用户点击「重新生成分镜提示词」验证。
 
 ---
 
-## 2. 本轮会话已完成（工作区改动，未提交）
+## 2. 本轮已完成（已提交 `36ac84f`）
 
-### 2.1 资产库「+」按钮 → 新建占位（人物/场景/道具）
+### 2.1 分镜提示词校验：硬阻断 vs 软警告
 
-**问题**：点击造型/编辑区「+」会触发保存，而非新建空占位。
+**业务规则（当前生效）**
 
-**已改**：
+| 类型 | 规则 |
+|------|------|
+| **硬阻断** | Clip 总时长 13/14/15 秒；内部单段 1–6 秒；空提示词；时间轴无法解析；镜头 ID 丢失；裸 `assetId`；占位模板；JSON 解析失败 |
+| **软警告（不阻止保存）** | 无人物设计/未入库/无参考图/无挂载行/无图片引用/无站位/提示词未出现人物名/缺场景道具/缺连续性声音/镜头数建议不符/时间轴空档重叠等 |
 
-| 模块 | 文件 | 改动 |
-|------|------|------|
-| 人物造型 | `CharacterDetail.tsx` | `openCreateLookEditor` 移除 `onSave?.()`；新建 appearance 时 `promptOverride: ""`、`currentMediaId: null`；跳转到最后分页；`previewId: null`；`runWithPromptGuard` 包裹 onClick |
-| 人物提示词 | `CharacterDetail.tsx` | `appearancePromptScopeText`：无 `currentMediaId` 的编辑中造型不 fallback 到 `buildLookPromptPrefill`，右侧提示词为空 |
-| 场景 | `SceneDetail.tsx` | `addDraftVariant` 移除立即 `onPersist`；`setHeroMediaId(null)`、`setLightboxMediaId(null)` |
-| 道具 | `PropDetail.tsx` | 同场景 |
-| 测试 | `character-history-look-ui.test.ts` | 断言 `openCreateLookEditor` 不含 `onSave`；空提示词逻辑 |
-
-### 2.2 单集资产提取 → 名单选择再设计
-
-**期望流程**：
-1. 点击「提取本集资产」→ 扫描剧本发现资产名单
-2. 展示名单卡片，用户勾选要设计的资产
-3. 确认后后台与模型进行资产设计对话（`extracting_details`）
-4. 结果写入人物/场景/道具列表
-
-**已改/新增**：
+**关键文件**
 
 | 文件 | 职责 |
 |------|------|
-| `extraction/types.ts` | 新增 `awaiting_roster_selection` 状态与 progress phase |
-| `extraction/run-task.ts` | roster 发现完成后进入 `awaiting_roster_selection` 暂停 |
-| `extraction/confirm-roster.ts` | **新增** 用户确认选择后启动 detail 提取 |
-| `extraction/http.ts` | 接入 confirm roster API |
-| `extraction/public-task.ts` | 对外暴露 roster 供前端展示 |
-| `extraction/progress-view.ts` | 修复 TS：`awaiting_roster_selection` 映射到 stage；补充文案 |
-| `extraction/store.ts` | 持久化新状态 |
+| `storyboard-clip-types.ts` | `BLOCKING_CLIP_VALIDATION_CODES` / `SOFT_CLIP_WARNING_CODES` + `partitionClipValidationIssues` |
+| `storyboard-prompt-validation.ts` | 渲染后文本校验；`validateShotPromptPartitioned` |
+| `storyboard-clip-validator.ts` | 结构化 Clip 校验；人物绑定只进 warning |
+| `storyboard-clip-pipeline.ts` | 仅硬错误 `ok: false`；软问题合并进 `warnings` 并 `prompts.set` |
+| `storyboard-prompt-llm.ts` | LLM 后二次校验只对硬错误抛 `STORYBOARD_PROMPTS_RULE_VALIDATION_FAILED` |
+| `generate-storyboard-episode.ts` | 成功时 `generationError: null` 或软提示文案；状态 `storyboard_incomplete` |
+| `StoryboardProductionPanel.tsx` | 软提示黄色 banner，不再标红 `generation_failed` |
 
-**构建修复**：`confirm-roster.ts` 中 `nextTask` 类型收窄为 `never` 的问题已改为 `confirmedTask: AssetExtractionTask | undefined`。
+**软提示文案**：`提示词已生成，部分镜头缺少人物参考图，将使用文字描述生成`
 
-### 2.3 一栈式 Flow 导航
+**验收要点**
 
-| 改动 | 文件 |
-|------|------|
-| 进入一栈式后隐藏顶栏 | `nav.ts` `isOneStackFlowPath()` + `AuthenticatedAppShell.tsx` |
-| 移除「素材引擎」导航 | `space-navigation.ts` |
-| 重命名「一栈式Flow」 | `projects/page.tsx`、`ProjectStageNav.tsx` |
-| 筛选：全部 / 进行中 / 已完成 | `projects/page.tsx`（进行中 = draft + generating） |
-| 侧边栏与入口 | `AppSidebar.tsx`、`use-open-one-stack-flow.tsx` 等 |
+- 无人物资产 / 人物未设计 / 无站位 / 无参考图 → 成功写入提示词 + warning
+- Clip 12s 或 16s / 单段 >6s → 失败，不写入
+- 截图旧错误需重新点击「重新生成分镜提示词」才会清空
 
-### 2.4 个人中心（AI 生图 / 生视频）
+### 2.2 资产提取 runner 恢复 & 名单选择
 
-**新增模块** `src/personal/`：
+- `extraction/runner-lease.ts`、`resume.ts`、`cancel-task.ts`
+- `RosterSelectionDialog.tsx`、`roster-selection.ts`
+- 任务状态 `awaiting_roster_selection` → 用户确认后进 detail 提取
 
-| 路径 | 职责 |
-|------|------|
-| `ui/PersonalHubShell.tsx` | 个人中心壳（生图/生视频 Tab） |
-| `ui/PersonalImageWorkspace.tsx` | AI 生图工作区 |
-| `ui/PersonalImageReferenceStrip.tsx` | 参考图条（最多 6 张，`multiple` file input） |
-| `ui/PersonalVideoWorkspace.tsx` | AI 生视频工作区 |
-| `ui/PersonalVideoHistoryThumb.tsx` | 视频历史缩略图（poster 修复） |
-| `image-generation/` | 生图 API、store、constants |
-| `video-generation/` | 生视频 API、SD2 人物检验、poster-url |
+### 2.3 剧本下游 pipeline & 分镜生成引导
 
-**API 路由**：`src/app/api/personal/image-generations/`、`video-generations/`
+- `script-downstream-pipeline.ts` + API route
+- `generate-storyboard-episode.ts`、`ensure-storyboard-workspace.ts`
+- `StoryboardEpisodeStagePanel.tsx`、`episode-downstream-state.ts`
 
-**其他修复**：
-- 视频历史封面：`poster-url.ts` 区分视频 URL 与图片 poster
-- 视频下载按钮叠加在预览/历史卡片上
-- 个人视频人物检验改用 SD2 路由：`sd2-image-video-ref-precheck.ts`（与资产设计一致，非 Ark vision）
+### 2.4 人物音色 & 一栈式 Shell
 
-### 2.5 个人素材 & 素材市场
+- `CharacterVoiceSettings.tsx`、`VoicePickerPanel.tsx`、`/api/voices/*`
+- `ProjectFlowHeaderShell.tsx`、`ShellGlobalAccountBar.tsx`、`project-flow.ts`
 
-**新增模块**：
+### 2.5 测试
 
-| 路径 | 职责 |
-|------|------|
-| `src/personal-assets/` | 个人素材库（上传、列表、批量删除） |
-| `src/asset-market/` | 素材市场（浏览、预览、加入个人/项目/画布） |
-| `src/app/api/personal-assets/` | 个人素材 API |
-| `src/app/api/asset-market/` | 素材市场 API |
-| `src/auth/market-assets-permissions.ts` | 市场权限 |
-
-### 2.6 材料库调整
-
-`src/materials/` 多处改动：引用、个人素材选择器、catalog/citation store、API routes。
-
-### 2.7 LAN 部署
-
-- 2026-08-24 重建 web 成功（修复 TS 后 `LAN start complete`）
-- 首次失败原因：Docker Desktop 未启动
-- 第二次失败：`confirm-roster.ts`、`progress-view.ts` TS 错误
-- 第三次成功
+已通过（本轮相关）：
 
 ```powershell
-cd E:\DevWorkspace\projects\InfiniteCanvas\code\infinite-canvas
-# 确认 Docker Desktop 已运行
+npx vitest run src/projects/storyboard/__tests__/storyboard-clip-pipeline.test.ts
+npx vitest run src/projects/storyboard/__tests__/storyboard-prompt-validation.test.ts
+npx vitest run src/projects/storyboard/__tests__/storyboard-prompt-llm.test.ts
+```
+
+---
+
+## 3. 工作区未提交改动（小量）
+
+```
+M  src/projects/script/__tests__/script-downstream-pipeline.test.ts
+M  src/shell/__tests__/generation-busy-navigation.test.ts
+?? deploy/*.log
+?? tmp/
+```
+
+**勿提交**：`tmp/`、`deploy/*.log`、`.env.lan`
+
+---
+
+## 4. 内部通道（LAN）部署
+
+### 4.1 启动步骤
+
+```powershell
+Set-Location E:\DevWorkspace\projects\InfiniteCanvas\code\infinite-canvas
+
+# 1. 确认 Docker Desktop 已运行（否则 start-lan 会失败）
+Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"  # 如未启动
+# 等待 docker info 成功后再继续
+
+# 2. 重建并启动
 .\deploy\start-lan.ps1 -ForceRecreate
+
+# 3. 健康检查
 .\deploy\check-lan.ps1
 ```
+
+### 4.2 访问信息
 
 | 项 | 值 |
 |----|-----|
-| 端口 | `3080`（`.env.lan` 中 `WEB_PORT`） |
-| 访问 | `http://<本机LAN IP>:3080/`（`check-lan.ps1` 会打印） |
-| build-revision | `1fed45f-dirty`（含未提交改动） |
+| 端口 | `3080`（`deploy/.env.lan` 中 `WEB_PORT`） |
+| 本机 WLAN IP | `192.168.31.106`（以 `check-lan.ps1` 输出为准） |
+| 访问地址 | `http://192.168.31.106:3080/` |
+| build-revision | `36ac84f-dirty`（含未提交测试改动时带 `-dirty`） |
+| compose | `compose.remote.yml` + `compose.lan.override.yml` |
 
----
-
-## 3. 待处理 / 已知问题（优先级排序）
-
-### P0 — AI 生图只能上传一张参考图
-
-**用户反馈**：界面显示 `1/6`，但实际只能上传一张参考图。
-
-**已有代码**（逻辑上应支持多张）：
-- `PersonalImageReferenceStrip.tsx`：`multiple` file input + add 按钮
-- `personal-image-utils.ts`：`mergeReferenceFiles()` 合并到 max 6
-- `PersonalImageWorkspace.tsx`：`form.append("image", reference.file)` 循环 append
-- `generate-personal-image.ts`：`form.getAll("image")` 读取多张
-
-**排查方向**：
-1. 确认 LAN 镜像是否为最新（硬刷新 Ctrl+F5）
-2. 检查 CSS：`.personal-image-reference-slot--add` 是否被遮挡或不可点击
-3. 检查第二次点击 file input 是否触发 `onChange`（`event.target.value = ""` 重置）
-4. 检查是否有其他地方（如 toolbar）还有旧的单图上传逻辑覆盖
-5. 浏览器端：Windows 文件选择器是否只选了一张（`multiple` 属性是否生效）
-6. 运行测试：`npx vitest run src/personal/__tests__/personal-image-upload.test.ts`
-
-### P1 — 单集资产提取 UI 接线
-
-后端 `awaiting_roster_selection` + `confirm-roster.ts` 已就绪，需确认前端：
-- `AssetManagementWorkspace.tsx` / `EpisodeAssetDesignWorkspace.tsx` 是否展示 roster 选择卡片
-- 用户勾选后是否调用 confirm API
-- 设计对话完成后是否正确入库
-
-### P2 — 提交未 commit 的改动
-
-用户曾要求「提交最近所有改动」，后台 agent 可能未完成。当前 `git status` 仍有大量 M/?? 文件。
-
-**勿提交**：`tmp/`、`deploy/web-rebuild.log`、`deploy/web-up.log`、`.env.lan`
-
-### P3 — 预存测试失败
-
-```
-workspace-permission-routes.test.ts — 期望 workspaceProjectAssetsDesignPath，实际 redirect 到 libraryPath
-route-wiring.test.ts — workflow-forbidden 字符串不匹配
-asset-library-split-layout.test.ts — CSS max-height 期望值过时
-```
-
----
-
-## 4. 关键文件地图
-
-### 资产库 UI
-
-| 文件 | 职责 |
-|------|------|
-| `CharacterDetail.tsx` | 人物：主形象 + 造型 board + 历史 + lightbox |
-| `SceneDetail.tsx` | 场景：预览 + 场景编辑 board |
-| `PropDetail.tsx` | 道具：预览 + 道具编辑 board |
-| `LibraryAssetMediaGrid.tsx` | 场景/道具编辑区 grid |
-| `CompactPromptReferenceSlots.tsx` | 资产设计 3 槽参考图 |
-| `AssetManagementWorkspace.tsx` | 三 Tab 工作台 + 提取工具栏 |
-| `EpisodeAssetDesignWorkspace.tsx` | 单集资产设计大工作区 |
-| `AssetExtractionToolbar.tsx` | 「提取本集资产」按钮 |
-
-### 资产提取 pipeline
-
-| 文件 | 职责 |
-|------|------|
-| `extraction/run-task.ts` | 提取任务主流程 |
-| `extraction/confirm-roster.ts` | 用户确认名单 → 启动 detail 提取 |
-| `extraction/types.ts` | 状态机类型 |
-| `extraction/store.ts` | 持久化 |
-| `extraction/progress-view.ts` | 进度 UI 文案 |
-| `extraction/http.ts` | HTTP 路由处理 |
-
-### 个人中心
-
-| 文件 | 职责 |
-|------|------|
-| `personal/ui/PersonalHubShell.tsx` | 壳 |
-| `personal/ui/PersonalImageWorkspace.tsx` | 生图 |
-| `personal/ui/PersonalImageReferenceStrip.tsx` | 参考图条 |
-| `personal/ui/PersonalVideoWorkspace.tsx` | 生视频 |
-| `personal/image-generation/generate-personal-image.ts` | 生图服务端 |
-| `personal/video-generation/precheck-reference.ts` | SD2 人物检验 |
-
-### Shell / 导航
-
-| 文件 | 职责 |
-|------|------|
-| `shell/AuthenticatedAppShell.tsx` | 顶栏 / 侧边栏切换 |
-| `shell/AppSidebar.tsx` | 侧边栏（AI 生图/生视频/个人素材/素材市场/画布） |
-| `shell/nav.ts` | `isOneStackFlowPath()` |
-| `shell/space-navigation.ts` | 空间导航项 |
-| `shell/use-open-one-stack-flow.tsx` | 一栈式 Flow 入口 |
-
-### 部署
-
-| 文件 | 职责 |
-|------|------|
-| `deploy/start-lan.ps1` | 构建 web + 启动 gateway |
-| `deploy/check-lan.ps1` | 健康检查 |
-| `deploy/compose.lan.override.yml` | LAN 覆盖 |
-| `deploy/.env.lan` | 环境变量（**勿提交**） |
-
----
-
-## 5. 布局与交互约定
-
-### 资产库提示词面板（人物/场景/道具）
-
-1. 参考图 3 槽位（拖拽、个人素材、本地上传）
-2. 提示词标签 +「复制提示词」
-3. 文本编辑区
-4. 底部：生成参数 / 生成资产
-
-### 资产库「+」按钮（人物造型 / 场景编辑 / 道具编辑）
-
-- 点击「+」→ 新建空编辑占位（「编辑中」）
-- 右侧提示词清空，等待用户填写新生成提示词
-- **不触发保存**
-
-### 个人中心 AI 生图
-
-- 提示词 textarea 上方/下方：`PersonalImageReferenceStrip`（最多 6 张参考图）
-- 工具栏：比例 / 画质 / 模型 / 张数 +「开始生成」
-- 支持粘贴图片、拖拽到 prompt 区域
-
-### 单集资产提取
-
-1. 选剧集 → 点「提取本集资产」
-2. 扫描 → 展示资产名单卡片（`awaiting_roster_selection`）
-3. 用户勾选 → 确认
-4. 后台设计对话 → 写入各资产列表
-
----
-
-## 6. 常用命令
+### 4.3 仅重启（不重建镜像）
 
 ```powershell
-# PowerShell 勿用 &&，用 ;
-Set-Location E:\DevWorkspace\projects\InfiniteCanvas\code\infinite-canvas
-
-# 重建 web（需 Docker Desktop 运行）
-.\deploy\start-lan.ps1 -ForceRecreate
-
-# 严格重建（无缓存）
-.\deploy\start-lan.ps1 -Strict
-
-# 仅重启（不重建镜像）
 .\deploy\start-lan.ps1 -ForceRecreate -SkipBuild
+```
 
-# 健康检查
-.\deploy\check-lan.ps1
+### 4.4 严格重建（无缓存）
 
-# 测试
-npx vitest run src/projects/assets/__tests__/character-history-look-ui.test.ts
-npx vitest run src/personal/__tests__/personal-image-upload.test.ts
-npx vitest run src/personal/__tests__/personal-image-hub.test.ts
-npx vitest run src/shell/__tests__/one-stack-flow-entry.test.ts
+```powershell
+.\deploy\start-lan.ps1 -Strict
 ```
 
 ---
 
-## 7. Git 状态摘要
+## 5. 已知问题 / 待办
+
+### P0 — 验证分镜软校验上线
+
+1. 拉起 LAN 后硬刷新（Ctrl+F5）
+2. 进入分镜页 →「重新生成分镜提示词」
+3. 确认：人物缺失只出黄色 warning，不再 `generation_failed`
+4. 故意 12s Clip 仍应失败
+
+### P1 — 企业空间副本
+
+`infinite-canvas-enterprise-spaces` 为独立 worktree，**未同步**本轮分镜校验改动；若企业空间也跑分镜生成，需手动 cherry-pick 或合并 `36ac84f`。
+
+### P2 — 预存测试失败（历史）
+
+- `workspace-permission-routes.test.ts`
+- `route-wiring.test.ts`
+- `asset-library-split-layout.test.ts`
+
+---
+
+## 6. 关键路径速查
 
 ```
-HEAD: 1fed45f feat: overhaul asset library, extraction, and workspace sync
-工作区: ~47 modified + ~30+ untracked（personal/, personal-assets/, asset-market/, confirm-roster.ts 等）
-未提交: 用户曾要求 commit，可能未完成
+src/projects/storyboard/services/
+  storyboard-clip-types.ts          # 硬/软 code 分区
+  storyboard-clip-validator.ts
+  storyboard-clip-pipeline.ts
+  storyboard-prompt-validation.ts
+  storyboard-prompt-llm.ts
+  generate-storyboard-episode.ts
+
+src/projects/storyboard/components/
+  StoryboardProductionPanel.tsx     # 生成状态 UI
+
+deploy/
+  start-lan.ps1                     # 拉起内部通道
+  check-lan.ps1                     # 健康检查
+  HANDOVER.md                       # 本文件
 ```
 
-**建议 commit 范围**：排除 `tmp/`、`deploy/*.log`、`.env.lan`，包含其余功能改动。
+---
+
+## 7. Git
+
+```
+分支: feat/react-flow-migration
+远程: origin → https://github.com/huajingliu6-cmyk/-.git
+HEAD: 36ac84f (已 push)
+```
 
 ---
 
 ## 8. 验收清单
 
-- [ ] LAN `check-lan.ps1` 通过，浏览器硬刷新
-- [ ] 人物/场景/道具「+」新建占位 + 空提示词，不保存
-- [ ] 一栈式 Flow：顶栏隐藏、项目列表筛选、名称正确
-- [ ] 单集资产提取：名单卡片 → 选择 → 设计 → 入库
-- [ ] AI 生图：可上传多张参考图（最多 6）
-- [ ] AI 生视频：历史封面圆角、下载按钮叠加、SD2 人物检验
-- [ ] 个人素材 / 素材市场基本浏览
+- [ ] Docker Desktop 运行中
+- [ ] `.\deploy\start-lan.ps1 -ForceRecreate` 成功
+- [ ] `.\deploy\check-lan.ps1` 通过
+- [ ] 浏览器访问 `http://<LAN IP>:3080/` 可登录
+- [ ] 分镜：无人物资产仍可生成提示词（warning only）
+- [ ] 分镜：12s/16s 或单段 >6s 仍失败
+- [ ] 重新生成后历史红色 `generationError` 被清空
 
 ---
 

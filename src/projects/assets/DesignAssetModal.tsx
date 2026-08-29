@@ -370,11 +370,21 @@ function DesignAssetModalBody({
   const autoPromptKeyRef = useRef<string | null>(null);
   const appliedJobResultRef = useRef<string | null>(null);
   const generateInFlightRef = useRef(false);
+  /** Jobs started from this DesignAssetModal session (ignore sibling scope leftovers). */
+  const sessionStartedJobIdsRef = useRef<Set<string>>(new Set());
   const lastStatusRef = useRef<string | null>(null);
+  const claimSessionJob = useCallback(
+    (payload: { jobId?: string; job?: { id?: string } | null }) => {
+      const id = payload.jobId ?? payload.job?.id;
+      if (id) sessionStartedJobIdsRef.current.add(id);
+    },
+    [],
+  );
   useGenerationBusy(
     generateBusy || promptBusy,
     `design-modal-${item.id}`,
     promptBusy ? "资产提示词生成" : "资产图生成",
+    { projectId, kind: "generic" },
   );
   const [copyNote, setCopyNote] = useState("");
   const [paramsOpen, setParamsOpen] = useState(false);
@@ -431,21 +441,38 @@ function DesignAssetModalBody({
     onPromptUpdatedRef.current = onPromptUpdated;
   }, [onPromptUpdated]);
 
+  const onGenerationProgressRef = useRef(onGenerationProgress);
+  useEffect(() => {
+    onGenerationProgressRef.current = onGenerationProgress;
+  }, [onGenerationProgress]);
+
+  const clearProgressNow = useCallback(() => {
+    if (progressClearTimerRef.current != null) {
+      window.clearTimeout(progressClearTimerRef.current);
+      progressClearTimerRef.current = null;
+    }
+    setGenerationProgress(null);
+    onGenerationProgressRef.current?.(item.id, null);
+  }, [item.id]);
+
   useEffect(() => {
     return () => {
       if (progressClearTimerRef.current != null) {
         window.clearTimeout(progressClearTimerRef.current);
         progressClearTimerRef.current = null;
       }
+      // Drop host overlay on unmount — cancelling the clear timer otherwise
+      // leaves a stuck 0% / failed layer on the parent preview.
+      onGenerationProgressRef.current?.(item.id, null);
     };
-  }, []);
+  }, [item.id]);
 
   const reportProgress = useCallback(
     (progress: AssetGenerationProgress | null) => {
       setGenerationProgress(progress);
-      onGenerationProgress?.(item.id, progress);
+      onGenerationProgressRef.current?.(item.id, progress);
     },
-    [item.id, onGenerationProgress],
+    [item.id],
   );
 
   const scheduleProgressClear = useCallback(
@@ -456,10 +483,10 @@ function DesignAssetModalBody({
       progressClearTimerRef.current = window.setTimeout(() => {
         progressClearTimerRef.current = null;
         setGenerationProgress(null);
-        onGenerationProgress?.(item.id, null);
+        onGenerationProgressRef.current?.(item.id, null);
       }, delayMs);
     },
-    [item.id, onGenerationProgress],
+    [item.id],
   );
 
   const incomingMedia = item.generatedMedia;
@@ -1016,16 +1043,25 @@ function DesignAssetModalBody({
   useEffect(() => {
     const job = imageJob.job;
     if (!job) return;
+    const scopedEmpty =
+      /:(?:appearance|draft):/.test(item.id) &&
+      !item.generatedMedia?.currentId;
+    const sessionOwnsJob = sessionStartedJobIdsRef.current.has(job.id);
     if (job.status === "failed") {
+      if (appliedJobResultRef.current === job.id) return;
+      appliedJobResultRef.current = job.id;
       setGeneratingAsset(false);
       onGeneratingAssetChange?.(item.id, false);
+      // Empty appearance/draft scopes share the character job feed — don't
+      // surface a sibling main-image failure as this look's error toast.
+      if (scopedEmpty && !sessionOwnsJob) {
+        clearProgressNow();
+        return;
+      }
       if (job.errorMessage) setError(job.errorMessage);
-      reportProgress({
-        stage: "failed",
-        percent: 0,
-        message: job.errorMessage ?? "资产生成失败",
-      });
-      scheduleProgressClear(2200);
+      // Drop overlay immediately — a stuck 0% "failed" layer blocks the
+      // preview and pairs with generation-busy to make other pages feel frozen.
+      clearProgressNow();
       return;
     }
     if (job.status !== "succeeded" && job.status !== "save_failed") return;
@@ -1034,6 +1070,14 @@ function DesignAssetModalBody({
     // Look-editor jobs share the same character assetId. Never promote them
     // into the main-image panel / 主形象历史 — LibraryCharacterLookEditor owns linking.
     if (job.sourceEntry === "library_look") {
+      appliedJobResultRef.current = job.id;
+      setGeneratingAsset(false);
+      onGeneratingAssetChange?.(item.id, false);
+      return;
+    }
+    // New empty look/draft must not ingest the character's last main job —
+    // that flashes the hero, toasts「已生成」, and appends the wrong media.
+    if (scopedEmpty && !sessionOwnsJob) {
       appliedJobResultRef.current = job.id;
       setGeneratingAsset(false);
       onGeneratingAssetChange?.(item.id, false);
@@ -1056,11 +1100,10 @@ function DesignAssetModalBody({
     applyJobResultToUi(job, job.params.prompt);
   }, [
     applyJobResultToUi,
+    clearProgressNow,
     imageJob.job,
     item.id,
     onGeneratingAssetChange,
-    reportProgress,
-    scheduleProgressClear,
   ]);
 
   const handleGenerate = useCallback(async (opts?: {
@@ -1226,8 +1269,25 @@ function DesignAssetModalBody({
         throw new Error("服务器没有返回有效数据，请稍后重试。");
       }
       if (!res.ok) {
-        if (payload.code === "GENERATION_IN_PROGRESS" && (payload.jobId || payload.job)) {
+        // Attach to the in-flight job and keep generating UI — do not throw into
+        // the failed/0% path while generationBlocked stays true (nav freeze).
+        if (
+          payload.code === "GENERATION_IN_PROGRESS" &&
+          (payload.jobId || payload.job)
+        ) {
+          appliedJobResultRef.current = null;
+          claimSessionJob(payload);
           imageJob.beginFromGenerateResponse(payload);
+          reportProgress({
+            stage: "generating",
+            percent: 45,
+            message: "正在生成图片",
+          });
+          setNotice(payload.error ?? "该素材正在生成中，请等待完成。");
+          if (isMultiAngle) {
+            setMultiAngleSelect(MULTI_ANGLE_NONE);
+          }
+          return;
         }
         throw new Error(
           payload.error ??
@@ -1240,6 +1300,7 @@ function DesignAssetModalBody({
         throw new Error("生成接口未返回异步任务，请刷新后重试");
       }
       appliedJobResultRef.current = null;
+      claimSessionJob(payload);
       imageJob.beginFromGenerateResponse(payload);
       reportProgress({
         stage: "generating",
@@ -1254,8 +1315,7 @@ function DesignAssetModalBody({
     } catch (e) {
       const message = e instanceof Error ? e.message : "资产生成失败";
       setError(message);
-      reportProgress({ stage: "failed", percent: 0, message });
-      scheduleProgressClear(2200);
+      clearProgressNow();
       if (isMultiAngle) {
         setMultiAngleSelect(MULTI_ANGLE_NONE);
       }
@@ -1282,7 +1342,8 @@ function DesignAssetModalBody({
     showLibraryCompactReferences,
     onGeneratingAssetChange,
     reportProgress,
-    scheduleProgressClear,
+    clearProgressNow,
+    claimSessionJob,
   ]);
 
   const handleMultiAngleChange = useCallback(

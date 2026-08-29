@@ -18,7 +18,6 @@ import type { InvalidRefScanResult } from "@/projects/storyboard/invalid-refs/ty
 import { storyboardNeedsLibraryRematch } from "@/projects/storyboard/services/shot-library-match";
 import type { PickerAsset } from "@/projects/storyboard/components/ProjectAssetPickerDialog";
 import { EpisodeSidebar } from "@/projects/storyboard/components/EpisodeSidebar";
-import { StoryboardGlobalSettingsDialog } from "@/projects/storyboard/components/StoryboardGlobalSettingsDialog";
 import { StoryboardProductionPanel } from "@/projects/storyboard/components/StoryboardProductionPanel";
 import type {
   AssetsSummary,
@@ -31,7 +30,6 @@ import {
   getPromptGenerationSnapshot,
   releaseQueuedPromptGenerationOnPageLeave,
   resolveEpisodePromptGenDisplayStatus,
-  STORYBOARD_PROMPT_GEN_MAX_CONCURRENT,
   subscribePromptGeneration,
   syncPromptGenerationFromProduction,
 } from "@/projects/storyboard/prompt-generation-manager";
@@ -111,7 +109,6 @@ export function StoryboardCreationWorkspace({
   const [saveNote, setSaveNote] = useState("");
   const [switchingEpisode, setSwitchingEpisode] = useState(false);
   const [scriptDraft, setScriptDraft] = useState<string | null>(null);
-  const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [savingGlobalSettings, setSavingGlobalSettings] = useState(false);
   const [invalidRefScan, setInvalidRefScan] =
     useState<InvalidRefScanResult | null>(null);
@@ -124,6 +121,9 @@ export function StoryboardCreationWorkspace({
   const [repairFocusShotId, setRepairFocusShotId] = useState<string | null>(
     null,
   );
+  const [dismissedPipelineBannerKey, setDismissedPipelineBannerKey] = useState<
+    string | null
+  >(null);
 
   const activeEpisodeId = workspace?.activeEpisodeId ?? null;
   const productions = workspace?.productions ?? [];
@@ -131,11 +131,6 @@ export function StoryboardCreationWorkspace({
     () => toPickerAssets(assetsSummary),
     [assetsSummary],
   );
-
-  const promptQueueHint =
-    promptSnap.generatingCount > 0 || promptSnap.queuedCount > 0
-      ? `（生成中 ${promptSnap.generatingCount}/${STORYBOARD_PROMPT_GEN_MAX_CONCURRENT}，等待 ${promptSnap.queuedCount}）`
-      : "";
 
   const refreshInvalidRefs = useCallback(
     async (episodeId: string | null) => {
@@ -454,11 +449,10 @@ export function StoryboardCreationWorkspace({
           ...(activeEpisodeId ? { activeEpisodeId } : {}),
         });
         setWorkspace(saved);
-        setGlobalSettingsOpen(false);
-        setSaveNote("全局设置已保存。");
+        setSaveNote("视频默认参数已保存。");
       } catch (err) {
         setSaveNote(
-          err instanceof Error ? err.message : "保存全局设置失败，请稍后重试",
+          err instanceof Error ? err.message : "保存视频默认参数失败，请稍后重试",
         );
       } finally {
         setSavingGlobalSettings(false);
@@ -544,26 +538,47 @@ export function StoryboardCreationWorkspace({
   return (
     <div className="sbw">
       <div className="sbw-inner">
-        {!pipeline.loading && pipeline.extractingAssets ? (
-          <p
-            className="sbw-pipeline-banner"
-            role="status"
-            data-testid="storyboard-extracting-banner"
-          >
-            {pipeline.message || "资产提取中…"}
-          </p>
-        ) : null}
-        {!pipeline.loading &&
-        pipeline.phase === "generating_storyboard" &&
-        pipeline.message ? (
-          <p
-            className="sbw-pipeline-banner"
-            role="status"
-            data-testid="storyboard-pipeline-banner"
-          >
-            {pipeline.message}
-          </p>
-        ) : null}
+        {(() => {
+          if (pipeline.loading) return null;
+          let bannerKey: string | null = null;
+          let bannerText = "";
+          let testId = "storyboard-pipeline-banner";
+          if (pipeline.extractingAssets) {
+            bannerKey = `extracting:${pipeline.message || "资产提取中"}`;
+            bannerText = pipeline.message || "资产提取中…";
+            testId = "storyboard-extracting-banner";
+          } else if (
+            pipeline.phase === "generating_storyboard" &&
+            pipeline.message
+          ) {
+            bannerKey = `generating:${pipeline.message}`;
+            bannerText = pipeline.message;
+          } else if (pipeline.phase === "ready" && pipeline.message) {
+            bannerKey = `ready:${pipeline.message}`;
+            bannerText = pipeline.message;
+          }
+          if (!bannerKey || dismissedPipelineBannerKey === bannerKey) {
+            return null;
+          }
+          return (
+            <div
+              className="sbw-pipeline-banner"
+              role="status"
+              data-testid={testId}
+            >
+              <span className="sbw-pipeline-banner__text">{bannerText}</span>
+              <button
+                type="button"
+                className="sbw-pipeline-banner__dismiss"
+                aria-label="关闭提示"
+                data-testid="storyboard-pipeline-banner-dismiss"
+                onClick={() => setDismissedPipelineBannerKey(bannerKey)}
+              >
+                ×
+              </button>
+            </div>
+          );
+        })()}
         <div className="sbw-layout">
           <EpisodeSidebar
             episodes={episodes}
@@ -607,21 +622,16 @@ export function StoryboardCreationWorkspace({
               onNote={setSaveNote}
               onScriptDraftChange={setScriptDraft}
               videoDefaults={workspace?.videoDefaults}
+              onVideoDefaultsChange={(next) => void handleSaveGlobalSettings(next)}
+              videoDefaultsSaving={savingGlobalSettings}
               promptGenStatus={activePromptStatus}
               promptGenError={
                 promptSnap.jobs[production.episodeId]?.error ||
                 production.generationError ||
                 undefined
               }
-              promptQueueHint={promptQueueHint}
-              onOpenGlobalSettings={() => setGlobalSettingsOpen(true)}
               pageSaveNote={
-                [
-                  saveNote,
-                  error,
-                  promptQueueHint,
-                  downstreamLoading ? "正在同步本集阶段状态…" : "",
-                ]
+                [saveNote, error, downstreamLoading ? "正在同步本集阶段状态…" : ""]
                   .filter(Boolean)
                   .join(" · ") || undefined
               }
@@ -651,14 +661,6 @@ export function StoryboardCreationWorkspace({
           }}
         />
       </div>
-
-      <StoryboardGlobalSettingsDialog
-        open={globalSettingsOpen}
-        initial={workspace?.videoDefaults}
-        saving={savingGlobalSettings}
-        onClose={() => setGlobalSettingsOpen(false)}
-        onSave={handleSaveGlobalSettings}
-      />
     </div>
   );
 }

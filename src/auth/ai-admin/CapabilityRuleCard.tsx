@@ -387,9 +387,24 @@ export function CapabilityRuleCard({
         throw new Error("草稿已被更新，已重新加载最新内容，请核对后再次发布");
       }
       if (!res.ok) throw new Error(payload.error ?? "发布失败");
-      await reloadDetail();
+      const publishedVersion = payload.version ?? null;
+      const detailAfter = await reloadDetail();
+      if (
+        detailAfter.effective?.source !== "custom" ||
+        detailAfter.effective?.version !== publishedVersion ||
+        publishedVersion == null
+      ) {
+        const actual =
+          detailAfter.effective?.source === "custom" &&
+          detailAfter.effective.version != null
+            ? `自定义 v${detailAfter.effective.version}`
+            : "内置规则";
+        throw new Error(
+          `发布校验失败：期望自定义 v${publishedVersion ?? "?"}，实际为 ${actual}。请勿提示发布成功。`,
+        );
+      }
       onSummaryRefresh();
-      reportOk(`已发布 v${payload.version ?? "?"}：${summary.label}`);
+      reportOk(`已发布 v${publishedVersion}：${summary.label}`);
     } catch (err) {
       reportErr(err instanceof Error ? err.message : "发布失败");
     } finally {

@@ -52,7 +52,7 @@ export function LibraryAssetMediaGrid({
   variants,
   canEdit,
   busy = false,
-  heroMediaId,
+  heroMediaId: _heroMediaId,
   activeVariantSlotId,
   onSelectMain,
   onAdd,
@@ -62,10 +62,7 @@ export function LibraryAssetMediaGrid({
   dragAssetName = "",
 }: Props) {
   const [variantPage, setVariantPage] = useState(0);
-  const mainActive =
-    !activeVariantSlotId &&
-    Boolean(primaryMediaId) &&
-    (heroMediaId === primaryMediaId || !heroMediaId);
+  const mainActive = !activeVariantSlotId;
   const totalPages = Math.max(1, Math.ceil(variants.length / VARIANTS_PER_PAGE));
   const safePage = Math.min(variantPage, totalPages - 1);
   const pagedVariants = variants.slice(
@@ -92,6 +89,9 @@ export function LibraryAssetMediaGrid({
             <button
               type="button"
               className="character-look-card__media"
+              data-testid={`${testIdPrefix}-main-board-select`}
+              aria-label={`选择${resolvedMainLabel}`}
+              title={`选择${resolvedMainLabel}`}
               onClick={onSelectMain}
             >
               {primaryMediaId ? (

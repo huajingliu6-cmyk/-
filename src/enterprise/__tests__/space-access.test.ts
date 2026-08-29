@@ -15,7 +15,7 @@ describe("enterprise space route guard", () => {
     expect(resolveSpaceRedirect("/app/enterprise-assets", { kind: "personal" })).toBeNull();
   });
 
-  it.each(["/app/projects", "/app/materials", "/app/guide", "/app/asset-market"])(
+  it.each(["/app/projects", "/app/personal-assets", "/app/guide", "/app/asset-market"])(
     "keeps personal routes accessible: %s",
     (pathname) => {
       expect(resolveSpaceRedirect(pathname, { kind: "personal" })).toBeNull();

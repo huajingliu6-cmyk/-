@@ -10,11 +10,20 @@ export const MARKET_ASSET_CATEGORIES: MarketAssetCategory[] = [
   "prop",
 ];
 
-export const MARKET_CATEGORY_LABELS: Record<MarketAssetCategory, string> = {
+/** Browse tabs including system voices (not backed by materials catalog). */
+export const MARKET_BROWSE_CATEGORIES = [
+  ...MARKET_ASSET_CATEGORIES,
+  "voice",
+] as const;
+
+export type MarketBrowseCategory = (typeof MARKET_BROWSE_CATEGORIES)[number];
+
+export const MARKET_CATEGORY_LABELS: Record<MarketBrowseCategory, string> = {
   character: "角色形象",
   clothing: "衣服商城",
   scene: "常用场景",
   prop: "常用道具",
+  voice: "音色",
 };
 
 export const MARKET_ASSET_PAGE_SIZE_DEFAULT = 32;

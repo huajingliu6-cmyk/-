@@ -121,7 +121,7 @@
   gap: 10px;
   width: 100%;
   min-height: 42px;
-  border: 1px solid transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   padding: 0 12px;
   color: rgba(255, 255, 255, 0.68);
@@ -138,12 +138,13 @@ button.app-sidebar__item {
 }
 
 .app-sidebar__item:hover {
+  border-color: rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.04);
   color: rgba(255, 255, 255, 0.9);
 }
 
 .app-sidebar__item.is-active {
-  border-color: rgba(124, 58, 237, 0.35);
+  border-color: rgba(139, 92, 246, 0.65);
   background: rgba(124, 58, 237, 0.14);
   color: #fff;
 }

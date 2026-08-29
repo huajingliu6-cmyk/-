@@ -34,8 +34,8 @@ import { wrapWriteFailure } from "@/projects/operation-failed";
 import { operationDigest } from "@/projects/stable-digest";
 import { parseSceneCharacterPlacements } from "@/projects/storyboard/scene-character-placements";
 import {
-  parseDurationSecondsFromVideoPrompt,
   parseStoryboardVideoDefaults,
+  STORYBOARD_SHOT_DURATION_MIN,
 } from "@/projects/storyboard/storyboard-video-params";
 
 export const PRODUCTION_REVISION_REQUIRED = "PRODUCTION_REVISION_REQUIRED";
@@ -263,6 +263,20 @@ function uniqueParsedIds(
   return out;
 }
 
+function parseShotDurationSeconds(raw: unknown): number {
+  // Preserve explicit historical values (including legacy 5s).
+  // Only absent/invalid values fall back to clip default 13.
+  // One-shot upgrade: migrateLegacyFiveSecondShotDurations().
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+    return Math.round(raw);
+  }
+  if (typeof raw === "string" && raw.trim()) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) return Math.round(n);
+  }
+  return STORYBOARD_SHOT_DURATION_MIN;
+}
+
 function parseStoryboardShot(raw: unknown): StoryboardShot | null {
   if (!isRecord(raw) || typeof raw.id !== "string") return null;
   const promptDraft = asString(raw.promptDraft);
@@ -275,13 +289,10 @@ function parseStoryboardShot(raw: unknown): StoryboardShot | null {
         .map((item) => parseShotRequirement(item))
         .filter((item): item is ShotAssetRequirement => item !== null)
     : [];
-  const promptText = videoPrompt || promptDraft;
-  const durationFromPrompt = parseDurationSecondsFromVideoPrompt(promptText);
   return {
     id: raw.id,
     shotNumber: Math.max(1, Math.round(asNumber(raw.shotNumber, 1))),
-    durationSeconds:
-      durationFromPrompt ?? Math.max(0, asNumber(raw.durationSeconds, 5)),
+    durationSeconds: parseShotDurationSeconds(raw.durationSeconds),
     shotSize: asString(raw.shotSize, "中景"),
     cameraAngle: asString(raw.cameraAngle, "平视"),
     cameraMovement: asString(raw.cameraMovement, "固定"),
@@ -289,6 +300,20 @@ function parseStoryboardShot(raw: unknown): StoryboardShot | null {
     visualDescription: asString(raw.visualDescription),
     actionDescription: asString(raw.actionDescription),
     dialogue: asString(raw.dialogue),
+    sourceScriptText: (() => {
+      const explicit = asString(raw.sourceScriptText);
+      if (explicit.trim()) return explicit;
+      // Legacy fallback: reconstruct from truncated display fields (best-effort).
+      const joined = [
+        asString(raw.visualDescription),
+        asString(raw.actionDescription),
+        asString(raw.dialogue),
+      ]
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .join("\n");
+      return joined || undefined;
+    })(),
     soundEffect: asString(raw.soundEffect),
     music: asString(raw.music),
     shotSummary: asString(raw.shotSummary),

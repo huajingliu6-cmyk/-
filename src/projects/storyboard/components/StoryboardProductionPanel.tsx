@@ -10,7 +10,6 @@ import {
   deleteStoryboardShot,
   StoryboardConfirmIncompleteError,
 } from "@/projects/storyboard/api-client";
-import { EpisodeVideoGenerationButton } from "@/projects/storyboard/components/EpisodeVideoGenerationButton";
 import { ShotSceneRequiredDialog } from "@/projects/storyboard/components/ShotSceneRequiredDialog";
 import { StoryboardShotAccordion } from "@/projects/storyboard/components/StoryboardShotAccordion";
 import { StoryboardPlaybackBar } from "@/projects/storyboard/components/StoryboardPlaybackBar";
@@ -19,6 +18,7 @@ import { StoryboardEmptyTimeline } from "@/projects/storyboard/components/Storyb
 import { StoryboardEpisodeStagePanel } from "@/projects/storyboard/components/StoryboardEpisodeStagePanel";
 import { StoryboardWorkspaceShell } from "@/projects/storyboard/components/StoryboardWorkspaceShell";
 import { ShotAssetCard } from "@/projects/storyboard/components/ShotAssetCard";
+import { ShotVideoOutputParams } from "@/projects/storyboard/components/ShotVideoOutputParams";
 import type { PickerAsset } from "@/projects/storyboard/components/ProjectAssetPickerDialog";
 import {
   VideoGenerationConfirmationDialog,
@@ -36,6 +36,10 @@ import {
   STORYBOARD_VIDEO_ASPECT_RATIO,
   STORYBOARD_VIDEO_RESOLUTION,
 } from "@/projects/storyboard/storyboard-video-constants";
+import {
+  defaultStoryboardVideoDefaults,
+  sumStoryboardDurationSeconds,
+} from "@/projects/storyboard/storyboard-video-params";
 import { useGenerationBusy } from "@/shell/GenerationBusyGuard";
 import { safeRandomUUID } from "@/lib/safe-random-id";
 
@@ -50,10 +54,14 @@ type Props = {
   canGenerateVideo?: boolean;
   /** 项目级视频默认；单镜头可覆盖 */
   videoDefaults?: import("@/projects/storyboard/storyboard-video-params").StoryboardVideoDefaults | null;
+  onVideoDefaultsChange?: (
+    next: import("@/projects/storyboard/storyboard-video-params").StoryboardVideoDefaults,
+  ) => void | Promise<void>;
+  videoDefaultsSaving?: boolean;
   /** 本集提示词生成展示状态 */
   promptGenStatus?: import("@/projects/storyboard/prompt-generation-manager").EpisodePromptGenUiStatus;
+  /** @deprecated 失败文案已改走消息通知；保留字段以免调用方报错 */
   promptGenError?: string;
-  promptQueueHint?: string;
   /** 本集下游阶段（资产 / 分镜提示词） */
   episodeDownstream?: import("@/projects/storyboard/episode-downstream-state").EpisodeDownstreamStatus | null;
   episodeNumber?: number;
@@ -65,7 +73,6 @@ type Props = {
   regenerateBusy?: boolean;
   assetsHref?: string;
   designHref?: string;
-  onOpenGlobalSettings?: () => void;
   pageSaveNote?: string;
   /** Q80–Q84 invalid reference scan for current episode (and project when repaired). */
   invalidRefScan?: import("@/projects/storyboard/invalid-refs/types").InvalidRefScanResult | null;
@@ -82,9 +89,10 @@ export function StoryboardProductionPanel({
   onScriptDraftChange,
   canGenerateVideo = true,
   videoDefaults = null,
+  onVideoDefaultsChange,
+  videoDefaultsSaving = false,
   promptGenStatus = "idle",
-  promptGenError,
-  promptQueueHint,
+  promptGenError: _promptGenError,
   episodeDownstream = null,
   episodeNumber = 1,
   episodeTitle = null,
@@ -95,7 +103,6 @@ export function StoryboardProductionPanel({
   regenerateBusy = false,
   assetsHref = "",
   designHref,
-  onOpenGlobalSettings,
   pageSaveNote,
   invalidRefScan = null,
   onOpenInvalidRefsRepair,
@@ -142,7 +149,7 @@ export function StoryboardProductionPanel({
   );
   const shotCount = flat.length;
   const totalDuration = useMemo(
-    () => flat.reduce((sum, row) => sum + row.shot.durationSeconds, 0),
+    () => sumStoryboardDurationSeconds(flat.map((row) => row.shot)),
     [flat],
   );
   const confirmed = production.status === "storyboard_done";
@@ -198,35 +205,15 @@ export function StoryboardProductionPanel({
           onProductionChange(latest);
         }
         if (latest.status !== "storyboard_generating") {
+          // Progress / soft-warning / failure copy is delivered via in-app
+          // notifications; avoid duplicating long banners in the workspace.
           if (
             latest.status === "storyboard_incomplete" ||
             latest.status === "storyboard_done"
           ) {
-            if (
-              latest.generationError?.includes("已生成") &&
-              latest.generationError.includes("未匹配")
-            ) {
-              setPanelNote(latest.generationError);
-              onNote(latest.generationError);
-            } else if (
-              latest.generationError?.includes("缺少人物参考图") ||
-              latest.generationError?.includes("将使用文字描述生成")
-            ) {
-              setPanelNote(latest.generationError);
-              onNote(latest.generationError);
-            } else {
-              setPanelNote("分镜提示词生成完成，请完善提示词与镜头素材。");
-              onNote("分镜提示词生成完成。");
-            }
-          } else if (
-            latest.status === "generation_failed" &&
-            latest.generationError
-          ) {
-            const note = latest.generationError.includes("本次生成未写入")
-              ? latest.generationError
-              : `生成失败：${latest.generationError}`;
-            setPanelNote(note);
-            onNote(note);
+            setPanelNote("");
+          } else if (latest.status === "generation_failed") {
+            setPanelNote("");
           }
         }
       } catch {
@@ -251,6 +238,15 @@ export function StoryboardProductionPanel({
     setActiveShotId(flat[0]?.shot.id ?? null);
     setFocusShotId(null);
   }
+
+  useEffect(() => {
+    if (!storyboard || flat.length === 0) return;
+    if (activeShotId && flat.some((row) => row.shot.id === activeShotId)) {
+      return;
+    }
+    setActiveShotId(flat[0]!.shot.id);
+    setFocusShotId(null);
+  }, [storyboard, flat, activeShotId]);
 
   const episodeVideoEnabled = useMemo(() => {
     if (!storyboard || !canGenerateVideo) {
@@ -714,10 +710,7 @@ export function StoryboardProductionPanel({
           data-testid="storyboard-workspace-generating"
           aria-live="polite"
         >
-          {promptGenStatus === "queued"
-            ? "本集提示词排队等待生成中…"
-            : "本集分镜提示词生成中（约 1–3 分钟），可切换其它剧集继续编辑。"}
-          {promptQueueHint ? ` ${promptQueueHint}` : ""}
+          分镜提示词生成中，进度请查看右上角消息通知。
         </div>
       ) : displayScript.trim() ? (
         <pre className="sbw-pre" data-testid="storyboard-script-preview">
@@ -756,24 +749,14 @@ export function StoryboardProductionPanel({
           ) : null}
         </div>
         <div className="sbw-panel__head-actions">
-          {onOpenGlobalSettings ? (
-            <button
-              type="button"
-              className="sbw-btn"
-              data-testid="storyboard-global-settings-btn"
-              onClick={onOpenGlobalSettings}
-            >
-              全局设置
-            </button>
-          ) : null}
-          {storyboard ? (
-            <EpisodeVideoGenerationButton
-              enabled={episodeVideoEnabled}
-              disabledReason={episodeVideoDisabledReason}
-              busy={batchBusy}
-              onClick={handleRequestBatchGenerate}
-            />
-          ) : null}
+          <ShotVideoOutputParams
+            mode="defaults"
+            value={videoDefaults ?? defaultStoryboardVideoDefaults()}
+            disabled={videoDefaultsSaving}
+            onChange={(next) => {
+              void onVideoDefaultsChange?.(next);
+            }}
+          />
         </div>
       </div>
 
@@ -808,74 +791,6 @@ export function StoryboardProductionPanel({
                 修复
               </button>
             ) : null}
-          </div>
-        ) : null}
-
-        {production.status === "generation_failed" &&
-        (production.generationError || promptGenError) ? (
-          <div className="sbw-banner is-error">
-            生成失败：{promptGenError || production.generationError}
-          </div>
-        ) : null}
-
-        {production.status !== "generation_failed" &&
-        production.generationError?.includes("已生成") &&
-        production.generationError.includes("未匹配") ? (
-          <div
-            className="sbw-banner"
-            data-testid="episode-prompt-gen-partial"
-            aria-live="polite"
-          >
-            {production.generationError}
-          </div>
-        ) : null}
-
-        {production.status !== "generation_failed" &&
-        (production.generationError?.includes("缺少人物参考图") ||
-          production.generationError?.includes("将使用文字描述生成")) ? (
-          <div
-            className="sbw-banner is-warning"
-            data-testid="episode-prompt-gen-media-warnings"
-            aria-live="polite"
-          >
-            {production.generationError}
-            {storyboard?.scenes
-              .flatMap((scene) => scene.shots)
-              .some((shot) => (shot.storyboardPromptWarnings?.length ?? 0) > 0) ? (
-              <details className="sbw-prompt-warnings">
-                <summary>展开缺失素材</summary>
-                <ul>
-                  {storyboard.scenes
-                    .flatMap((scene) => scene.shots)
-                    .flatMap((shot) =>
-                      (shot.storyboardPromptWarnings ?? []).map((warning) => (
-                        <li key={`${shot.id}-${warning.code}-${warning.message}`}>
-                          镜头{shot.shotNumber}：{warning.message}
-                        </li>
-                      )),
-                    )}
-                </ul>
-              </details>
-            ) : null}
-          </div>
-        ) : null}
-
-        {promptGenStatus === "failed" && promptGenError ? (
-          <div className="sbw-banner is-error" data-testid="episode-prompt-gen-failed">
-            本集提示词生成失败：{promptGenError}
-          </div>
-        ) : null}
-
-        {isGenerating && storyboard ? (
-          <div
-            className="sbw-banner"
-            data-testid="episode-prompt-gen-busy"
-            aria-live="polite"
-          >
-            {promptGenStatus === "queued"
-              ? "本集提示词排队等待生成中…"
-              : "本集分镜提示词生成中（约 1–3 分钟），可切换其它剧集继续编辑。"}
-            {promptQueueHint ? ` ${promptQueueHint}` : ""}
           </div>
         ) : null}
 

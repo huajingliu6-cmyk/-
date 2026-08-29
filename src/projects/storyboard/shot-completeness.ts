@@ -6,8 +6,6 @@ import type {
 } from "@/projects/storyboard/types";
 import { normalizeAssetName } from "@/projects/storyboard/hash";
 import { placementsFingerprintPayload } from "@/projects/storyboard/scene-character-placements";
-import { isStoryboardPromptRuleExpired } from "@/projects/storyboard/services/storyboard-prompt-validation";
-
 export function getShotVideoPrompt(shot: StoryboardShot): string {
   return shot.videoPrompt?.trim() || shot.promptDraft?.trim() || "";
 }
@@ -330,7 +328,6 @@ export function getShotCompletenessStatus(
     return "needs_prompt";
   }
   if (!getShotVideoPrompt(shot)) return "needs_prompt";
-  if (isStoryboardPromptRuleExpired(shot)) return "needs_prompt";
   if (shot.promptLocked || shot.locked) {
     if (areShotAssetsComplete(shot)) return "locked";
   }

@@ -1,31 +1,28 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, Suspense } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
-  Cable,
   CheckCircle2,
-  ClipboardCheck,
-  Gauge,
-  History,
   LockKeyhole,
   RefreshCw,
-  Route,
   ShieldCheck,
 } from "lucide-react";
-import { AssetApprovalsHistoryTab } from "@/auth/ai-admin/AssetApprovalsHistoryTab";
-import { TextGenerationsHistoryTab } from "@/auth/ai-admin/TextGenerationsHistoryTab";
-import { AdminOverview } from "@/auth/ai-admin/AdminOverview";
 import { CapabilityRoutingView } from "@/auth/ai-admin/CapabilityRoutingView";
 import { ModelConnectionsView } from "@/auth/ai-admin/ModelConnectionsView";
+import { MaterialsAdminPage } from "@/materials/ui/MaterialsAdminPage";
+import { SystemVoicesAdminPanel } from "@/projects/assets/SystemVoicesAdminPanel";
 import type { AuthUser } from "@/auth/types";
 import { APP_SHELL_ROOT } from "@/shell/nav";
 import {
+  adminPrimaryView,
+  type AdminPrimaryView,
   type AdminView,
   resolveAdminInitialView,
 } from "@/auth/ai-admin/admin-view";
 import "@/auth/ai-admin/admin-console.css";
+import "@/materials/materials.css";
 
 export type { AdminView };
 export { resolveAdminInitialView };
@@ -35,87 +32,42 @@ type AdminConsoleProps = {
   user: AuthUser;
 };
 
-const VIEW_META: Record<AdminView, { title: string; subtitle: string }> = {
-  overview: { title: "运行概览", subtitle: "服务、业务能力与任务健康度" },
-  connections: { title: "API 连接", subtitle: "统一管理模型服务的接入配置" },
-  routes: { title: "能力线路", subtitle: "查看业务功能最终调用的模型服务" },
-  generations: { title: "生成记录", subtitle: "任务状态、用量与失败详情" },
-  approvals: { title: "素材审批", subtitle: "素材提交与审核记录" },
-};
+const VIEW_META: Record<AdminPrimaryView, { title: string; subtitle: string }> =
+  {
+    api: { title: "API 配置", subtitle: "模型接入、能力线路与配置状态" },
+    materials: { title: "素材管理", subtitle: "公共素材目录与系统音色" },
+  };
 
-const NAV_GROUPS: Array<{
+const ADMIN_TOP_TABS: Array<{
+  id: AdminPrimaryView;
   label: string;
-  items: Array<{
-    id: AdminView;
-    label: string;
-    description: string;
-    icon: typeof Gauge;
-  }>;
+  testId: string;
 }> = [
-  {
-    label: "运行中心",
-    items: [
-      {
-        id: "overview",
-        label: "运行概览",
-        description: "服务与任务健康度",
-        icon: Gauge,
-      },
-    ],
-  },
-  {
-    label: "AI 服务",
-    items: [
-      {
-        id: "connections",
-        label: "API 连接",
-        description: "地址、模型与密钥",
-        icon: Cable,
-      },
-      {
-        id: "routes",
-        label: "能力线路",
-        description: "业务功能实际走向",
-        icon: Route,
-      },
-    ],
-  },
-  {
-    label: "记录与审核",
-    items: [
-      {
-        id: "generations",
-        label: "生成记录",
-        description: "任务、用量与异常",
-        icon: History,
-      },
-      {
-        id: "approvals",
-        label: "素材审批",
-        description: "提交与审核留痕",
-        icon: ClipboardCheck,
-      },
-    ],
-  },
+  { id: "api", label: "API 配置", testId: "admin-primary-api" },
+  { id: "materials", label: "素材管理", testId: "admin-primary-materials" },
 ];
 
-export function AdminConsole({ initialView = "overview", user: _user }: AdminConsoleProps) {
+export function AdminConsole({
+  initialView = "api",
+  user: _user,
+}: AdminConsoleProps) {
   const [view, setView] = useState<AdminView>(initialView);
   const [refreshKey, setRefreshKey] = useState(0);
   const [notice, setNotice] = useState("");
+  const primary = adminPrimaryView(view);
 
-  const selectView = useCallback((next: AdminView) => {
+  const selectPrimary = useCallback((next: AdminPrimaryView) => {
     setView(next);
     setNotice("");
     const url = new URL(window.location.href);
-    if (next === "overview") url.searchParams.delete("view");
-    else url.searchParams.set("view", next);
+    url.pathname = "/app/admin";
+    url.searchParams.set("view", next);
     window.history.replaceState(window.history.state, "", url);
   }, []);
 
   const refresh = () => {
     setRefreshKey((value) => value + 1);
-    setNotice(`${VIEW_META[view].title}已刷新`);
+    setNotice(`${VIEW_META[primary].title}已刷新`);
   };
 
   return (
@@ -126,36 +78,35 @@ export function AdminConsole({ initialView = "overview", user: _user }: AdminCon
           className="ai-admin-brand"
           aria-label="返回主界面"
         >
-          <span className="ai-admin-brand__mark"><ShieldCheck aria-hidden /></span>
+          <span className="ai-admin-brand__mark">
+            <ShieldCheck aria-hidden />
+          </span>
           <span className="ai-admin-brand__copy">
             <strong>Lumina Admin</strong>
-            <small>系统管理控制台</small>
+            <small>系统配置中心</small>
           </span>
         </Link>
 
-        <nav className="ai-admin-nav" aria-label="系统管理模块">
-          {NAV_GROUPS.map((group) => (
-            <section className="ai-admin-nav__group" key={group.label}>
-              <p>{group.label}</p>
-              {group.items.map((item) => {
-                const Icon = item.icon;
-                const active = view === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className="ai-admin-nav__item"
-                    aria-current={active ? "page" : undefined}
-                    onClick={() => selectView(item.id)}
-                  >
-                    <Icon aria-hidden />
-                    <span><strong>{item.label}</strong><small>{item.description}</small></span>
-                    <i aria-hidden />
-                  </button>
-                );
-              })}
-            </section>
-          ))}
+        <nav
+          className="ai-admin-top-tabs"
+          aria-label="系统配置主模块"
+          data-testid="admin-primary-tabs"
+        >
+          {ADMIN_TOP_TABS.map((tab) => {
+            const active = primary === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                className={`ai-admin-top-tab${active ? " is-active" : ""}`}
+                aria-current={active ? "page" : undefined}
+                data-testid={tab.testId}
+                onClick={() => selectPrimary(tab.id)}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </nav>
 
         <div className="ai-admin-sidebar__foot">
@@ -167,8 +118,8 @@ export function AdminConsole({ initialView = "overview", user: _user }: AdminCon
       <main className="ai-admin-main">
         <header className="ai-admin-header">
           <div className="ai-admin-header__title">
-            <strong>{VIEW_META[view].title}</strong>
-            <small>{VIEW_META[view].subtitle}</small>
+            <strong>{VIEW_META[primary].title}</strong>
+            <small>{VIEW_META[primary].subtitle}</small>
           </div>
           <div className="ai-admin-header__actions">
             <Link
@@ -186,26 +137,40 @@ export function AdminConsole({ initialView = "overview", user: _user }: AdminCon
           </div>
         </header>
 
-        <div className="ai-admin-content" key={`${view}-${refreshKey}`}>
-          {view === "overview" ? (
-            <AdminOverview onNavigate={selectView} />
-          ) : view === "connections" ? (
-            <ModelConnectionsView onNavigate={selectView} />
-          ) : view === "routes" ? (
-            <CapabilityRoutingView />
-          ) : view === "generations" ? (
-            <section className="ai-admin-view ai-admin-legacy-view">
-              <div className="ai-admin-page-heading">
-                <div><h1>生成记录</h1><p>按任务类型、状态、用户和项目定位异常</p></div>
-              </div>
-              <TextGenerationsHistoryTab active />
+        <div className="ai-admin-content" key={`${primary}-${refreshKey}`}>
+          {primary === "materials" ? (
+            <section
+              className="ai-admin-view ai-admin-materials-view"
+              data-testid="admin-materials-view"
+            >
+              <Suspense
+                fallback={
+                  <div className="me-page">
+                    <div className="me-loading">加载中…</div>
+                  </div>
+                }
+              >
+                <MaterialsAdminPage />
+              </Suspense>
+              <SystemVoicesAdminPanel />
             </section>
           ) : (
-            <section className="ai-admin-view ai-admin-legacy-view">
-              <div className="ai-admin-page-heading">
-                <div><h1>素材审批</h1><p>集中查看资产提交与审核留痕</p></div>
+            <section
+              className="ai-admin-view ai-admin-api-view"
+              data-testid="admin-api-view"
+            >
+              <ModelConnectionsView
+                onNavigate={(next) => {
+                  if (next === "routes") {
+                    document
+                      .getElementById("admin-capability-routing")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }
+                }}
+              />
+              <div id="admin-capability-routing">
+                <CapabilityRoutingView />
               </div>
-              <AssetApprovalsHistoryTab active />
             </section>
           )}
         </div>

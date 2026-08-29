@@ -116,13 +116,15 @@ export const AUTH_NAV_ITEMS: ShellNavItem[] = [
   { id: "personal-assets", label: "个人素材", href: APP_PERSONAL_ASSETS_PATH },
   { id: "guide", label: "创作指引", href: "/app/guide" },
   { id: "team", label: "团队管理", href: "/app/team" },
-  {
-    id: "admin-materials",
-    label: "素材市场管理",
-    href: "/app/admin/materials",
-  },
-  { id: "admin", label: "系统管理", href: APP_ADMIN_PATH },
+  /**
+   * Top global entry for SYSTEM_ADMIN only (filtered by /api/auth/navigation).
+   * Renamed from「系统管理」; materials admin is reached via /app/admin?view=materials.
+   */
+  { id: "admin", label: "API 配置", href: `${APP_ADMIN_PATH}?view=api` },
 ];
+
+/** Admin-only nav ids stripped for non-SYSTEM_ADMIN users. */
+export const ADMIN_NAV_IDS = ["admin", "admin-materials"] as const;
 
 /** 抽卡工程师仅可见工作台 */
 export const CARD_ENGINEER_NAV_IDS = ["workspace"] as const;

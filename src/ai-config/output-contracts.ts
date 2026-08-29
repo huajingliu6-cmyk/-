@@ -98,15 +98,19 @@ export function buildImmutableOutputContract(
       return [
         "[IMMUTABLE_OUTPUT_CONTRACT]",
         `version: ${OUTPUT_CONTRACT_VERSION}`,
-        "Return exactly one JSON object (machine envelope only). Preferred shape:",
-        '{"shots":[{"shotId":"与输入一致的镜头id","videoPrompt":"该镜头完整中文视频提示词"}]}',
+        "protocol: SHOT_ID_PROMPT_V1",
+        "Planning mode (no input shotIds): return",
+        '{"shots":[{"sceneTitle":"...","sourceScriptText":"...","videoPrompt":"完整未压缩正文","dialogue":"..."}],"done":boolean}',
+        `At most 3 shots per response; set done=true when the episode is fully covered.`,
+        "Fill mode (input shotIds present): return",
+        '{"shots":[{"shotId":"输入shotId原样","videoPrompt":"完整未压缩正文"}]}',
         "Legacy alias also accepted: {\"prompts\":[{\"shotId\":\"...\",\"videoPrompt\":\"...\"}]}",
-        "shots/prompts must cover every shotId from the user input exactly once; shotId must be copied verbatim; videoPrompt must be non-empty.",
-        "CRITICAL: each videoPrompt value must be the FULL shot prompt body that obeys the published task rules — including duration header (each videoPrompt represents one final PromptClip with total duration 13–15 seconds, only 13/14/15 allowed; each Clip MUST contain 3–5 continuous internal timeline segments of 1–6 seconds that sum to the Clip total, prefer ≤5s per segment; timeline must start at 0 and be continuous), mount tags when assets exist, optional character blocking (do not invent), timed internal shots (size/focal/angle/move), dialogue verbatim, sound, and continuity limits.",
-        "Do NOT rewrite videoPrompt into a short summary such as「景别：…运镜：…」one-liners.",
-        "When two or more shots are returned, insert the required adjacent handoff card text between them by appending it to the earlier shot's videoPrompt (or prepending to the next), exactly as the task rules require.",
-        "Output-format rules must NOT override or drop project visual-style constraints.",
-        "No explanations, markdown fences, or meta commentary outside the JSON.",
+        "Platform only materializes returned rows — it does not invent shot boundaries.",
+        "videoPrompt MUST be the full prompt body required by the task rule (e.g. complete PromptClip with timeline/modules).",
+        "Do NOT compress, summarize, paraphrase-shorten, or collapse videoPrompt into short paragraphs.",
+        "Do NOT pack multiple clips into one videoPrompt as 「镜头1/2/3」 shorthand.",
+        "Only prior-batch continuity context may be brief; never the videoPrompt body.",
+        "No Markdown fences, analysis, or commentary outside the JSON.",
       ].join("\n");
 
     case "script.outline.generate":

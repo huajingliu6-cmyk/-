@@ -217,7 +217,10 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(modal).toContain('stage: "validating"');
     expect(modal).toContain('stage: "generating"');
     expect(modal).toContain('stage: "completed"');
-    expect(modal).toContain('stage: "failed"');
+    expect(modal).toContain("clearProgressNow");
+    expect(modal).toContain("GENERATION_IN_PROGRESS");
+    expect(modal).not.toContain('stage: "failed",');
+    expect(modal).not.toContain("scheduleProgressClear(2200)");
 
     expect(css).toContain(".ead-generation-overlay");
     expect(css).toContain(".ead-generation-overlay__readout");
@@ -225,5 +228,8 @@ describe("Batch H1 design asset card UI contract", () => {
     expect(css).not.toContain(".ead-generation-overlay__track");
     expect(css).not.toContain(".ead-generation-overlay__steps");
     expect(css).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(css).toMatch(
+      /\.ead-generation-overlay\s*\{[\s\S]*?pointer-events:\s*none/,
+    );
   });
 });

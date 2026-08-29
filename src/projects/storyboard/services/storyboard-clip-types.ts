@@ -52,25 +52,20 @@ export type StoryboardClipWarning = {
 };
 
 /**
- * Hard blockers only: Clip duration, per-segment duration bounds,
- * unusable/empty prompt integrity, forged asset ids, missing model clip.
+ * Hard blockers for SHOT_ID_PROMPT_V1: shotId ↔ videoPrompt structure only.
+ * Body content (timeline, duration text, sound, continuity, mounts) is never blocking.
  */
 export const BLOCKING_CLIP_VALIDATION_CODES = new Set<string>([
+  "MODEL_RESPONSE_EMPTY",
+  "MODEL_RESPONSE_UNPARSEABLE",
   "EMPTY_PROMPT",
-  "INVALID_CLIP_DURATION",
-  "MISSING_CLIP_DURATION",
-  "MISSING_TIMELINE",
-  "INTERNAL_SHOT_TOO_LONG",
-  "INTERNAL_SHOT_DURATION_EXCEEDED",
-  "INTERNAL_SHOT_TOO_SHORT",
-  "BARE_ASSET_ID_IN_PROMPT",
   "DUPLICATE_SHOT_ID",
   "UNKNOWN_SHOT_ID",
+  "MISSING_SHOT_PROMPT",
   "MISSING_SHOT_CLIP",
-  "PLACEHOLDER_TEMPLATE",
 ]);
 
-/** Soft content / character / asset / suggested structure — never block save. */
+/** Soft / legacy content codes — never block save under SHOT_ID_PROMPT_V1. */
 export const SOFT_CLIP_WARNING_CODES = new Set<string>([
   "CHARACTER_BINDING_INCOMPLETE",
   "CHARACTER_ASSET_NOT_FOUND",
@@ -89,8 +84,19 @@ export const SOFT_CLIP_WARNING_CODES = new Set<string>([
   "TIMELINE_NOT_START_AT_ZERO",
   "TIMELINE_END_MISMATCH",
   "TIMELINE_TOTAL_MISMATCH",
+  "MISSING_CLIP_DURATION",
+  "INVALID_CLIP_DURATION",
+  "MISSING_TIMELINE",
+  "INTERNAL_SHOT_TOO_LONG",
+  "INTERNAL_SHOT_DURATION_EXCEEDED",
+  "INTERNAL_SHOT_TOO_SHORT",
+  "BARE_ASSET_ID_IN_PROMPT",
+  "PLACEHOLDER_TEMPLATE",
   "DIALOGUE_NOT_VERBATIM",
   "GENERIC_CHARACTER_PLACEHOLDER",
+  "SHOT_NUMBER_GAP",
+  "CHARACTER_CONTINUITY_JUMP",
+  "DIALOGUE_CONTINUITY_REWRITE",
 ]);
 
 export function isBlockingClipValidationCode(code: string): boolean {

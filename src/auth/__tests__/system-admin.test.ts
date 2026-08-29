@@ -106,7 +106,7 @@ describe("system admin persistence and CLI semantics", () => {
     );
   });
 
-  it("can revoke when another admin remains", async () => {
+  it("cannot grant a second system admin", async () => {
     await createTestAdminUser({
       username: `first_admin_${Date.now()}`,
       password: "Member@123456",
@@ -115,12 +115,20 @@ describe("system admin persistence and CLI semantics", () => {
       username: `second_admin_${Date.now()}`,
       password: "Member@123456",
     });
-    await grantSystemAdminByUsername(second.username);
-    expect(await countSystemAdmins()).toBeGreaterThanOrEqual(2);
+    await expect(grantSystemAdminByUsername(second.username)).rejects.toThrow(
+      /只允许存在 1 个/,
+    );
+    expect(await countSystemAdmins()).toBe(1);
+  });
 
-    const revoked = await revokeSystemAdminByUsername(second.username);
-    expect(revoked.user.role).toBe("user");
-    expect(getSystemRole(revoked.user)).toBe("USER");
+  it("cannot revoke the sole system admin", async () => {
+    const admin = await createTestAdminUser({
+      username: `sole_admin_revoke_${Date.now()}`,
+      password: "Member@123456",
+    });
+    await expect(revokeSystemAdminByUsername(admin.username)).rejects.toThrow(
+      /最后一个系统管理员/,
+    );
   });
 
   it("persists role in users.json without password fields in public mapping", async () => {

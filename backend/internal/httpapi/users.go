@@ -433,6 +433,9 @@ func (handler *Users) changeAdmin(writer http.ResponseWriter, request *http.Requ
 			if normalizeUserRole(user.Role) == "admin" {
 				return map[string]any{"user": publicUser(user), "alreadyAdmin": true}, false, nil
 			}
+			if adminCount >= 1 {
+				return nil, false, errors.New("系统管理员全局只允许存在 1 个，禁止创建第二个系统管理员")
+			}
 			user.Role = "admin"
 			user.UpdatedAt = requestTime()
 			catalog.Users[index] = user
